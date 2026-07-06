@@ -133,8 +133,30 @@ pub enum Key {
     Down,
     Left,
     Right,
+    Enter,
+    Backspace,
     CtrlC,
     Unknown,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct WindowSize {
+    pub cols: u32,
+    pub rows: u32,
+    pub width_px: u32,
+    pub height_px: u32,
+}
+
+impl WindowSize {
+    /// Pixel size of one terminal cell, if the terminal reports pixel sizes
+    /// (kitty, Ghostty, and most modern terminals do; some leave them 0).
+    pub fn cell_size(&self) -> Option<(u32, u32)> {
+        if self.cols > 0 && self.rows > 0 && self.width_px > 0 && self.height_px > 0 {
+            Some((self.width_px / self.cols, self.height_px / self.rows))
+        } else {
+            None
+        }
+    }
 }
 
 pub struct Terminal {
@@ -193,9 +215,21 @@ impl Terminal {
                 })
             }
             0x03 => Ok(Key::CtrlC),
+            0x0d => Ok(Key::Enter),
+            0x7f | 0x08 => Ok(Key::Backspace),
             c if c.is_ascii() => Ok(Key::Char(c as char)),
             _ => Ok(Key::Unknown),
         }
+    }
+
+    pub fn size(&self) -> io::Result<WindowSize> {
+        let ws = termios::tcgetwinsize(&self.stdin)?;
+        Ok(WindowSize {
+            cols: u32::from(ws.ws_col),
+            rows: u32::from(ws.ws_row),
+            width_px: u32::from(ws.ws_xpixel),
+            height_px: u32::from(ws.ws_ypixel),
+        })
     }
 }
 
