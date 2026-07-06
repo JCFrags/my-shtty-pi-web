@@ -1,0 +1,12 @@
+[package]
+name = "pixel-core"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+rustix = { workspace = true }
+base64 = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,30 @@
+[workspace]
+resolver = "3"
+members = ["crates/pixel-core", "examples/counter"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+pixel-core = { path = "crates/pixel-core" }
+rustix = { version = "1", features = ["termios", "stdio"] }
+base64 = "0.22"
+
+[workspace.lints.rust]
+rust_2018_idioms = { level = "warn", priority = -1 }
+unsafe_code = "warn"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"
+
+# Dependencies are compiled once with optimizations and then cached, so pixel
+# pushing stays fast in dev builds. Our own code stays at opt-level 0 for fast
+# iteration.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+# Full debuginfo is rarely needed and slows linking; backtraces still work.
+debug = "line-tables-only"
