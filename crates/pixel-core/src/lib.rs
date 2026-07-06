@@ -101,9 +101,12 @@ pub fn measure_text(font: &fontdue::Font, text: &str, px: f32) -> f32 {
         .sum()
 }
 
+/// Pixels are zlib-compressed (`o=z`): UI canvases are mostly flat color, so
+/// this cuts the escape stream by orders of magnitude.
 pub fn kitty_transmit(image_id: u32, width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
     assert_eq!(rgba.len(), (width * height * 4) as usize);
-    let payload = BASE64.encode(rgba);
+    let compressed = miniz_oxide::deflate::compress_to_vec_zlib(rgba, 1);
+    let payload = BASE64.encode(&compressed);
     let chunks: Vec<&[u8]> = payload.as_bytes().chunks(KITTY_CHUNK_SIZE).collect();
     let last = chunks.len() - 1;
 
@@ -113,7 +116,7 @@ pub fn kitty_transmit(image_id: u32, width: u32, height: u32, rgba: &[u8]) -> Ve
         out.extend_from_slice(b"\x1b_G");
         if i == 0 {
             out.extend_from_slice(
-                format!("a=T,f=32,s={width},v={height},t=d,i={image_id},p=1,q=2,m={more}")
+                format!("a=T,f=32,o=z,s={width},v={height},t=d,i={image_id},p=1,q=2,m={more}")
                     .as_bytes(),
             );
         } else {
@@ -129,13 +132,13 @@ pub fn kitty_transmit(image_id: u32, width: u32, height: u32, rgba: &[u8]) -> Ve
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
     Char(char),
+    Ctrl(char),
     Up,
     Down,
     Left,
     Right,
     Enter,
     Backspace,
-    CtrlC,
     Unknown,
 }
 
@@ -163,6 +166,12 @@ pub struct Terminal {
     stdin: io::Stdin,
     stdout: io::Stdout,
     saved: Termios,
+    /**
+     * because in vscode replacing an image of a given id keeps an artifact around,
+     * so atm we're using this field to determine if we need to clear instead of replace.
+     * very unelegant solution
+     */
+    last_frame_size: Option<(u32, u32)>,
 }
 
 impl Terminal {
@@ -181,12 +190,27 @@ impl Terminal {
             stdin,
             stdout,
             saved,
+            last_frame_size: None,
         })
     }
 
-    pub fn draw(&mut self, canvas: &Canvas) -> io::Result<()> {
+    pub fn draw(&mut self, canvas: &Canvas) -> io::Result<usize> {
+        let shrank = self
+            .last_frame_size
+            .is_some_and(|(w, h)| canvas.width < w || canvas.height < h);
+        self.last_frame_size = Some((canvas.width, canvas.height));
+
         let mut frame = Vec::new();
         frame.extend_from_slice(b"\x1b[?2026h"); // mode 2026 atomic updates
+        if shrank {
+            frame.extend_from_slice(b"\x1b_Ga=d,d=A,q=2\x1b\\\x1b[2J");
+            if let Ok(ws) = self.size() {
+                let blank_row = " ".repeat(ws.cols as usize);
+                for row in 1..=ws.rows {
+                    frame.extend_from_slice(format!("\x1b[{row};1H{blank_row}").as_bytes());
+                }
+            }
+        }
         frame.extend_from_slice(b"\x1b[H");
         frame.extend_from_slice(&kitty_transmit(
             1,
@@ -196,7 +220,8 @@ impl Terminal {
         ));
         frame.extend_from_slice(b"\x1b[?2026l");
         self.stdout.write_all(&frame)?;
-        self.stdout.flush()
+        self.stdout.flush()?;
+        Ok(frame.len())
     }
 
     pub fn read_key(&mut self) -> io::Result<Key> {
@@ -214,9 +239,9 @@ impl Terminal {
                     _ => Key::Unknown,
                 })
             }
-            0x03 => Ok(Key::CtrlC),
             0x0d => Ok(Key::Enter),
             0x7f | 0x08 => Ok(Key::Backspace),
+            c @ 0x01..=0x1a => Ok(Key::Ctrl((b'a' + c - 1) as char)),
             c if c.is_ascii() => Ok(Key::Char(c as char)),
             _ => Ok(Key::Unknown),
         }
@@ -231,6 +256,54 @@ impl Terminal {
             height_px: u32::from(ws.ws_ypixel),
         })
     }
+
+    pub fn cell_size(&mut self) -> io::Result<Option<(u32, u32)>> {
+        if let Some(cell) = self.size()?.cell_size() {
+            return Ok(Some(cell));
+        }
+        self.stdout.write_all(b"\x1b[16t")?;
+        self.stdout.flush()?;
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(300);
+        let mut buf = Vec::new();
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() || buf.len() > 256 {
+                return Ok(None);
+            }
+            let mut fds = [rustix::event::PollFd::new(
+                &self.stdin,
+                rustix::event::PollFlags::IN,
+            )];
+            let timeout = rustix::event::Timespec::try_from(remaining)
+                .map_err(|_| io::Error::other("timeout out of range"))?;
+            if rustix::event::poll(&mut fds, Some(&timeout))? == 0 {
+                return Ok(None);
+            }
+            let mut chunk = [0u8; 64];
+            let n = self.stdin.read(&mut chunk)?;
+            if n == 0 {
+                return Ok(None);
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            if let Some(cell) = parse_cell_size_report(&buf) {
+                return Ok(Some(cell));
+            }
+        }
+    }
+}
+
+fn parse_cell_size_report(buf: &[u8]) -> Option<(u32, u32)> {
+    let start = buf.windows(4).position(|w| w == b"\x1b[6;")? + 4;
+    let end = start + buf[start..].iter().position(|&b| b == b't')?;
+    let mut parts = buf[start..end].split(|&b| b == b';');
+    let height: u32 = std::str::from_utf8(parts.next()?).ok()?.parse().ok()?;
+    let width: u32 = std::str::from_utf8(parts.next()?).ok()?.parse().ok()?;
+    if width > 0 && height > 0 {
+        Some((width, height))
+    } else {
+        None
+    }
 }
 
 impl Drop for Terminal {
@@ -243,6 +316,135 @@ impl Drop for Terminal {
     }
 }
 
+#[derive(Default)]
+pub struct Profiler {
+    recording: Option<Recording>,
+}
+
+struct Recording {
+    started: std::time::Instant,
+    frames: Vec<FrameRecord>,
+}
+
+#[derive(Default)]
+struct FrameRecord {
+    at_ms: f64,
+    spans: Vec<(&'static str, f64)>,
+    counters: Vec<(&'static str, u64)>,
+}
+
+impl Profiler {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn is_recording(&self) -> bool {
+        self.recording.is_some()
+    }
+
+    pub fn toggle(&mut self) -> io::Result<Option<std::path::PathBuf>> {
+        match self.recording.take() {
+            None => {
+                self.recording = Some(Recording {
+                    started: std::time::Instant::now(),
+                    frames: Vec::new(),
+                });
+                Ok(None)
+            }
+            Some(recording) => {
+                std::fs::create_dir_all("profiles")?;
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(io::Error::other)?
+                    .as_secs();
+                let path = std::path::PathBuf::from(format!("profiles/profile-{stamp}.json"));
+                std::fs::write(&path, report_json(&recording.frames))?;
+                Ok(Some(path))
+            }
+        }
+    }
+
+    pub fn begin_frame(&mut self) {
+        if let Some(recording) = &mut self.recording {
+            recording.frames.push(FrameRecord {
+                at_ms: recording.started.elapsed().as_secs_f64() * 1000.0,
+                ..FrameRecord::default()
+            });
+        }
+    }
+
+    pub fn span<T>(&mut self, name: &'static str, work: impl FnOnce() -> T) -> T {
+        let start = std::time::Instant::now();
+        let result = work();
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+        if let Some(frame) = self.current_frame() {
+            frame.spans.push((name, elapsed_ms));
+        }
+        result
+    }
+
+    pub fn count(&mut self, name: &'static str, value: u64) {
+        if let Some(frame) = self.current_frame() {
+            frame.counters.push((name, value));
+        }
+    }
+
+    fn current_frame(&mut self) -> Option<&mut FrameRecord> {
+        self.recording.as_mut().and_then(|r| r.frames.last_mut())
+    }
+}
+
+fn report_json(frames: &[FrameRecord]) -> String {
+    let mut span_stats: Vec<(&str, Vec<f64>)> = Vec::new();
+    let mut counter_stats: Vec<(&str, Vec<u64>)> = Vec::new();
+    for frame in frames {
+        for &(name, ms) in &frame.spans {
+            match span_stats.iter_mut().find(|(n, _)| *n == name) {
+                Some((_, values)) => values.push(ms),
+                None => span_stats.push((name, vec![ms])),
+            }
+        }
+        for &(name, value) in &frame.counters {
+            match counter_stats.iter_mut().find(|(n, _)| *n == name) {
+                Some((_, values)) => values.push(value),
+                None => counter_stats.push((name, vec![value])),
+            }
+        }
+    }
+
+    let mut out = String::from("{\n  \"summary\": {\n    \"frames\": ");
+    out.push_str(&frames.len().to_string());
+    for (name, values) in &span_stats {
+        let total: f64 = values.iter().sum();
+        let max = values.iter().cloned().fold(0.0f64, f64::max);
+        out.push_str(&format!(
+            ",\n    \"{name}\": {{\"total_ms\": {total:.3}, \"mean_ms\": {:.3}, \"max_ms\": {max:.3}}}",
+            total / values.len() as f64
+        ));
+    }
+    for (name, values) in &counter_stats {
+        let total: u64 = values.iter().sum();
+        let max = values.iter().max().copied().unwrap_or(0);
+        out.push_str(&format!(
+            ",\n    \"{name}\": {{\"total\": {total}, \"mean\": {:.1}, \"max\": {max}}}",
+            total as f64 / values.len() as f64
+        ));
+    }
+    out.push_str("\n  },\n  \"frames\": [\n");
+    for (i, frame) in frames.iter().enumerate() {
+        out.push_str(&format!("    {{\"at_ms\": {:.3}", frame.at_ms));
+        for &(name, ms) in &frame.spans {
+            out.push_str(&format!(", \"{name}_ms\": {ms:.3}"));
+        }
+        for &(name, value) in &frame.counters {
+            out.push_str(&format!(", \"{name}\": {value}"));
+        }
+        out.push_str(if i + 1 == frames.len() { "}\n" } else { "},\n" });
+    }
+    out.push_str("  ]\n}\n");
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,23 +452,46 @@ mod tests {
     #[test]
     fn transmit_emits_single_chunk_for_small_images() {
         let out = kitty_transmit(1, 1, 1, &[0xff, 0x00, 0x00, 0xff]);
-        assert_eq!(
-            out,
-            b"\x1b_Ga=T,f=32,s=1,v=1,t=d,i=1,p=1,q=2,m=0;/wAA/w==\x1b\\"
-        );
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.starts_with("\x1b_Ga=T,f=32,o=z,s=1,v=1,t=d,i=1,p=1,q=2,m=0;"));
+        assert!(text.ends_with("\x1b\\"));
+
+        let payload = text
+            .split_once(';')
+            .and_then(|(_, rest)| rest.strip_suffix("\x1b\\"))
+            .unwrap();
+        let decompressed =
+            miniz_oxide::inflate::decompress_to_vec_zlib(&BASE64.decode(payload).unwrap()).unwrap();
+        assert_eq!(decompressed, [0xff, 0x00, 0x00, 0xff]);
     }
 
     #[test]
     fn transmit_chunks_large_payloads() {
-        let canvas = Canvas::new(64, 64);
-        let out = kitty_transmit(1, canvas.width, canvas.height, &canvas.pixels);
+        // Pseudo-random pixels so zlib can't shrink them below one chunk.
+        let mut seed = 0x12345678u32;
+        let pixels: Vec<u8> = (0..64 * 64 * 4)
+            .map(|_| {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                (seed >> 24) as u8
+            })
+            .collect();
+        let out = kitty_transmit(1, 64, 64, &pixels);
         let text = String::from_utf8_lossy(&out);
         let opens = text.matches("\x1b_G").count();
-        // 64*64*4 bytes -> ~21.8 KB of base64 -> 6 chunks of <= 4096.
-        assert_eq!(opens, 6);
-        assert_eq!(text.matches("m=1").count(), 5);
+        assert!(opens > 1, "expected multiple chunks, got {opens}");
+        assert_eq!(text.matches("m=1").count(), opens - 1);
         assert_eq!(text.matches("m=0").count(), 1);
         assert!(text.ends_with("\x1b\\"));
+    }
+
+    #[test]
+    fn transmit_compresses_flat_canvases_hard() {
+        let mut canvas = Canvas::new(256, 256);
+        canvas.fill([24, 24, 32, 255]);
+        let out = kitty_transmit(1, canvas.width, canvas.height, &canvas.pixels);
+        // 256KB of raw RGBA (350KB base64) should collapse to a few hundred
+        // bytes of escape stream.
+        assert!(out.len() < 4096, "expected tiny output, got {}", out.len());
     }
 
     #[test]
@@ -286,6 +511,41 @@ mod tests {
         let half = &canvas.pixels[4..8];
         assert_eq!(half[0], (200 * 128 / 255) as u8);
         assert_eq!(half[3], 255);
+    }
+
+    #[test]
+    fn profiler_report_includes_frames_and_summary() {
+        let frames = vec![
+            FrameRecord {
+                at_ms: 0.0,
+                spans: vec![("render", 2.0), ("draw", 10.0)],
+                counters: vec![("bytes", 1000)],
+            },
+            FrameRecord {
+                at_ms: 5.0,
+                spans: vec![("render", 4.0), ("draw", 20.0)],
+                counters: vec![("bytes", 3000)],
+            },
+        ];
+        let json = report_json(&frames);
+        assert!(json.contains("\"frames\": 2"));
+        assert!(
+            json.contains(
+                "\"render\": {\"total_ms\": 6.000, \"mean_ms\": 3.000, \"max_ms\": 4.000}"
+            )
+        );
+        assert!(json.contains("\"bytes\": {\"total\": 4000, \"mean\": 2000.0, \"max\": 3000}"));
+        assert!(json.contains(
+            "{\"at_ms\": 5.000, \"render_ms\": 4.000, \"draw_ms\": 20.000, \"bytes\": 3000}"
+        ));
+    }
+
+    #[test]
+    fn parses_cell_size_report_amid_noise() {
+        assert_eq!(parse_cell_size_report(b"\x1b[6;14;7t"), Some((7, 14)));
+        assert_eq!(parse_cell_size_report(b"ab\x1b[6;28;13tcd"), Some((13, 28)));
+        assert_eq!(parse_cell_size_report(b"\x1b[6;14"), None);
+        assert_eq!(parse_cell_size_report(b"\x1b[6;0;0t"), None);
     }
 
     #[test]

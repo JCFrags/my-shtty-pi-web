@@ -1,4 +1,4 @@
-use pixel_core::{Canvas, Key, Terminal, fontdue, measure_text};
+use pixel_core::{Canvas, Key, Profiler, Terminal, fontdue, measure_text};
 
 static FONT_BYTES: &[u8] = include_bytes!("../assets/JetBrainsMono-Regular.ttf");
 
@@ -6,6 +6,7 @@ const PAD: u32 = 12;
 const BG: [u8; 4] = [24, 24, 32, 255];
 const FG: [u8; 4] = [230, 230, 240, 255];
 const CARET: [u8; 4] = [120, 220, 160, 255];
+const RECORDING_DOT: [u8; 4] = [235, 80, 80, 255];
 const FALLBACK_CELL_HEIGHT: f32 = 32.0;
 
 fn px_for_cell_height(font: &fontdue::Font, cell_height: f32) -> f32 {
@@ -15,7 +16,7 @@ fn px_for_cell_height(font: &fontdue::Font, cell_height: f32) -> f32 {
     (cell_height * 100.0 / probe.new_line_size).clamp(6.0, 512.0)
 }
 
-fn render(font: &fontdue::Font, text: &str, px: f32) -> Canvas {
+fn render(font: &fontdue::Font, text: &str, px: f32, recording: bool) -> Canvas {
     let line_metrics = font
         .horizontal_line_metrics(px)
         .expect("font has horizontal metrics");
@@ -42,6 +43,10 @@ fn render(font: &fontdue::Font, text: &str, px: f32) -> Canvas {
     let caret_x = PAD + measure_text(font, lines[last], px).ceil() as u32;
     let caret_y = PAD + (line_height * last as f32) as u32;
     canvas.fill_rect(caret_x, caret_y, caret_width, line_height as u32, CARET);
+
+    if recording {
+        canvas.fill_rect(0, 0, 6, 6, RECORDING_DOT);
+    }
     canvas
 }
 
@@ -51,16 +56,19 @@ fn main() -> std::io::Result<()> {
 
     let mut term = Terminal::new()?;
     let cell_height = term
-        .size()?
-        .cell_size()
+        .cell_size()?
         .map_or(FALLBACK_CELL_HEIGHT, |(_, h)| h as f32);
     let px = px_for_cell_height(&font, cell_height);
 
+    let mut profiler = Profiler::new();
     let mut text = String::new();
-    term.draw(&render(&font, &text, px))?;
+    term.draw(&render(&font, &text, px, false))?;
     loop {
         match term.read_key()? {
-            Key::CtrlC => break,
+            Key::Ctrl('c') => break,
+            Key::Ctrl('p') => {
+                profiler.toggle()?;
+            }
             Key::Backspace => {
                 text.pop();
             }
@@ -68,7 +76,11 @@ fn main() -> std::io::Result<()> {
             Key::Char(c) if !c.is_control() => text.push(c),
             _ => continue,
         }
-        term.draw(&render(&font, &text, px))?;
+        profiler.begin_frame();
+        let recording = profiler.is_recording();
+        let canvas = profiler.span("render", || render(&font, &text, px, recording));
+        let bytes = profiler.span("draw", || term.draw(&canvas))?;
+        profiler.count("bytes", bytes as u64);
     }
     Ok(())
 }
