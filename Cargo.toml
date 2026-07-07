@@ -13,6 +13,7 @@ rustix = { version = "1", features = ["termios", "stdio", "event"] }
 base64 = "0.22"
 fontdue = "0.9"
 miniz_oxide = "0.8"
+taffy = "0.10"
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
