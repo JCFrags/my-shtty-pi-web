@@ -1,10 +1,46 @@
+use std::cell::RefCell;
 use std::io;
 use std::time::Instant;
 
-#[derive(Default)]
-pub struct Profiler {
-    recording: Option<Recording>,
+// Thread-local so engine internals can record spans without every function
+// threading a profiler reference through its signature.
+thread_local! {
+    static ACTIVE: RefCell<Option<Recording>> = const { RefCell::new(None) };
 }
+
+/// Runs `work`, recording its duration in the current frame of the active
+/// recording (no-op when not recording). Nested spans each get their own row.
+pub fn span<T>(name: &'static str, work: impl FnOnce() -> T) -> T {
+    if !is_recording() {
+        return work();
+    }
+    let start = Instant::now();
+    let result = work();
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+    with_current_frame(|frame| frame.spans.push((name, elapsed_ms)));
+    result
+}
+
+pub fn count(name: &'static str, value: u64) {
+    with_current_frame(|frame| frame.counters.push((name, value)));
+}
+
+pub fn is_recording() -> bool {
+    ACTIVE.with(|active| active.borrow().is_some())
+}
+
+fn with_current_frame(update: impl FnOnce(&mut FrameRecord)) {
+    ACTIVE.with(|active| {
+        if let Some(recording) = active.borrow_mut().as_mut()
+            && let Some(frame) = recording.frames.last_mut()
+        {
+            update(frame);
+        }
+    });
+}
+
+#[derive(Default)]
+pub struct Profiler;
 
 struct Recording {
     started: Instant,
@@ -20,23 +56,17 @@ struct FrameRecord {
 
 impl Profiler {
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 
     pub fn is_recording(&self) -> bool {
-        self.recording.is_some()
+        is_recording()
     }
 
     /// Starts recording, or stops and writes the report, returning its path.
     pub fn toggle(&mut self) -> io::Result<Option<std::path::PathBuf>> {
-        match self.recording.take() {
-            None => {
-                self.recording = Some(Recording {
-                    started: Instant::now(),
-                    frames: Vec::new(),
-                });
-                Ok(None)
-            }
+        let stopped = ACTIVE.with(|active| active.borrow_mut().take());
+        match stopped {
             Some(recording) => {
                 std::fs::create_dir_all("profiles")?;
                 let stamp = std::time::SystemTime::now()
@@ -47,36 +77,35 @@ impl Profiler {
                 std::fs::write(&path, report_json(&recording.frames))?;
                 Ok(Some(path))
             }
+            None => {
+                ACTIVE.with(|active| {
+                    *active.borrow_mut() = Some(Recording {
+                        started: Instant::now(),
+                        frames: Vec::new(),
+                    });
+                });
+                Ok(None)
+            }
         }
     }
 
     pub fn begin_frame(&mut self) {
-        if let Some(recording) = &mut self.recording {
-            recording.frames.push(FrameRecord {
-                at_ms: recording.started.elapsed().as_secs_f64() * 1000.0,
-                ..FrameRecord::default()
-            });
-        }
+        ACTIVE.with(|active| {
+            if let Some(recording) = active.borrow_mut().as_mut() {
+                recording.frames.push(FrameRecord {
+                    at_ms: recording.started.elapsed().as_secs_f64() * 1000.0,
+                    ..FrameRecord::default()
+                });
+            }
+        });
     }
 
     pub fn span<T>(&mut self, name: &'static str, work: impl FnOnce() -> T) -> T {
-        let start = Instant::now();
-        let result = work();
-        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-        if let Some(frame) = self.current_frame() {
-            frame.spans.push((name, elapsed_ms));
-        }
-        result
+        span(name, work)
     }
 
     pub fn count(&mut self, name: &'static str, value: u64) {
-        if let Some(frame) = self.current_frame() {
-            frame.counters.push((name, value));
-        }
-    }
-
-    fn current_frame(&mut self) -> Option<&mut FrameRecord> {
-        self.recording.as_mut().and_then(|r| r.frames.last_mut())
+        count(name, value);
     }
 }
 
@@ -160,5 +189,27 @@ mod tests {
         assert!(json.contains(
             "{\"at_ms\": 5.000, \"render_ms\": 4.000, \"draw_ms\": 20.000, \"bytes\": 3000}"
         ));
+    }
+
+    #[test]
+    fn free_spans_record_into_active_frames() {
+        let mut profiler = Profiler::new();
+        assert_eq!(span("idle", || 7), 7);
+
+        profiler.toggle().ok();
+        profiler.begin_frame();
+        span("work", || {
+            std::thread::sleep(std::time::Duration::from_millis(1))
+        });
+        count("items", 3);
+
+        let captured = ACTIVE.with(|active| {
+            let recording = active.borrow_mut().take().unwrap();
+            recording.frames
+        });
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].spans[0].0, "work");
+        assert!(captured[0].spans[0].1 >= 1.0);
+        assert_eq!(captured[0].counters[0], ("items", 3));
     }
 }

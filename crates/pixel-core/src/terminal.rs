@@ -53,6 +53,14 @@ pub enum MouseButton {
     None,
 }
 
+/// Colors reported by the terminal itself; None where it didn't answer.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TerminalColors {
+    pub foreground: Option<[u8; 4]>,
+    pub background: Option<[u8; 4]>,
+    pub palette: [Option<[u8; 4]>; 16],
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct WindowSize {
     pub cols: u32,
@@ -95,9 +103,9 @@ impl Terminal {
         termios::tcsetattr(&stdin, OptionalActions::Drain, &raw)?;
 
         let mut stdout = io::stdout();
-        // Alt screen, hidden cursor, then mouse reporting: button events
-        // (1002), SGR encoding (1006), pixel coordinates (1016).
-        stdout.write_all(b"\x1b[?1049h\x1b[?25l\x1b[?1002h\x1b[?1006h\x1b[?1016h")?;
+        // Alt screen, hidden cursor, then mouse reporting: all motion
+        // (1003, needed for hover), SGR encoding (1006), pixel coords (1016).
+        stdout.write_all(b"\x1b[?1049h\x1b[?25l\x1b[?1003h\x1b[?1006h\x1b[?1016h")?;
         stdout.flush()?;
 
         let mut terminal = Self {
@@ -137,8 +145,10 @@ impl Terminal {
             &canvas.pixels,
         ));
         frame.extend_from_slice(b"\x1b[?2026l");
-        self.stdout.write_all(&frame)?;
-        self.stdout.flush()?;
+        crate::profiler::span("term.write", || {
+            self.stdout.write_all(&frame)?;
+            self.stdout.flush()
+        })?;
         Ok(frame.len())
     }
 
@@ -224,6 +234,63 @@ impl Terminal {
         Ok(self.cell)
     }
 
+    /// Queries the terminal's own colors (OSC 10/11 for fg/bg, OSC 4 for the
+    /// ANSI palette) so apps can match its theme. Terminals answer what they
+    /// support; the rest stays None.
+    pub fn query_colors(&mut self) -> io::Result<TerminalColors> {
+        let mut query = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\".to_vec();
+        for i in 0..16 {
+            query.extend_from_slice(format!("\x1b]4;{i};?\x1b\\").as_bytes());
+        }
+        self.stdout.write_all(&query)?;
+        self.stdout.flush()?;
+
+        let deadline = Instant::now() + Duration::from_millis(300);
+        let mut buf = Vec::new();
+        loop {
+            let replies = buf.windows(4).filter(|w| w == b"rgb:").count();
+            if replies >= 18 {
+                break;
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            // Once replies start arriving, a short silence means the terminal
+            // has answered everything it supports.
+            let wait = if replies > 0 {
+                remaining.min(Duration::from_millis(60))
+            } else {
+                remaining
+            };
+            if wait.is_zero() || buf.len() > 4096 {
+                break;
+            }
+            let mut fds = [rustix::event::PollFd::new(
+                &self.stdin,
+                rustix::event::PollFlags::IN,
+            )];
+            let timeout = rustix::event::Timespec::try_from(wait)
+                .map_err(|_| io::Error::other("timeout out of range"))?;
+            if rustix::event::poll(&mut fds, Some(&timeout))? == 0 {
+                break;
+            }
+            let mut chunk = [0u8; 256];
+            let n = self.stdin.read(&mut chunk)?;
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+        }
+
+        let mut colors = TerminalColors {
+            foreground: parse_osc_color(&buf, "10;"),
+            background: parse_osc_color(&buf, "11;"),
+            ..TerminalColors::default()
+        };
+        for (i, slot) in colors.palette.iter_mut().enumerate() {
+            *slot = parse_osc_color(&buf, &format!("4;{i};"));
+        }
+        Ok(colors)
+    }
+
     fn probe_mouse_pixels(&mut self) -> io::Result<bool> {
         self.stdout.write_all(b"\x1b[?1016$p")?;
         self.stdout.flush()?;
@@ -273,7 +340,7 @@ impl Terminal {
 impl Drop for Terminal {
     fn drop(&mut self) {
         let _ = self.stdout.write_all(
-            b"\x1b_Ga=d,d=A,q=2\x1b\\\x1b[?1016l\x1b[?1006l\x1b[?1002l\x1b[?25h\x1b[?1049l",
+            b"\x1b_Ga=d,d=A,q=2\x1b\\\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?25h\x1b[?1049l",
         );
         let _ = self.stdout.flush();
         let _ = termios::tcsetattr(&self.stdin, OptionalActions::Flush, &self.saved);
@@ -319,6 +386,32 @@ fn parse_decrqm_1016(buf: &[u8]) -> Option<bool> {
     let start = buf.windows(8).position(|w| w == b"\x1b[?1016;")? + 8;
     let ps = *buf.get(start)?;
     Some(ps == b'1' || ps == b'3')
+}
+
+/// Finds `ESC ] {selector} rgb:RRRR/GGGG/BBBB` and reads the high byte of
+/// each channel; terminals report 1-4 hex digits per channel.
+fn parse_osc_color(buf: &[u8], selector: &str) -> Option<[u8; 4]> {
+    let text = String::from_utf8_lossy(buf);
+    let prefix = format!("\x1b]{selector}rgb:");
+    let start = text.find(&prefix)? + prefix.len();
+    let spec: String = text[start..]
+        .chars()
+        .take_while(|c| c.is_ascii_hexdigit() || *c == '/')
+        .collect();
+    let mut channels = spec.split('/').map(|hex| {
+        let value = u16::from_str_radix(hex, 16).ok()?;
+        Some(match hex.len() {
+            1 => (value * 17) as u8,
+            2 => value as u8,
+            3 => (value >> 4) as u8,
+            4 => (value >> 8) as u8,
+            _ => return None,
+        })
+    });
+    let r = channels.next()??;
+    let g = channels.next()??;
+    let b = channels.next()??;
+    Some([r, g, b, 255])
 }
 
 fn parse_cell_size_report(buf: &[u8]) -> Option<(u32, u32)> {
@@ -370,6 +463,20 @@ mod tests {
         );
         assert_eq!(parse_sgr_mouse(b"0;1;1", true), None);
         assert_eq!(parse_sgr_mouse(b"<0;0;1", true), None);
+    }
+
+    #[test]
+    fn parses_osc_color_replies() {
+        let reply =
+            b"\x1b]11;rgb:1e1e/2a2a/3434\x1b\\\x1b]10;rgb:ff/ee/dd\x07\x1b]4;13;rgb:9f/86/eb\x1b\\";
+        assert_eq!(parse_osc_color(reply, "11;"), Some([0x1e, 0x2a, 0x34, 255]));
+        assert_eq!(parse_osc_color(reply, "10;"), Some([0xff, 0xee, 0xdd, 255]));
+        assert_eq!(
+            parse_osc_color(reply, "4;13;"),
+            Some([0x9f, 0x86, 0xeb, 255])
+        );
+        assert_eq!(parse_osc_color(reply, "4;2;"), None);
+        assert_eq!(parse_osc_color(b"garbage", "11;"), None);
     }
 
     #[test]

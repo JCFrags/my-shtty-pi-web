@@ -5,8 +5,10 @@ const KITTY_CHUNK_SIZE: usize = 4096;
 
 pub fn kitty_transmit(image_id: u32, width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
     assert_eq!(rgba.len(), (width * height * 4) as usize);
-    let compressed = miniz_oxide::deflate::compress_to_vec_zlib(rgba, 1);
-    let payload = BASE64.encode(&compressed);
+    let compressed = crate::profiler::span("kitty.compress", || {
+        miniz_oxide::deflate::compress_to_vec_zlib(rgba, 1)
+    });
+    let payload = crate::profiler::span("kitty.base64", || BASE64.encode(&compressed));
     let chunks: Vec<&[u8]> = payload.as_bytes().chunks(KITTY_CHUNK_SIZE).collect();
     let last = chunks.len() - 1;
 
@@ -15,8 +17,10 @@ pub fn kitty_transmit(image_id: u32, width: u32, height: u32, rgba: &[u8]) -> Ve
         let more = u8::from(i != last);
         out.extend_from_slice(b"\x1b_G");
         if i == 0 {
+            // C=1: the cursor stays put after display, so a full-window image
+            // can't push the cursor past the last row and force a scroll.
             out.extend_from_slice(
-                format!("a=T,f=32,o=z,s={width},v={height},t=d,i={image_id},p=1,q=2,m={more}")
+                format!("a=T,f=32,o=z,s={width},v={height},t=d,i={image_id},p=1,q=2,C=1,m={more}")
                     .as_bytes(),
             );
         } else {
@@ -38,7 +42,7 @@ mod tests {
     fn transmit_emits_single_chunk_for_small_images() {
         let out = kitty_transmit(1, 1, 1, &[0xff, 0x00, 0x00, 0xff]);
         let text = String::from_utf8(out).unwrap();
-        assert!(text.starts_with("\x1b_Ga=T,f=32,o=z,s=1,v=1,t=d,i=1,p=1,q=2,m=0;"));
+        assert!(text.starts_with("\x1b_Ga=T,f=32,o=z,s=1,v=1,t=d,i=1,p=1,q=2,C=1,m=0;"));
         assert!(text.ends_with("\x1b\\"));
 
         let payload = text
