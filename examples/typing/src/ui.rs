@@ -1,7 +1,56 @@
 use pixel_core::{
-    Align, Border, Canvas, Color, Dimension, Edges, FlexDirection, Justify, Node, Scene, Style,
-    TerminalColors, fontdue, measure_text,
+    Align, Border, Canvas, Color, Dimension, Edges, FlexDirection, Glide, Justify, Node, Overflow,
+    Scene, ScrollProfile, Smooth, Style, TerminalColors, Tui, fontdue, measure_text,
 };
+
+static SCROLL_SMOOTH: Smooth = Smooth {
+    tau: 0.08,
+    brake: 0.025,
+};
+static SCROLL_GLIDE: Glide = Glide {
+    tau: 0.07,
+    friction: 0.20,
+    gain: 1.0,
+};
+static SCROLL_TUI: Tui = Tui;
+
+pub const PROFILES: [&'static dyn ScrollProfile; 3] =
+    [&SCROLL_SMOOTH, &SCROLL_GLIDE, &SCROLL_TUI];
+
+impl App {
+    /// Native mode still needs an integrator for programmatic moves like
+    /// caret follow; wheel deltas bypass it and write positions directly.
+    pub fn profile(&self) -> &'static dyn ScrollProfile {
+        if self.native_active() {
+            &SCROLL_SMOOTH
+        } else {
+            PROFILES[self.scroll_profile]
+        }
+    }
+
+    pub fn native_active(&self) -> bool {
+        self.scroll_profile == PROFILES.len()
+    }
+
+    pub fn enable_native(&mut self) {
+        self.native = true;
+        self.scroll_profile = PROFILES.len();
+    }
+
+    pub fn cycle_scroll_profile(&mut self) {
+        let cycle = PROFILES.len() + self.native as usize;
+        self.scroll_profile = (self.scroll_profile + 1) % cycle;
+    }
+
+    pub fn profile_label(&self) -> String {
+        if self.native_active() {
+            return "scroll: native".into();
+        }
+        let debug = format!("{:?}", PROFILES[self.scroll_profile]);
+        let name = debug.split_whitespace().next().unwrap_or("?").to_lowercase();
+        format!("scroll: {name}")
+    }
+}
 
 /// All chrome is sized in multiples of the base font size (em-style):
 /// terminals disagree on whether a "pixel" is a device or logical pixel, but
@@ -74,6 +123,20 @@ pub struct App {
     pub notes: Vec<Note>,
     pub active: usize,
     pub theme: Theme,
+    pub editor_scroll: f32,
+    /// Pins the editor to the bottom; wheel turns it off, typing back on.
+    pub follow: bool,
+    pub scroll_profile: usize,
+    /// Whether the macOS scroll helper spawned; adds "native" to the cycle.
+    pub native: bool,
+    pub stats: FrameStats,
+}
+
+/// Rolling frame timings from the main loop, shown in the status bar.
+#[derive(Default)]
+pub struct FrameStats {
+    pub frame_ms: f32,
+    pub fps: f32,
 }
 
 pub struct Note {
@@ -95,8 +158,6 @@ pub fn build_ui(app: &App, window: (u32, u32), base_px: f32, recording: bool) ->
     let t = &app.theme;
 
     let mut sidebar_children = vec![Node {
-        // Terminals send 0x7f for the Backspace key; 0x08 is Ctrl-H.
-        // Terminals send 0x7f for the Backspace key; 0x08 is Ctrl-H.
         style: Style {
             padding: Edges::symmetric(rem * 0.6, rem * 0.35),
             color: Some(t.muted),
@@ -119,7 +180,10 @@ pub fn build_ui(app: &App, window: (u32, u32), base_px: f32, recording: bool) ->
                 ..Style::default()
             },
             text: Some(note.title.clone()),
-            on_click: Some(Box::new(move |app: &mut App| app.active = i)),
+            on_click: Some(Box::new(move |app: &mut App| {
+                app.active = i;
+                app.follow = true;
+            })),
             ..Node::default()
         });
     }
@@ -149,6 +213,7 @@ pub fn build_ui(app: &App, window: (u32, u32), base_px: f32, recording: bool) ->
                 text: String::new(),
             });
             app.active = app.notes.len() - 1;
+            app.follow = true;
         })),
         ..Node::default()
     });
@@ -197,11 +262,37 @@ pub fn build_ui(app: &App, window: (u32, u32), base_px: f32, recording: bool) ->
         status_right.push(chip("REC", small, t.fg, t.recording));
     }
     status_right.push(chip(
-        &format!("{} chars", app.notes[app.active].text.chars().count()),
+        &app.profile_label(),
+        small,
+        t.accent,
+        t.chip_bg,
+    ));
+    status_right.push(chip(
+        &format!("{} lines", app.notes[app.active].text.lines().count()),
         small,
         t.muted,
         t.chip_bg,
     ));
+    status_right.push(chip(
+        &format!("{:.0}px", app.editor_scroll),
+        small,
+        t.muted,
+        t.chip_bg,
+    ));
+    if app.stats.frame_ms > 0.0 {
+        status_right.push(chip(
+            &format!("{:.1}ms", app.stats.frame_ms),
+            small,
+            t.muted,
+            t.chip_bg,
+        ));
+        status_right.push(chip(
+            &format!("{:.0}fps", app.stats.fps),
+            small,
+            t.accent,
+            t.chip_bg,
+        ));
+    }
     let status_bar = Node {
         style: Style {
             justify_content: Some(Justify::SpaceBetween),
@@ -216,7 +307,7 @@ pub fn build_ui(app: &App, window: (u32, u32), base_px: f32, recording: bool) ->
                     font_size: Some(small),
                     ..Style::default()
                 },
-                text: Some("ctrl-p profile / ctrl-c quit".into()),
+                text: Some("ctrl-s scroll feel / ctrl-p profile / ctrl-c quit".into()),
                 ..Node::default()
             },
             Node {
@@ -251,10 +342,23 @@ pub fn build_ui(app: &App, window: (u32, u32), base_px: f32, recording: bool) ->
             },
             Node {
                 style: Style {
+                    flex_direction: FlexDirection::Column,
                     flex_grow: 1.0,
+                    overflow: Overflow::Scroll,
                     ..Style::default()
                 },
                 id: Some("editor"),
+                scroll_offset: app.editor_scroll,
+                children: vec![Node {
+                    style: Style {
+                        padding: Edges::all(editor_pad(rem)),
+                        flex_shrink: 0.0,
+                        ..Style::default()
+                    },
+                    id: Some("editor-text"),
+                    text: Some(app.notes[app.active].text.clone()),
+                    ..Node::default()
+                }],
                 ..Node::default()
             },
             status_bar,
@@ -292,53 +396,47 @@ fn chip(label: &str, px: f32, color: Color, background: Color) -> Node<App> {
     }
 }
 
-pub fn paint_editor(
+/// Scroll needed to put the last line at the bottom; mirrors the layout
+/// math (the text child is padded lines of text) rather than reading taffy.
+pub fn editor_max_scroll(app: &App, font: &fontdue::Font, px: f32, viewport_h: f32) -> f32 {
+    let Some(line_metrics) = font.horizontal_line_metrics(px) else {
+        return 0.0;
+    };
+    let lines = app.notes[app.active].text.split('\n').count();
+    let content_h = editor_pad(px) * 2.0 + line_metrics.new_line_size * lines as f32;
+    (content_h - viewport_h).max(0.0)
+}
+
+pub fn paint_caret(
     canvas: &mut Canvas,
     scene: &Scene<App>,
     font: &fontdue::Font,
     px: f32,
     app: &App,
 ) {
-    let t = &app.theme;
-    let Some(rect) = scene.rect("editor") else {
+    let Some(viewport) = scene.rect("editor") else {
+        return;
+    };
+    let Some(text_rect) = scene.rect("editor-text") else {
         return;
     };
     let Some(line_metrics) = font.horizontal_line_metrics(px) else {
         return;
     };
     let line_height = line_metrics.new_line_size;
-    let text = &app.notes[app.active].text;
-
-    let lines: Vec<&str> = text.split('\n').collect();
+    let lines: Vec<&str> = app.notes[app.active].text.split('\n').collect();
     let pad = editor_pad(px);
-    let bottom = rect.y + rect.h - pad;
-    let mut caret_line: Option<(usize, f32)> = None;
-    for (i, line) in lines.iter().enumerate() {
-        let top = rect.y + pad + line_height * i as f32;
-        if top + line_height > bottom {
-            break;
-        }
-        canvas.draw_text(
-            font,
-            line,
-            (rect.x + pad) as i32,
-            (top + line_metrics.ascent) as i32,
-            px,
-            t.fg,
-        );
-        caret_line = Some((i, top));
-    }
-    if let Some((i, top)) = caret_line
-        && i == lines.len() - 1
-    {
-        let caret_x = rect.x + pad + measure_text(font, lines[i], px);
-        canvas.fill_rounded_rect(
-            caret_x,
-            top,
-            (px / 8.0).max(2.0),
-            line_height,
-            1.5,
-            t.accent,
-        );
-    }
+    let caret_x = text_rect.x + pad + measure_text(font, lines[lines.len() - 1], px);
+    let caret_top = text_rect.y + pad + line_height * (lines.len() - 1) as f32;
+
+    canvas.push_clip(viewport.x, viewport.y, viewport.w, viewport.h);
+    canvas.fill_rounded_rect(
+        caret_x,
+        caret_top,
+        (px / 8.0).max(2.0),
+        line_height,
+        1.5,
+        app.theme.accent,
+    );
+    canvas.pop_clip();
 }

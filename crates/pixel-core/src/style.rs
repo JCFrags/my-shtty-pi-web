@@ -5,7 +5,6 @@ pub enum Dimension {
     #[default]
     Auto,
     Px(f32),
-    /// Fraction of the parent, 0.0..=1.0.
     Percent(f32),
 }
 
@@ -60,6 +59,15 @@ pub enum Align {
     Stretch,
 }
 
+/// Scroll clips like Hidden but also applies the node's scroll_offset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Overflow {
+    #[default]
+    Visible,
+    Hidden,
+    Scroll,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Border {
     pub width: f32,
@@ -75,15 +83,19 @@ impl Border {
 /// One style object per node, DOM-like: layout and decoration together.
 /// `color`, `font_size`, and `font` inherit to descendants; everything else
 /// is local. `font` indexes into the fonts slice passed to `render_scene`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Style {
     pub flex_direction: FlexDirection,
     pub flex_grow: f32,
+    /// Content inside a Scroll node only overflows (and so only scrolls)
+    /// when this is 0; the CSS-default 1.0 shrinks it to fit instead.
+    pub flex_shrink: f32,
     pub width: Dimension,
     pub height: Dimension,
     pub padding: Edges,
     pub margin: Edges,
     pub gap: f32,
+    pub overflow: Overflow,
     pub justify_content: Option<Justify>,
     pub align_items: Option<Align>,
     pub background: Option<Color>,
@@ -94,4 +106,30 @@ pub struct Style {
     pub font: Option<usize>,
     pub hover_background: Option<Color>,
     pub hover_color: Option<Color>,
+}
+
+impl Default for Style {
+    fn default() -> Self {
+        Self {
+            flex_direction: FlexDirection::default(),
+            flex_grow: 0.0,
+            flex_shrink: 1.0,
+            width: Dimension::default(),
+            height: Dimension::default(),
+            padding: Edges::default(),
+            margin: Edges::default(),
+            gap: 0.0,
+            overflow: Overflow::default(),
+            justify_content: None,
+            align_items: None,
+            background: None,
+            corner_radius: 0.0,
+            border: None,
+            color: None,
+            font_size: None,
+            font: None,
+            hover_background: None,
+            hover_color: None,
+        }
+    }
 }

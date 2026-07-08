@@ -1,4 +1,4 @@
-use std::io::{self, Read as _, Write as _};
+use std::io::{self, Write as _};
 use std::time::{Duration, Instant};
 
 use rustix::termios::{self, OptionalActions, Termios};
@@ -10,6 +10,7 @@ use crate::kitty::kitty_transmit;
 pub enum Event {
     Key(Key),
     Mouse(Mouse),
+    Focus(bool),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +44,8 @@ pub enum MouseKind {
     Move,
     ScrollUp,
     ScrollDown,
+    ScrollLeft,
+    ScrollRight,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,14 +87,16 @@ pub struct Terminal {
     stdin: io::Stdin,
     stdout: io::Stdout,
     saved: Termios,
-    /**
-     * because in vscode replacing an image of a given id keeps an artifact around,
-     * so atm we're using this field to determine if we need to clear instead of replace.
-     * very unelegant solution
-     */
     last_frame_size: Option<(u32, u32)>,
     mouse_pixels: bool,
     cell: Option<(u32, u32)>,
+    /// Unparsed input. Reads bypass io::Stdin's internal buffer: bytes hiding
+    /// there would make poll() report an idle fd while input sits unparsed.
+    pending: Vec<u8>,
+    /// True once the startup probe confirms the terminal can read our shared
+    /// memory; everything else gets frames as base64 over the pty.
+    shm_frames: bool,
+    frame_seq: u64,
 }
 
 impl Terminal {
@@ -104,8 +109,9 @@ impl Terminal {
 
         let mut stdout = io::stdout();
         // Alt screen, hidden cursor, then mouse reporting: all motion
-        // (1003, needed for hover), SGR encoding (1006), pixel coords (1016).
-        stdout.write_all(b"\x1b[?1049h\x1b[?25l\x1b[?1003h\x1b[?1006h\x1b[?1016h")?;
+        // (1003, needed for hover), SGR encoding (1006), pixel coords (1016),
+        // focus reporting (1004).
+        stdout.write_all(b"\x1b[?1049h\x1b[?25l\x1b[?1003h\x1b[?1006h\x1b[?1016h\x1b[?1004h")?;
         stdout.flush()?;
 
         let mut terminal = Self {
@@ -115,9 +121,30 @@ impl Terminal {
             last_frame_size: None,
             mouse_pixels: false,
             cell: None,
+            pending: Vec::new(),
+            shm_frames: false,
+            frame_seq: 0,
         };
         terminal.mouse_pixels = terminal.probe_mouse_pixels()?;
+        terminal.shm_frames = terminal.probe_shm_frames()?;
         Ok(terminal)
+    }
+
+    fn probe_shm_frames(&mut self) -> io::Result<bool> {
+        let name = format!("/px-{}-q", std::process::id());
+        if write_shm(&name, &[0, 0, 0, 255]).is_err() {
+            return Ok(false);
+        }
+        self.stdout
+            .write_all(&crate::kitty::kitty_query_shm(SHM_PROBE_ID, &name))?;
+        self.stdout.flush()?;
+        let reply = self.read_report(300, |buf| parse_probe_reply(buf, b"_Gi=299;"))?;
+        let _ = rustix::shm::unlink(&name);
+        Ok(reply.unwrap_or(false))
+    }
+
+    fn shm_name(seq: u64) -> String {
+        format!("/px-{}-{seq}", std::process::id())
     }
 
     pub fn draw(&mut self, canvas: &Canvas) -> io::Result<usize> {
@@ -138,12 +165,24 @@ impl Terminal {
             }
         }
         frame.extend_from_slice(b"\x1b[H");
-        frame.extend_from_slice(&kitty_transmit(
-            1,
-            canvas.width,
-            canvas.height,
-            &canvas.pixels,
-        ));
+        if self.shm_frames {
+            let name = Self::shm_name(self.frame_seq);
+            crate::profiler::span("kitty.shm", || write_shm(&name, &canvas.pixels))?;
+            self.frame_seq += 1;
+            frame.extend_from_slice(&crate::kitty::kitty_transmit_shm(
+                1,
+                canvas.width,
+                canvas.height,
+                &name,
+            ));
+        } else {
+            frame.extend_from_slice(&kitty_transmit(
+                1,
+                canvas.width,
+                canvas.height,
+                &canvas.pixels,
+            ));
+        }
         frame.extend_from_slice(b"\x1b[?2026l");
         crate::profiler::span("term.write", || {
             self.stdout.write_all(&frame)?;
@@ -153,46 +192,55 @@ impl Terminal {
     }
 
     pub fn read_event(&mut self) -> io::Result<Event> {
-        let b = self.read_byte()?;
-        match b {
-            0x1b => self.read_escape(),
-            0x0d => Ok(Event::Key(Key::Enter)),
-            0x7f | 0x08 => Ok(Event::Key(Key::Backspace)),
-            c @ 0x01..=0x1a => Ok(Event::Key(Key::Ctrl((b'a' + c - 1) as char))),
-            c if c.is_ascii() => Ok(Event::Key(Key::Char(c as char))),
-            _ => Ok(Event::Key(Key::Unknown)),
+        match self.poll_event(None)? {
+            Some(event) => Ok(event),
+            None => Err(io::ErrorKind::UnexpectedEof.into()),
         }
     }
 
-    fn read_escape(&mut self) -> io::Result<Event> {
-        if self.read_byte()? != b'[' {
-            return Ok(Event::Key(Key::Unknown));
+    /// Next event, or None once `timeout` passes (None waits forever;
+    /// Duration::ZERO drains already-arrived input without waiting).
+    pub fn poll_event(&mut self, timeout: Option<Duration>) -> io::Result<Option<Event>> {
+        let deadline = timeout.map(|t| Instant::now() + t);
+        loop {
+            if let Some((raw, used)) = parse_event(&self.pending) {
+                self.pending.drain(..used);
+                return Ok(Some(match raw {
+                    RawEvent::Key(key) => Event::Key(key),
+                    RawEvent::Focus(focused) => Event::Focus(focused),
+                    RawEvent::Mouse(kind, button, x, y) => {
+                        let (x, y) = self.mouse_position_px(x, y);
+                        Event::Mouse(Mouse { kind, button, x, y })
+                    }
+                }));
+            }
+            let wait = deadline.map(|d| d.saturating_duration_since(Instant::now()));
+            if !self.wait_for_input(wait)? {
+                return Ok(None);
+            }
+            let mut chunk = [0u8; 256];
+            let n = rustix::io::read(&self.stdin, &mut chunk)?;
+            if n == 0 {
+                return Ok(None);
+            }
+            self.pending.extend_from_slice(&chunk[..n]);
         }
-        let mut params = Vec::new();
-        let terminator = loop {
-            let b = self.read_byte()?;
-            if (0x40..=0x7e).contains(&b) {
-                break b;
-            }
-            params.push(b);
-            if params.len() > 24 {
-                return Ok(Event::Key(Key::Unknown));
-            }
+    }
+
+    /// True when stdin has bytes to read; false when the wait elapsed first.
+    fn wait_for_input(&self, wait: Option<Duration>) -> io::Result<bool> {
+        let mut fds = [rustix::event::PollFd::new(
+            &self.stdin,
+            rustix::event::PollFlags::IN,
+        )];
+        let timeout = match wait {
+            Some(w) => Some(
+                rustix::event::Timespec::try_from(w)
+                    .map_err(|_| io::Error::other("timeout out of range"))?,
+            ),
+            None => None,
         };
-        Ok(match terminator {
-            b'A' => Event::Key(Key::Up),
-            b'B' => Event::Key(Key::Down),
-            b'C' => Event::Key(Key::Right),
-            b'D' => Event::Key(Key::Left),
-            b'M' | b'm' => match parse_sgr_mouse(&params, terminator == b'M') {
-                Some((kind, button, col_or_x, row_or_y)) => {
-                    let (x, y) = self.mouse_position_px(col_or_x, row_or_y);
-                    Event::Mouse(Mouse { kind, button, x, y })
-                }
-                None => Event::Key(Key::Unknown),
-            },
-            _ => Event::Key(Key::Unknown),
-        })
+        Ok(rustix::event::poll(&mut fds, timeout.as_ref())? > 0)
     }
 
     /// SGR coordinates are 1-based; cell coordinates map to the cell's center.
@@ -263,17 +311,11 @@ impl Terminal {
             if wait.is_zero() || buf.len() > 4096 {
                 break;
             }
-            let mut fds = [rustix::event::PollFd::new(
-                &self.stdin,
-                rustix::event::PollFlags::IN,
-            )];
-            let timeout = rustix::event::Timespec::try_from(wait)
-                .map_err(|_| io::Error::other("timeout out of range"))?;
-            if rustix::event::poll(&mut fds, Some(&timeout))? == 0 {
+            if !self.wait_for_input(Some(wait))? {
                 break;
             }
             let mut chunk = [0u8; 256];
-            let n = self.stdin.read(&mut chunk)?;
+            let n = rustix::io::read(&self.stdin, &mut chunk)?;
             if n == 0 {
                 break;
             }
@@ -309,17 +351,11 @@ impl Terminal {
             if remaining.is_zero() || buf.len() > 256 {
                 return Ok(None);
             }
-            let mut fds = [rustix::event::PollFd::new(
-                &self.stdin,
-                rustix::event::PollFlags::IN,
-            )];
-            let timeout = rustix::event::Timespec::try_from(remaining)
-                .map_err(|_| io::Error::other("timeout out of range"))?;
-            if rustix::event::poll(&mut fds, Some(&timeout))? == 0 {
+            if !self.wait_for_input(Some(remaining))? {
                 return Ok(None);
             }
             let mut chunk = [0u8; 64];
-            let n = self.stdin.read(&mut chunk)?;
+            let n = rustix::io::read(&self.stdin, &mut chunk)?;
             if n == 0 {
                 return Ok(None);
             }
@@ -329,21 +365,133 @@ impl Terminal {
             }
         }
     }
+}
 
-    fn read_byte(&mut self) -> io::Result<u8> {
-        let mut b = [0u8; 1];
-        self.stdin.read_exact(&mut b)?;
-        Ok(b[0])
+const SHM_PROBE_ID: u32 = 299;
+
+fn parse_probe_reply(buf: &[u8], needle: &[u8]) -> Option<bool> {
+    let pos = buf.windows(needle.len()).position(|w| w == needle)?;
+    let rest = &buf[pos + needle.len()..];
+    if rest.len() < 2 {
+        return None;
     }
+    Some(rest.starts_with(b"OK"))
+}
+
+/// macOS shm fds reject read/write syscalls, so filling the object takes an
+/// mmap round-trip.
+#[allow(unsafe_code)]
+fn write_shm(name: &str, data: &[u8]) -> io::Result<()> {
+    let fd = rustix::shm::open(
+        name,
+        rustix::shm::OFlags::CREATE | rustix::shm::OFlags::EXCL | rustix::shm::OFlags::RDWR,
+        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+    )?;
+    rustix::fs::ftruncate(&fd, data.len() as u64)?;
+    // SAFETY: a fresh shared mapping sized to data.len() by the ftruncate
+    // above, written once and unmapped before the fd closes.
+    unsafe {
+        let ptr = rustix::mm::mmap(
+            std::ptr::null_mut(),
+            data.len(),
+            rustix::mm::ProtFlags::READ | rustix::mm::ProtFlags::WRITE,
+            rustix::mm::MapFlags::SHARED,
+            &fd,
+            0,
+        )?;
+        std::ptr::copy_nonoverlapping(data.as_ptr(), ptr.cast(), data.len());
+        rustix::mm::munmap(ptr, data.len())?;
+    }
+    Ok(())
 }
 
 impl Drop for Terminal {
     fn drop(&mut self) {
+        // The terminal unlinks each object it reads; sweep the rest.
+        for seq in 0..self.frame_seq {
+            let _ = rustix::shm::unlink(Self::shm_name(seq));
+        }
         let _ = self.stdout.write_all(
-            b"\x1b_Ga=d,d=A,q=2\x1b\\\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?25h\x1b[?1049l",
+            b"\x1b_Ga=d,d=A,q=2\x1b\\\x1b[?1004l\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?25h\x1b[?1049l",
         );
         let _ = self.stdout.flush();
         let _ = termios::tcsetattr(&self.stdin, OptionalActions::Flush, &self.saved);
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum RawEvent {
+    Key(Key),
+    Mouse(MouseKind, MouseButton, u32, u32),
+    Focus(bool),
+}
+
+/// One event from the front of `buf` plus the bytes it consumed. None means
+/// an incomplete sequence; garbage always consumes and yields Key::Unknown.
+fn parse_event(buf: &[u8]) -> Option<(RawEvent, usize)> {
+    let b0 = *buf.first()?;
+    if b0 != 0x1b {
+        let key = match b0 {
+            0x0d => Key::Enter,
+            0x7f | 0x08 => Key::Backspace,
+            c @ 0x01..=0x1a => Key::Ctrl((b'a' + c - 1) as char),
+            c if c.is_ascii() => Key::Char(c as char),
+            _ => Key::Unknown,
+        };
+        return Some((RawEvent::Key(key), 1));
+    }
+    // String sequences (graphics replies, late query answers) must be
+    // swallowed whole or their bodies leak into the input as typed keys.
+    if matches!(*buf.get(1)?, b'_' | b']' | b'P' | b'X' | b'^') {
+        return consume_string_sequence(buf).map(|end| (RawEvent::Key(Key::Unknown), end));
+    }
+    if *buf.get(1)? != b'[' {
+        return Some((RawEvent::Key(Key::Unknown), 2));
+    }
+    let mut end = 2;
+    let terminator = loop {
+        let b = *buf.get(end)?;
+        end += 1;
+        if (0x40..=0x7e).contains(&b) {
+            break b;
+        }
+        if end - 2 > 24 {
+            return Some((RawEvent::Key(Key::Unknown), end));
+        }
+    };
+    let params = &buf[2..end - 1];
+    let event = match terminator {
+        b'A' => RawEvent::Key(Key::Up),
+        b'B' => RawEvent::Key(Key::Down),
+        b'C' => RawEvent::Key(Key::Right),
+        b'D' => RawEvent::Key(Key::Left),
+        b'I' => RawEvent::Focus(true),
+        b'O' => RawEvent::Focus(false),
+        b'M' | b'm' => match parse_sgr_mouse(params, terminator == b'M') {
+            Some((kind, button, x, y)) => RawEvent::Mouse(kind, button, x, y),
+            None => RawEvent::Key(Key::Unknown),
+        },
+        _ => RawEvent::Key(Key::Unknown),
+    };
+    Some((event, end))
+}
+
+/// Bytes up to and including the terminator (ST, or BEL for OSC); None means
+/// the terminator hasn't arrived yet. Capped so garbage can't buffer forever.
+fn consume_string_sequence(buf: &[u8]) -> Option<usize> {
+    let mut i = 2;
+    loop {
+        match *buf.get(i)? {
+            0x07 if buf[1] == b']' => return Some(i + 1),
+            0x1b => {
+                if *buf.get(i + 1)? == b'\\' {
+                    return Some(i + 2);
+                }
+                i += 1;
+            }
+            _ if i > 4096 => return Some(i),
+            _ => i += 1,
+        }
     }
 }
 
@@ -366,10 +514,13 @@ fn parse_sgr_mouse(params: &[u8], press: bool) -> Option<(MouseKind, MouseButton
         _ => MouseButton::None,
     };
     let kind = if b & 64 != 0 {
-        if b & 1 == 0 {
-            MouseKind::ScrollUp
-        } else {
-            MouseKind::ScrollDown
+        // 64 up, 65 down, 66 left, 67 right; trackpads emit the horizontal
+        // pair whenever a two-finger scroll drifts sideways.
+        match b & 3 {
+            0 => MouseKind::ScrollUp,
+            1 => MouseKind::ScrollDown,
+            2 => MouseKind::ScrollLeft,
+            _ => MouseKind::ScrollRight,
         }
     } else if b & 32 != 0 {
         MouseKind::Move
@@ -432,6 +583,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parses_probe_replies() {
+        let parse = |buf: &[u8]| parse_probe_reply(buf, b"_Gi=299;");
+        assert_eq!(parse(b"\x1b_Gi=299;OK\x1b\\"), Some(true));
+        assert_eq!(parse(b"noise\x1b_Gi=299;ENOENT:not found\x1b\\"), Some(false));
+        assert_eq!(parse(b"\x1b_Gi=299;O"), None, "partial");
+        assert_eq!(parse(b"\x1b[?1016;1$y"), None);
+    }
+
+    #[test]
+    #[allow(unsafe_code)]
+    fn shm_roundtrip() {
+        let name = format!("/px-test-{}", std::process::id());
+        let data: Vec<u8> = (0..8192).map(|i| (i % 251) as u8).collect();
+        write_shm(&name, &data).unwrap();
+
+        let fd = rustix::shm::open(&name, rustix::shm::OFlags::RDONLY, rustix::fs::Mode::empty())
+            .unwrap();
+        // SAFETY: read-only mapping of the object just written, sized to
+        // match, unmapped before the fd closes.
+        let read_back = unsafe {
+            let ptr = rustix::mm::mmap(
+                std::ptr::null_mut(),
+                data.len(),
+                rustix::mm::ProtFlags::READ,
+                rustix::mm::MapFlags::SHARED,
+                &fd,
+                0,
+            )
+            .unwrap();
+            let bytes = std::slice::from_raw_parts(ptr.cast::<u8>(), data.len()).to_vec();
+            rustix::mm::munmap(ptr, data.len()).unwrap();
+            bytes
+        };
+        rustix::shm::unlink(&name).unwrap();
+        assert_eq!(read_back, data);
+    }
+
+    #[test]
     fn parses_cell_size_report_amid_noise() {
         assert_eq!(parse_cell_size_report(b"\x1b[6;14;7t"), Some((7, 14)));
         assert_eq!(parse_cell_size_report(b"ab\x1b[6;28;13tcd"), Some((13, 28)));
@@ -461,8 +650,55 @@ mod tests {
             parse_sgr_mouse(b"<65;1;1", true),
             Some((MouseKind::ScrollDown, MouseButton::Middle, 1, 1))
         );
+        assert_eq!(
+            parse_sgr_mouse(b"<66;1;1", true).unwrap().0,
+            MouseKind::ScrollLeft
+        );
+        assert_eq!(
+            parse_sgr_mouse(b"<67;1;1", true).unwrap().0,
+            MouseKind::ScrollRight
+        );
         assert_eq!(parse_sgr_mouse(b"0;1;1", true), None);
         assert_eq!(parse_sgr_mouse(b"<0;0;1", true), None);
+    }
+
+    #[test]
+    fn parse_event_consumes_one_event_and_reports_incomplete_tails() {
+        assert_eq!(parse_event(b""), None);
+        assert_eq!(parse_event(b"a"), Some((RawEvent::Key(Key::Char('a')), 1)));
+        assert_eq!(parse_event(b"\x1b"), None, "escape alone: wait for more");
+        assert_eq!(parse_event(b"\x1b["), None);
+        assert_eq!(parse_event(b"\x1b[<65;10;2"), None, "mouse mid-sequence");
+        assert_eq!(
+            parse_event(b"\x1b[<65;10;20Mxyz"),
+            Some((
+                RawEvent::Mouse(MouseKind::ScrollDown, MouseButton::Middle, 10, 20),
+                12
+            ))
+        );
+        assert_eq!(parse_event(b"\x1b[Aq"), Some((RawEvent::Key(Key::Up), 3)));
+        assert_eq!(parse_event(b"\x1b[I"), Some((RawEvent::Focus(true), 3)));
+        assert_eq!(parse_event(b"\x1b[O"), Some((RawEvent::Focus(false), 3)));
+        assert_eq!(parse_event(b"\x1bOP"), Some((RawEvent::Key(Key::Unknown), 2)));
+    }
+
+    #[test]
+    fn terminal_reply_strings_never_leak_as_keystrokes() {
+        // xterm.js < May 2026 replies OK to every transmission despite q=2.
+        assert_eq!(
+            parse_event(b"\x1b_Gi=1;OK\x1b\\"),
+            Some((RawEvent::Key(Key::Unknown), 11))
+        );
+        assert_eq!(parse_event(b"\x1b_Gi=1;OK"), None, "reply mid-arrival");
+        assert_eq!(
+            parse_event(b"\x1b]11;rgb:1e/2a/34\x07x"),
+            Some((RawEvent::Key(Key::Unknown), 18)),
+            "late OSC reply, BEL-terminated"
+        );
+        assert_eq!(
+            parse_event(b"\x1bP1$r0m\x1b\\"),
+            Some((RawEvent::Key(Key::Unknown), 9))
+        );
     }
 
     #[test]

@@ -9,7 +9,7 @@ publish = false
 
 [workspace.dependencies]
 pixel-core = { path = "crates/pixel-core" }
-rustix = { version = "1", features = ["termios", "stdio", "event"] }
+rustix = { version = "1", features = ["termios", "stdio", "event", "fs", "shm", "mm"] }
 base64 = "0.22"
 fontdue = "0.9"
 miniz_oxide = "0.8"
@@ -27,6 +27,11 @@ undocumented_unsafe_blocks = "warn"
 # pushing stays fast in dev builds. Our own code stays at opt-level 0 for fast
 # iteration.
 [profile.dev.package."*"]
+opt-level = 2
+
+# The engine's per-pixel loops are the frame budget; apps iterate at opt 0
+# while the engine compiles optimized.
+[profile.dev.package.pixel-core]
 opt-level = 2
 
 [profile.dev]

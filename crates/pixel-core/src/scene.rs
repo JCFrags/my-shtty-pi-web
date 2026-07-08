@@ -2,7 +2,7 @@ use taffy::TaffyTree;
 use taffy::prelude::TaffyMaxContent as _;
 
 use crate::canvas::{Canvas, measure_text};
-use crate::style::{Align, Border, Color, Dimension, FlexDirection, Justify, Style};
+use crate::style::{Align, Border, Color, Dimension, FlexDirection, Justify, Overflow, Style};
 
 pub type Handler<S> = Box<dyn Fn(&mut S)>;
 
@@ -11,6 +11,8 @@ pub struct Node<S> {
     pub text: Option<String>,
     pub id: Option<&'static str>,
     pub on_click: Option<Handler<S>>,
+    /// Pixels of downward scroll; only applies when overflow is Scroll.
+    pub scroll_offset: f32,
     pub children: Vec<Node<S>>,
 }
 
@@ -21,6 +23,7 @@ impl<S> Default for Node<S> {
             text: None,
             id: None,
             on_click: None,
+            scroll_offset: 0.0,
             children: Vec::new(),
         }
     }
@@ -38,6 +41,31 @@ impl PxRect {
     pub fn contains(&self, x: f32, y: f32) -> bool {
         x >= self.x && x < self.x + self.w && y >= self.y && y < self.y + self.h
     }
+
+    pub fn intersect(&self, other: PxRect) -> PxRect {
+        let x = self.x.max(other.x);
+        let y = self.y.max(other.y);
+        PxRect {
+            x,
+            y,
+            w: ((self.x + self.w).min(other.x + other.w) - x).max(0.0),
+            h: ((self.y + self.h).min(other.y + other.h) - y).max(0.0),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ScrollArea {
+    pub id: Option<&'static str>,
+    pub rect: PxRect,
+    pub content_height: f32,
+    pub offset: f32,
+}
+
+impl ScrollArea {
+    pub fn max_scroll(&self) -> f32 {
+        (self.content_height - self.rect.h).max(0.0)
+    }
 }
 
 /// The computed frame: where tagged nodes landed and which handlers are live.
@@ -46,6 +74,7 @@ pub struct Scene<S> {
     handlers: Vec<(PxRect, Handler<S>)>,
     ids: Vec<(&'static str, PxRect)>,
     hoverables: Vec<PxRect>,
+    scrollables: Vec<ScrollArea>,
 }
 
 impl<S> Scene<S> {
@@ -72,6 +101,20 @@ impl<S> Scene<S> {
     /// decide whether a mouse move needs a redraw.
     pub fn hover_target(&self, x: f32, y: f32) -> Option<usize> {
         self.hoverables.iter().rposition(|rect| rect.contains(x, y))
+    }
+
+    /// Topmost scrollable under the point; where wheel events should go.
+    pub fn scroll_area_at(&self, x: f32, y: f32) -> Option<&ScrollArea> {
+        self.scrollables
+            .iter()
+            .rev()
+            .find(|area| area.rect.contains(x, y))
+    }
+
+    pub fn scroll_area(&self, id: &str) -> Option<&ScrollArea> {
+        self.scrollables
+            .iter()
+            .find(|area| area.id == Some(id))
     }
 }
 
@@ -126,6 +169,7 @@ pub fn render_scene<S>(
         handlers: Vec::new(),
         ids: Vec::new(),
         hoverables: Vec::new(),
+        scrollables: Vec::new(),
     };
     crate::profiler::span("scene.paint", || {
         paint_node(
@@ -134,6 +178,7 @@ pub fn render_scene<S>(
             canvas,
             fonts,
             (0.0, 0.0),
+            None,
             cursor,
             &mut scene,
         )
@@ -161,6 +206,8 @@ struct BuiltNode<S> {
     hover_color: Option<Color>,
     corner_radius: f32,
     border: Option<Border>,
+    overflow: Overflow,
+    scroll_offset: f32,
     text: Option<(String, Color, f32, usize)>,
     id: Option<&'static str>,
     on_click: Option<Handler<S>>,
@@ -209,6 +256,8 @@ fn build_node<S>(
         hover_color: node.style.hover_color,
         corner_radius: node.style.corner_radius,
         border: node.style.border,
+        overflow: node.style.overflow,
+        scroll_offset: node.scroll_offset,
         text: node
             .text
             .map(|t| (t, inherited.color, inherited.px, inherited.font)),
@@ -218,12 +267,14 @@ fn build_node<S>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_node<S>(
     node: &mut BuiltNode<S>,
     tree: &TaffyTree<MeasureCtx>,
     canvas: &mut Canvas,
     fonts: &[fontdue::Font],
     offset: (f32, f32),
+    clip: Option<PxRect>,
     cursor: Option<(f32, f32)>,
     scene: &mut Scene<S>,
 ) {
@@ -234,7 +285,8 @@ fn paint_node<S>(
         w: layout.size.width,
         h: layout.size.height,
     };
-    let hovered = cursor.is_some_and(|(x, y)| rect.contains(x, y));
+    let visible = clip.map_or(rect, |c| rect.intersect(c));
+    let hovered = cursor.is_some_and(|(x, y)| visible.contains(x, y));
 
     let background = match (hovered, node.hover_background) {
         (true, Some(bg)) => Some(bg),
@@ -254,6 +306,12 @@ fn paint_node<S>(
             border.color,
         );
     }
+
+    let clips_children = node.overflow != Overflow::Visible;
+    if clips_children {
+        canvas.push_clip(rect.x, rect.y, rect.w, rect.h);
+    }
+
     if let Some((text, color, px, font_index)) = &node.text {
         let font = &fonts[*font_index.min(&(fonts.len() - 1))];
         if let Some(line_metrics) = font.horizontal_line_metrics(*px) {
@@ -263,12 +321,22 @@ fn paint_node<S>(
             };
             let origin_x = rect.x + layout.padding.left;
             let origin_y = rect.y + layout.padding.top;
+            let line_h = line_metrics.new_line_size;
             for (i, line) in text.split('\n').enumerate() {
+                // Cull clipped-out lines, keeping one line of slack for glyphs
+                // that overhang their line box.
+                let top = origin_y + line_h * i as f32;
+                if top + 2.0 * line_h < visible.y {
+                    continue;
+                }
+                if top - line_h > visible.y + visible.h {
+                    break;
+                }
                 canvas.draw_text(
                     font,
                     line,
                     origin_x as i32,
-                    (origin_y + line_metrics.ascent + line_metrics.new_line_size * i as f32) as i32,
+                    (top + line_metrics.ascent) as i32,
                     *px,
                     color,
                 );
@@ -277,16 +345,37 @@ fn paint_node<S>(
     }
 
     if node.hover_background.is_some() || node.hover_color.is_some() {
-        scene.hoverables.push(rect);
+        scene.hoverables.push(visible);
     }
     if let Some(handler) = node.on_click.take() {
-        scene.handlers.push((rect, handler));
+        scene.handlers.push((visible, handler));
     }
+    // Ids stay unclipped so geometry like caret math works off-screen.
     if let Some(id) = node.id {
         scene.ids.push((id, rect));
     }
+    if node.overflow == Overflow::Scroll {
+        scene.scrollables.push(ScrollArea {
+            id: node.id,
+            rect: visible,
+            content_height: layout.content_size.height,
+            offset: node.scroll_offset,
+        });
+    }
+
+    let child_origin = if node.overflow == Overflow::Scroll {
+        (rect.x, rect.y - node.scroll_offset)
+    } else {
+        (rect.x, rect.y)
+    };
+    let child_clip = if clips_children { Some(visible) } else { clip };
     for child in &mut node.children {
-        paint_node(child, tree, canvas, fonts, (rect.x, rect.y), cursor, scene);
+        paint_node(
+            child, tree, canvas, fonts, child_origin, child_clip, cursor, scene,
+        );
+    }
+    if clips_children {
+        canvas.pop_clip();
     }
 }
 
@@ -301,12 +390,23 @@ fn to_taffy(style: &Style) -> taffy::Style {
         }
     }
 
+    let overflow = match style.overflow {
+        crate::style::Overflow::Visible => taffy::Overflow::Visible,
+        crate::style::Overflow::Hidden => taffy::Overflow::Hidden,
+        crate::style::Overflow::Scroll => taffy::Overflow::Scroll,
+    };
+
     taffy::Style {
+        overflow: taffy::Point {
+            x: overflow,
+            y: overflow,
+        },
         flex_direction: match style.flex_direction {
             FlexDirection::Row => taffy::FlexDirection::Row,
             FlexDirection::Column => taffy::FlexDirection::Column,
         },
         flex_grow: style.flex_grow,
+        flex_shrink: style.flex_shrink,
         size: taffy::Size {
             width: dimension(style.width),
             height: dimension(style.height),
@@ -447,6 +547,74 @@ mod tests {
             Some((50.0, 50.0)),
         );
         assert_eq!(&canvas.pixels[0..4], &[1, 1, 1, 255]);
+    }
+
+    fn scroll_container(offset: f32, on_click: bool) -> Node<usize> {
+        let block = |color: Color, clicks: bool| Node {
+            style: Style {
+                width: Dimension::Px(40.0),
+                height: Dimension::Px(40.0),
+                flex_shrink: 0.0,
+                background: Some(color),
+                ..Style::default()
+            },
+            on_click: clicks.then(|| Box::new(|hit: &mut usize| *hit = 7) as Handler<usize>),
+            ..Node::default()
+        };
+        Node {
+            style: Style {
+                flex_direction: FlexDirection::Column,
+                width: Dimension::Px(40.0),
+                height: Dimension::Px(40.0),
+                overflow: Overflow::Scroll,
+                ..Style::default()
+            },
+            id: Some("scroller"),
+            scroll_offset: offset,
+            children: vec![
+                block([10, 0, 0, 255], false),
+                block([0, 20, 0, 255], on_click),
+            ],
+            ..Node::default()
+        }
+    }
+
+    #[test]
+    fn scroll_area_reports_overflowing_content() {
+        let mut canvas = Canvas::new(40, 40);
+        let scene = scene_for(scroll_container(0.0, false), &mut canvas);
+        let area = scene.scroll_area("scroller").unwrap();
+        assert_eq!(area.content_height, 80.0);
+        assert_eq!(area.max_scroll(), 40.0);
+        assert!(scene.scroll_area_at(5.0, 5.0).is_some());
+        assert!(scene.scroll_area_at(100.0, 5.0).is_none());
+    }
+
+    #[test]
+    fn scroll_offset_shifts_children_and_clips_painting() {
+        let mut canvas = Canvas::new(40, 60);
+        scene_for(scroll_container(10.0, false), &mut canvas);
+        // Offset 10 scrolls the red/green boundary from y=40 up to y=30.
+        assert_eq!(&canvas.pixels[(29 * 40 * 4) as usize..][..4], &[10, 0, 0, 255]);
+        assert_eq!(&canvas.pixels[(30 * 40 * 4) as usize..][..4], &[0, 20, 0, 255]);
+        // The viewport ends at y=40; the green block must not paint below it.
+        assert_eq!(&canvas.pixels[(40 * 40 * 4) as usize..][..4], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn scrolled_out_children_do_not_take_clicks() {
+        let mut canvas = Canvas::new(40, 40);
+        let scene = scene_for(scroll_container(0.0, true), &mut canvas);
+        let mut hit = 0;
+        assert!(
+            !scene.dispatch_click(5.0, 35.0, &mut hit),
+            "second block starts below the viewport"
+        );
+
+        let mut canvas = Canvas::new(40, 40);
+        let scene = scene_for(scroll_container(40.0, true), &mut canvas);
+        assert!(scene.dispatch_click(5.0, 35.0, &mut hit));
+        assert_eq!(hit, 7, "fully scrolled, second block fills the viewport");
     }
 
     #[test]

@@ -1,7 +1,17 @@
+type GlyphKey = (usize, char, u32);
+type GlyphCache = std::collections::HashMap<GlyphKey, (fontdue::Metrics, Vec<u8>)>;
+std::thread_local! {
+    static GLYPH_CACHE: std::cell::RefCell<GlyphCache> = std::cell::RefCell::new(GlyphCache::new());
+    static ADVANCE_CACHE: std::cell::RefCell<std::collections::HashMap<GlyphKey, f32>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
 pub struct Canvas {
     pub width: u32,
     pub height: u32,
     pub pixels: Vec<u8>,
+    clip_stack: Vec<(u32, u32, u32, u32)>,
+    clip_mask: Option<tiny_skia::Mask>,
 }
 
 impl Canvas {
@@ -10,11 +20,34 @@ impl Canvas {
             width,
             height,
             pixels: vec![0; (width * height * 4) as usize],
+            clip_stack: Vec::new(),
+            clip_mask: None,
         }
     }
 
-    /// Doubling memcpy fill: per-pixel loops are milliseconds at dev
-    /// opt-level 0 on full-window canvases, memcpy is fast at any opt level.
+    pub fn push_clip(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        let (cx1, cy1, cx2, cy2) = self.clip_bounds();
+        let x1 = (x.round().max(0.0) as u32).clamp(cx1, cx2);
+        let y1 = (y.round().max(0.0) as u32).clamp(cy1, cy2);
+        let x2 = ((x + w).round().max(0.0) as u32).clamp(x1, cx2);
+        let y2 = ((y + h).round().max(0.0) as u32).clamp(y1, cy2);
+        self.clip_stack.push((x1, y1, x2, y2));
+        self.clip_mask = None;
+    }
+
+    pub fn pop_clip(&mut self) {
+        self.clip_stack.pop();
+        self.clip_mask = None;
+    }
+
+    fn clip_bounds(&self) -> (u32, u32, u32, u32) {
+        self.clip_stack
+            .last()
+            .copied()
+            .unwrap_or((0, 0, self.width, self.height))
+    }
+
+    // weird op, but its a fast way to fill an array to a given color without allocating memory beforehand
     pub fn fill(&mut self, color: [u8; 4]) {
         if self.pixels.is_empty() {
             return;
@@ -30,10 +63,11 @@ impl Canvas {
     }
 
     pub fn fill_rect(&mut self, x: u32, y: u32, w: u32, h: u32, color: [u8; 4]) {
-        let x1 = x.min(self.width);
-        let y1 = y.min(self.height);
-        let x2 = x.saturating_add(w).min(self.width);
-        let y2 = y.saturating_add(h).min(self.height);
+        let (cx1, cy1, cx2, cy2) = self.clip_bounds();
+        let x1 = x.clamp(cx1, cx2);
+        let y1 = y.clamp(cy1, cy2);
+        let x2 = x.saturating_add(w).clamp(x1, cx2);
+        let y2 = y.saturating_add(h).clamp(y1, cy2);
         for row in y1..y2 {
             for col in x1..x2 {
                 let i = ((row * self.width + col) * 4) as usize;
@@ -52,33 +86,38 @@ impl Canvas {
         color: [u8; 4],
     ) {
         let mut pen_x = x as f32;
-        for ch in text.chars() {
-            let (metrics, coverage) = font.rasterize(ch, px);
-            let glyph_x = pen_x.round() as i32 + metrics.xmin;
-            // ymin is the bottom edge's offset from the baseline (positive = up),
-            // so the bitmap's top row sits at baseline - height - ymin.
-            let glyph_y = baseline - metrics.height as i32 - metrics.ymin;
-            self.blend_mask(
-                glyph_x,
-                glyph_y,
-                metrics.width,
-                metrics.height,
-                &coverage,
-                color,
-            );
-            pen_x += metrics.advance_width;
-        }
+        GLYPH_CACHE.with_borrow_mut(|cache| {
+            for ch in text.chars() {
+                let (metrics, coverage) = cache
+                    .entry((font.file_hash(), ch, px.to_bits()))
+                    .or_insert_with(|| font.rasterize(ch, px));
+                let glyph_x = pen_x.round() as i32 + metrics.xmin;
+                // ymin is the bottom edge's offset from the baseline (positive = up),
+                // so the bitmap's top row sits at baseline - height - ymin.
+                let glyph_y = baseline - metrics.height as i32 - metrics.ymin;
+                self.blend_mask(
+                    glyph_x,
+                    glyph_y,
+                    metrics.width,
+                    metrics.height,
+                    coverage,
+                    color,
+                );
+                pen_x += metrics.advance_width;
+            }
+        });
     }
 
     fn blend_mask(&mut self, x: i32, y: i32, w: usize, h: usize, mask: &[u8], color: [u8; 4]) {
+        let (cx1, cy1, cx2, cy2) = self.clip_bounds();
         for row in 0..h {
             let py = y + row as i32;
-            if py < 0 || py >= self.height as i32 {
+            if py < cy1 as i32 || py >= cy2 as i32 {
                 continue;
             }
             for col in 0..w {
                 let px = x + col as i32;
-                if px < 0 || px >= self.width as i32 {
+                if px < cx1 as i32 || px >= cx2 as i32 {
                     continue;
                 }
                 let coverage = u32::from(mask[row * w + col]);
@@ -135,6 +174,12 @@ impl Canvas {
     }
 
     fn paint_path(&mut self, path: &tiny_skia::Path, color: [u8; 4], stroke_width: Option<f32>) {
+        let (cx1, cy1, cx2, cy2) = self.clip_bounds();
+        if cx1 == cx2 || cy1 == cy2 {
+            return;
+        }
+        self.ensure_clip_mask();
+        let mask = self.clip_mask.as_ref();
         let Some(mut pixmap) =
             tiny_skia::PixmapMut::from_bytes(&mut self.pixels, self.width, self.height)
         else {
@@ -149,7 +194,7 @@ impl Canvas {
                 &paint,
                 tiny_skia::FillRule::Winding,
                 tiny_skia::Transform::identity(),
-                None,
+                mask,
             ),
             Some(width) => pixmap.stroke_path(
                 path,
@@ -159,9 +204,33 @@ impl Canvas {
                     ..tiny_skia::Stroke::default()
                 },
                 tiny_skia::Transform::identity(),
-                None,
+                mask,
             ),
         }
+    }
+
+    // tiny-skia has no scissor rect, so rect clips become a full-canvas
+    // alpha mask, built once per clip change and only when a path is drawn.
+    fn ensure_clip_mask(&mut self) {
+        if self.clip_stack.is_empty() || self.clip_mask.is_some() {
+            return;
+        }
+        let (x1, y1, x2, y2) = self.clip_bounds();
+        let Some(mut mask) = tiny_skia::Mask::new(self.width, self.height) else {
+            return;
+        };
+        let Some(rect) =
+            tiny_skia::Rect::from_ltrb(x1 as f32, y1 as f32, x2 as f32, y2 as f32)
+        else {
+            return;
+        };
+        mask.fill_path(
+            &tiny_skia::PathBuilder::from_rect(rect),
+            tiny_skia::FillRule::Winding,
+            false,
+            tiny_skia::Transform::identity(),
+        );
+        self.clip_mask = Some(mask);
     }
 }
 
@@ -197,9 +266,15 @@ fn rounded_rect_path(x: f32, y: f32, w: f32, h: f32, radius: f32) -> Option<tiny
 }
 
 pub fn measure_text(font: &fontdue::Font, text: &str, px: f32) -> f32 {
-    text.chars()
-        .map(|ch| font.metrics(ch, px).advance_width)
-        .sum()
+    ADVANCE_CACHE.with_borrow_mut(|cache| {
+        text.chars()
+            .map(|ch| {
+                *cache
+                    .entry((font.file_hash(), ch, px.to_bits()))
+                    .or_insert_with(|| font.metrics(ch, px).advance_width)
+            })
+            .sum()
+    })
 }
 
 #[cfg(test)]
@@ -223,6 +298,41 @@ mod tests {
         let half = &canvas.pixels[4..8];
         assert_eq!(half[0], (200 * 128 / 255) as u8);
         assert_eq!(half[3], 255);
+    }
+
+    #[test]
+    fn clip_restricts_all_drawing_and_pops_back_off() {
+        let mut canvas = Canvas::new(4, 1);
+        canvas.push_clip(1.0, 0.0, 2.0, 1.0);
+        canvas.fill_rect(0, 0, 4, 1, [7, 7, 7, 255]);
+        canvas.blend_mask(0, 0, 4, 1, &[255; 4], [9, 9, 9, 255]);
+        assert_eq!(&canvas.pixels[0..4], &[0, 0, 0, 0], "left of clip untouched");
+        assert_eq!(&canvas.pixels[4..8], &[9, 9, 9, 255]);
+        assert_eq!(&canvas.pixels[12..16], &[0, 0, 0, 0], "right of clip untouched");
+
+        canvas.pop_clip();
+        canvas.fill_rect(0, 0, 4, 1, [7, 7, 7, 255]);
+        assert_eq!(&canvas.pixels[0..4], &[7, 7, 7, 255]);
+    }
+
+    #[test]
+    fn nested_clips_intersect() {
+        let mut canvas = Canvas::new(4, 1);
+        canvas.push_clip(0.0, 0.0, 3.0, 1.0);
+        canvas.push_clip(2.0, 0.0, 2.0, 1.0);
+        canvas.fill_rect(0, 0, 4, 1, [7, 7, 7, 255]);
+        assert_eq!(&canvas.pixels[4..8], &[0, 0, 0, 0]);
+        assert_eq!(&canvas.pixels[8..12], &[7, 7, 7, 255]);
+        assert_eq!(&canvas.pixels[12..16], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn clip_masks_path_painting() {
+        let mut canvas = Canvas::new(4, 4);
+        canvas.push_clip(0.0, 0.0, 2.0, 4.0);
+        canvas.fill_rounded_rect(0.0, 0.0, 4.0, 4.0, 0.0, [8, 8, 8, 255]);
+        assert_eq!(&canvas.pixels[0..4], &[8, 8, 8, 255]);
+        assert_eq!(&canvas.pixels[8..12], &[0, 0, 0, 0], "beyond clip untouched");
     }
 
     #[test]
