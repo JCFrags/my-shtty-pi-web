@@ -23,8 +23,6 @@ const FALLBACK_CELL: (u32, u32) = (16, 32);
 
 const FRAME_POLL: Duration = Duration::from_millis(6);
 
-/// The system fonts can't be bundled (Apple license), but loading the user's
-/// own installed copy at runtime is fine; bundled fonts cover every miss.
 fn load_font(candidates: &[&str], fallback: &'static [u8]) -> fontdue::Font {
     let parse = |bytes: &[u8]| fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default());
     if cfg!(target_os = "macos") {
@@ -39,8 +37,6 @@ fn load_font(candidates: &[&str], fallback: &'static [u8]) -> fontdue::Font {
     parse(fallback).expect("bundled font parses")
 }
 
-/// Chords Ghostty consumes by default that the editor needs: undo/redo,
-/// select-all, and doc start/end movement and selection.
 const GHOSTTY_KEYBINDS: &[&str] = &[
     "super+z=unbind",
     "super+shift+z=unbind",
@@ -60,8 +56,6 @@ fn main() -> std::io::Result<()> {
         println!("{claim:?}");
         return Ok(());
     }
-    // Best effort: a failure here just means the cmd chords stay owned by
-    // Ghostty, which the ctrl fallbacks and the context menu already cover.
     let _ = pixel_core::ghostty::claim_keybinds("typing", GHOSTTY_KEYBINDS);
     let fonts = [
         load_font(SYSTEM_UI_FONTS, UI_FONT_BYTES),
@@ -75,8 +69,6 @@ fn main() -> std::io::Result<()> {
     let (cell_w, cell_h) = cell.unwrap_or(FALLBACK_CELL);
     let cols = if ws.cols > 0 { ws.cols } else { 80 };
     let rows = if ws.rows > 0 { ws.rows } else { 24 };
-    // The ioctl reports the exact grid pixel size where supported; derive
-    // from cell size only when it doesn't.
     let mut window = (
         if ws.width_px > 0 {
             ws.width_px
@@ -89,8 +81,6 @@ fn main() -> std::io::Result<()> {
             rows * cell_h
         },
     );
-    // Pane pixels can exceed the cell grid; an image taller than the grid
-    // line-feeds past the bottom and scrolls everything.
     if cell.is_some() {
         window = (window.0 / cell_w * cell_w, window.1 / cell_h * cell_h);
     }
