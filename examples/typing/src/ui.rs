@@ -135,12 +135,9 @@ pub struct App {
     pub native: bool,
     pub stats: FrameStats,
     pub context_menu: Option<(f32, f32)>,
-    /// Action chosen from a menu item, run by the main loop: item handlers
-    /// can't reach the terminal for clipboard I/O.
     pub pending: Option<InputAction>,
 }
 
-/// Rolling frame timings from the main loop, shown in the status bar.
 #[derive(Default)]
 pub struct FrameStats {
     pub frame_ms: f32,
