@@ -140,8 +140,6 @@ fn main() -> std::io::Result<()> {
     let mut last_frame = Instant::now();
     'session: loop {
         let animating = !scroll.settled();
-        // Native deltas arrive on a channel poll() can't see, so native mode
-        // keeps the loop on a frame clock while the terminal is focused.
         let mut event = if animating || (app.native_active() && focused) {
             term.poll_event(Some(FRAME_POLL))?
         } else {
@@ -154,8 +152,6 @@ fn main() -> std::io::Result<()> {
                     let menu_was_open = app.context_menu.take().is_some();
                     if menu_was_open {
                         dirty = true;
-                        // Escape only dismisses the menu; other keys go on
-                        // to act as usual after closing it.
                         if key.key == Key::Escape {
                             event = term.poll_event(Some(Duration::ZERO))?;
                             continue;
@@ -172,8 +168,6 @@ fn main() -> std::io::Result<()> {
                             app.cycle_scroll_profile();
                             dirty = true;
                         }
-                        // Bare ctrl-c keeps its terminal meaning; with a
-                        // selection the input turns it into a copy.
                         Key::Char('c')
                             if mods.ctrl
                                 && !mods.sup
@@ -205,8 +199,6 @@ fn main() -> std::io::Result<()> {
                                 if on_menu {
                                     scene.dispatch_click(point.0, point.1, &mut app);
                                 }
-                                // A click elsewhere only dismisses, like a
-                                // browser: it never edits what's underneath.
                                 event = term.poll_event(Some(Duration::ZERO))?;
                                 continue;
                             }
@@ -231,8 +223,6 @@ fn main() -> std::io::Result<()> {
                                 if let Some(geometry) = scene.input_geometry(EDITOR_INPUT) {
                                     let input = &mut app.notes[app.active].input;
                                     let offset = geometry.offset_at(input.text(), point, &fonts);
-                                    // Right-clicking inside the selection
-                                    // keeps it, so Copy applies to it.
                                     if !input.selection().is_some_and(|sel| sel.contains(&offset))
                                     {
                                         input.set_cursor(offset, false);
@@ -292,8 +282,6 @@ fn main() -> std::io::Result<()> {
                 && let Some(area) = over_editor
             {
                 for delta in deltas {
-                    // Positive delta_y means fingers scrolling toward the top
-                    // of the content, i.e. the offset decreases.
                     let px_delta = if delta.precise {
                         delta.delta_y * scale
                     } else {
@@ -331,7 +319,6 @@ fn main() -> std::io::Result<()> {
 
         let now = Instant::now();
         let gap = now.duration_since(last_frame).as_secs_f32();
-        // Cap dt so the first frame after an idle stretch steps, not jumps.
         let dt = gap.min(0.05);
         let max = scene
             .scroll_area(EDITOR)
@@ -361,8 +348,6 @@ fn main() -> std::io::Result<()> {
     Ok(())
 }
 
-/// Runs the side effects an input can't perform itself and reports whether
-/// the frame needs a redraw.
 fn apply_reply(app: &mut App, term: &mut Terminal, reply: InputReply) -> std::io::Result<bool> {
     Ok(match reply {
         InputReply::None => false,
