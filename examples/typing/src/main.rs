@@ -5,11 +5,12 @@ use std::time::{Duration, Instant};
 
 use pixel_core::profiler as prof;
 use pixel_core::{
-    Canvas, Event, Key, MouseKind, NativeScroll, Profiler, ScrollState, Terminal, fontdue,
-    render_scene,
+    CONTEXT_MENU_ID, Canvas, Event, InputReply, Key, MouseButton, MouseKind, NativeScroll,
+    Profiler, ScrollState, Terminal, fontdue, render_scene,
 };
 use ui::{
-    App, FONT_MONO, FONT_UI, Theme, build_ui, editor_max_scroll, paint_caret, px_for_cell_height,
+    App, EDITOR, EDITOR_INPUT, FONT_MONO, FONT_UI, Theme, build_ui, editor_pad,
+    px_for_cell_height,
 };
 
 static UI_FONT_BYTES: &[u8] = include_bytes!("../assets/InterVariable.ttf");
@@ -38,7 +39,30 @@ fn load_font(candidates: &[&str], fallback: &'static [u8]) -> fontdue::Font {
     parse(fallback).expect("bundled font parses")
 }
 
+/// Chords Ghostty consumes by default that the editor needs: undo/redo,
+/// select-all, and doc start/end movement and selection.
+const GHOSTTY_KEYBINDS: &[&str] = &[
+    "super+z=unbind",
+    "super+shift+z=unbind",
+    "super+a=unbind",
+    "super+up=unbind",
+    "super+down=unbind",
+    "super+shift+up=unbind",
+    "super+shift+down=unbind",
+];
+
 fn main() -> std::io::Result<()> {
+    if std::env::args().any(|arg| arg == "--keys") {
+        return key_dump();
+    }
+    if std::env::args().any(|arg| arg == "--setup-ghostty") {
+        let claim = pixel_core::ghostty::claim_keybinds("typing", GHOSTTY_KEYBINDS)?;
+        println!("{claim:?}");
+        return Ok(());
+    }
+    // Best effort: a failure here just means the cmd chords stay owned by
+    // Ghostty, which the ctrl fallbacks and the context menu already cover.
+    let _ = pixel_core::ghostty::claim_keybinds("typing", GHOSTTY_KEYBINDS);
     let fonts = [
         load_font(SYSTEM_UI_FONTS, UI_FONT_BYTES),
         load_font(SYSTEM_MONO_FONTS, MONO_FONT_BYTES),
@@ -77,10 +101,12 @@ fn main() -> std::io::Result<()> {
         active: 0,
         theme,
         editor_scroll: 0.0,
-        follow: true,
+        reveal_caret: true,
         scroll_profile: 0,
         native: false,
         stats: ui::FrameStats::default(),
+        context_menu: None,
+        pending: None,
     };
     let mut native = NativeScroll::spawn();
     if native.is_some() {
@@ -98,15 +124,12 @@ fn main() -> std::io::Result<()> {
             canvas
         });
         let scene = render_scene(
-            build_ui(app, window, px, recording),
+            build_ui(app, window, px, recording, &fonts[FONT_UI]),
             &mut canvas,
             &fonts,
             px,
             cursor,
         );
-        prof::span("editor.paint", || {
-            paint_caret(&mut canvas, &scene, &fonts[FONT_UI], px, app)
-        });
         (canvas, scene)
     };
 
@@ -127,50 +150,120 @@ fn main() -> std::io::Result<()> {
         let mut dirty = false;
         while let Some(current) = event {
             match current {
-                Event::Key(key) => match key {
-                    Key::Ctrl('c') => break 'session,
-                    Key::Ctrl('p') => {
-                        profiler.toggle()?;
+                Event::Key(key) => {
+                    let menu_was_open = app.context_menu.take().is_some();
+                    if menu_was_open {
                         dirty = true;
+                        // Escape only dismisses the menu; other keys go on
+                        // to act as usual after closing it.
+                        if key.key == Key::Escape {
+                            event = term.poll_event(Some(Duration::ZERO))?;
+                            continue;
+                        }
                     }
-                    Key::Ctrl('s') => {
-                        app.cycle_scroll_profile();
-                        dirty = true;
+                    let mods = key.mods;
+                    match key.key {
+                        Key::Char('q') if mods.ctrl => break 'session,
+                        Key::Char('p') if mods.ctrl => {
+                            profiler.toggle()?;
+                            dirty = true;
+                        }
+                        Key::Char('s') if mods.ctrl => {
+                            app.cycle_scroll_profile();
+                            dirty = true;
+                        }
+                        // Bare ctrl-c keeps its terminal meaning; with a
+                        // selection the input turns it into a copy.
+                        Key::Char('c')
+                            if mods.ctrl
+                                && !mods.sup
+                                && app.notes[app.active].input.selection().is_none() =>
+                        {
+                            break 'session;
+                        }
+                        _ => {
+                            let reply =
+                                app.notes[app.active].input.handle_key(key, &fonts[FONT_UI], px);
+                            dirty |= apply_reply(&mut app, &mut term, reply)?;
+                        }
                     }
-                    Key::Backspace => {
-                        app.notes[app.active].text.pop();
-                        app.follow = true;
-                        dirty = true;
-                    }
-                    Key::Enter => {
-                        app.notes[app.active].text.push('\n');
-                        app.follow = true;
-                        dirty = true;
-                    }
-                    Key::Char(c) if !c.is_control() => {
-                        app.notes[app.active].text.push(c);
-                        app.follow = true;
-                        dirty = true;
-                    }
-                    _ => {}
-                },
+                }
+                Event::Paste(text) => {
+                    app.notes[app.active].input.insert(&text);
+                    dirty = true;
+                    app.reveal_caret = true;
+                }
                 Event::Mouse(mouse) => {
                     let point = (mouse.x as f32, mouse.y as f32);
                     match mouse.kind {
-                        MouseKind::Down => {
-                            dirty |= scene.dispatch_click(point.0, point.1, &mut app);
+                        MouseKind::Down if mouse.button == MouseButton::Left => {
+                            if app.context_menu.take().is_some() {
+                                dirty = true;
+                                let on_menu = scene
+                                    .rect(CONTEXT_MENU_ID)
+                                    .is_some_and(|r| r.contains(point.0, point.1));
+                                if on_menu {
+                                    scene.dispatch_click(point.0, point.1, &mut app);
+                                }
+                                // A click elsewhere only dismisses, like a
+                                // browser: it never edits what's underneath.
+                                event = term.poll_event(Some(Duration::ZERO))?;
+                                continue;
+                            }
+                            let on_editor = scene
+                                .rect(EDITOR)
+                                .is_some_and(|r| r.contains(point.0, point.1));
+                            match scene.input_geometry(EDITOR_INPUT) {
+                                Some(geometry) if on_editor => {
+                                    let reply = app.notes[app.active]
+                                        .input
+                                        .handle_mouse(&mouse, geometry, &fonts);
+                                    dirty |= apply_reply(&mut app, &mut term, reply)?;
+                                }
+                                _ => dirty |= scene.dispatch_click(point.0, point.1, &mut app),
+                            }
                         }
-                        MouseKind::Move => {
-                            cursor = Some(point);
-                            let new_hover = scene.hover_target(point.0, point.1);
-                            if new_hover != hover {
-                                hover = new_hover;
+                        MouseKind::Down if mouse.button == MouseButton::Right => {
+                            let on_editor = scene
+                                .rect(EDITOR)
+                                .is_some_and(|r| r.contains(point.0, point.1));
+                            if on_editor {
+                                if let Some(geometry) = scene.input_geometry(EDITOR_INPUT) {
+                                    let input = &mut app.notes[app.active].input;
+                                    let offset = geometry.offset_at(input.text(), point, &fonts);
+                                    // Right-clicking inside the selection
+                                    // keeps it, so Copy applies to it.
+                                    if !input.selection().is_some_and(|sel| sel.contains(&offset))
+                                    {
+                                        input.set_cursor(offset, false);
+                                    }
+                                }
+                                app.context_menu = Some(point);
                                 dirty = true;
                             }
                         }
+                        MouseKind::Up | MouseKind::Move => {
+                            if mouse.kind == MouseKind::Move {
+                                cursor = Some(point);
+                                let new_hover = scene.hover_target(point.0, point.1);
+                                if new_hover != hover {
+                                    hover = new_hover;
+                                    dirty = true;
+                                }
+                            }
+                            if let Some(geometry) = scene.input_geometry(EDITOR_INPUT) {
+                                let reply = app.notes[app.active]
+                                    .input
+                                    .handle_mouse(&mouse, geometry, &fonts);
+                                dirty |= apply_reply(&mut app, &mut term, reply)?;
+                            }
+                        }
                         MouseKind::ScrollUp | MouseKind::ScrollDown if !app.native_active() => {
+                            if app.context_menu.take().is_some() {
+                                dirty = true;
+                            }
                             if let Some(area) = scene.scroll_area_at(point.0, point.1)
-                                && area.id == Some("editor")
+                                && area.id == Some(EDITOR)
                             {
                                 let tick = if mouse.kind == MouseKind::ScrollUp {
                                     -(cell_h as f32)
@@ -178,7 +271,6 @@ fn main() -> std::io::Result<()> {
                                     cell_h as f32
                                 };
                                 scroll.tick(app.profile(), tick, area.max_scroll());
-                                app.follow = false;
                             }
                         }
                         _ => {}
@@ -194,7 +286,7 @@ fn main() -> std::io::Result<()> {
             let scale = native.scale;
             let over_editor = cursor
                 .and_then(|(x, y)| scene.scroll_area_at(x, y))
-                .filter(|area| area.id == Some("editor"));
+                .filter(|area| area.id == Some(EDITOR));
             if app.native_active()
                 && focused
                 && let Some(area) = over_editor
@@ -211,17 +303,30 @@ fn main() -> std::io::Result<()> {
                     if next != scroll.position {
                         scroll.position = next;
                         scroll.set_target(next);
-                        app.follow = false;
                         dirty = true;
                     }
                 }
             }
         }
 
-        if app.follow
-            && let Some(editor) = scene.rect("editor")
-        {
-            scroll.set_target(editor_max_scroll(&app, &fonts[FONT_UI], px, editor.h));
+        if let Some(action) = app.pending.take() {
+            let reply = app.notes[app.active].input.apply(action);
+            dirty |= apply_reply(&mut app, &mut term, reply)?;
+        }
+
+        if app.reveal_caret {
+            app.reveal_caret = false;
+            let input = &app.notes[app.active].input;
+            if let Some(area) = scene.scroll_area(EDITOR)
+                && let Some(geometry) = scene.input_geometry(EDITOR_INPUT)
+                && let Some(target) = area.target_to_reveal(
+                    geometry.caret_rect(input.text(), input.cursor(), &fonts),
+                    scroll.target,
+                    editor_pad(px),
+                )
+            {
+                scroll.set_target(target);
+            }
         }
 
         let now = Instant::now();
@@ -229,7 +334,7 @@ fn main() -> std::io::Result<()> {
         // Cap dt so the first frame after an idle stretch steps, not jumps.
         let dt = gap.min(0.05);
         let max = scene
-            .scroll_area("editor")
+            .scroll_area(EDITOR)
             .map(|area| area.max_scroll())
             .unwrap_or(0.0);
         dirty |= scroll.step(app.profile(), dt, max);
@@ -254,6 +359,56 @@ fn main() -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Runs the side effects an input can't perform itself and reports whether
+/// the frame needs a redraw.
+fn apply_reply(app: &mut App, term: &mut Terminal, reply: InputReply) -> std::io::Result<bool> {
+    Ok(match reply {
+        InputReply::None => false,
+        InputReply::Selected => true,
+        InputReply::Moved | InputReply::Edited => {
+            app.reveal_caret = true;
+            true
+        }
+        InputReply::Copy(text) => {
+            term.set_clipboard(&text)?;
+            false
+        }
+        InputReply::Cut(text) => {
+            term.set_clipboard(&text)?;
+            app.reveal_caret = true;
+            true
+        }
+        InputReply::RequestPaste => {
+            term.request_clipboard()?;
+            false
+        }
+    })
+}
+
+fn key_dump() -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut term = Terminal::new()?;
+    let mut out = std::io::stdout();
+    write!(out, "key dump — press keys; ctrl-q or ctrl-c quits\r\n")?;
+    out.flush()?;
+    loop {
+        match term.read_event()? {
+            Event::Key(k) => {
+                write!(out, "{k:?}\r\n")?;
+                out.flush()?;
+                if k.mods.ctrl && matches!(k.key, Key::Char('q') | Key::Char('c')) {
+                    return Ok(());
+                }
+            }
+            Event::Paste(text) => {
+                write!(out, "Paste({text:?})\r\n")?;
+                out.flush()?;
+            }
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]

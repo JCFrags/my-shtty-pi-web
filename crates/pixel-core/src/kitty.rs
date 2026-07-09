@@ -3,15 +3,14 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 
 const KITTY_CHUNK_SIZE: usize = 4096;
 
-/// Asks the terminal to read (not display) a 1x1 shm object; it replies
-/// `i=<id>;OK` only if it can actually reach shared memory.
+// this looks like slop nonsense, verify its needed
 pub(crate) fn kitty_query_shm(image_id: u32, name: &str) -> Vec<u8> {
     let payload = BASE64.encode(name);
     format!("\x1b_Gi={image_id},a=q,t=s,f=32,s=1,v=1;{payload}\x1b\\").into_bytes()
 }
 
-/// Transmission via shared memory: the escape carries only the base64 object
-/// name; the terminal reads the pixels out-of-band and unlinks the object.
+// i want to look into how we do this, and be very careful and abstract this well per terminal
+// and make it very clear what we explicitly support/don't
 pub(crate) fn kitty_transmit_shm(image_id: u32, width: u32, height: u32, name: &str) -> Vec<u8> {
     let payload = BASE64.encode(name);
     format!(
@@ -34,6 +33,7 @@ pub fn kitty_transmit(image_id: u32, width: u32, height: u32, rgba: &[u8]) -> Ve
         let more = u8::from(i != last);
         out.extend_from_slice(b"\x1b_G");
         if i == 0 {
+            // todo: verify this is needed
             // C=1: the cursor stays put after display, so a full-window image
             // can't push the cursor past the last row and force a scroll.
             out.extend_from_slice(

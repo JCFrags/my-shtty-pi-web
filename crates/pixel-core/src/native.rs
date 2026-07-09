@@ -4,7 +4,6 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 pub struct NativeDelta {
     pub delta_y: f32,
-    /// Notched wheel mice report false; their deltas are lines, not pixels.
     pub precise: bool,
 }
 
@@ -13,8 +12,6 @@ enum Msg {
     Delta(NativeDelta),
 }
 
-/// Precise scroll deltas from a macOS helper process; only works when the
-/// app runs locally in a GUI session, so spawn() failing is a normal outcome.
 pub struct NativeScroll {
     child: Child,
     rx: Receiver<Msg>,

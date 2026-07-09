@@ -2,14 +2,10 @@ use std::cell::RefCell;
 use std::io;
 use std::time::Instant;
 
-// Thread-local so engine internals can record spans without every function
-// threading a profiler reference through its signature.
 thread_local! {
     static ACTIVE: RefCell<Option<Recording>> = const { RefCell::new(None) };
 }
 
-/// Runs `work`, recording its duration in the current frame of the active
-/// recording (no-op when not recording). Nested spans each get their own row.
 pub fn span<T>(name: &'static str, work: impl FnOnce() -> T) -> T {
     if !is_recording() {
         return work();
@@ -63,7 +59,6 @@ impl Profiler {
         is_recording()
     }
 
-    /// Starts recording, or stops and writes the report, returning its path.
     pub fn toggle(&mut self) -> io::Result<Option<std::path::PathBuf>> {
         let stopped = ACTIVE.with(|active| active.borrow_mut().take());
         match stopped {

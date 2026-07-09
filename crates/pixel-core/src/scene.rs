@@ -1,17 +1,22 @@
 use taffy::TaffyTree;
 use taffy::prelude::TaffyMaxContent as _;
 
+use std::ops::Range;
+
 use crate::canvas::{Canvas, measure_text};
-use crate::style::{Align, Border, Color, Dimension, FlexDirection, Justify, Overflow, Style};
+use crate::style::{
+    Align, Border, Color, Dimension, FlexDirection, Justify, Overflow, Position, Style,
+};
+use crate::text_input::{InputGeometry, InputRender, caret_width, offset_to_point};
 
 pub type Handler<S> = Box<dyn Fn(&mut S)>;
 
 pub struct Node<S> {
     pub style: Style,
     pub text: Option<String>,
+    pub input: Option<InputRender>,
     pub id: Option<&'static str>,
     pub on_click: Option<Handler<S>>,
-    /// Pixels of downward scroll; only applies when overflow is Scroll.
     pub scroll_offset: f32,
     pub children: Vec<Node<S>>,
 }
@@ -21,6 +26,7 @@ impl<S> Default for Node<S> {
         Self {
             style: Style::default(),
             text: None,
+            input: None,
             id: None,
             on_click: None,
             scroll_offset: 0.0,
@@ -66,21 +72,30 @@ impl ScrollArea {
     pub fn max_scroll(&self) -> f32 {
         (self.content_height - self.rect.h).max(0.0)
     }
+
+    pub fn target_to_reveal(&self, rect: PxRect, current: f32, margin: f32) -> Option<f32> {
+        let top = rect.y - self.rect.y + self.offset - margin;
+        let bottom = top + rect.h + 2.0 * margin;
+        if top < current {
+            Some(top.max(0.0))
+        } else if bottom > current + self.rect.h {
+            Some(bottom - self.rect.h)
+        } else {
+            None
+        }
+    }
 }
 
-/// The computed frame: where tagged nodes landed and which handlers are live.
-/// Dispatch hit-tests internally, topmost node first.
 pub struct Scene<S> {
     handlers: Vec<(PxRect, Handler<S>)>,
     ids: Vec<(&'static str, PxRect)>,
     hoverables: Vec<PxRect>,
     scrollables: Vec<ScrollArea>,
+    inputs: Vec<(&'static str, InputGeometry)>,
 }
 
 impl<S> Scene<S> {
     pub fn dispatch_click(&self, x: f32, y: f32, state: &mut S) -> bool {
-        // Handlers are collected in paint order, so the reverse scan finds
-        // the topmost handler under the point.
         for (rect, handler) in self.handlers.iter().rev() {
             if rect.contains(x, y) {
                 handler(state);
@@ -97,13 +112,10 @@ impl<S> Scene<S> {
             .map(|(_, rect)| *rect)
     }
 
-    /// Topmost hover-styled node under the point. Compare across frames to
-    /// decide whether a mouse move needs a redraw.
     pub fn hover_target(&self, x: f32, y: f32) -> Option<usize> {
         self.hoverables.iter().rposition(|rect| rect.contains(x, y))
     }
 
-    /// Topmost scrollable under the point; where wheel events should go.
     pub fn scroll_area_at(&self, x: f32, y: f32) -> Option<&ScrollArea> {
         self.scrollables
             .iter()
@@ -115,6 +127,13 @@ impl<S> Scene<S> {
         self.scrollables
             .iter()
             .find(|area| area.id == Some(id))
+    }
+
+    pub fn input_geometry(&self, id: &str) -> Option<InputGeometry> {
+        self.inputs
+            .iter()
+            .find(|(node_id, _)| *node_id == id)
+            .map(|(_, geometry)| *geometry)
     }
 }
 
@@ -170,6 +189,7 @@ pub fn render_scene<S>(
         ids: Vec::new(),
         hoverables: Vec::new(),
         scrollables: Vec::new(),
+        inputs: Vec::new(),
     };
     crate::profiler::span("scene.paint", || {
         paint_node(
@@ -209,6 +229,7 @@ struct BuiltNode<S> {
     overflow: Overflow,
     scroll_offset: f32,
     text: Option<(String, Color, f32, usize)>,
+    input: Option<InputRender>,
     id: Option<&'static str>,
     on_click: Option<Handler<S>>,
     children: Vec<BuiltNode<S>>,
@@ -261,6 +282,7 @@ fn build_node<S>(
         text: node
             .text
             .map(|t| (t, inherited.color, inherited.px, inherited.font)),
+        input: node.input,
         id: node.id,
         on_click: node.on_click,
         children,
@@ -319,13 +341,35 @@ fn paint_node<S>(
                 (true, Some(c)) => c,
                 _ => *color,
             };
-            let origin_x = rect.x + layout.padding.left;
-            let origin_y = rect.y + layout.padding.top;
+            let origin = (rect.x + layout.padding.left, rect.y + layout.padding.top);
             let line_h = line_metrics.new_line_size;
+            if let Some(input) = &node.input {
+                if let Some(id) = node.id {
+                    scene.inputs.push((
+                        id,
+                        InputGeometry {
+                            origin,
+                            font: *font_index,
+                            px: *px,
+                        },
+                    ));
+                }
+                if let Some(selection) = &input.selection {
+                    paint_selection(
+                        canvas,
+                        text,
+                        selection,
+                        origin,
+                        font,
+                        *px,
+                        line_h,
+                        visible,
+                        input.selection_color,
+                    );
+                }
+            }
             for (i, line) in text.split('\n').enumerate() {
-                // Cull clipped-out lines, keeping one line of slack for glyphs
-                // that overhang their line box.
-                let top = origin_y + line_h * i as f32;
+                let top = origin.1 + line_h * i as f32;
                 if top + 2.0 * line_h < visible.y {
                     continue;
                 }
@@ -335,10 +379,23 @@ fn paint_node<S>(
                 canvas.draw_text(
                     font,
                     line,
-                    origin_x as i32,
+                    origin.0 as i32,
                     (top + line_metrics.ascent) as i32,
                     *px,
                     color,
+                );
+            }
+            if let Some(input) = &node.input
+                && input.selection.is_none()
+            {
+                let (x, y) = offset_to_point(text, input.cursor, font, *px);
+                canvas.fill_rounded_rect(
+                    origin.0 + x,
+                    origin.1 + y,
+                    caret_width(*px),
+                    line_h,
+                    1.5,
+                    input.caret_color,
                 );
             }
         }
@@ -350,7 +407,6 @@ fn paint_node<S>(
     if let Some(handler) = node.on_click.take() {
         scene.handlers.push((visible, handler));
     }
-    // Ids stay unclipped so geometry like caret math works off-screen.
     if let Some(id) = node.id {
         scene.ids.push((id, rect));
     }
@@ -379,6 +435,44 @@ fn paint_node<S>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn paint_selection(
+    canvas: &mut Canvas,
+    text: &str,
+    selection: &Range<usize>,
+    origin: (f32, f32),
+    font: &fontdue::Font,
+    px: f32,
+    line_h: f32,
+    visible: PxRect,
+    color: Color,
+) {
+    let newline_w = measure_text(font, " ", px);
+    let mut line_start = 0usize;
+    for (i, line) in text.split('\n').enumerate() {
+        let line_end = line_start + line.len();
+        if line_start > selection.end {
+            break;
+        }
+        let top = origin.1 + line_h * i as f32;
+        if top > visible.y + visible.h {
+            break;
+        }
+        let overlaps = selection.start <= line_end && selection.end > line_start;
+        if overlaps && top + line_h >= visible.y {
+            let from = selection.start.max(line_start);
+            let to = selection.end.min(line_end);
+            let x1 = measure_text(font, &text[line_start..from], px);
+            let mut x2 = measure_text(font, &text[line_start..to], px);
+            if selection.end > line_end {
+                x2 += newline_w;
+            }
+            canvas.fill_rounded_rect(origin.0 + x1, top, (x2 - x1).max(1.0), line_h, 0.0, color);
+        }
+        line_start = line_end + 1;
+    }
+}
+
 fn to_taffy(style: &Style) -> taffy::Style {
     use taffy::prelude::{auto, length, percent};
 
@@ -390,6 +484,10 @@ fn to_taffy(style: &Style) -> taffy::Style {
         }
     }
 
+    fn inset_edge(v: Option<f32>) -> taffy::LengthPercentageAuto {
+        v.map_or(auto(), length)
+    }
+
     let overflow = match style.overflow {
         crate::style::Overflow::Visible => taffy::Overflow::Visible,
         crate::style::Overflow::Hidden => taffy::Overflow::Hidden,
@@ -397,6 +495,16 @@ fn to_taffy(style: &Style) -> taffy::Style {
     };
 
     taffy::Style {
+        position: match style.position {
+            Position::Flow => taffy::Position::Relative,
+            Position::Absolute => taffy::Position::Absolute,
+        },
+        inset: taffy::Rect {
+            left: inset_edge(style.inset.left),
+            right: inset_edge(style.inset.right),
+            top: inset_edge(style.inset.top),
+            bottom: inset_edge(style.inset.bottom),
+        },
         overflow: taffy::Point {
             x: overflow,
             y: overflow,
@@ -615,6 +723,155 @@ mod tests {
         let scene = scene_for(scroll_container(40.0, true), &mut canvas);
         assert!(scene.dispatch_click(5.0, 35.0, &mut hit));
         assert_eq!(hit, 7, "fully scrolled, second block fills the viewport");
+    }
+
+    #[test]
+    fn absolute_nodes_place_by_inset_and_sit_on_top() {
+        use crate::style::{Inset, Position};
+        let mut canvas = Canvas::new(100, 100);
+        let under = Node {
+            style: Style {
+                width: Dimension::Px(100.0),
+                height: Dimension::Px(100.0),
+                ..Style::default()
+            },
+            on_click: Some(Box::new(|hit: &mut usize| *hit = 1)),
+            ..Node::default()
+        };
+        let floating = Node {
+            style: Style {
+                position: Position::Absolute,
+                inset: Inset::top_left(30.0, 40.0),
+                width: Dimension::Px(20.0),
+                height: Dimension::Px(10.0),
+                background: Some([9, 9, 9, 255]),
+                ..Style::default()
+            },
+            id: Some("float"),
+            on_click: Some(Box::new(|hit: &mut usize| *hit = 2)),
+            ..Node::default()
+        };
+        let root = Node {
+            style: Style {
+                width: Dimension::Px(100.0),
+                height: Dimension::Px(100.0),
+                ..Style::default()
+            },
+            children: vec![under, floating],
+            ..Node::default()
+        };
+        let scene = scene_for(root, &mut canvas);
+
+        let rect = scene.rect("float").unwrap();
+        assert_eq!((rect.x, rect.y, rect.w, rect.h), (30.0, 40.0, 20.0, 10.0));
+        assert_eq!(
+            &canvas.pixels[((45 * 100 + 35) * 4) as usize..][..4],
+            &[9, 9, 9, 255],
+            "floating node paints over the sibling that fills the window"
+        );
+        let mut hit = 0;
+        assert!(scene.dispatch_click(35.0, 45.0, &mut hit));
+        assert_eq!(hit, 2, "floating node wins the hit test");
+        assert!(scene.dispatch_click(5.0, 5.0, &mut hit));
+        assert_eq!(hit, 1);
+    }
+
+    #[test]
+    fn input_nodes_paint_caret_and_selection_and_expose_geometry() {
+        use crate::text_input::TextInput;
+
+        let editor = |input: &TextInput| {
+            let mut node = input.node::<usize>([255, 0, 0, 255], [0, 255, 0, 255]);
+            node.style = Style {
+                padding: Edges::all(4.0),
+                ..Style::default()
+            };
+            node.id = Some("in");
+            Node {
+                style: Style {
+                    width: Dimension::Px(200.0),
+                    height: Dimension::Px(60.0),
+                    ..Style::default()
+                },
+                children: vec![node],
+                ..Node::default()
+            }
+        };
+        let pixel = |canvas: &Canvas, x: u32, y: u32| {
+            let i = ((y * canvas.width + x) * 4) as usize;
+            [canvas.pixels[i], canvas.pixels[i + 1], canvas.pixels[i + 2]]
+        };
+
+        let mut input = TextInput::new("hello".into());
+        input.set_cursor(2, false);
+        let mut canvas = Canvas::new(200, 60);
+        let scene = scene_for(editor(&input), &mut canvas);
+
+        let geometry = scene.input_geometry("in").unwrap();
+        assert_eq!(geometry.origin, (4.0, 4.0), "origin is inside the padding");
+        let caret = geometry.caret_rect(input.text(), input.cursor(), &[font()]);
+        let center = (
+            (caret.x + caret.w / 2.0) as u32,
+            (caret.y + caret.h / 2.0) as u32,
+        );
+        assert_eq!(pixel(&canvas, center.0, center.1), [255, 0, 0], "caret painted");
+        assert_eq!(
+            geometry.offset_at(input.text(), (caret.x + 0.1, caret.y + 1.0), &[font()]),
+            2,
+            "geometry maps points back to offsets"
+        );
+
+        input.set_cursor(4, true);
+        let mut canvas = Canvas::new(200, 60);
+        scene_for(editor(&input), &mut canvas);
+        let selected = geometry.caret_rect(input.text(), 3, &[font()]);
+        assert_eq!(
+            pixel(&canvas, selected.x as u32 + 1, selected.y as u32 + 1),
+            [0, 255, 0],
+            "selection painted behind the selected glyphs"
+        );
+        assert_eq!(
+            pixel(&canvas, (caret.x + caret.w / 2.0) as u32, center.1),
+            [0, 255, 0],
+            "no caret while a selection is active"
+        );
+    }
+
+    #[test]
+    fn scroll_reveal_targets_the_nearest_edge() {
+        let area = ScrollArea {
+            id: None,
+            rect: PxRect {
+                x: 0.0,
+                y: 100.0,
+                w: 100.0,
+                h: 50.0,
+            },
+            content_height: 500.0,
+            offset: 20.0,
+        };
+        let rect = |y: f32| PxRect {
+            x: 0.0,
+            y,
+            w: 2.0,
+            h: 10.0,
+        };
+        assert_eq!(
+            area.target_to_reveal(rect(90.0), 20.0, 0.0),
+            Some(10.0),
+            "above the viewport scrolls up to it"
+        );
+        assert_eq!(area.target_to_reveal(rect(110.0), 20.0, 0.0), None, "visible");
+        assert_eq!(
+            area.target_to_reveal(rect(160.0), 20.0, 0.0),
+            Some(40.0),
+            "below the viewport scrolls it flush with the bottom"
+        );
+        assert_eq!(
+            area.target_to_reveal(rect(110.0), 20.0, 15.0),
+            Some(15.0),
+            "margin widens what counts as hidden"
+        );
     }
 
     #[test]

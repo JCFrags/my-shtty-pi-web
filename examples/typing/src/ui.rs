@@ -1,6 +1,7 @@
 use pixel_core::{
-    Align, Border, Canvas, Color, Dimension, Edges, FlexDirection, Glide, Justify, Node, Overflow,
-    Scene, ScrollProfile, Smooth, Style, TerminalColors, Tui, fontdue, measure_text,
+    Align, Border, Color, Dimension, Edges, FlexDirection, Glide, InputAction, Justify,
+    MenuEntry, MenuItem, MenuStyle, Node, Overflow, ScrollProfile, Smooth, Style, TerminalColors,
+    TextInput, Tui, context_menu, fontdue,
 };
 
 static SCROLL_SMOOTH: Smooth = Smooth {
@@ -18,8 +19,7 @@ pub const PROFILES: [&'static dyn ScrollProfile; 3] =
     [&SCROLL_SMOOTH, &SCROLL_GLIDE, &SCROLL_TUI];
 
 impl App {
-    /// Native mode still needs an integrator for programmatic moves like
-    /// caret follow; wheel deltas bypass it and write positions directly.
+    // what the hell is this
     pub fn profile(&self) -> &'static dyn ScrollProfile {
         if self.native_active() {
             &SCROLL_SMOOTH
@@ -55,12 +55,16 @@ impl App {
 /// All chrome is sized in multiples of the base font size (em-style):
 /// terminals disagree on whether a "pixel" is a device or logical pixel, but
 /// base_px is derived from the cell height so it carries the right density.
-fn editor_pad(rem: f32) -> f32 {
+pub fn editor_pad(rem: f32) -> f32 {
     rem * 1.1
 }
 
 pub const FONT_UI: usize = 0;
 pub const FONT_MONO: usize = 1;
+
+/// Scene ids for the notes editor: the scroll viewport and the input inside.
+pub const EDITOR: &str = "editor";
+pub const EDITOR_INPUT: &str = "editor-text";
 
 /// Fallback palette (the previous hardcoded look) for terminals that don't
 /// answer color queries.
@@ -77,6 +81,7 @@ pub struct Theme {
     item_hover: Color,
     item_active: Color,
     accent: Color,
+    selection: Color,
     chip_bg: Color,
     hairline: Color,
     recording: Color,
@@ -102,6 +107,7 @@ impl Theme {
             item_hover: mix(bg, fg, 0.10),
             item_active: mix(bg, accent, 0.35),
             accent,
+            selection: mix(bg, accent, 0.35),
             chip_bg: mix(bg, fg, 0.09),
             hairline: mix(bg, fg, 0.15),
             recording: mix(bg, red, 0.75),
@@ -124,12 +130,14 @@ pub struct App {
     pub active: usize,
     pub theme: Theme,
     pub editor_scroll: f32,
-    /// Pins the editor to the bottom; wheel turns it off, typing back on.
-    pub follow: bool,
+    pub reveal_caret: bool,
     pub scroll_profile: usize,
-    /// Whether the macOS scroll helper spawned; adds "native" to the cycle.
     pub native: bool,
     pub stats: FrameStats,
+    pub context_menu: Option<(f32, f32)>,
+    /// Action chosen from a menu item, run by the main loop: item handlers
+    /// can't reach the terminal for clipboard I/O.
+    pub pending: Option<InputAction>,
 }
 
 /// Rolling frame timings from the main loop, shown in the status bar.
@@ -141,7 +149,7 @@ pub struct FrameStats {
 
 pub struct Note {
     pub title: String,
-    pub text: String,
+    pub input: TextInput,
 }
 
 pub fn px_for_cell_height(font: &fontdue::Font, cell_height: f32) -> f32 {
@@ -151,7 +159,13 @@ pub fn px_for_cell_height(font: &fontdue::Font, cell_height: f32) -> f32 {
     (cell_height * 100.0 / probe.new_line_size).clamp(6.0, 512.0)
 }
 
-pub fn build_ui(app: &App, window: (u32, u32), base_px: f32, recording: bool) -> Node<App> {
+pub fn build_ui(
+    app: &App,
+    window: (u32, u32),
+    base_px: f32,
+    recording: bool,
+    font: &fontdue::Font,
+) -> Node<App> {
     let small = base_px * 0.85;
     let rem = base_px;
     let hair = (rem / 16.0).max(1.0);
@@ -164,7 +178,7 @@ pub fn build_ui(app: &App, window: (u32, u32), base_px: f32, recording: bool) ->
             font_size: Some(small),
             ..Style::default()
         },
-        text: Some("VAULT".into()),
+        text: Some("header".into()),
         ..Node::default()
     }];
     for (i, note) in app.notes.iter().enumerate() {
@@ -182,7 +196,7 @@ pub fn build_ui(app: &App, window: (u32, u32), base_px: f32, recording: bool) ->
             text: Some(note.title.clone()),
             on_click: Some(Box::new(move |app: &mut App| {
                 app.active = i;
-                app.follow = true;
+                app.reveal_caret = true;
             })),
             ..Node::default()
         });
@@ -206,14 +220,14 @@ pub fn build_ui(app: &App, window: (u32, u32), base_px: f32, recording: bool) ->
             hover_background: Some(t.item_hover),
             ..Style::default()
         },
-        text: Some("+ new note".into()),
+        text: Some("+ ".into()),
         on_click: Some(Box::new(|app: &mut App| {
             app.notes.push(Note {
                 title: format!("untitled {}", app.notes.len() + 1),
-                text: String::new(),
+                input: TextInput::new(String::new()),
             });
             app.active = app.notes.len() - 1;
-            app.follow = true;
+            app.reveal_caret = true;
         })),
         ..Node::default()
     });
@@ -222,9 +236,6 @@ pub fn build_ui(app: &App, window: (u32, u32), base_px: f32, recording: bool) ->
         style: Style {
             flex_direction: FlexDirection::Column,
             width: Dimension::Px(rem * 14.0),
-            // Inset from the window edges: terminals often pad the grid, so a
-            // floating panel reads better than a flush one. Height comes from
-            // the row's default stretch, which respects the margin.
             margin: Edges::all(rem * 0.4),
             padding: Edges::all(rem * 0.6),
             gap: rem * 0.125,
@@ -268,7 +279,7 @@ pub fn build_ui(app: &App, window: (u32, u32), base_px: f32, recording: bool) ->
         t.chip_bg,
     ));
     status_right.push(chip(
-        &format!("{} lines", app.notes[app.active].text.lines().count()),
+        &format!("{} lines", app.notes[app.active].input.text().lines().count()),
         small,
         t.muted,
         t.chip_bg,
@@ -307,7 +318,7 @@ pub fn build_ui(app: &App, window: (u32, u32), base_px: f32, recording: bool) ->
                     font_size: Some(small),
                     ..Style::default()
                 },
-                text: Some("ctrl-s scroll feel / ctrl-p profile / ctrl-c quit".into()),
+                text: Some("ctrl-s scroll feel / ctrl-p profile / ctrl-q quit".into()),
                 ..Node::default()
             },
             Node {
@@ -347,17 +358,17 @@ pub fn build_ui(app: &App, window: (u32, u32), base_px: f32, recording: bool) ->
                     overflow: Overflow::Scroll,
                     ..Style::default()
                 },
-                id: Some("editor"),
+                id: Some(EDITOR),
                 scroll_offset: app.editor_scroll,
-                children: vec![Node {
-                    style: Style {
+                children: vec![{
+                    let mut input = app.notes[app.active].input.node(t.accent, t.selection);
+                    input.style = Style {
                         padding: Edges::all(editor_pad(rem)),
                         flex_shrink: 0.0,
                         ..Style::default()
-                    },
-                    id: Some("editor-text"),
-                    text: Some(app.notes[app.active].text.clone()),
-                    ..Node::default()
+                    };
+                    input.id = Some(EDITOR_INPUT);
+                    input
                 }],
                 ..Node::default()
             },
@@ -365,6 +376,11 @@ pub fn build_ui(app: &App, window: (u32, u32), base_px: f32, recording: bool) ->
         ],
         ..Node::default()
     };
+
+    let mut children = vec![sidebar, main];
+    if let Some(at) = app.context_menu {
+        children.push(editor_menu(app, at, window, rem, font));
+    }
 
     Node {
         style: Style {
@@ -375,9 +391,56 @@ pub fn build_ui(app: &App, window: (u32, u32), base_px: f32, recording: bool) ->
             font: Some(FONT_UI),
             ..Style::default()
         },
-        children: vec![sidebar, main],
+        children,
         ..Node::default()
     }
+}
+
+fn editor_menu(
+    app: &App,
+    at: (f32, f32),
+    window: (u32, u32),
+    px: f32,
+    font: &fontdue::Font,
+) -> Node<App> {
+    let input = &app.notes[app.active].input;
+    let has_selection = input.selection().is_some();
+    let item = |label, shortcut, enabled, action: InputAction| {
+        MenuEntry::from(MenuItem::new(
+            label,
+            Some(shortcut),
+            enabled,
+            move |app: &mut App| {
+                app.pending = Some(action);
+                app.context_menu = None;
+            },
+        ))
+    };
+    let t = &app.theme;
+    context_menu(
+        vec![
+            item("Undo", "⌘Z", input.can_undo(), InputAction::Undo),
+            item("Redo", "⇧⌘Z", input.can_redo(), InputAction::Redo),
+            MenuEntry::Separator,
+            item("Cut", "⌘X", has_selection, InputAction::Cut),
+            item("Copy", "⌘C", has_selection, InputAction::Copy),
+            item("Paste", "⌘V", true, InputAction::Paste),
+            MenuEntry::Separator,
+            item("Select All", "⌘A", true, InputAction::SelectAll),
+        ],
+        at,
+        (window.0 as f32, window.1 as f32),
+        px,
+        font,
+        &MenuStyle {
+            background: mix(t.bg, t.fg, 0.07),
+            foreground: t.fg,
+            disabled: t.muted,
+            hover: t.item_hover,
+            shortcut: t.muted,
+            border: t.hairline,
+        },
+    )
 }
 
 fn chip(label: &str, px: f32, color: Color, background: Color) -> Node<App> {
@@ -396,47 +459,3 @@ fn chip(label: &str, px: f32, color: Color, background: Color) -> Node<App> {
     }
 }
 
-/// Scroll needed to put the last line at the bottom; mirrors the layout
-/// math (the text child is padded lines of text) rather than reading taffy.
-pub fn editor_max_scroll(app: &App, font: &fontdue::Font, px: f32, viewport_h: f32) -> f32 {
-    let Some(line_metrics) = font.horizontal_line_metrics(px) else {
-        return 0.0;
-    };
-    let lines = app.notes[app.active].text.split('\n').count();
-    let content_h = editor_pad(px) * 2.0 + line_metrics.new_line_size * lines as f32;
-    (content_h - viewport_h).max(0.0)
-}
-
-pub fn paint_caret(
-    canvas: &mut Canvas,
-    scene: &Scene<App>,
-    font: &fontdue::Font,
-    px: f32,
-    app: &App,
-) {
-    let Some(viewport) = scene.rect("editor") else {
-        return;
-    };
-    let Some(text_rect) = scene.rect("editor-text") else {
-        return;
-    };
-    let Some(line_metrics) = font.horizontal_line_metrics(px) else {
-        return;
-    };
-    let line_height = line_metrics.new_line_size;
-    let lines: Vec<&str> = app.notes[app.active].text.split('\n').collect();
-    let pad = editor_pad(px);
-    let caret_x = text_rect.x + pad + measure_text(font, lines[lines.len() - 1], px);
-    let caret_top = text_rect.y + pad + line_height * (lines.len() - 1) as f32;
-
-    canvas.push_clip(viewport.x, viewport.y, viewport.w, viewport.h);
-    canvas.fill_rounded_rect(
-        caret_x,
-        caret_top,
-        (px / 8.0).max(2.0),
-        line_height,
-        1.5,
-        app.theme.accent,
-    );
-    canvas.pop_clip();
-}

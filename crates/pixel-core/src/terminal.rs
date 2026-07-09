@@ -6,29 +6,54 @@ use rustix::termios::{self, OptionalActions, Termios};
 use crate::canvas::Canvas;
 use crate::kitty::kitty_transmit;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    Key(Key),
+    Key(KeyEvent),
     Mouse(Mouse),
+    Paste(String),
     Focus(bool),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyEvent {
+    pub key: Key,
+    pub mods: Mods,
+}
+
+impl KeyEvent {
+    fn plain(key: Key) -> Self {
+        Self {
+            key,
+            mods: Mods::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Mods {
+    pub shift: bool,
+    pub alt: bool,
+    pub ctrl: bool,
+    pub sup: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
     Char(char),
-    Ctrl(char),
     Up,
     Down,
     Left,
     Right,
+    Home,
+    End,
     Enter,
     Backspace,
+    Delete,
+    Escape,
+    Tab,
     Unknown,
 }
 
-/// Mouse position is always in pixels relative to the terminal's top-left,
-/// regardless of whether the terminal reports pixel (mode 1016) or cell
-/// coordinates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Mouse {
     pub kind: MouseKind,
@@ -56,7 +81,6 @@ pub enum MouseButton {
     None,
 }
 
-/// Colors reported by the terminal itself; None where it didn't answer.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TerminalColors {
     pub foreground: Option<[u8; 4]>,
@@ -73,7 +97,7 @@ pub struct WindowSize {
 }
 
 impl WindowSize {
-    /// Some terminal stacks leave the pixel fields zero, hence Option.
+    // fixme: why is this an option? if this is not an invariant, we should define the terminals this is the case for
     pub fn cell_size(&self) -> Option<(u32, u32)> {
         if self.cols > 0 && self.rows > 0 && self.width_px > 0 && self.height_px > 0 {
             Some((self.width_px / self.cols, self.height_px / self.rows))
@@ -90,11 +114,7 @@ pub struct Terminal {
     last_frame_size: Option<(u32, u32)>,
     mouse_pixels: bool,
     cell: Option<(u32, u32)>,
-    /// Unparsed input. Reads bypass io::Stdin's internal buffer: bytes hiding
-    /// there would make poll() report an idle fd while input sits unparsed.
     pending: Vec<u8>,
-    /// True once the startup probe confirms the terminal can read our shared
-    /// memory; everything else gets frames as base64 over the pty.
     shm_frames: bool,
     frame_seq: u64,
 }
@@ -108,10 +128,10 @@ impl Terminal {
         termios::tcsetattr(&stdin, OptionalActions::Drain, &raw)?;
 
         let mut stdout = io::stdout();
-        // Alt screen, hidden cursor, then mouse reporting: all motion
-        // (1003, needed for hover), SGR encoding (1006), pixel coords (1016),
-        // focus reporting (1004).
-        stdout.write_all(b"\x1b[?1049h\x1b[?25l\x1b[?1003h\x1b[?1006h\x1b[?1016h\x1b[?1004h")?;
+        // would prefer if they weren't magic and linked to some known doc on the internet
+        stdout.write_all(
+            b"\x1b[?1049h\x1b[?25l\x1b[?1003h\x1b[?1006h\x1b[?1016h\x1b[?1004h\x1b[?2004h\x1b[>1u",
+        )?;
         stdout.flush()?;
 
         let mut terminal = Self {
@@ -198,8 +218,6 @@ impl Terminal {
         }
     }
 
-    /// Next event, or None once `timeout` passes (None waits forever;
-    /// Duration::ZERO drains already-arrived input without waiting).
     pub fn poll_event(&mut self, timeout: Option<Duration>) -> io::Result<Option<Event>> {
         let deadline = timeout.map(|t| Instant::now() + t);
         loop {
@@ -207,6 +225,7 @@ impl Terminal {
                 self.pending.drain(..used);
                 return Ok(Some(match raw {
                     RawEvent::Key(key) => Event::Key(key),
+                    RawEvent::Paste(text) => Event::Paste(text),
                     RawEvent::Focus(focused) => Event::Focus(focused),
                     RawEvent::Mouse(kind, button, x, y) => {
                         let (x, y) = self.mouse_position_px(x, y);
@@ -227,7 +246,6 @@ impl Terminal {
         }
     }
 
-    /// True when stdin has bytes to read; false when the wait elapsed first.
     fn wait_for_input(&self, wait: Option<Duration>) -> io::Result<bool> {
         let mut fds = [rustix::event::PollFd::new(
             &self.stdin,
@@ -243,7 +261,6 @@ impl Terminal {
         Ok(rustix::event::poll(&mut fds, timeout.as_ref())? > 0)
     }
 
-    /// SGR coordinates are 1-based; cell coordinates map to the cell's center.
     fn mouse_position_px(&self, x: u32, y: u32) -> (u32, u32) {
         if self.mouse_pixels {
             (x.saturating_sub(1), y.saturating_sub(1))
@@ -266,8 +283,6 @@ impl Terminal {
         })
     }
 
-    /// Falls back to the `CSI 16 t` query when the winsize ioctl reports no
-    /// pixel sizes (e.g. VS Code); the terminal answers on stdin.
     pub fn cell_size(&mut self) -> io::Result<Option<(u32, u32)>> {
         if self.cell.is_some() {
             return Ok(self.cell);
@@ -282,9 +297,8 @@ impl Terminal {
         Ok(self.cell)
     }
 
-    /// Queries the terminal's own colors (OSC 10/11 for fg/bg, OSC 4 for the
-    /// ANSI palette) so apps can match its theme. Terminals answer what they
-    /// support; the rest stays None.
+    // i really really don't like this, think it causes some startup latency, and think there's a better option
+    // todo: look at what opentui does
     pub fn query_colors(&mut self) -> io::Result<TerminalColors> {
         let mut query = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\".to_vec();
         for i in 0..16 {
@@ -301,8 +315,6 @@ impl Terminal {
                 break;
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
-            // Once replies start arriving, a short silence means the terminal
-            // has answered everything it supports.
             let wait = if replies > 0 {
                 remaining.min(Duration::from_millis(60))
             } else {
@@ -365,6 +377,20 @@ impl Terminal {
             }
         }
     }
+
+    pub fn set_clipboard(&mut self, text: &str) -> io::Result<()> {
+        use base64::Engine as _;
+        let payload = base64::engine::general_purpose::STANDARD.encode(text);
+        self.stdout
+            .write_all(format!("\x1b]52;c;{payload}\x1b\\").as_bytes())?;
+        self.stdout.flush()
+    }
+
+    // this will trigger a prompt or just not work
+    pub fn request_clipboard(&mut self) -> io::Result<()> {
+        self.stdout.write_all(b"\x1b]52;c;?\x1b\\")?;
+        self.stdout.flush()
+    }
 }
 
 const SHM_PROBE_ID: u32 = 299;
@@ -378,8 +404,6 @@ fn parse_probe_reply(buf: &[u8], needle: &[u8]) -> Option<bool> {
     Some(rest.starts_with(b"OK"))
 }
 
-/// macOS shm fds reject read/write syscalls, so filling the object takes an
-/// mmap round-trip.
 #[allow(unsafe_code)]
 fn write_shm(name: &str, data: &[u8]) -> io::Result<()> {
     let fd = rustix::shm::open(
@@ -388,8 +412,6 @@ fn write_shm(name: &str, data: &[u8]) -> io::Result<()> {
         rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
     )?;
     rustix::fs::ftruncate(&fd, data.len() as u64)?;
-    // SAFETY: a fresh shared mapping sized to data.len() by the ftruncate
-    // above, written once and unmapped before the fd closes.
     unsafe {
         let ptr = rustix::mm::mmap(
             std::ptr::null_mut(),
@@ -407,12 +429,11 @@ fn write_shm(name: &str, data: &[u8]) -> io::Result<()> {
 
 impl Drop for Terminal {
     fn drop(&mut self) {
-        // The terminal unlinks each object it reads; sweep the rest.
         for seq in 0..self.frame_seq {
             let _ = rustix::shm::unlink(Self::shm_name(seq));
         }
         let _ = self.stdout.write_all(
-            b"\x1b_Ga=d,d=A,q=2\x1b\\\x1b[?1004l\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?25h\x1b[?1049l",
+            b"\x1b_Ga=d,d=A,q=2\x1b\\\x1b[<u\x1b[?2004l\x1b[?1004l\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?25h\x1b[?1049l",
         );
         let _ = self.stdout.flush();
         let _ = termios::tcsetattr(&self.stdin, OptionalActions::Flush, &self.saved);
@@ -421,32 +442,97 @@ impl Drop for Terminal {
 
 #[derive(Debug, PartialEq, Eq)]
 enum RawEvent {
-    Key(Key),
+    Key(KeyEvent),
     Mouse(MouseKind, MouseButton, u32, u32),
+    Paste(String),
     Focus(bool),
 }
 
-/// One event from the front of `buf` plus the bytes it consumed. None means
-/// an incomplete sequence; garbage always consumes and yields Key::Unknown.
 fn parse_event(buf: &[u8]) -> Option<(RawEvent, usize)> {
     let b0 = *buf.first()?;
     if b0 != 0x1b {
-        let key = match b0 {
-            0x0d => Key::Enter,
-            0x7f | 0x08 => Key::Backspace,
-            c @ 0x01..=0x1a => Key::Ctrl((b'a' + c - 1) as char),
-            c if c.is_ascii() => Key::Char(c as char),
-            _ => Key::Unknown,
+        return parse_plain_bytes(buf);
+    }
+    match *buf.get(1)? {
+        b'[' => parse_csi(buf),
+        b'_' | b']' | b'P' | b'X' | b'^' => consume_string_sequence(buf).map(|end| {
+            match parse_osc52_reply(&buf[..end]) {
+                Some(text) => (RawEvent::Paste(text), end),
+                None => (RawEvent::Key(KeyEvent::plain(Key::Unknown)), end),
+            }
+        }),
+        b'O' => {
+            let key = match *buf.get(2)? {
+                b'A' => Key::Up,
+                b'B' => Key::Down,
+                b'C' => Key::Right,
+                b'D' => Key::Left,
+                b'H' => Key::Home,
+                b'F' => Key::End,
+                _ => Key::Unknown,
+            };
+            Some((RawEvent::Key(KeyEvent::plain(key)), 3))
+        }
+        b => {
+            let mut event = byte_key_event(b);
+            event.mods.alt = true;
+            Some((RawEvent::Key(event), 2))
+        }
+    }
+}
+
+fn parse_plain_bytes(buf: &[u8]) -> Option<(RawEvent, usize)> {
+    let b0 = buf[0];
+    if b0 >= 0x80 {
+        let len = match b0 {
+            0xc2..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf4 => 4,
+            _ => return Some((RawEvent::Key(KeyEvent::plain(Key::Unknown)), 1)),
         };
-        return Some((RawEvent::Key(key), 1));
+        if buf.len() < len {
+            return None;
+        }
+        return Some(match std::str::from_utf8(&buf[..len]) {
+            Ok(s) => {
+                let c = s.chars().next().expect("non-empty utf8");
+                (RawEvent::Key(KeyEvent::plain(Key::Char(c))), len)
+            }
+            Err(_) => (RawEvent::Key(KeyEvent::plain(Key::Unknown)), 1),
+        });
     }
-    // String sequences (graphics replies, late query answers) must be
-    // swallowed whole or their bodies leak into the input as typed keys.
-    if matches!(*buf.get(1)?, b'_' | b']' | b'P' | b'X' | b'^') {
-        return consume_string_sequence(buf).map(|end| (RawEvent::Key(Key::Unknown), end));
+    Some((RawEvent::Key(byte_key_event(b0)), 1))
+}
+
+fn byte_key_event(b: u8) -> KeyEvent {
+    match b {
+        0x0d => KeyEvent::plain(Key::Enter),
+        0x09 => KeyEvent::plain(Key::Tab),
+        0x7f | 0x08 => KeyEvent::plain(Key::Backspace),
+        c @ 0x01..=0x1a => KeyEvent {
+            key: Key::Char((b'a' + c - 1) as char),
+            mods: Mods {
+                ctrl: true,
+                ..Mods::default()
+            },
+        },
+        c @ 0x20..=0x7e => KeyEvent::plain(Key::Char(c as char)),
+        _ => KeyEvent::plain(Key::Unknown),
     }
-    if *buf.get(1)? != b'[' {
-        return Some((RawEvent::Key(Key::Unknown), 2));
+}
+
+const PASTE_START: &[u8] = b"\x1b[200~";
+const PASTE_END: &[u8] = b"\x1b[201~";
+
+fn parse_csi(buf: &[u8]) -> Option<(RawEvent, usize)> {
+    if buf.starts_with(PASTE_START) {
+        let body_start = PASTE_START.len();
+        let end = buf[body_start..]
+            .windows(PASTE_END.len())
+            .position(|w| w == PASTE_END)?;
+        let body =
+            normalize_newlines(String::from_utf8_lossy(&buf[body_start..body_start + end]).into_owned());
+        return Some((RawEvent::Paste(body), body_start + end + PASTE_END.len()));
     }
     let mut end = 2;
     let terminator = loop {
@@ -456,28 +542,117 @@ fn parse_event(buf: &[u8]) -> Option<(RawEvent, usize)> {
             break b;
         }
         if end - 2 > 24 {
-            return Some((RawEvent::Key(Key::Unknown), end));
+            return Some((RawEvent::Key(KeyEvent::plain(Key::Unknown)), end));
         }
     };
     let params = &buf[2..end - 1];
+    let mods = decode_mods(param(params, 1).unwrap_or(1));
     let event = match terminator {
-        b'A' => RawEvent::Key(Key::Up),
-        b'B' => RawEvent::Key(Key::Down),
-        b'C' => RawEvent::Key(Key::Right),
-        b'D' => RawEvent::Key(Key::Left),
+        b'A' => RawEvent::Key(KeyEvent { key: Key::Up, mods }),
+        b'B' => RawEvent::Key(KeyEvent { key: Key::Down, mods }),
+        b'C' => RawEvent::Key(KeyEvent { key: Key::Right, mods }),
+        b'D' => RawEvent::Key(KeyEvent { key: Key::Left, mods }),
+        b'H' => RawEvent::Key(KeyEvent { key: Key::Home, mods }),
+        b'F' => RawEvent::Key(KeyEvent { key: Key::End, mods }),
+        b'Z' => RawEvent::Key(KeyEvent {
+            key: Key::Tab,
+            mods: Mods {
+                shift: true,
+                ..mods
+            },
+        }),
+        b'u' => RawEvent::Key(parse_kitty_key(params)),
+        b'~' => {
+            let key = match param(params, 0) {
+                Some(3) => Key::Delete,
+                Some(1 | 7) => Key::Home,
+                Some(4 | 8) => Key::End,
+                // todo: needs link
+                // xterm modifyOtherKeys: `CSI 27 ; mods ; codepoint ~`.
+                Some(27) => {
+                    let key = param(params, 2).map_or(Key::Unknown, key_from_codepoint);
+                    return Some((RawEvent::Key(KeyEvent { key, mods }), end));
+                }
+                _ => Key::Unknown,
+            };
+            RawEvent::Key(KeyEvent { key, mods })
+        }
         b'I' => RawEvent::Focus(true),
         b'O' => RawEvent::Focus(false),
         b'M' | b'm' => match parse_sgr_mouse(params, terminator == b'M') {
             Some((kind, button, x, y)) => RawEvent::Mouse(kind, button, x, y),
-            None => RawEvent::Key(Key::Unknown),
+            None => RawEvent::Key(KeyEvent::plain(Key::Unknown)),
         },
-        _ => RawEvent::Key(Key::Unknown),
+        _ => RawEvent::Key(KeyEvent::plain(Key::Unknown)),
     };
     Some((event, end))
 }
 
-/// Bytes up to and including the terminator (ST, or BEL for OSC); None means
-/// the terminator hasn't arrived yet. Capped so garbage can't buffer forever.
+fn parse_kitty_key(params: &[u8]) -> KeyEvent {
+    let Some(code) = param(params, 0) else {
+        return KeyEvent::plain(Key::Unknown);
+    };
+    let mods = decode_mods(param(params, 1).unwrap_or(1));
+    KeyEvent {
+        key: key_from_codepoint(code),
+        mods,
+    }
+}
+
+fn key_from_codepoint(code: u32) -> Key {
+    match code {
+        13 => Key::Enter,
+        9 => Key::Tab,
+        27 => Key::Escape,
+        8 | 127 => Key::Backspace,
+        57344..=63743 => Key::Unknown,
+        c => char::from_u32(c).map_or(Key::Unknown, Key::Char),
+    }
+}
+
+fn normalize_newlines(text: String) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+// todo: needs link
+/// `OSC 52 ; c ; <base64> ST` — a terminal's answer to a clipboard read.
+fn parse_osc52_reply(seq: &[u8]) -> Option<String> {
+    use base64::Engine as _;
+    let body = seq.strip_prefix(b"\x1b]52;")?;
+    let semi = body.iter().position(|&b| b == b';')?;
+    let payload = &body[semi + 1..];
+    let end = payload
+        .iter()
+        .position(|&b| b == 0x07 || b == 0x1b)
+        .unwrap_or(payload.len());
+    let payload = &payload[..end];
+    if payload == b"?" {
+        return None;
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(payload)
+        .ok()?;
+    Some(normalize_newlines(
+        String::from_utf8_lossy(&bytes).into_owned(),
+    ))
+}
+
+fn decode_mods(param: u32) -> Mods {
+    let bits = param.saturating_sub(1);
+    Mods {
+        shift: bits & 1 != 0,
+        alt: bits & 2 != 0,
+        ctrl: bits & 4 != 0,
+        sup: bits & 8 != 0,
+    }
+}
+
+fn param(params: &[u8], index: usize) -> Option<u32> {
+    let field = params.split(|&b| b == b';').nth(index)?;
+    let field = field.split(|&b| b == b':').next()?;
+    std::str::from_utf8(field).ok()?.parse().ok()
+}
+
 fn consume_string_sequence(buf: &[u8]) -> Option<usize> {
     let mut i = 2;
     loop {
@@ -495,7 +670,6 @@ fn consume_string_sequence(buf: &[u8]) -> Option<usize> {
     }
 }
 
-/// Params are the bytes between `CSI` and the final `M`/`m`, e.g. `<0;80;24`.
 fn parse_sgr_mouse(params: &[u8], press: bool) -> Option<(MouseKind, MouseButton, u32, u32)> {
     let rest = params.strip_prefix(b"<")?;
     let mut fields = rest.split(|&b| b == b';');
@@ -514,8 +688,6 @@ fn parse_sgr_mouse(params: &[u8], press: bool) -> Option<(MouseKind, MouseButton
         _ => MouseButton::None,
     };
     let kind = if b & 64 != 0 {
-        // 64 up, 65 down, 66 left, 67 right; trackpads emit the horizontal
-        // pair whenever a two-finger scroll drifts sideways.
         match b & 3 {
             0 => MouseKind::ScrollUp,
             1 => MouseKind::ScrollDown,
@@ -532,15 +704,12 @@ fn parse_sgr_mouse(params: &[u8], press: bool) -> Option<(MouseKind, MouseButton
     Some((kind, button, x, y))
 }
 
-/// DECRQM reply: `CSI ? 1016 ; Ps $ y`, where Ps 1/3 means the mode is set.
 fn parse_decrqm_1016(buf: &[u8]) -> Option<bool> {
     let start = buf.windows(8).position(|w| w == b"\x1b[?1016;")? + 8;
     let ps = *buf.get(start)?;
     Some(ps == b'1' || ps == b'3')
 }
 
-/// Finds `ESC ] {selector} rgb:RRRR/GGGG/BBBB` and reads the high byte of
-/// each channel; terminals report 1-4 hex digits per channel.
 fn parse_osc_color(buf: &[u8], selector: &str) -> Option<[u8; 4]> {
     let text = String::from_utf8_lossy(buf);
     let prefix = format!("\x1b]{selector}rgb:");
@@ -600,8 +769,6 @@ mod tests {
 
         let fd = rustix::shm::open(&name, rustix::shm::OFlags::RDONLY, rustix::fs::Mode::empty())
             .unwrap();
-        // SAFETY: read-only mapping of the object just written, sized to
-        // match, unmapped before the fd closes.
         let read_back = unsafe {
             let ptr = rustix::mm::mmap(
                 std::ptr::null_mut(),
@@ -662,10 +829,43 @@ mod tests {
         assert_eq!(parse_sgr_mouse(b"<0;0;1", true), None);
     }
 
+    fn key(k: Key) -> RawEvent {
+        RawEvent::Key(KeyEvent::plain(k))
+    }
+
+    fn key_mods(k: Key, mods: Mods) -> RawEvent {
+        RawEvent::Key(KeyEvent { key: k, mods })
+    }
+
+    const SHIFT: Mods = Mods {
+        shift: true,
+        alt: false,
+        ctrl: false,
+        sup: false,
+    };
+    const ALT: Mods = Mods {
+        shift: false,
+        alt: true,
+        ctrl: false,
+        sup: false,
+    };
+    const CTRL: Mods = Mods {
+        shift: false,
+        alt: false,
+        ctrl: true,
+        sup: false,
+    };
+    const SUPER: Mods = Mods {
+        shift: false,
+        alt: false,
+        ctrl: false,
+        sup: true,
+    };
+
     #[test]
     fn parse_event_consumes_one_event_and_reports_incomplete_tails() {
         assert_eq!(parse_event(b""), None);
-        assert_eq!(parse_event(b"a"), Some((RawEvent::Key(Key::Char('a')), 1)));
+        assert_eq!(parse_event(b"a"), Some((key(Key::Char('a')), 1)));
         assert_eq!(parse_event(b"\x1b"), None, "escape alone: wait for more");
         assert_eq!(parse_event(b"\x1b["), None);
         assert_eq!(parse_event(b"\x1b[<65;10;2"), None, "mouse mid-sequence");
@@ -676,10 +876,11 @@ mod tests {
                 12
             ))
         );
-        assert_eq!(parse_event(b"\x1b[Aq"), Some((RawEvent::Key(Key::Up), 3)));
+        assert_eq!(parse_event(b"\x1b[Aq"), Some((key(Key::Up), 3)));
         assert_eq!(parse_event(b"\x1b[I"), Some((RawEvent::Focus(true), 3)));
         assert_eq!(parse_event(b"\x1b[O"), Some((RawEvent::Focus(false), 3)));
-        assert_eq!(parse_event(b"\x1bOP"), Some((RawEvent::Key(Key::Unknown), 2)));
+        assert_eq!(parse_event(b"\x1bOP"), Some((key(Key::Unknown), 3)));
+        assert_eq!(parse_event(b"\x1bOA"), Some((key(Key::Up), 3)));
     }
 
     #[test]
@@ -687,17 +888,160 @@ mod tests {
         // xterm.js < May 2026 replies OK to every transmission despite q=2.
         assert_eq!(
             parse_event(b"\x1b_Gi=1;OK\x1b\\"),
-            Some((RawEvent::Key(Key::Unknown), 11))
+            Some((key(Key::Unknown), 11))
         );
         assert_eq!(parse_event(b"\x1b_Gi=1;OK"), None, "reply mid-arrival");
         assert_eq!(
             parse_event(b"\x1b]11;rgb:1e/2a/34\x07x"),
-            Some((RawEvent::Key(Key::Unknown), 18)),
+            Some((key(Key::Unknown), 18)),
             "late OSC reply, BEL-terminated"
         );
         assert_eq!(
             parse_event(b"\x1bP1$r0m\x1b\\"),
-            Some((RawEvent::Key(Key::Unknown), 9))
+            Some((key(Key::Unknown), 9))
+        );
+    }
+
+    #[test]
+    fn parses_modifiers_on_legacy_and_kitty_keys() {
+        assert_eq!(
+            parse_event(b"\x1b[1;2D"),
+            Some((key_mods(Key::Left, SHIFT), 6))
+        );
+        assert_eq!(
+            parse_event(b"\x1b[1;3C"),
+            Some((key_mods(Key::Right, ALT), 6))
+        );
+        assert_eq!(
+            parse_event(b"\x1b[1;9A"),
+            Some((key_mods(Key::Up, SUPER), 6))
+        );
+        assert_eq!(parse_event(b"\x1b[3~"), Some((key(Key::Delete), 4)));
+        assert_eq!(parse_event(b"\x1b[H"), Some((key(Key::Home), 3)));
+        assert_eq!(parse_event(b"\x1b[F"), Some((key(Key::End), 3)));
+        assert_eq!(
+            parse_event(b"\x1b[Z"),
+            Some((key_mods(Key::Tab, SHIFT), 3))
+        );
+
+        assert_eq!(
+            parse_event(b"\x1b[99;5u"),
+            Some((key_mods(Key::Char('c'), CTRL), 7))
+        );
+        assert_eq!(
+            parse_event(b"\x1b[97;9u"),
+            Some((key_mods(Key::Char('a'), SUPER), 7))
+        );
+        assert_eq!(
+            parse_event(b"\x1b[13;2u"),
+            Some((key_mods(Key::Enter, SHIFT), 7))
+        );
+        assert_eq!(
+            parse_event(b"\x1b[127;3u"),
+            Some((key_mods(Key::Backspace, ALT), 8))
+        );
+        assert_eq!(parse_event(b"\x1b[27u"), Some((key(Key::Escape), 5)));
+        assert_eq!(
+            parse_event(b"\x1b[99:67;5u"),
+            Some((key_mods(Key::Char('c'), CTRL), 10)),
+            "sub-parameters (shifted key) are ignored"
+        );
+        assert_eq!(parse_event(b"\x1b[57428;1u"), Some((key(Key::Unknown), 10)));
+    }
+
+    #[test]
+    fn ctrl_bytes_and_alt_prefixes_decode_as_modified_chars() {
+        assert_eq!(
+            parse_event(b"\x11"),
+            Some((key_mods(Key::Char('q'), CTRL), 1))
+        );
+        assert_eq!(parse_event(b"\x09"), Some((key(Key::Tab), 1)));
+        assert_eq!(parse_event(b"\x0d"), Some((key(Key::Enter), 1)));
+        assert_eq!(
+            parse_event(b"\x1bf"),
+            Some((key_mods(Key::Char('f'), ALT), 2))
+        );
+        assert_eq!(
+            parse_event(b"\x1b\x7f"),
+            Some((key_mods(Key::Backspace, ALT), 2))
+        );
+        // Ghostty's common `shift+enter=text:\x1b\r` rewrite must land as
+        // Enter, not vanish as an unknown key.
+        assert_eq!(
+            parse_event(b"\x1b\x0d"),
+            Some((key_mods(Key::Enter, ALT), 2))
+        );
+    }
+
+    #[test]
+    fn utf8_input_decodes_whole_chars() {
+        assert_eq!(parse_event("é".as_bytes()), Some((key(Key::Char('é')), 2)));
+        assert_eq!(
+            parse_event("猫x".as_bytes()),
+            Some((key(Key::Char('猫')), 3))
+        );
+        assert_eq!(
+            parse_event(&"é".as_bytes()[..1]),
+            None,
+            "partial utf8 waits for the rest"
+        );
+        assert_eq!(parse_event(b"\xff"), Some((key(Key::Unknown), 1)));
+    }
+
+    #[test]
+    fn parses_modify_other_keys_sequences() {
+        assert_eq!(
+            parse_event(b"\x1b[27;3;127~"),
+            Some((key_mods(Key::Backspace, ALT), 11))
+        );
+        assert_eq!(
+            parse_event(b"\x1b[27;9;127~"),
+            Some((key_mods(Key::Backspace, SUPER), 11))
+        );
+        assert_eq!(
+            parse_event(b"\x1b[27;5;99~"),
+            Some((key_mods(Key::Char('c'), CTRL), 10))
+        );
+    }
+
+    #[test]
+    fn clipboard_read_replies_become_paste_events() {
+        assert_eq!(
+            parse_event(b"\x1b]52;c;aGkNdGhlcmU=\x1b\\"),
+            Some((RawEvent::Paste("hi\nthere".into()), 21)),
+            "base64 decoded, newlines normalized"
+        );
+        assert_eq!(
+            parse_event(b"\x1b]52;c;aGVsbG8=\x07x"),
+            Some((RawEvent::Paste("hello".into()), 16)),
+            "BEL-terminated"
+        );
+        assert_eq!(
+            parse_event(b"\x1b]52;c;?\x1b\\"),
+            Some((key(Key::Unknown), 10)),
+            "a query echo is not clipboard data"
+        );
+        assert_eq!(
+            parse_event(b"\x1b]52;c;!!!\x1b\\"),
+            Some((key(Key::Unknown), 12)),
+            "garbage payload swallowed silently"
+        );
+    }
+
+    #[test]
+    fn bracketed_paste_arrives_as_one_normalized_event() {
+        assert_eq!(
+            parse_event(b"\x1b[200~hi\r\nthere\rend\x1b[201~x"),
+            Some((RawEvent::Paste("hi\nthere\nend".into()), 25))
+        );
+        assert_eq!(
+            parse_event(b"\x1b[200~partial paste"),
+            None,
+            "paste waits for its terminator"
+        );
+        assert_eq!(
+            parse_event(b"\x1b[200~\x1b[201~"),
+            Some((RawEvent::Paste(String::new()), 12))
         );
     }
 

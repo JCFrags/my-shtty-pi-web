@@ -58,14 +58,37 @@ pub enum Align {
     End,
     Stretch,
 }
-
-/// Scroll clips like Hidden but also applies the node's scroll_offset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Overflow {
     #[default]
     Visible,
     Hidden,
     Scroll,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Position {
+    #[default]
+    Flow,
+    Absolute,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Inset {
+    pub left: Option<f32>,
+    pub top: Option<f32>,
+    pub right: Option<f32>,
+    pub bottom: Option<f32>,
+}
+
+impl Inset {
+    pub fn top_left(x: f32, y: f32) -> Self {
+        Self {
+            left: Some(x),
+            top: Some(y),
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -80,21 +103,18 @@ impl Border {
     }
 }
 
-/// One style object per node, DOM-like: layout and decoration together.
-/// `color`, `font_size`, and `font` inherit to descendants; everything else
-/// is local. `font` indexes into the fonts slice passed to `render_scene`.
 #[derive(Debug, Clone)]
 pub struct Style {
     pub flex_direction: FlexDirection,
     pub flex_grow: f32,
-    /// Content inside a Scroll node only overflows (and so only scrolls)
-    /// when this is 0; the CSS-default 1.0 shrinks it to fit instead.
     pub flex_shrink: f32,
     pub width: Dimension,
     pub height: Dimension,
     pub padding: Edges,
     pub margin: Edges,
     pub gap: f32,
+    pub position: Position,
+    pub inset: Inset,
     pub overflow: Overflow,
     pub justify_content: Option<Justify>,
     pub align_items: Option<Align>,
@@ -104,7 +124,7 @@ pub struct Style {
     pub color: Option<Color>,
     pub font_size: Option<f32>,
     pub font: Option<usize>,
-    pub hover_background: Option<Color>,
+    pub hover_background: Option<Color>, // this obviously should not be represented explicitly lmao
     pub hover_color: Option<Color>,
 }
 
@@ -119,6 +139,8 @@ impl Default for Style {
             padding: Edges::default(),
             margin: Edges::default(),
             gap: 0.0,
+            position: Position::default(),
+            inset: Inset::default(),
             overflow: Overflow::default(),
             justify_content: None,
             align_items: None,

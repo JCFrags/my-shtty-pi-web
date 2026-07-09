@@ -1,22 +1,24 @@
+use pixel_core::TextInput;
+
 use crate::ui::Note;
 
 pub fn demo_notes() -> Vec<Note> {
     vec![
         Note {
             title: "fix flaky auth test".into(),
-            text: flaky_test_session(),
+            input: TextInput::new(flaky_test_session()),
         },
         Note {
             title: "add scroll profiles".into(),
-            text: scroll_profiles_session(),
+            input: TextInput::new(scroll_profiles_session()),
         },
         Note {
             title: "hunt render regression".into(),
-            text: render_regression_session(),
+            input: TextInput::new(render_regression_session()),
         },
         Note {
             title: "scratch".into(),
-            text: String::new(),
+            input: TextInput::new(String::new()),
         },
     ]
 }
