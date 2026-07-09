@@ -125,6 +125,10 @@ fn main() -> std::io::Result<()> {
 
     let (canvas, mut scene) = render_frame(&app, false, None);
     term.draw(&canvas)?;
+    /**
+     * i wonder if i could implement a blinking cursor?
+     * 
+     */
 
     let mut scroll = ScrollState::default();
     let mut last_frame = Instant::now();
