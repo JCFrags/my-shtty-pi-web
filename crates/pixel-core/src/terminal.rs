@@ -185,6 +185,9 @@ impl Terminal {
         self.stdout
             .write_all(&crate::kitty::kitty_query_shm(SHM_PROBE_ID, &name))?;
         self.stdout.flush()?;
+        /**
+         * really dislike this
+         */
         let reply = self.read_report(300, |buf| parse_probe_reply(buf, b"_Gi=299;"))?;
         let _ = rustix::shm::unlink(&name);
         Ok(reply.unwrap_or(false))
