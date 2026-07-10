@@ -46,9 +46,6 @@ fn err(e: impl std::fmt::Display) -> Error {
 
 struct SendEngine(Engine);
 
-/**
- * what is the point of this?
- */
 #[allow(unsafe_code)]
 unsafe impl Send for SendEngine {}
 
@@ -71,11 +68,6 @@ pub struct PixelEngine {
     thread: Option<JoinHandle<()>>,
 }
 
-/**
- * has this always errored?
- * 
- * what is the napi attrivute doing here?x
- */
 #[napi]
 impl PixelEngine {
     #[napi(constructor)]

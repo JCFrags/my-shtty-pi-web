@@ -16,7 +16,6 @@ lcov.info
 *.pending-snap
 
 # Debugger/IDE state
-.vscode/
 .idea/
 *.iml
 

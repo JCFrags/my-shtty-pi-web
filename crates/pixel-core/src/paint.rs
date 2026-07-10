@@ -218,7 +218,6 @@ fn paint_selection(
             let to = selection.end.min(line.end);
             let x1 = measure_text(font, &text[line.start..from], px);
             let mut x2 = measure_text(font, &text[line.start..to], px);
-            // A selection crossing an explicit newline shows it as a space.
             if selection.end > line.end && text[line.end..].starts_with('\n') {
                 x2 += newline_w;
             }

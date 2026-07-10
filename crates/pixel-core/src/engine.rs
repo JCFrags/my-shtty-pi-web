@@ -57,11 +57,7 @@ static DEFAULT_PROFILE: Smooth = Smooth {
 
 pub struct EngineConfig {
     pub fonts: Vec<fontdue::Font>,
-    /// Index into `fonts` used to derive the base font size from the cell height.
     pub cell_metrics_font: usize,
-    /// Install a SIGWINCH handler so resizes repaint immediately. Turn off
-    /// in processes with their own runtime (Node owns SIGWINCH) and wake
-    /// the engine yourself instead; pump re-checks the size on every wake.
     pub watch_resize: bool,
 }
 
@@ -82,28 +78,23 @@ pub enum EngineEvent {
         key: Option<String>,
         text: String,
     },
-    /// Enter on an input with `submit`; the input is already cleared.
     Submit {
         node: NodeId,
         key: Option<String>,
         text: String,
     },
-    /// Coalesced to one per frame, only for nodes with `scroll_events`.
     Scroll {
         node: NodeId,
         key: Option<String>,
         offset: f32,
         max: f32,
     },
-    /// The terminal window changed; the tree is already re-sized.
     Resize {
         width: u32,
         height: u32,
         base_px: f32,
     },
-    /// A key press no focused input consumed.
     Key(KeyEvent),
-    /// Pasted text arriving while no input is focused.
     Paste(String),
 }
 
@@ -265,7 +256,6 @@ impl Engine {
         self.finish_reply(focus, reply, out)
     }
 
-    /// `wait: None` blocks; an in-flight animation shortens any wait.
     pub fn pump(&mut self, wait: Option<Duration>) -> io::Result<Vec<EngineEvent>> {
         let mut out = Vec::new();
         self.check_resize(&mut out)?;

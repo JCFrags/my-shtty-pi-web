@@ -76,6 +76,9 @@ interface EngineEventJson {
 export function createRoot(options: RootOptions = {}): PixelRoot {
   const bridge = getBridge();
   const info = JSON.parse(bridge.engine.info()) as EngineInfo;
+  /**
+   * hm i dont really see the point of this
+   */
   const container = reconciler.createContainer(
     { id: CONTAINER_ID },
     ConcurrentRoot,
@@ -141,9 +144,14 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
         break;
     }
   };
-
+  // okay now we start, are we passing in anything?
+  // we are passing json? what is json here?
+  // oh wait what we are literlaly passing a js function how
+  // the hell does that work?
   bridge.engine.start((err, json) => {
     if (err) return;
+    console.log('what are we passing to the neigne', json);
+    
     dispatch(JSON.parse(json) as EngineEventJson);
   });
 
