@@ -950,7 +950,6 @@ impl Tree {
         Some(ScrollbarRects { zone, track, thumb })
     }
 
-    /// The scroll position that puts the thumb's top edge at `thumb_y`.
     pub fn scroll_pos_for_thumb(&self, id: NodeId, thumb_y: f32) -> Option<f32> {
         let rects = self.scrollbar_rects(id)?;
         let node = self.get(id)?;
