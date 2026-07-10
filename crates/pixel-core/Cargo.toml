@@ -6,6 +6,7 @@ publish.workspace = true
 
 [dependencies]
 rustix = { workspace = true }
+libc = { workspace = true }
 base64 = { workspace = true }
 fontdue = { workspace = true }
 miniz_oxide = { workspace = true }

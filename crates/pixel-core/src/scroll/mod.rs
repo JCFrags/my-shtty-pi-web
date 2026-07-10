@@ -1,6 +1,6 @@
 pub mod profiles;
 
-pub trait ScrollProfile: std::fmt::Debug {
+pub trait ScrollProfile: std::fmt::Debug + Sync {
     fn tick(&self, _state: &mut ScrollState, _delta: f32, _max: f32) {}
     fn step(&self, state: &mut ScrollState, dt: f32, max: f32);
 }

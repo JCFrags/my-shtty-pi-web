@@ -1,0 +1,8 @@
+{
+  "name": "terminal-graphics-engine",
+  "private": true,
+  "workspaces": [
+    "packages/pixel-react",
+    "examples/typing-react"
+  ]
+}

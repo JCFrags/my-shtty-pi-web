@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/pixel-core", "examples/typing"]
+members = ["crates/pixel-core", "crates/pixel-node", "examples/typing"]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,7 +9,8 @@ publish = false
 
 [workspace.dependencies]
 pixel-core = { path = "crates/pixel-core" }
-rustix = { version = "1", features = ["termios", "stdio", "event", "fs", "shm", "mm", "process"] }
+rustix = { version = "1", features = ["termios", "stdio", "event", "fs", "shm", "mm", "process", "pipe"] }
+libc = "0.2"
 base64 = "0.22"
 fontdue = "0.9"
 miniz_oxide = "0.8"

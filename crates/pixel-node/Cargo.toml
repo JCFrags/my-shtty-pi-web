@@ -1,0 +1,21 @@
+[package]
+name = "pixel-node"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pixel-core = { workspace = true }
+napi = { version = "2", default-features = false, features = ["napi8"] }
+napi-derive = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+napi-build = "2"
+
+[lints]
+workspace = true

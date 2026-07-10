@@ -1,43 +1,37 @@
 // remindme: in vscode terminal disable, since it overlaps with their context menu
 use crate::canvas::measure_text;
-use crate::scene::{Handler, Node};
+use crate::desc::Desc;
 use crate::style::{
     Align, Border, Color, Dimension, Edges, FlexDirection, Inset, Justify, Position, Style,
 };
 
-// fixme: i don't like this special id
-pub const CONTEXT_MENU_ID: &str = "context-menu";
+pub const CONTEXT_MENU_KEY: &str = "context-menu";
 
-pub struct MenuItem<S> {
+pub struct MenuItem {
     pub label: String,
     pub shortcut: Option<String>,
     pub enabled: bool,
-    pub on_select: Handler<S>,
+    pub key: String,
 }
 
-impl<S> MenuItem<S> {
-    pub fn new(
-        label: &str,
-        shortcut: Option<&str>,
-        enabled: bool,
-        on_select: impl Fn(&mut S) + 'static,
-    ) -> Self {
+impl MenuItem {
+    pub fn new(label: &str, shortcut: Option<&str>, enabled: bool, key: &str) -> Self {
         Self {
             label: label.into(),
             shortcut: shortcut.map(str::to_string),
             enabled,
-            on_select: Box::new(on_select),
+            key: key.into(),
         }
     }
 }
 
-pub enum MenuEntry<S> {
-    Item(MenuItem<S>),
+pub enum MenuEntry {
+    Item(MenuItem),
     Separator,
 }
 
-impl<S> From<MenuItem<S>> for MenuEntry<S> {
-    fn from(item: MenuItem<S>) -> Self {
+impl From<MenuItem> for MenuEntry {
+    fn from(item: MenuItem) -> Self {
         MenuEntry::Item(item)
     }
 }
@@ -51,17 +45,14 @@ pub struct MenuStyle {
     pub border: Color,
 }
 
-/**
- * this seems way too complex, i suspect a zindex abstracton should help?
- */
-pub fn context_menu<S>(
-    entries: Vec<MenuEntry<S>>,
+pub fn context_menu(
+    entries: Vec<MenuEntry>,
     at: (f32, f32),
     window: (f32, f32),
     px: f32,
     font: &fontdue::Font,
     style: &MenuStyle,
-) -> Node<S> {
+) -> Desc {
     let pad = px * 0.55;
     let item_pad = Edges::symmetric(px * 0.7, px * 0.35);
     let gap_between = px * 2.0;
@@ -101,14 +92,14 @@ pub fn context_menu<S>(
             let item = match entry {
                 MenuEntry::Item(item) => item,
                 MenuEntry::Separator => {
-                    return Node {
+                    return Desc {
                         style: Style {
                             height: Dimension::Px(1.0),
                             margin: Edges::symmetric(0.0, separator_margin),
                             background: Some(style.border),
                             ..Style::default()
                         },
-                        ..Node::default()
+                        ..Desc::default()
                     };
                 }
             };
@@ -117,7 +108,7 @@ pub fn context_menu<S>(
             } else {
                 style.disabled
             };
-            let mut row = Node {
+            let mut row = Desc {
                 style: Style {
                     justify_content: Some(Justify::SpaceBetween),
                     align_items: Some(Align::Center),
@@ -128,15 +119,16 @@ pub fn context_menu<S>(
                     hover_background: item.enabled.then_some(style.hover),
                     ..Style::default()
                 },
-                on_click: item.enabled.then_some(item.on_select),
-                ..Node::default()
+                key: Some(item.key),
+                clickable: item.enabled,
+                ..Desc::default()
             };
-            row.children.push(Node {
+            row.children.push(Desc {
                 text: Some(item.label),
-                ..Node::default()
+                ..Desc::default()
             });
             if let Some(shortcut) = item.shortcut {
-                row.children.push(Node {
+                row.children.push(Desc {
                     style: Style {
                         color: Some(if item.enabled {
                             style.shortcut
@@ -147,14 +139,14 @@ pub fn context_menu<S>(
                         ..Style::default()
                     },
                     text: Some(shortcut),
-                    ..Node::default()
+                    ..Desc::default()
                 });
             }
             row
         })
         .collect();
 
-    Node {
+    Desc {
         style: Style {
             position: Position::Absolute,
             inset: Inset::top_left(x, y),
@@ -165,19 +157,18 @@ pub fn context_menu<S>(
             border: Some(Border::hairline(style.border)),
             ..Style::default()
         },
-        id: Some(CONTEXT_MENU_ID),
-        // hm
-        on_click: Some(Box::new(|_| {})),
+        key: Some(CONTEXT_MENU_KEY.into()),
+        // Clickable so menu-chrome clicks don't fall through to what's underneath.
+        clickable: true,
         children,
-        ..Node::default()
+        ..Desc::default()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::canvas::Canvas;
-    use crate::scene::render_scene;
+    use crate::tree::Tree;
 
     static FONT_BYTES: &[u8] =
         include_bytes!("../../../examples/typing/assets/JetBrainsMono-Regular.ttf");
@@ -197,57 +188,49 @@ mod tests {
         }
     }
 
-    fn menu_scene(
-        items: Vec<MenuEntry<Option<&'static str>>>,
-        at: (f32, f32),
-    ) -> (Canvas, crate::scene::Scene<Option<&'static str>>) {
-        let mut canvas = Canvas::new(400, 300);
-        let f = font();
-        let root = Node {
-            style: Style {
-                width: Dimension::Px(400.0),
-                height: Dimension::Px(300.0),
-                ..Style::default()
-            },
-            children: vec![context_menu(items, at, (400.0, 300.0), 16.0, &f, &style())],
-            ..Node::default()
-        };
-        let scene = render_scene(root, &mut canvas, &[f], 16.0, None);
-        (canvas, scene)
+    fn items() -> Vec<MenuEntry> {
+        vec![
+            MenuItem::new("Copy", Some("⌘C"), true, "menu:copy").into(),
+            MenuItem::new("Paste", Some("⌘V"), false, "menu:paste").into(),
+        ]
     }
 
-    fn items() -> Vec<MenuEntry<Option<&'static str>>> {
-        vec![
-            MenuItem::new("Copy", Some("⌘C"), true, |hit| *hit = Some("copy")).into(),
-            MenuItem::new("Paste", Some("⌘V"), false, |hit| *hit = Some("paste")).into(),
-        ]
+    fn menu_tree(at: (f32, f32)) -> Tree {
+        let mut tree = Tree::new((400.0, 300.0));
+        let f = font();
+        tree.reconcile(Desc {
+            children: vec![context_menu(items(), at, (400.0, 300.0), 16.0, &f, &style())],
+            ..Desc::default()
+        });
+        tree.flush_layout(&[f], 16.0);
+        tree
     }
 
     #[test]
     fn menu_dispatches_enabled_items_and_swallows_the_rest() {
-        let (_, scene) = menu_scene(items(), (100.0, 50.0));
-        let rect = scene.rect(CONTEXT_MENU_ID).unwrap();
+        let tree = menu_tree((100.0, 50.0));
+        let menu = tree.find(CONTEXT_MENU_KEY).unwrap();
+        let rect = tree.rect(menu).unwrap();
         assert_eq!((rect.x, rect.y), (100.0, 50.0));
 
-        let mut hit = None;
         let row_h = (rect.h - 2.0 * 16.0 * 0.55) / 2.0;
         let first_row = (rect.x + rect.w / 2.0, rect.y + rect.h / 2.0 - row_h / 2.0);
-        assert!(scene.dispatch_click(first_row.0, first_row.1, &mut hit));
-        assert_eq!(hit, Some("copy"));
+        let hit = tree.hit_click(first_row.0, first_row.1).unwrap();
+        assert_eq!(tree.key_of(hit), Some("menu:copy"));
 
-        hit = None;
         let second_row = (rect.x + rect.w / 2.0, rect.y + rect.h / 2.0 + row_h / 2.0);
-        assert!(
-            scene.dispatch_click(second_row.0, second_row.1, &mut hit),
+        let hit = tree.hit_click(second_row.0, second_row.1).unwrap();
+        assert_eq!(
+            tree.key_of(hit),
+            Some(CONTEXT_MENU_KEY),
             "disabled row still swallows the click via the container"
         );
-        assert_eq!(hit, None, "disabled item never fires");
     }
 
     #[test]
     fn menu_shifts_inside_the_window() {
-        let (_, scene) = menu_scene(items(), (395.0, 295.0));
-        let rect = scene.rect(CONTEXT_MENU_ID).unwrap();
+        let tree = menu_tree((395.0, 295.0));
+        let rect = tree.rect(tree.find(CONTEXT_MENU_KEY).unwrap()).unwrap();
         assert!(rect.x + rect.w <= 400.0, "clamped horizontally: {rect:?}");
         assert!(rect.y + rect.h <= 300.0, "clamped vertically: {rect:?}");
     }

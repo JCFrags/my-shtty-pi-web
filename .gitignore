@@ -34,3 +34,8 @@ Thumbs.db
 # Local environment / secrets
 .env
 .env.*
+
+# Node
+node_modules/
+packages/pixel-react/dist/
+packages/pixel-react/native/

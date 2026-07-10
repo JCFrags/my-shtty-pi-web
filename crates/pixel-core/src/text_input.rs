@@ -3,9 +3,9 @@ use std::ops::Range;
 use std::time::{Duration, Instant};
 
 use crate::canvas::measure_text;
-use crate::scene::{Node, PxRect};
-use crate::style::Color;
 use crate::terminal::{Key, KeyEvent, Mouse, MouseButton, MouseKind};
+use crate::tree::PxRect;
+use crate::wrap::{line_of_offset, wrap_lines};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Granularity {
@@ -35,19 +35,13 @@ pub enum InputReply {
     RequestPaste,
 }
 
-#[derive(Debug, Clone)]
-pub struct InputRender {
-    pub cursor: usize,
-    pub selection: Option<Range<usize>>,
-    pub caret_color: Color,
-    pub selection_color: Color,
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct InputGeometry {
     pub origin: (f32, f32),
     pub font: usize,
     pub px: f32,
+    /// Soft-wrap width of the content box; None means no wrapping.
+    pub max_width: Option<f32>,
 }
 
 impl InputGeometry {
@@ -59,12 +53,13 @@ impl InputGeometry {
             point.1 - self.origin.1,
             font,
             self.px,
+            self.max_width,
         )
     }
 
     pub fn caret_rect(&self, text: &str, cursor: usize, fonts: &[fontdue::Font]) -> PxRect {
         let font = &fonts[self.font.min(fonts.len() - 1)];
-        let (x, y) = offset_to_point(text, cursor, font, self.px);
+        let (x, y) = offset_to_point(text, cursor, font, self.px, self.max_width);
         PxRect {
             x: self.origin.0 + x,
             y: self.origin.1 + y,
@@ -306,39 +301,44 @@ impl TextInput {
         self.place(target, extend);
     }
 
-    pub fn move_up(&mut self, extend: bool, font: &fontdue::Font, px: f32) {
-        self.move_vertical(true, extend, font, px);
+    pub fn move_up(&mut self, extend: bool, font: &fontdue::Font, px: f32, wrap: Option<f32>) {
+        self.move_vertical(true, extend, font, px, wrap);
     }
 
-    pub fn move_down(&mut self, extend: bool, font: &fontdue::Font, px: f32) {
-        self.move_vertical(false, extend, font, px);
+    pub fn move_down(&mut self, extend: bool, font: &fontdue::Font, px: f32, wrap: Option<f32>) {
+        self.move_vertical(false, extend, font, px, wrap);
     }
 
-    fn move_vertical(&mut self, up: bool, extend: bool, font: &fontdue::Font, px: f32) {
+    fn move_vertical(
+        &mut self,
+        up: bool,
+        extend: bool,
+        font: &fontdue::Font,
+        px: f32,
+        wrap: Option<f32>,
+    ) {
         if !extend && let Some(range) = self.selection() {
             self.cursor = if up { range.start } else { range.end };
             self.anchor = None;
         }
-        let start = line_start(&self.text, self.cursor);
+        let lines = wrap_lines(&self.text, font, px, wrap);
+        let line = line_of_offset(&lines, self.cursor);
+        let range = &lines[line];
         let x = self
             .goal_x
-            .unwrap_or_else(|| measure_text(font, &self.text[start..self.cursor], px));
+            .unwrap_or_else(|| measure_text(font, &self.text[range.start..self.cursor], px));
         let target = if up {
-            if start == 0 {
+            if line == 0 {
                 0
             } else {
-                let prev_start = line_start(&self.text, start - 1);
-                prev_start + nearest_column(&self.text[prev_start..start - 1], x, font, px)
+                let prev = &lines[line - 1];
+                prev.start + nearest_column(&self.text[prev.clone()], x, font, px)
             }
+        } else if line + 1 >= lines.len() {
+            self.text.len()
         } else {
-            let end = line_end(&self.text, self.cursor);
-            if end == self.text.len() {
-                self.text.len()
-            } else {
-                let next_start = end + 1;
-                let next_end = line_end(&self.text, next_start);
-                next_start + nearest_column(&self.text[next_start..next_end], x, font, px)
-            }
+            let next = &lines[line + 1];
+            next.start + nearest_column(&self.text[next.clone()], x, font, px)
         };
         self.place(target, extend);
         self.goal_x = Some(x);
@@ -444,18 +444,15 @@ impl TextInput {
         }
     }
 
-    /// A node displaying this input; the caller sets style and id on it.
-    pub fn node<S>(&self, caret_color: Color, selection_color: Color) -> Node<S> {
-        Node {
-            text: Some(self.text.clone()),
-            input: Some(InputRender {
-                cursor: self.cursor,
-                selection: self.selection(),
-                caret_color,
-                selection_color,
-            }),
-            ..Node::default()
+    /// Replaces the whole text as a single undoable edit.
+    pub fn replace_all(&mut self, text: &str) {
+        if self.text == text {
+            return;
         }
+        self.sealed = true;
+        let end = self.text.len();
+        self.splice(0..end, text, EditKind::Other);
+        self.sealed = true;
     }
 
     pub fn apply(&mut self, action: InputAction) -> InputReply {
@@ -493,7 +490,13 @@ impl TextInput {
         }
     }
 
-    pub fn handle_key(&mut self, key: KeyEvent, font: &fontdue::Font, px: f32) -> InputReply {
+    pub fn handle_key(
+        &mut self,
+        key: KeyEvent,
+        font: &fontdue::Font,
+        px: f32,
+        wrap: Option<f32>,
+    ) -> InputReply {
         use Granularity::{Char, Line, Word};
         let m = key.mods;
         let combo = m.ctrl || m.sup;
@@ -531,11 +534,11 @@ impl TextInput {
                 InputReply::Moved
             }
             Key::Up => {
-                self.move_up(m.shift, font, px);
+                self.move_up(m.shift, font, px, wrap);
                 InputReply::Moved
             }
             Key::Down => {
-                self.move_down(m.shift, font, px);
+                self.move_down(m.shift, font, px, wrap);
                 InputReply::Moved
             }
             Key::Home => {
@@ -735,27 +738,35 @@ pub fn line_height(font: &fontdue::Font, px: f32) -> f32 {
         .map_or(px, |m| m.new_line_size)
 }
 
-pub fn offset_to_point(text: &str, offset: usize, font: &fontdue::Font, px: f32) -> (f32, f32) {
+pub fn offset_to_point(
+    text: &str,
+    offset: usize,
+    font: &fontdue::Font,
+    px: f32,
+    wrap: Option<f32>,
+) -> (f32, f32) {
     let offset = snap_to_boundary(text, offset);
-    let line_index = text[..offset].matches('\n').count();
-    let start = line_start(text, offset);
+    let lines = wrap_lines(text, font, px, wrap);
+    let line = line_of_offset(&lines, offset);
+    let start = lines[line].start;
     (
-        measure_text(font, &text[start..offset], px),
-        line_index as f32 * line_height(font, px),
+        measure_text(font, &text[start..offset.max(start)], px),
+        line as f32 * line_height(font, px),
     )
 }
 
-pub fn point_to_offset(text: &str, x: f32, y: f32, font: &fontdue::Font, px: f32) -> usize {
-    let line_index = (y / line_height(font, px)).floor().max(0.0) as usize;
-    let mut start = 0;
-    for _ in 0..line_index {
-        match text[start..].find('\n') {
-            Some(i) => start += i + 1,
-            None => break,
-        }
-    }
-    let end = line_end(text, start);
-    start + nearest_column(&text[start..end], x, font, px)
+pub fn point_to_offset(
+    text: &str,
+    x: f32,
+    y: f32,
+    font: &fontdue::Font,
+    px: f32,
+    wrap: Option<f32>,
+) -> usize {
+    let lines = wrap_lines(text, font, px, wrap);
+    let line = ((y / line_height(font, px)).floor().max(0.0) as usize).min(lines.len() - 1);
+    let range = &lines[line];
+    range.start + nearest_column(&text[range.clone()], x, font, px)
 }
 
 fn nearest_column(line: &str, x: f32, font: &fontdue::Font, px: f32) -> usize {
@@ -891,14 +902,14 @@ mod tests {
     fn vertical_movement_keeps_the_goal_column() {
         let f = font();
         let mut i = input("a long first line\nab\nanother long line", 12);
-        i.move_down(false, &f, 16.0);
+        i.move_down(false, &f, 16.0, None);
         assert_eq!(i.cursor(), 20, "short line clamps to its end");
-        i.move_down(false, &f, 16.0);
-        let (x, _) = offset_to_point(i.text(), i.cursor(), &f, 16.0);
-        let (goal_x, _) = offset_to_point("a long first line", 12, &f, 16.0);
+        i.move_down(false, &f, 16.0, None);
+        let (x, _) = offset_to_point(i.text(), i.cursor(), &f, 16.0, None);
+        let (goal_x, _) = offset_to_point("a long first line", 12, &f, 16.0, None);
         assert!((x - goal_x).abs() < 1.0, "goal column restored: {x} vs {goal_x}");
-        i.move_up(false, &f, 16.0);
-        i.move_up(false, &f, 16.0);
+        i.move_up(false, &f, 16.0, None);
+        i.move_up(false, &f, 16.0, None);
         assert_eq!(i.cursor(), 12, "round trip returns home");
     }
 
@@ -906,10 +917,10 @@ mod tests {
     fn vertical_movement_at_the_edges_goes_to_doc_ends() {
         let f = font();
         let mut i = input("one\ntwo", 1);
-        i.move_up(false, &f, 16.0);
+        i.move_up(false, &f, 16.0, None);
         assert_eq!(i.cursor(), 0);
         i.set_cursor(5, false);
-        i.move_down(false, &f, 16.0);
+        i.move_down(false, &f, 16.0, None);
         assert_eq!(i.cursor(), 7);
     }
 
@@ -919,7 +930,7 @@ mod tests {
         let mut i = input("one\ntwo\nthree", 5);
         i.set_cursor(2, true);
         assert_eq!(i.selection(), Some(2..5));
-        i.move_down(false, &f, 16.0);
+        i.move_down(false, &f, 16.0, None);
         assert_eq!(i.selection(), None);
         assert!(i.cursor() > 7, "moved below the selection end line");
     }
@@ -1100,39 +1111,39 @@ mod tests {
         let f = font();
         let mut i = input("one two", 7);
         assert_eq!(
-            i.handle_key(key(Key::Char('a'), CTRL), &f, 16.0),
+            i.handle_key(key(Key::Char('a'), CTRL), &f, 16.0, None),
             InputReply::Moved
         );
         assert_eq!(i.cursor(), 0, "ctrl-a is line start, not select all");
         assert_eq!(
-            i.handle_key(key(Key::Char('x'), CTRL), &f, 16.0),
+            i.handle_key(key(Key::Char('x'), CTRL), &f, 16.0, None),
             InputReply::None,
             "cut without a selection does nothing"
         );
         assert_eq!(
-            i.handle_key(key(Key::Char('a'), SUPER), &f, 16.0),
+            i.handle_key(key(Key::Char('a'), SUPER), &f, 16.0, None),
             InputReply::Selected
         );
         assert_eq!(
-            i.handle_key(key(Key::Char('c'), SUPER), &f, 16.0),
+            i.handle_key(key(Key::Char('c'), SUPER), &f, 16.0, None),
             InputReply::Copy("one two".into())
         );
         assert_eq!(
-            i.handle_key(key(Key::Char('x'), SUPER), &f, 16.0),
+            i.handle_key(key(Key::Char('x'), SUPER), &f, 16.0, None),
             InputReply::Cut("one two".into())
         );
         assert_eq!(i.text(), "");
         assert_eq!(
-            i.handle_key(key(Key::Char('z'), SUPER), &f, 16.0),
+            i.handle_key(key(Key::Char('z'), SUPER), &f, 16.0, None),
             InputReply::Edited
         );
         assert_eq!(i.text(), "one two");
         assert_eq!(
-            i.handle_key(key(Key::Char('v'), CTRL), &f, 16.0),
+            i.handle_key(key(Key::Char('v'), CTRL), &f, 16.0, None),
             InputReply::RequestPaste
         );
         assert_eq!(
-            i.handle_key(key(Key::Char('!'), Mods::default()), &f, 16.0),
+            i.handle_key(key(Key::Char('!'), Mods::default()), &f, 16.0, None),
             InputReply::Edited
         );
     }
@@ -1144,11 +1155,12 @@ mod tests {
             origin: (10.0, 5.0),
             font: 0,
             px: 16.0,
+            max_width: None,
         };
         let text = "hello world";
         let mut i = input(text, 0);
         let event = |kind, button, offset: usize| {
-            let (x, y) = offset_to_point(text, offset, &fonts[0], 16.0);
+            let (x, y) = offset_to_point(text, offset, &fonts[0], 16.0, None);
             Mouse {
                 kind,
                 button,
@@ -1184,9 +1196,10 @@ mod tests {
             origin: (10.0, 5.0),
             font: 0,
             px: 16.0,
+            max_width: None,
         };
         let rect = geometry.caret_rect("ab\ncd", 4, &fonts);
-        let (x, y) = offset_to_point("ab\ncd", 4, &fonts[0], 16.0);
+        let (x, y) = offset_to_point("ab\ncd", 4, &fonts[0], 16.0, None);
         assert_eq!((rect.x, rect.y), (10.0 + x, 5.0 + y));
         assert!(rect.h > 0.0 && rect.w > 0.0);
     }
@@ -1196,9 +1209,9 @@ mod tests {
         let f = font();
         let text = "first line\nsecond\n\nlast";
         for offset in [0, 5, 10, 11, 17, 18, 19, 23] {
-            let (x, y) = offset_to_point(text, offset, &f, 16.0);
+            let (x, y) = offset_to_point(text, offset, &f, 16.0, None);
             assert_eq!(
-                point_to_offset(text, x + 0.1, y + 1.0, &f, 16.0),
+                point_to_offset(text, x + 0.1, y + 1.0, &f, 16.0, None),
                 offset,
                 "offset {offset}"
             );
@@ -1209,10 +1222,10 @@ mod tests {
     fn points_outside_the_text_clamp() {
         let f = font();
         let text = "short\nlonger line";
-        assert_eq!(point_to_offset(text, -5.0, -10.0, &f, 16.0), 0);
-        assert_eq!(point_to_offset(text, 10_000.0, 0.0, &f, 16.0), 5, "past line end");
+        assert_eq!(point_to_offset(text, -5.0, -10.0, &f, 16.0, None), 0);
+        assert_eq!(point_to_offset(text, 10_000.0, 0.0, &f, 16.0, None), 5, "past line end");
         assert_eq!(
-            point_to_offset(text, 10_000.0, 10_000.0, &f, 16.0),
+            point_to_offset(text, 10_000.0, 10_000.0, &f, 16.0, None),
             text.len(),
             "below the last line"
         );
@@ -1222,7 +1235,7 @@ mod tests {
     fn click_right_of_a_glyphs_midpoint_lands_after_it() {
         let f = font();
         let w = measure_text(&f, "a", 16.0);
-        assert_eq!(point_to_offset("abc", w * 0.4, 0.0, &f, 16.0), 0);
-        assert_eq!(point_to_offset("abc", w * 0.6, 0.0, &f, 16.0), 1);
+        assert_eq!(point_to_offset("abc", w * 0.4, 0.0, &f, 16.0, None), 0);
+        assert_eq!(point_to_offset("abc", w * 0.6, 0.0, &f, 16.0, None), 1);
     }
 }

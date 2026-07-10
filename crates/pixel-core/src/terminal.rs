@@ -117,6 +117,34 @@ pub struct Terminal {
     pending: Vec<u8>,
     shm_frames: bool,
     frame_seq: u64,
+    wake_rx: Option<rustix::fd::OwnedFd>,
+    waker: Option<Waker>,
+}
+
+static RESIZE_WAKE_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+#[allow(unsafe_code)]
+extern "C" fn sigwinch_handler(_: libc::c_int) {
+    let fd = RESIZE_WAKE_FD.load(std::sync::atomic::Ordering::Relaxed);
+    if fd >= 0 {
+        // SAFETY: write(2) is async-signal-safe; the fd outlives the handler
+        // because the Terminal holds the Waker's Arc for its whole life.
+        unsafe {
+            libc::write(fd, [1u8].as_ptr().cast(), 1);
+        }
+    }
+}
+
+/// Makes a blocked [`Terminal::poll_event`] return as if it timed out.
+#[derive(Clone)]
+pub struct Waker {
+    fd: std::sync::Arc<rustix::fd::OwnedFd>,
+}
+
+impl Waker {
+    pub fn wake(&self) {
+        let _ = rustix::io::write(&*self.fd, &[1]);
+    }
 }
 
 impl Terminal {
@@ -144,6 +172,8 @@ impl Terminal {
             pending: Vec::new(),
             shm_frames: false,
             frame_seq: 0,
+            wake_rx: None,
+            waker: None,
         };
         terminal.mouse_pixels = terminal.probe_mouse_pixels()?;
         terminal.shm_frames = terminal.probe_shm_frames()?;
@@ -240,17 +270,52 @@ impl Terminal {
             let mut chunk = [0u8; 256];
             let n = rustix::io::read(&self.stdin, &mut chunk)?;
             if n == 0 {
-                return Ok(None);
+                // stdin EOF: poll would report readable forever.
+                return Err(io::ErrorKind::UnexpectedEof.into());
             }
             self.pending.extend_from_slice(&chunk[..n]);
         }
     }
 
+    pub fn waker(&mut self) -> io::Result<Waker> {
+        if let Some(waker) = &self.waker {
+            return Ok(waker.clone());
+        }
+        let (rx, tx) = rustix::pipe::pipe()?;
+        rustix::fs::fcntl_setfl(&rx, rustix::fs::OFlags::NONBLOCK)?;
+        rustix::fs::fcntl_setfl(&tx, rustix::fs::OFlags::NONBLOCK)?;
+        self.wake_rx = Some(rx);
+        let waker = Waker {
+            fd: std::sync::Arc::new(tx),
+        };
+        self.waker = Some(waker.clone());
+        Ok(waker)
+    }
+
+    /// Wakes `poll_event` on SIGWINCH so a resize repaints without waiting
+    /// for input. Not for multi-runtime processes (Node owns SIGWINCH there).
+    #[allow(unsafe_code)]
+    pub fn watch_resize(&mut self) -> io::Result<()> {
+        use rustix::fd::AsRawFd as _;
+        let waker = self.waker()?;
+        RESIZE_WAKE_FD.store(
+            waker.fd.as_raw_fd(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        // SAFETY: the handler only does an async-signal-safe write to a
+        // pipe fd kept alive by self.waker.
+        unsafe {
+            let mut action: libc::sigaction = std::mem::zeroed();
+            action.sa_sigaction = sigwinch_handler as usize;
+            action.sa_flags = libc::SA_RESTART;
+            if libc::sigaction(libc::SIGWINCH, &action, std::ptr::null_mut()) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        Ok(())
+    }
+
     fn wait_for_input(&self, wait: Option<Duration>) -> io::Result<bool> {
-        let mut fds = [rustix::event::PollFd::new(
-            &self.stdin,
-            rustix::event::PollFlags::IN,
-        )];
         let timeout = match wait {
             Some(w) => Some(
                 rustix::event::Timespec::try_from(w)
@@ -258,7 +323,35 @@ impl Terminal {
             ),
             None => None,
         };
-        Ok(rustix::event::poll(&mut fds, timeout.as_ref())? > 0)
+        // A signal (SIGWINCH) interrupting the poll counts as a wake, not
+        // an error: poll is not restarted by SA_RESTART.
+        let poll = |fds: &mut [rustix::event::PollFd<'_>]| match rustix::event::poll(
+            fds,
+            timeout.as_ref(),
+        ) {
+            Ok(n) => Ok(n),
+            Err(rustix::io::Errno::INTR) => Ok(0),
+            Err(e) => Err(io::Error::from(e)),
+        };
+        let stdin_fd = rustix::event::PollFd::new(&self.stdin, rustix::event::PollFlags::IN);
+        match &self.wake_rx {
+            None => {
+                let mut fds = [stdin_fd];
+                Ok(poll(&mut fds)? > 0)
+            }
+            Some(wake) => {
+                let mut fds = [
+                    stdin_fd,
+                    rustix::event::PollFd::new(wake, rustix::event::PollFlags::IN),
+                ];
+                poll(&mut fds)?;
+                if fds[1].revents().contains(rustix::event::PollFlags::IN) {
+                    let mut sink = [0u8; 64];
+                    while matches!(rustix::io::read(wake, &mut sink), Ok(n) if n > 0) {}
+                }
+                Ok(fds[0].revents().contains(rustix::event::PollFlags::IN))
+            }
+        }
     }
 
     fn mouse_position_px(&self, x: u32, y: u32) -> (u32, u32) {

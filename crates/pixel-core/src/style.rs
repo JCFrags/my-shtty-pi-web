@@ -103,11 +103,40 @@ impl Border {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScrollbarStyle {
+    pub width: f32,
+    pub hover_width: f32,
+    pub margin: f32,
+    pub min_thumb: f32,
+    pub thumb_color: Color,
+    pub thumb_hover_color: Color,
+    pub track_color: Color,
+}
+
+impl ScrollbarStyle {
+    /// Engine defaults, scaled to the base font size so density carries over.
+    pub fn for_rem(rem: f32) -> Self {
+        Self {
+            width: (rem * 0.3).max(3.0),
+            hover_width: (rem * 0.55).max(6.0),
+            margin: (rem * 0.15).max(2.0),
+            min_thumb: rem * 1.5,
+            thumb_color: [150, 150, 150, 140],
+            thumb_hover_color: [175, 175, 175, 210],
+            track_color: [128, 128, 128, 40],
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Style {
     pub flex_direction: FlexDirection,
     pub flex_grow: f32,
     pub flex_shrink: f32,
+    /// CSS flex-basis. `flex_grow: 1.0` with `Px(0.0)` is the `flex: 1`
+    /// idiom: size from the container, not from content.
+    pub flex_basis: Dimension,
     pub width: Dimension,
     pub height: Dimension,
     pub padding: Edges,
@@ -126,6 +155,9 @@ pub struct Style {
     pub font: Option<usize>,
     pub hover_background: Option<Color>, // this obviously should not be represented explicitly lmao
     pub hover_color: Option<Color>,
+    pub scrollbar: Option<ScrollbarStyle>,
+    /// Soft-wrap text to the available width; off renders logical lines.
+    pub wrap: bool,
 }
 
 impl Default for Style {
@@ -134,6 +166,7 @@ impl Default for Style {
             flex_direction: FlexDirection::default(),
             flex_grow: 0.0,
             flex_shrink: 1.0,
+            flex_basis: Dimension::default(),
             width: Dimension::default(),
             height: Dimension::default(),
             padding: Edges::default(),
@@ -152,6 +185,8 @@ impl Default for Style {
             font: None,
             hover_background: None,
             hover_color: None,
+            scrollbar: None,
+            wrap: true,
         }
     }
 }
