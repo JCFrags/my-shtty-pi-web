@@ -39,12 +39,10 @@ export interface Style {
   border?: { width: number; color: Color };
   color?: Color;
   fontSize?: number;
-  /** Index into the engine's font list (0 = UI, 1 = mono). */
   font?: number;
   hoverBackground?: Color;
   hoverColor?: Color;
   scrollbar?: ScrollbarStyle;
-  /** Soft-wrap text to the available width (default true). */
   wrap?: boolean;
 }
 
