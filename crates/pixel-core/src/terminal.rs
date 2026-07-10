@@ -156,7 +156,7 @@ impl Terminal {
         // would prefer if they weren't magic and linked to some known doc on the internet
         stdout.write_all(
             b"\x1b[?1049h\x1b[?25l\x1b[?1003h\x1b[?1006h\x1b[?1016h\x1b[?1004h\x1b[?2004h\x1b[>1u",
-        )?;
+        )?; // enable many reporting modes so we get info about mouse/keyboard
         stdout.flush()?;
 
         let mut terminal = Self {
