@@ -47,7 +47,7 @@ impl Canvas {
             .unwrap_or((0, 0, self.width, self.height))
     }
 
-    // weird op, but its a fast way to fill an array to a given color without allocating memory beforehand
+    // weird impl, but its a fast way to fill an array to a given color without allocating memory beforehand
     pub fn fill(&mut self, color: [u8; 4]) {
         if self.pixels.is_empty() {
             return;

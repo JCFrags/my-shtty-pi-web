@@ -107,11 +107,6 @@ impl WindowSize {
     }
 }
 
-struct ShmSlot {
-    ptr: *mut u8,
-    len: usize,
-}
-
 pub struct Terminal {
     stdin: io::Stdin,
     stdout: io::Stdout,
@@ -121,7 +116,6 @@ pub struct Terminal {
     cell: Option<(u32, u32)>,
     pending: Vec<u8>,
     shm_frames: bool,
-    shm_slots: [Option<ShmSlot>; 2],
     frame_seq: u64,
     wake_rx: Option<rustix::fd::OwnedFd>,
     waker: Option<Waker>,
@@ -174,7 +168,6 @@ impl Terminal {
             cell: None,
             pending: Vec::new(),
             shm_frames: false,
-            shm_slots: [None, None],
             frame_seq: 0,
             wake_rx: None,
             waker: None,
@@ -201,61 +194,14 @@ impl Terminal {
         format!("/px-{}-{seq}", std::process::id())
     }
 
-    /// Writes the frame into one of two shm slots, alternating so the
-    /// terminal can still read the previous frame while we fill the next.
-    /// A slot's mapping is reused when its object survived the last frame;
-    /// terminals that unlink after reading (as the kitty protocol allows)
-    /// force a fresh object, which is what every frame paid before.
-    #[allow(unsafe_code)]
+    // todo: verify this helps
+    /// Alternates between two shm names so the terminal, which reads asynchronously, can
+    /// still read the previous frame while we write the next; unlink clears unread frames.
     fn write_shm_frame(&mut self, data: &[u8]) -> io::Result<String> {
-        let slot = (self.frame_seq % 2) as usize;
+        let name = Self::shm_name(self.frame_seq % 2);
         self.frame_seq += 1;
-        let name = Self::shm_name(slot as u64);
-        let open_new = |name: &str| {
-            rustix::shm::open(
-                name,
-                rustix::shm::OFlags::CREATE | rustix::shm::OFlags::EXCL | rustix::shm::OFlags::RDWR,
-                rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
-            )
-        };
-        let mut created = match open_new(&name) {
-            Ok(fd) => Some(fd),
-            Err(rustix::io::Errno::EXIST) => None,
-            Err(e) => return Err(e.into()),
-        };
-        let reusable = self.shm_slots[slot]
-            .as_ref()
-            .is_some_and(|s| s.len == data.len());
-        if created.is_none() && !reusable {
-            let _ = rustix::shm::unlink(&name);
-            created = Some(open_new(&name)?);
-        }
-        if let Some(fd) = created {
-            rustix::fs::ftruncate(&fd, data.len() as u64)?;
-            if let Some(old) = self.shm_slots[slot].take() {
-                unsafe {
-                    let _ = rustix::mm::munmap(old.ptr.cast(), old.len);
-                }
-            }
-            let ptr = unsafe {
-                rustix::mm::mmap(
-                    std::ptr::null_mut(),
-                    data.len(),
-                    rustix::mm::ProtFlags::READ | rustix::mm::ProtFlags::WRITE,
-                    rustix::mm::MapFlags::SHARED,
-                    &fd,
-                    0,
-                )?
-            };
-            self.shm_slots[slot] = Some(ShmSlot {
-                ptr: ptr.cast(),
-                len: data.len(),
-            });
-        }
-        let dest = self.shm_slots[slot].as_ref().expect("slot mapped above");
-        unsafe {
-            std::ptr::copy_nonoverlapping(data.as_ptr(), dest.ptr, data.len());
-        }
+        let _ = rustix::shm::unlink(&name);
+        write_shm(&name, data)?;
         Ok(name)
     }
 
@@ -576,15 +522,9 @@ fn write_shm(name: &str, data: &[u8]) -> io::Result<()> {
 }
 
 impl Drop for Terminal {
-    #[allow(unsafe_code)]
     fn drop(&mut self) {
-        for (slot, state) in self.shm_slots.iter_mut().enumerate() {
-            if let Some(mapping) = state.take() {
-                unsafe {
-                    let _ = rustix::mm::munmap(mapping.ptr.cast(), mapping.len);
-                }
-                let _ = rustix::shm::unlink(Self::shm_name(slot as u64));
-            }
+        for slot in 0..2 {
+            let _ = rustix::shm::unlink(Self::shm_name(slot));
         }
         let _ = self.stdout.write_all(
             b"\x1b_Ga=d,d=A,q=2\x1b\\\x1b[<u\x1b[?2004l\x1b[?1004l\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?25h\x1b[?1049l",

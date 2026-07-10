@@ -149,8 +149,7 @@ function insert(parent: number, child: Instance, before: Instance | null) {
   b.push({ op: "insertBefore", parent, child: child.id, before: before?.id ?? null });
 }
 
-function remove(parent: number, child: Instance) {
-  void parent;
+function remove(_parent: number, child: Instance) {
   getBridge().push({ op: "remove", id: child.id });
 }
 
