@@ -2,6 +2,8 @@ use std::io::{BufRead as _, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
+use crate::terminal::Waker;
+
 pub struct NativeDelta {
     pub delta_y: f32,
     pub precise: bool,
@@ -19,7 +21,7 @@ pub struct NativeScroll {
 }
 
 impl NativeScroll {
-    pub fn spawn() -> Option<Self> {
+    pub fn spawn(waker: Option<Waker>) -> Option<Self> {
         let path = std::env::var("NATIVE_SCROLL_HELPER")
             .ok()
             .or_else(|| option_env!("NATIVE_SCROLL_HELPER").map(String::from))?;
@@ -31,7 +33,7 @@ impl NativeScroll {
             .ok()?;
         let stdout = child.stdout.take()?;
         let (tx, rx) = channel();
-        std::thread::spawn(move || read_lines(stdout, &tx));
+        std::thread::spawn(move || read_lines(stdout, &tx, waker.as_ref()));
         Some(Self {
             child,
             rx,
@@ -57,7 +59,7 @@ impl Drop for NativeScroll {
     }
 }
 
-fn read_lines(stdout: std::process::ChildStdout, tx: &Sender<Msg>) {
+fn read_lines(stdout: std::process::ChildStdout, tx: &Sender<Msg>, waker: Option<&Waker>) {
     for line in BufReader::new(stdout).lines() {
         let Ok(line) = line else {
             return;
@@ -73,10 +75,13 @@ fn read_lines(stdout: std::process::ChildStdout, tx: &Sender<Msg>) {
             }),
             _ => None,
         };
-        if let Some(msg) = msg
-            && tx.send(msg).is_err()
-        {
-            return;
+        if let Some(msg) = msg {
+            if tx.send(msg).is_err() {
+                return;
+            }
+            if let Some(waker) = waker {
+                waker.wake();
+            }
         }
     }
 }

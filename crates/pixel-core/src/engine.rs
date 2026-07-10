@@ -34,7 +34,6 @@ fn step_toward(value: f32, up: bool, up_rate: f32, down_rate: f32) -> f32 {
     }
 }
 
-/// Pixel window size, snapped to the cell grid so frames align with cells.
 fn window_from(ws: &crate::terminal::WindowSize, cell: (u32, u32)) -> (u32, u32) {
     let cols = if ws.cols > 0 { ws.cols } else { 80 };
     let rows = if ws.rows > 0 { ws.rows } else { 24 };
@@ -131,6 +130,7 @@ pub struct Engine {
     native: Option<NativeScroll>,
     use_native: bool,
     profile: &'static dyn ScrollProfile,
+    canvas: Canvas,
     drag: Option<NodeId>,
     bar_hover: Option<NodeId>,
     bar_drag: Option<(NodeId, f32)>,
@@ -153,7 +153,7 @@ impl Engine {
         let window = window_from(&ws, cell);
         let base_px = px_for_cell_height(&config.fonts[config.cell_metrics_font], cell.1 as f32);
         let tree = Tree::new((window.0 as f32, window.1 as f32));
-        let native = NativeScroll::spawn();
+        let native = NativeScroll::spawn(term.waker().ok());
         let use_native = native.is_some();
         Ok(Self {
             term,
@@ -172,6 +172,7 @@ impl Engine {
             native,
             use_native,
             profile: &DEFAULT_PROFILE,
+            canvas: Canvas::new(window.0, window.1),
             drag: None,
             bar_hover: None,
             bar_drag: None,
@@ -326,9 +327,7 @@ impl Engine {
             .scroll_nodes()
             .iter()
             .any(|&id| self.tree.scroll_state(id).is_some_and(|s| !s.settled()));
-        scrolling
-            || self.bars_animating()
-            || (self.native_scroll_active() && self.term_focused)
+        scrolling || self.bars_animating()
     }
 
     fn handle_event(&mut self, event: Event, out: &mut Vec<EngineEvent>) -> io::Result<()> {
@@ -684,26 +683,26 @@ impl Engine {
         };
         let (node, max) = (area.node, area.max_scroll());
         let cell_h = self.cell.1 as f32;
+        let profile = self.profile;
         let mut moved = false;
         if let Some(state) = self.tree.scroll_state_mut(node) {
             for delta in deltas {
-                let px_delta = if delta.precise {
-                    delta.delta_y * scale
-                } else {
-                    delta.delta_y * cell_h
-                };
-                let next = (state.position - px_delta).clamp(0.0, max);
-                if next != state.position {
-                    state.position = next;
+                if delta.precise {
+                    let next = (state.position - delta.delta_y * scale).clamp(0.0, max);
+                    if next != state.position {
+                        state.position = next;
+                        moved = true;
+                    }
                     state.set_target(next);
-                    moved = true;
+                } else {
+                    state.tick(profile, -delta.delta_y * cell_h, max);
                 }
             }
         }
         if moved {
             self.tree.mark_place();
-            self.touch_bar(node);
         }
+        self.touch_bar(node);
     }
 
     fn step_scrolls(&mut self, dt: f32) {
@@ -761,15 +760,16 @@ impl Engine {
         }
         self.profiler.begin_frame();
         let start = Instant::now();
-        let mut canvas = crate::profiler::span("canvas.clear", || {
-            let mut canvas = Canvas::new(self.window.0, self.window.1);
-            canvas.fill(self.clear_color);
-            canvas
+        crate::profiler::span("canvas.clear", || {
+            if (self.canvas.width, self.canvas.height) != self.window {
+                self.canvas = Canvas::new(self.window.0, self.window.1);
+            }
+            self.canvas.fill(self.clear_color);
         });
         self.tree.flush_layout(&self.fonts, self.base_px);
-        paint(&self.tree, &mut canvas, &self.fonts, self.cursor);
+        paint(&self.tree, &mut self.canvas, &self.fonts, self.cursor);
         self.tree.clear_paint_flag();
-        let bytes = crate::profiler::span("draw", || self.term.draw(&canvas))?;
+        let bytes = crate::profiler::span("draw", || self.term.draw(&self.canvas))?;
         crate::profiler::count("bytes", bytes as u64);
 
         let gap = start.duration_since(self.last_frame).as_secs_f32();

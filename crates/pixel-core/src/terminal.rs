@@ -107,6 +107,11 @@ impl WindowSize {
     }
 }
 
+struct ShmSlot {
+    ptr: *mut u8,
+    len: usize,
+}
+
 pub struct Terminal {
     stdin: io::Stdin,
     stdout: io::Stdout,
@@ -116,6 +121,7 @@ pub struct Terminal {
     cell: Option<(u32, u32)>,
     pending: Vec<u8>,
     shm_frames: bool,
+    shm_slots: [Option<ShmSlot>; 2],
     frame_seq: u64,
     wake_rx: Option<rustix::fd::OwnedFd>,
     waker: Option<Waker>,
@@ -127,15 +133,12 @@ static RESIZE_WAKE_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI
 extern "C" fn sigwinch_handler(_: libc::c_int) {
     let fd = RESIZE_WAKE_FD.load(std::sync::atomic::Ordering::Relaxed);
     if fd >= 0 {
-        // SAFETY: write(2) is async-signal-safe; the fd outlives the handler
-        // because the Terminal holds the Waker's Arc for its whole life.
         unsafe {
             libc::write(fd, [1u8].as_ptr().cast(), 1);
         }
     }
 }
 
-/// Makes a blocked [`Terminal::poll_event`] return as if it timed out.
 #[derive(Clone)]
 pub struct Waker {
     fd: std::sync::Arc<rustix::fd::OwnedFd>,
@@ -171,6 +174,7 @@ impl Terminal {
             cell: None,
             pending: Vec::new(),
             shm_frames: false,
+            shm_slots: [None, None],
             frame_seq: 0,
             wake_rx: None,
             waker: None,
@@ -197,6 +201,64 @@ impl Terminal {
         format!("/px-{}-{seq}", std::process::id())
     }
 
+    /// Writes the frame into one of two shm slots, alternating so the
+    /// terminal can still read the previous frame while we fill the next.
+    /// A slot's mapping is reused when its object survived the last frame;
+    /// terminals that unlink after reading (as the kitty protocol allows)
+    /// force a fresh object, which is what every frame paid before.
+    #[allow(unsafe_code)]
+    fn write_shm_frame(&mut self, data: &[u8]) -> io::Result<String> {
+        let slot = (self.frame_seq % 2) as usize;
+        self.frame_seq += 1;
+        let name = Self::shm_name(slot as u64);
+        let open_new = |name: &str| {
+            rustix::shm::open(
+                name,
+                rustix::shm::OFlags::CREATE | rustix::shm::OFlags::EXCL | rustix::shm::OFlags::RDWR,
+                rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+            )
+        };
+        let mut created = match open_new(&name) {
+            Ok(fd) => Some(fd),
+            Err(rustix::io::Errno::EXIST) => None,
+            Err(e) => return Err(e.into()),
+        };
+        let reusable = self.shm_slots[slot]
+            .as_ref()
+            .is_some_and(|s| s.len == data.len());
+        if created.is_none() && !reusable {
+            let _ = rustix::shm::unlink(&name);
+            created = Some(open_new(&name)?);
+        }
+        if let Some(fd) = created {
+            rustix::fs::ftruncate(&fd, data.len() as u64)?;
+            if let Some(old) = self.shm_slots[slot].take() {
+                unsafe {
+                    let _ = rustix::mm::munmap(old.ptr.cast(), old.len);
+                }
+            }
+            let ptr = unsafe {
+                rustix::mm::mmap(
+                    std::ptr::null_mut(),
+                    data.len(),
+                    rustix::mm::ProtFlags::READ | rustix::mm::ProtFlags::WRITE,
+                    rustix::mm::MapFlags::SHARED,
+                    &fd,
+                    0,
+                )?
+            };
+            self.shm_slots[slot] = Some(ShmSlot {
+                ptr: ptr.cast(),
+                len: data.len(),
+            });
+        }
+        let dest = self.shm_slots[slot].as_ref().expect("slot mapped above");
+        unsafe {
+            std::ptr::copy_nonoverlapping(data.as_ptr(), dest.ptr, data.len());
+        }
+        Ok(name)
+    }
+
     pub fn draw(&mut self, canvas: &Canvas) -> io::Result<usize> {
         let shrank = self
             .last_frame_size
@@ -216,9 +278,8 @@ impl Terminal {
         }
         frame.extend_from_slice(b"\x1b[H");
         if self.shm_frames {
-            let name = Self::shm_name(self.frame_seq);
-            crate::profiler::span("kitty.shm", || write_shm(&name, &canvas.pixels))?;
-            self.frame_seq += 1;
+            let name =
+                crate::profiler::span("kitty.shm", || self.write_shm_frame(&canvas.pixels))?;
             frame.extend_from_slice(&crate::kitty::kitty_transmit_shm(
                 1,
                 canvas.width,
@@ -292,8 +353,6 @@ impl Terminal {
         Ok(waker)
     }
 
-    /// Wakes `poll_event` on SIGWINCH so a resize repaints without waiting
-    /// for input. Not for multi-runtime processes (Node owns SIGWINCH there).
     #[allow(unsafe_code)]
     pub fn watch_resize(&mut self) -> io::Result<()> {
         use rustix::fd::AsRawFd as _;
@@ -302,8 +361,6 @@ impl Terminal {
             waker.fd.as_raw_fd(),
             std::sync::atomic::Ordering::Relaxed,
         );
-        // SAFETY: the handler only does an async-signal-safe write to a
-        // pipe fd kept alive by self.waker.
         unsafe {
             let mut action: libc::sigaction = std::mem::zeroed();
             action.sa_sigaction = sigwinch_handler as usize;
@@ -323,8 +380,6 @@ impl Terminal {
             ),
             None => None,
         };
-        // A signal (SIGWINCH) interrupting the poll counts as a wake, not
-        // an error: poll is not restarted by SA_RESTART.
         let poll = |fds: &mut [rustix::event::PollFd<'_>]| match rustix::event::poll(
             fds,
             timeout.as_ref(),
@@ -521,9 +576,15 @@ fn write_shm(name: &str, data: &[u8]) -> io::Result<()> {
 }
 
 impl Drop for Terminal {
+    #[allow(unsafe_code)]
     fn drop(&mut self) {
-        for seq in 0..self.frame_seq {
-            let _ = rustix::shm::unlink(Self::shm_name(seq));
+        for (slot, state) in self.shm_slots.iter_mut().enumerate() {
+            if let Some(mapping) = state.take() {
+                unsafe {
+                    let _ = rustix::mm::munmap(mapping.ptr.cast(), mapping.len);
+                }
+                let _ = rustix::shm::unlink(Self::shm_name(slot as u64));
+            }
         }
         let _ = self.stdout.write_all(
             b"\x1b_Ga=d,d=A,q=2\x1b\\\x1b[<u\x1b[?2004l\x1b[?1004l\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?25h\x1b[?1049l",
