@@ -115,7 +115,6 @@ pub struct ScrollbarStyle {
 }
 
 impl ScrollbarStyle {
-    /// Engine defaults, scaled to the base font size so density carries over.
     pub fn for_rem(rem: f32) -> Self {
         Self {
             width: (rem * 0.3).max(3.0),
@@ -134,8 +133,6 @@ pub struct Style {
     pub flex_direction: FlexDirection,
     pub flex_grow: f32,
     pub flex_shrink: f32,
-    /// CSS flex-basis. `flex_grow: 1.0` with `Px(0.0)` is the `flex: 1`
-    /// idiom: size from the container, not from content.
     pub flex_basis: Dimension,
     pub width: Dimension,
     pub height: Dimension,
@@ -156,7 +153,6 @@ pub struct Style {
     pub hover_background: Option<Color>, // this obviously should not be represented explicitly lmao
     pub hover_color: Option<Color>,
     pub scrollbar: Option<ScrollbarStyle>,
-    /// Soft-wrap text to the available width; off renders logical lines.
     pub wrap: bool,
 }
 
