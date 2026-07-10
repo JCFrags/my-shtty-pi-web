@@ -9,7 +9,6 @@ pub struct Glide {
 
 impl ScrollProfile for Glide {
     fn tick(&self, state: &mut ScrollState, delta: f32, _max: f32) {
-        // A tick against the coast cancels it instead of fighting it.
         if delta * state.velocity < 0.0 {
             state.velocity = 0.0;
         }
@@ -72,8 +71,6 @@ mod tests {
         }
         state.tick(&GLIDE, -20.0, 1000.0);
         settle(&mut state, &GLIDE, 1000.0);
-        // Had the +100 coast survived the nudge it would land near 160;
-        // cancelling leaves the direct moves plus only the nudge's own coast.
         assert!(
             state.position < 100.0,
             "coast survived the catch: {}",

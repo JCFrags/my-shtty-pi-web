@@ -150,7 +150,7 @@ pub struct Style {
     pub color: Option<Color>,
     pub font_size: Option<f32>,
     pub font: Option<usize>,
-    pub hover_background: Option<Color>, // this obviously should not be represented explicitly lmao
+    pub hover_background: Option<Color>, // seems weird but is not that bad of a representation
     pub hover_color: Option<Color>,
     pub scrollbar: Option<ScrollbarStyle>,
     pub wrap: bool,

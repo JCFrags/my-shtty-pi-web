@@ -722,8 +722,6 @@ impl Tree {
     fn place(&mut self) {
         self.paint_order.clear();
         self.scrollables.clear();
-        // The window clips everything: layout can overflow the root, but
-        // nothing outside the canvas is visible or hittable.
         let layout = self.taffy.layout(self.node(self.root).taffy).expect("layout");
         let window = PxRect {
             x: 0.0,
@@ -816,8 +814,6 @@ impl Tree {
         })
     }
 
-    /// An unoccluded scroll viewport counts as the input inside it, so
-    /// clicking past the end of the text still lands in the editor.
     pub fn hit_target(&self, x: f32, y: f32) -> Option<HitTarget> {
         for &id in self.paint_order.iter().rev() {
             let Some(node) = self.get(id) else {

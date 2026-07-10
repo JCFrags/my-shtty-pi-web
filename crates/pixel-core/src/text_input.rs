@@ -443,7 +443,6 @@ impl TextInput {
         }
     }
 
-    /// Replaces the whole text as a single undoable edit.
     pub fn replace_all(&mut self, text: &str) {
         if self.text == text {
             return;
