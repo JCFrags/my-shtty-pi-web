@@ -5,7 +5,6 @@ use crate::tree::{InputProps, NodeId, Props, Tree};
 pub struct Desc {
     pub style: Style,
     pub text: Option<String>,
-    /// Equal keys match across frames, so retained state survives reordering.
     pub key: Option<String>,
     pub clickable: bool,
     pub input: Option<InputProps>,
@@ -34,7 +33,6 @@ impl Desc {
 }
 
 impl Tree {
-    /// The root keeps its engine-managed size; `desc.style` sizing is ignored.
     pub fn reconcile(&mut self, desc: Desc) {
         crate::profiler::span("tree.reconcile", || {
             let root = self.root();

@@ -51,9 +51,6 @@ impl App {
     }
 }
 
-/// All chrome is sized in multiples of the base font size (em-style):
-/// terminals disagree on whether a "pixel" is a device or logical pixel, but
-/// base_px is derived from the cell height so it carries the right density.
 pub fn editor_pad(rem: f32) -> f32 {
     rem * 1.1
 }
@@ -82,8 +79,6 @@ pub const MENU_ACTIONS: [(&str, InputAction); 6] = [
     ("menu:select-all", InputAction::SelectAll),
 ];
 
-/// Fallback palette (the previous hardcoded look) for terminals that don't
-/// answer color queries.
 const FALLBACK_BG: Color = [22, 22, 30, 255];
 const FALLBACK_FG: Color = [222, 220, 235, 255];
 const FALLBACK_ACCENT: Color = [159, 134, 235, 255];
@@ -336,10 +331,10 @@ pub fn build_ui(
         key: Some(input_key(app.active)),
         input: Some(InputProps {
             initial: app.notes[app.active].text.clone(),
-            value: None,
             caret_color: t.accent,
             selection_color: t.selection,
             auto_focus: true,
+            ..InputProps::default()
         }),
         ..Desc::default()
     };

@@ -3,6 +3,7 @@
   "private": true,
   "workspaces": [
     "packages/pixel-react",
-    "examples/typing-react"
+    "examples/typing-react",
+    "examples/agent"
   ]
 }

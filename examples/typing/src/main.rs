@@ -189,6 +189,7 @@ fn main() -> std::io::Result<()> {
                 }
                 EngineEvent::Paste(_)
                 | EngineEvent::Scroll { .. }
+                | EngineEvent::Submit { .. }
                 | EngineEvent::Resize { .. } => {}
             }
         }

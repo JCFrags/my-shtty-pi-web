@@ -40,7 +40,6 @@ pub struct InputGeometry {
     pub origin: (f32, f32),
     pub font: usize,
     pub px: f32,
-    /// Soft-wrap width of the content box; None means no wrapping.
     pub max_width: Option<f32>,
 }
 

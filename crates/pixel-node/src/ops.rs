@@ -6,7 +6,6 @@ use pixel_core::{
 };
 use serde::Deserialize;
 
-/// JS reconciler instance ids mapped to NodeIds; id 0 is the tree root.
 pub struct IdMap {
     to_node: HashMap<u32, NodeId>,
     to_ext: HashMap<NodeId, u32>,
@@ -57,7 +56,6 @@ enum Op {
     Remove {
         id: u32,
     },
-    /// Drops the id mapping of a node deleted as part of a removed subtree.
     Forget {
         id: u32,
     },
@@ -103,6 +101,7 @@ struct InputDto {
     caret_color: Option<Color>,
     selection_color: Option<Color>,
     auto_focus: bool,
+    submit: bool,
 }
 
 #[derive(Deserialize)]
@@ -308,6 +307,7 @@ impl PropsDto {
                     caret_color: i.caret_color.unwrap_or(defaults.caret_color),
                     selection_color: i.selection_color.unwrap_or(defaults.selection_color),
                     auto_focus: i.auto_focus,
+                    submit: i.submit,
                 }
             }),
             content_height: self.content_height,
@@ -316,7 +316,6 @@ impl PropsDto {
     }
 }
 
-/// A malformed op is reported but never aborts the rest of the batch.
 pub fn apply_ops(engine: &mut Engine, ids: &mut IdMap, json: &str) -> Result<(), String> {
     let values: Vec<serde_json::Value> = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let mut errors = Vec::new();

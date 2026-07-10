@@ -158,7 +158,6 @@ pub fn context_menu(
             ..Style::default()
         },
         key: Some(CONTEXT_MENU_KEY.into()),
-        // Clickable so menu-chrome clicks don't fall through to what's underneath.
         clickable: true,
         children,
         ..Desc::default()

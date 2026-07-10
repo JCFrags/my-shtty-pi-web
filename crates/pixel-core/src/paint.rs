@@ -6,7 +6,7 @@ use crate::text_input::{caret_width, offset_to_point};
 use crate::tree::{NodeId, PxRect, Tree};
 use crate::wrap::wrap_lines;
 
-/// Requires `flush_layout` to have run first.
+// todo: check why, and verify this statement "Requires `flush_layout` to have run first."
 pub fn paint(tree: &Tree, canvas: &mut Canvas, fonts: &[fontdue::Font], cursor: Option<(f32, f32)>) {
     assert!(!fonts.is_empty());
     crate::profiler::span("tree.paint", || {

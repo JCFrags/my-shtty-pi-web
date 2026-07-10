@@ -97,11 +97,11 @@ impl ScrollArea {
 #[derive(Debug, Clone, PartialEq)]
 pub struct InputProps {
     pub initial: String,
-    /// When set, overwrites the input's text on update.
     pub value: Option<String>,
     pub caret_color: Color,
     pub selection_color: Color,
     pub auto_focus: bool,
+    pub submit: bool,
 }
 
 impl Default for InputProps {
@@ -112,6 +112,7 @@ impl Default for InputProps {
             caret_color: [255, 255, 255, 255],
             selection_color: [90, 90, 140, 255],
             auto_focus: false,
+            submit: false,
         }
     }
 }
@@ -124,8 +125,6 @@ pub struct Props {
     pub clickable: bool,
     pub hidden: bool,
     pub input: Option<InputProps>,
-    /// Overrides measured content height for scroll range and the
-    /// scrollbar, so windowed (virtualized) children keep real proportions.
     pub content_height: Option<f32>,
     pub scroll_events: bool,
 }
@@ -134,6 +133,7 @@ pub(crate) struct InputState {
     pub input: TextInput,
     pub caret_color: Color,
     pub selection_color: Color,
+    pub submit: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -171,8 +171,6 @@ pub(crate) struct RNode {
     pub visible: PxRect,
 }
 
-/// `zone` is the hover/hit strip at the right edge; `track` and `thumb` are
-/// what paints.
 #[derive(Debug, Clone, Copy)]
 pub struct ScrollbarRects {
     pub zone: PxRect,
@@ -312,6 +310,7 @@ impl Tree {
                 input: TextInput::new(p.initial.clone()),
                 caret_color: p.caret_color,
                 selection_color: p.selection_color,
+                submit: p.submit,
             }),
             parent: None,
             children: Vec::new(),
@@ -356,7 +355,6 @@ impl Tree {
         id
     }
 
-    /// Detaches `child` from its current parent first; `before: None` appends.
     pub fn insert_before(&mut self, parent: NodeId, child: NodeId, before: Option<NodeId>) {
         assert!(child != self.root, "the root cannot be re-parented");
         self.detach(child);
@@ -458,6 +456,7 @@ impl Tree {
                     || state.selection_color != p.selection_color;
                 state.caret_color = p.caret_color;
                 state.selection_color = p.selection_color;
+                state.submit = p.submit;
             }
             (state @ Some(_), None) => {
                 *state = None;
@@ -469,6 +468,7 @@ impl Tree {
                     input: TextInput::new(p.initial.clone()),
                     caret_color: p.caret_color,
                     selection_color: p.selection_color,
+                    submit: p.submit,
                 });
                 node.text = Some(p.initial);
                 changed = true;
@@ -519,7 +519,6 @@ impl Tree {
         }
     }
 
-    /// One undoable edit; no-op when equal.
     pub fn set_input_text(&mut self, id: NodeId, text: &str) {
         let node = self.node_mut(id);
         let Some(state) = &mut node.input else {
@@ -608,7 +607,6 @@ impl Tree {
         self.needs_place = true;
     }
 
-    /// Must run before rects, hit tests, or paint are meaningful.
     pub fn flush_layout(&mut self, fonts: &[fontdue::Font], base_px: f32) {
         assert!(!fonts.is_empty());
         self.base_px = base_px;
@@ -1369,6 +1367,22 @@ mod tests {
         assert_eq!([r, g, b], [0, 255, 0], "selection painted behind the glyphs");
         let [r, g, b, _] = pixel(&canvas, (caret.x + caret.w / 2.0) as u32, center.1);
         assert_eq!([r, g, b], [0, 255, 0], "no caret while a selection is active");
+    }
+
+    #[test]
+    fn input_submit_prop_tracks_updates() {
+        let mut tree = tree_of((200.0, 60.0), editor("hello"));
+        let id = tree.find("in").unwrap();
+        assert!(!tree.get(id).unwrap().input.as_ref().unwrap().submit);
+
+        let mut children = editor("hello");
+        children[0].children[0].input.as_mut().unwrap().submit = true;
+        tree.reconcile(Desc {
+            children,
+            ..Desc::default()
+        });
+        let id = tree.find("in").unwrap();
+        assert!(tree.get(id).unwrap().input.as_ref().unwrap().submit);
     }
 
     #[test]

@@ -2,15 +2,9 @@ use std::ops::Range;
 
 use crate::canvas::measure_text;
 
-/// Layout rounds to whole pixels, so a node's final width can come out a
-/// fraction under the measured text width. Wrapping at paint/caret time
-/// adds this slack so rounding can never split off a trailing character.
+// what?
 pub(crate) const WRAP_SLACK: f32 = 1.0;
 
-/// Breaks text into visual lines. The ranges are contiguous and cover every
-/// byte except the `\n` separators, so any offset maps to exactly one line
-/// (a wrap-boundary offset belongs to the following line). `max_width: None`
-/// means logical lines only.
 pub fn wrap_lines(
     text: &str,
     font: &fontdue::Font,
@@ -33,9 +27,6 @@ pub fn wrap_lines(
     lines
 }
 
-/// Greedy word wrap: break points sit after runs of spaces, so trailing
-/// spaces hang off the line end like browsers render them. Words wider than
-/// the line fall back to per-character breaking.
 fn wrap_logical_line(
     text: &str,
     line: Range<usize>,
@@ -74,7 +65,6 @@ fn wrap_logical_line(
     out.push(line_start..line.end);
 }
 
-/// End of the word starting at `from`, including its trailing spaces.
 fn next_break(text: &str, from: usize, limit: usize) -> usize {
     let bytes = text.as_bytes();
     let mut i = from;
@@ -120,10 +110,6 @@ fn break_long_word(
     cursor
 }
 
-/// Index of the visual line containing `offset`: the last line starting at
-/// or before it. A wrap-boundary offset thus belongs to the later line
-/// (where the caret should display), while an offset at a `\n` stays on the
-/// line it terminates.
 pub fn line_of_offset(lines: &[Range<usize>], offset: usize) -> usize {
     lines.iter().rposition(|line| line.start <= offset).unwrap_or(0)
 }

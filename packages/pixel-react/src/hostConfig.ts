@@ -21,7 +21,6 @@ export interface BoxProps {
   id?: string;
   onClick?: (event: ClickEvent) => void;
   onScroll?: (event: ScrollEvent) => void;
-  /** Overrides measured content height (see virtualized lists). */
   contentHeight?: number;
   children?: React.ReactNode;
 }
@@ -37,13 +36,12 @@ export interface InputProps {
   style?: Style;
   id?: string;
   defaultValue?: string;
-  /** Pushed into the engine only when the prop changes between commits;
-   * between changes the engine's own text wins. */
   value?: string;
   caretColor?: Style["color"];
   selectionColor?: Style["color"];
   autoFocus?: boolean;
   onChange?: (text: string) => void;
+  onSubmit?: (text: string) => void;
 }
 
 type AnyProps = BoxProps & TextProps & InputProps;
@@ -118,7 +116,6 @@ function serializeProps(
   if (type === "text") {
     base.text = textOf(props.children);
   } else if (type === "input") {
-    // Re-sending an unchanged value would race the engine's own edits.
     const valueChanged = !prevProps || props.value !== prevProps.value;
     base.input = {
       initial: props.defaultValue ?? props.value ?? "",
@@ -126,6 +123,7 @@ function serializeProps(
       caretColor: parseColor(props.caretColor),
       selectionColor: parseColor(props.selectionColor),
       autoFocus: !!props.autoFocus,
+      submit: !!props.onSubmit,
     };
   }
   return base;

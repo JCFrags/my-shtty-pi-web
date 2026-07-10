@@ -18,6 +18,14 @@ const FALLBACK_CELL: (u32, u32) = (16, 32);
 const FRAME_POLL: Duration = Duration::from_millis(6);
 const BAR_HIDE_DELAY: Duration = Duration::from_millis(1000);
 
+fn is_plain_enter(key: &KeyEvent) -> bool {
+    key.key == crate::terminal::Key::Enter
+        && !key.mods.shift
+        && !key.mods.ctrl
+        && !key.mods.alt
+        && !key.mods.sup
+}
+
 fn step_toward(value: f32, up: bool, up_rate: f32, down_rate: f32) -> f32 {
     if up {
         (value + up_rate).min(1.0)
@@ -71,6 +79,12 @@ pub enum EngineEvent {
         y: f32,
     },
     Change {
+        node: NodeId,
+        key: Option<String>,
+        text: String,
+    },
+    /// Enter on an input with `submit`; the input is already cleared.
+    Submit {
         node: NodeId,
         key: Option<String>,
         text: String,
@@ -324,10 +338,16 @@ impl Engine {
                     self.tree
                         .get(id)
                         .filter(|node| node.input.is_some())
-                        .map(|node| (id, node.resolved))
+                        .map(|node| {
+                            let submit = node.input.as_ref().is_some_and(|s| s.submit);
+                            (id, node.resolved, submit)
+                        })
                 });
                 match focused {
-                    Some((focus, resolved)) => {
+                    Some((focus, _, true)) if is_plain_enter(&key) => {
+                        self.submit_input(focus, out)?;
+                    }
+                    Some((focus, resolved, _)) => {
                         let wrap = self.tree.input_geometry(focus).and_then(|g| g.max_width);
                         let font = &self.fonts[resolved.font.min(self.fonts.len() - 1)];
                         let input = self.tree.input_mut(focus).expect("checked above");
@@ -483,6 +503,17 @@ impl Engine {
             InputReply::RequestPaste => self.term.request_clipboard()?,
         }
         Ok(())
+    }
+
+    fn submit_input(&mut self, id: NodeId, out: &mut Vec<EngineEvent>) -> io::Result<()> {
+        let text = self.tree.input_text(id).unwrap_or_default().to_string();
+        out.push(EngineEvent::Submit {
+            node: id,
+            key: self.tree.key_of(id).map(str::to_string),
+            text,
+        });
+        self.tree.edit_input(id, |input| input.replace_all(""));
+        self.finish_reply(id, InputReply::Edited, out)
     }
 
     fn push_change(&mut self, id: NodeId, out: &mut Vec<EngineEvent>) {

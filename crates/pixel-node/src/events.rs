@@ -23,6 +23,12 @@ pub fn event_json(event: &EngineEvent, ids: &IdMap) -> Option<String> {
             "key": key,
             "text": text,
         }),
+        EngineEvent::Submit { node, key, text } => json!({
+            "type": "submit",
+            "node": ids.ext(*node)?,
+            "key": key,
+            "text": text,
+        }),
         EngineEvent::Scroll {
             node,
             key,

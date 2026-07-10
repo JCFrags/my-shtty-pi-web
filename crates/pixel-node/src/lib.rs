@@ -16,6 +16,9 @@ use serde_json::json;
 use crate::events::event_json;
 use crate::ops::{IdMap, apply_ops};
 
+/**
+ * obviously retarded
+ */
 static UI_FONT_BYTES: &[u8] = include_bytes!("../../../examples/typing/assets/InterVariable.ttf");
 static MONO_FONT_BYTES: &[u8] =
     include_bytes!("../../../examples/typing/assets/JetBrainsMono-Regular.ttf");
@@ -43,10 +46,10 @@ fn err(e: impl std::fmt::Display) -> Error {
 
 struct SendEngine(Engine);
 
+/**
+ * what is the point of this?
+ */
 #[allow(unsafe_code)]
-// SAFETY: Engine is only non-Send because taffy's CompactLength can hold a
-// calc pointer; this crate never constructs calc values, and the engine
-// moves wholesale to one thread rather than being shared.
 unsafe impl Send for SendEngine {}
 
 fn colors_json(colors: &TerminalColors) -> serde_json::Value {
@@ -68,6 +71,11 @@ pub struct PixelEngine {
     thread: Option<JoinHandle<()>>,
 }
 
+/**
+ * has this always errored?
+ * 
+ * what is the napi attrivute doing here?x
+ */
 #[napi]
 impl PixelEngine {
     #[napi(constructor)]
@@ -76,8 +84,6 @@ impl PixelEngine {
             load_font(SYSTEM_UI_FONTS, UI_FONT_BYTES),
             load_font(SYSTEM_MONO_FONTS, MONO_FONT_BYTES),
         ];
-        // Node's runtime owns SIGWINCH; JS forwards its resize events by
-        // waking the engine instead.
         let mut engine = Engine::new(EngineConfig {
             fonts,
             cell_metrics_font: 1,
@@ -113,8 +119,6 @@ impl PixelEngine {
         self.info.clone()
     }
 
-    /// Ops sent after the engine stopped are dropped: React's unmount
-    /// teardown may still be flushing when the terminal is gone.
     #[napi]
     pub fn apply_ops(&self, ops: String) -> Result<()> {
         let _ = self.tx.send(ops);
@@ -139,8 +143,6 @@ impl PixelEngine {
         let stop = self.stop.clone();
         let cell = SendEngine(engine);
         self.thread = Some(std::thread::spawn(move || {
-            // Binds the wrapper: the closure would otherwise capture the
-            // non-Send field directly and defeat SendEngine.
             let cell = cell;
             let mut engine = cell.0;
             let mut ids = IdMap::new(engine.tree.root());
@@ -164,7 +166,6 @@ impl PixelEngine {
                     }
                 }
             };
-            // Restores the terminal before telling JS.
             drop(engine);
             if !stop.load(Ordering::Relaxed) {
                 let exit = json!({ "type": "exit", "error": exit_error });

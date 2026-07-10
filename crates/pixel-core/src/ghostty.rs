@@ -1,6 +1,3 @@
-//! Frees keys that Ghostty binds by default: keeps a managed block in its
-//! config and signals it to reload (SIGUSR2, its only reload API).
-
 use std::io;
 use std::path::PathBuf;
 use std::process::Command;

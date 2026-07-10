@@ -2,7 +2,6 @@ import type { ForwardRefExoticComponent, RefAttributes } from "react";
 
 import type { BoxProps, InputProps, TextProps } from "./hostConfig";
 
-/// What a ref to a host component resolves to.
 export interface NodeHandle {
   id: number;
   focus(): void;

@@ -24,20 +24,19 @@ export interface KeyMods {
 }
 
 export interface EngineKeyEvent {
-  /** Single character, or "enter", "escape", "up", "backspace", ... */
   key: string;
   mods: KeyMods;
 }
 
+/**
+ * these on things i don't feel very good about
+ * global api probably? something like that, or hook we provide?
+ */
 export interface RootOptions {
-  /** Keys no focused input consumed. */
   onKey?: (event: EngineKeyEvent) => void;
   onRightClick?: (event: { x: number; y: number }) => void;
-  /** Pasted text arriving while no input is focused. */
   onPaste?: (text: string) => void;
-  /** The terminal is already restored when this fires; default exits. */
   onEngineExit?: (error: string | null) => void;
-  /** The window changed; `root.info` is already updated. */
   onResize?: (size: { width: number; height: number; basePx: number }) => void;
 }
 
@@ -52,6 +51,7 @@ interface EngineEventJson {
     | "click"
     | "rightClick"
     | "change"
+    | "submit"
     | "scroll"
     | "resize"
     | "key"
@@ -99,6 +99,11 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
         props?.onChange?.(event.text!);
         break;
       }
+      case "submit": {
+        const props = bridge.propsById.get(event.node!);
+        props?.onSubmit?.(event.text!);
+        break;
+      }
       case "scroll": {
         const props = bridge.propsById.get(event.node!);
         props?.onScroll?.({ offset: event.offset!, max: event.max! });
@@ -142,8 +147,6 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
     dispatch(JSON.parse(json) as EngineEventJson);
   });
 
-  // Node owns SIGWINCH; an empty op batch wakes the engine, whose pump
-  // re-checks the window size on every wake.
   const forwardResize = () => bridge.engine.applyOps("[]");
   process.stdout.on("resize", forwardResize);
 
@@ -156,7 +159,6 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
       reconciler.updateContainer(element, container, null, null);
     },
     stop() {
-      // A deferred unmount commit would send ops to a torn-down engine.
       reconciler.flushSync(() => {
         reconciler.updateContainer(null, container, null, null);
       });
