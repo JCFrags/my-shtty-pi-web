@@ -12,6 +12,9 @@ pub enum Event {
     Mouse(Mouse),
     Paste(String),
     Focus(bool),
+    /// In-band resize notification (mode 2048): the terminal pushed its new
+    /// text-area size, including on font-size changes.
+    WindowSize(WindowSize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,7 +91,7 @@ pub struct TerminalColors {
     pub palette: [Option<[u8; 4]>; 16],
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowSize {
     pub cols: u32,
     pub rows: u32,
@@ -155,7 +158,7 @@ impl Terminal {
         let mut stdout = io::stdout();
         // would prefer if they weren't magic and linked to some known doc on the internet
         stdout.write_all(
-            b"\x1b[?1049h\x1b[?25l\x1b[?1003h\x1b[?1006h\x1b[?1016h\x1b[?1004h\x1b[?2004h\x1b[>1u",
+            b"\x1b[?1049h\x1b[?25l\x1b[?1003h\x1b[?1006h\x1b[?1016h\x1b[?1004h\x1b[?2004h\x1b[?2048h\x1b[>1u",
         )?; // enable many reporting modes so we get info about mouse/keyboard
         stdout.flush()?;
 
@@ -266,6 +269,7 @@ impl Terminal {
                     RawEvent::Key(key) => Event::Key(key),
                     RawEvent::Paste(text) => Event::Paste(text),
                     RawEvent::Focus(focused) => Event::Focus(focused),
+                    RawEvent::WindowSize(ws) => Event::WindowSize(ws),
                     RawEvent::Mouse(kind, button, x, y) => {
                         let (x, y) = self.mouse_position_px(x, y);
                         Event::Mouse(Mouse { kind, button, x, y })
@@ -374,6 +378,12 @@ impl Terminal {
             width_px: u32::from(ws.ws_xpixel),
             height_px: u32::from(ws.ws_ypixel),
         })
+    }
+
+    /// Drop the cached `CSI 16t` cell size; on terminals that don't report
+    /// pixels in the winsize, a font-size change invalidates it.
+    pub fn forget_cell_size(&mut self) {
+        self.cell = None;
     }
 
     pub fn cell_size(&mut self) -> io::Result<Option<(u32, u32)>> {
@@ -526,7 +536,7 @@ impl Drop for Terminal {
             let _ = rustix::shm::unlink(Self::shm_name(slot));
         }
         let _ = self.stdout.write_all(
-            b"\x1b_Ga=d,d=A,q=2\x1b\\\x1b[<u\x1b[?2004l\x1b[?1004l\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?25h\x1b[?1049l",
+            b"\x1b_Ga=d,d=A,q=2\x1b\\\x1b[<u\x1b[?2048l\x1b[?2004l\x1b[?1004l\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?25h\x1b[?1049l",
         );
         let _ = self.stdout.flush();
         let _ = termios::tcsetattr(&self.stdin, OptionalActions::Flush, &self.saved);
@@ -539,6 +549,7 @@ enum RawEvent {
     Mouse(MouseKind, MouseButton, u32, u32),
     Paste(String),
     Focus(bool),
+    WindowSize(WindowSize),
 }
 
 fn parse_event(buf: &[u8]) -> Option<(RawEvent, usize)> {
@@ -692,9 +703,43 @@ fn parse_csi(buf: &[u8]) -> Option<(RawEvent, usize)> {
             Some((kind, button, x, y)) => RawEvent::Mouse(kind, button, x, y),
             None => RawEvent::Key(KeyEvent::plain(Key::Unknown)),
         },
+        b't' => match parse_resize_report(params) {
+            Some(ws) => RawEvent::WindowSize(ws),
+            None => RawEvent::Key(KeyEvent::plain(Key::Unknown)),
+        },
         _ => RawEvent::Key(KeyEvent::plain(Key::Unknown)),
     };
     Some((event, end))
+}
+
+/// Mode 2048 report: `CSI 48 ; rows ; cols ; height_px ; width_px t`.
+/// Fields may carry colon-separated subparameters; only the leading number
+/// counts. Pixel-incapable terminals report the pixel fields as 0.
+fn parse_resize_report(params: &[u8]) -> Option<WindowSize> {
+    let mut fields = params.split(|&b| b == b';').map(|field| {
+        let digits: Vec<u8> = field
+            .iter()
+            .copied()
+            .take_while(u8::is_ascii_digit)
+            .collect();
+        std::str::from_utf8(&digits).ok()?.parse::<u32>().ok()
+    });
+    if fields.next()?? != 48 {
+        return None;
+    }
+    let rows = fields.next()??;
+    let cols = fields.next()??;
+    let height_px = fields.next().flatten().unwrap_or(0);
+    let width_px = fields.next().flatten().unwrap_or(0);
+    if rows == 0 || cols == 0 {
+        return None;
+    }
+    Some(WindowSize {
+        cols,
+        rows,
+        width_px,
+        height_px,
+    })
 }
 
 fn parse_kitty_key(params: &[u8]) -> KeyEvent {
@@ -901,6 +946,30 @@ mod tests {
         };
         rustix::shm::unlink(&name).unwrap();
         assert_eq!(read_back, data);
+    }
+
+    #[test]
+    fn parses_in_band_resize_reports() {
+        let (event, used) = parse_event(b"\x1b[48;30;100;630;1000t").unwrap();
+        assert_eq!(
+            event,
+            RawEvent::WindowSize(WindowSize {
+                cols: 100,
+                rows: 30,
+                width_px: 1000,
+                height_px: 630,
+            })
+        );
+        assert_eq!(used, 21);
+        // Colon subparameters only count their leading number.
+        let (event, _) = parse_event(b"\x1b[48;30:1;100;630;1000t").unwrap();
+        assert!(matches!(event, RawEvent::WindowSize(ws) if ws.rows == 30 && ws.cols == 100));
+        // Pixel-incapable terminals report zeros; rows/cols still land.
+        let (event, _) = parse_event(b"\x1b[48;30;100;0;0t").unwrap();
+        assert!(matches!(event, RawEvent::WindowSize(ws) if ws.cell_size().is_none()));
+        // Other `t` reports are not resizes.
+        let (event, _) = parse_event(b"\x1b[6;21;10t").unwrap();
+        assert!(!matches!(event, RawEvent::WindowSize(_)));
     }
 
     #[test]
