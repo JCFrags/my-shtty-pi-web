@@ -71,8 +71,6 @@ impl Canvas {
         if x2 <= x1 || y2 <= y1 {
             return;
         }
-        // Fill one row, then memcpy it into the rest: large fills (selection
-        // bands can span the viewport) must not run per-pixel loops.
         let first = ((y1 * self.width + x1) * 4) as usize;
         let row_len = ((x2 - x1) * 4) as usize;
         for px in self.pixels[first..first + row_len].chunks_exact_mut(4) {
@@ -156,9 +154,6 @@ impl Canvas {
         if w <= 0.0 || h <= 0.0 {
             return;
         }
-        // Square opaque fills skip the path rasterizer: paint_path builds a
-        // full-canvas clip mask and blends per pixel, which made selection
-        // bands cost milliseconds per frame while scrolling.
         if radius.min(w / 2.0).min(h / 2.0) < 0.5 && color[3] == 255 {
             let x1 = x.round().max(0.0) as u32;
             let y1 = y.round().max(0.0) as u32;
@@ -183,7 +178,6 @@ impl Canvas {
         width: f32,
         color: [u8; 4],
     ) {
-        // Inset by half the stroke so the border stays inside the box like CSS.
         let inset = width / 2.0;
         if let Some(path) = rounded_rect_path(
             x + inset,

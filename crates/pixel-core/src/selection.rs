@@ -3,16 +3,12 @@ use std::time::{Duration, Instant};
 
 use crate::tree::NodeId;
 
-/// A position inside a text node's string, in byte offsets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DocPos {
     pub node: NodeId,
     pub offset: usize,
 }
 
-/// Selection across the document's text nodes. `anchor` is where the
-/// gesture started, `focus` is the end that moves; either may come first
-/// in document order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DocSelection {
     pub anchor: DocPos,
@@ -152,8 +148,6 @@ pub(crate) fn line_end(text: &str, offset: usize) -> usize {
     text[offset..].find('\n').map_or(text.len(), |i| offset + i)
 }
 
-/// The word (or run of same-class characters) under `offset`, preferring
-/// the word to the left when the offset sits on a boundary.
 pub(crate) fn word_range_at(text: &str, offset: usize) -> Option<Range<usize>> {
     let offset = snap_to_boundary(text, offset);
     let pivot = if text[offset..].chars().next().is_some_and(is_word_char) {
@@ -185,7 +179,6 @@ pub(crate) fn word_range_at(text: &str, offset: usize) -> Option<Range<usize>> {
     Some(start..end)
 }
 
-/// The logical line under `offset`, including its trailing newline.
 pub(crate) fn line_range_at(text: &str, offset: usize) -> Range<usize> {
     let offset = snap_to_boundary(text, offset);
     let start = line_start(text, offset);

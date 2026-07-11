@@ -23,8 +23,6 @@ pub struct CounterRecord {
     pub value: u64,
 }
 
-/// A user interaction (click, key, scroll burst…) noted on the timeline so a
-/// profile can be correlated with what the user was doing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarkRecord {
     pub name: &'static str,
@@ -36,8 +34,6 @@ pub struct MarkRecord {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProfileData {
-    /// Wall-clock time of recording start; span start_ms offsets are
-    /// relative to this, so consumers can merge with other clocks.
     pub epoch_ms: f64,
     pub spans: Vec<SpanRecord>,
     pub counters: Vec<CounterRecord>,
@@ -86,8 +82,6 @@ pub fn stop() -> Option<ProfileData> {
         })
 }
 
-/// Tags subsequent spans with the view they work on, so a profile can
-/// separate app-tree work from devtools-tree work.
 pub fn set_view(view: u32) {
     ACTIVE.with(|active| {
         if let Some(recording) = active.borrow_mut().as_mut() {
@@ -152,9 +146,6 @@ pub fn mark(name: &'static str, view: u32, label: String) {
     });
 }
 
-/// Like `mark`, but if the previous mark has the same name and ended less
-/// than `gap_ms` ago, extend it instead — one mark per scroll burst, not per
-/// wheel tick. The label is replaced so callers can keep a running count.
 pub fn mark_or_extend(name: &'static str, view: u32, label: String, gap_ms: f64) {
     ACTIVE.with(|active| {
         if let Some(r) = active.borrow_mut().as_mut() {
@@ -179,8 +170,6 @@ pub fn mark_or_extend(name: &'static str, view: u32, label: String, gap_ms: f64)
     });
 }
 
-/// Offset since recording start, or None when idle. Pairs with `emit` for
-/// code that aggregates timings itself and reports them afterwards.
 pub fn now_ms() -> Option<f64> {
     ACTIVE.with(|active| {
         active
@@ -190,7 +179,6 @@ pub fn now_ms() -> Option<f64> {
     })
 }
 
-/// Record an already-measured span as a child of the currently open span.
 pub fn emit(name: &'static str, start_ms: f64, dur_ms: f64, arg: Option<u64>) {
     ACTIVE.with(|active| {
         if let Some(r) = active.borrow_mut().as_mut() {
@@ -219,7 +207,6 @@ impl Profiler {
         is_recording()
     }
 
-    /// Start/stop recording, dumping a JSON report to `profiles/` on stop.
     pub fn toggle(&mut self) -> io::Result<Option<std::path::PathBuf>> {
         if is_recording() {
             let data = stop().expect("recording was active");

@@ -79,8 +79,6 @@ pub fn error(target: &'static str, message: impl Into<String>) {
     log(LogLevel::Error, target, message);
 }
 
-/// Entries with seq >= `after`, so callers pass the last seen seq + 1
-/// (or 0 for the full backlog that is still in the ring).
 pub fn entries_after(after: u64) -> Vec<LogEntry> {
     let Ok(store) = LOGS.lock() else {
         return Vec::new();

@@ -922,7 +922,6 @@ impl Tree {
         Some(self.get(id)?.visible)
     }
 
-    /// Topmost wheel-subscribed node under the point.
     pub fn hit_wheel(&self, x: f32, y: f32) -> Option<NodeId> {
         self.paint_order.iter().rev().copied().find(|&id| {
             self.get(id)
@@ -930,8 +929,6 @@ impl Tree {
         })
     }
 
-    /// Topmost painted node under the point, clickable or not. This is the
-    /// hit test for inspection, where every node is a candidate.
     pub fn hit_any(&self, x: f32, y: f32) -> Option<NodeId> {
         self.paint_order.iter().rev().copied().find(|&id| {
             self.get(id)
@@ -970,8 +967,6 @@ impl Tree {
                 return Some(HitTarget::Click(id));
             }
             if self.selectable_text_leaf(id) {
-                // A clickable or input ancestor still owns the click; the
-                // engine starts the selection gesture separately.
                 return Some(self.interactive_ancestor(id).unwrap_or(HitTarget::Text(id)));
             }
             if node.style.overflow == Overflow::Scroll
@@ -983,9 +978,6 @@ impl Tree {
         None
     }
 
-    /// A static text leaf the document selection may cover. Selectability
-    /// is orthogonal to click handling, like user-select in a browser;
-    /// only `selectable: false` (or being an input) opts text out.
     pub(crate) fn selectable_text_leaf(&self, id: NodeId) -> bool {
         let Some(node) = self.get(id) else {
             return false;
@@ -1169,9 +1161,6 @@ impl Tree {
             _ => 0,
         }
     }
-
-    /// Document position directly under the point, if it sits on a
-    /// selectable text leaf.
     pub fn doc_pos_hit(&self, point: (f32, f32), fonts: &[fontdue::Font]) -> Option<DocPos> {
         let id = self.paint_order.iter().rev().copied().find(|&id| {
             self.selectable_text_leaf(id)
@@ -1185,10 +1174,6 @@ impl Tree {
         })
     }
 
-    /// Like `doc_pos_hit`, but snaps to the nearest selectable text when
-    /// the point is in a gap, so drags through empty space keep selecting.
-    /// Points past a node's bottom or top mean its very end or beginning —
-    /// the x position only picks a column when the point is beside a line.
     pub fn doc_pos_near(&self, point: (f32, f32), fonts: &[fontdue::Font]) -> Option<DocPos> {
         self.doc_pos_near_impl(point, fonts, true)
     }
@@ -1230,8 +1215,6 @@ impl Tree {
         Some(DocPos { node: id, offset })
     }
 
-    /// The current document selection, if both endpoints are still live
-    /// text nodes.
     pub fn doc_selection(&self) -> Option<DocSelection> {
         let sel = self.doc_selection?;
         let valid = |pos: DocPos| {
@@ -1242,7 +1225,6 @@ impl Tree {
         (valid(sel.anchor) && valid(sel.focus)).then_some(sel)
     }
 
-    /// Endpoints in document order; None while collapsed or invalid.
     fn doc_range(&self) -> Option<(DocPos, DocPos)> {
         let sel = self.doc_selection()?;
         if sel.is_collapsed() {
@@ -1256,7 +1238,6 @@ impl Tree {
         })
     }
 
-    /// The slice of this node's text covered by the document selection.
     pub fn doc_selection_range(&self, id: NodeId) -> Option<std::ops::Range<usize>> {
         let (start, end) = self.doc_range()?;
         let node = self.get(id)?;
@@ -1278,8 +1259,6 @@ impl Tree {
         (from < to).then(|| from..to)
     }
 
-    /// Selected text across nodes in document order; nodes on different
-    /// rows are joined with a newline.
     pub fn doc_selected_text(&self) -> Option<String> {
         self.doc_range()?;
         let mut out = String::new();
@@ -1302,8 +1281,6 @@ impl Tree {
         (!out.is_empty()).then_some(out)
     }
 
-    /// Mouse down on a selectable text leaf: place, or select word/line on
-    /// chained clicks — the same gesture protocol inputs use.
     pub fn doc_select_down(&mut self, point: (f32, f32), fonts: &[fontdue::Font]) -> bool {
         let Some(pos) = self.doc_pos_hit(point, fonts) else {
             return false;
@@ -1336,10 +1313,6 @@ impl Tree {
         true
     }
 
-    /// Mouse down away from any text: anchor a pending, collapsed selection
-    /// at the nearest selectable position so a drag into text starts
-    /// selecting from there — a click that never drags selects nothing,
-    /// which is also what dismisses an existing selection.
     pub fn doc_select_down_near(&mut self, point: (f32, f32), fonts: &[fontdue::Font]) -> bool {
         let Some(pos) = self.doc_pos_near(point, fonts) else {
             return false;
@@ -1397,8 +1370,6 @@ impl Tree {
         true
     }
 
-    /// Clears the document selection; true when a visible selection was
-    /// dismissed.
     pub fn doc_collapse(&mut self) -> bool {
         let had = self.doc_range().is_some();
         if self.doc_selection.take().is_some() {
@@ -1425,9 +1396,6 @@ impl Tree {
         }
     }
 
-    /// Shift+arrow: move the selection's focus endpoint, crossing into the
-    /// neighboring text node at the ends. Line granularity stays put at a
-    /// line edge, like the input's cmd+arrow.
     pub fn doc_extend(&mut self, left: bool, granularity: Granularity) -> bool {
         let Some(sel) = self.doc_selection() else {
             return false;
@@ -1493,8 +1461,6 @@ impl Tree {
         true
     }
 
-    /// Cmd+shift+up/down: extend the focus endpoint to the document's
-    /// first or last selectable position.
     pub fn doc_extend_edge(&mut self, up: bool) -> bool {
         let Some(sel) = self.doc_selection() else {
             return false;
@@ -1530,9 +1496,6 @@ impl Tree {
         true
     }
 
-    /// Shift+up/down: within the node this mirrors the input's goal-column
-    /// motion; at the node's first/last visual line it hit-tests one line
-    /// beyond the node to cross into the neighbor.
     pub fn doc_extend_vertical(&mut self, up: bool, fonts: &[fontdue::Font]) -> bool {
         let Some(sel) = self.doc_selection() else {
             return false;
@@ -1573,8 +1536,6 @@ impl Tree {
             } else {
                 rect.y + rect.h + line_h * 0.5
             };
-            // Unclamped: landing in a gap should still pick the goal column
-            // of the neighbor, not jump to its end.
             match self.doc_pos_near_impl((goal_x, y), fonts, false) {
                 Some(pos) if pos.node != focus.node => Some(pos),
                 _ => Some(DocPos {
@@ -1621,10 +1582,6 @@ impl Tree {
         None
     }
 
-    /// Terminal-style selection regions, one per `Unified` container the
-    /// selection touches. Each container renders its slice of the selection
-    /// as continuous bands regardless of where the gesture started: an
-    /// endpoint outside the container clamps that edge to full width.
     pub fn doc_selection_blocks(
         &self,
         fonts: &[fontdue::Font],

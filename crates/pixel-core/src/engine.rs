@@ -167,8 +167,6 @@ pub enum EngineEvent {
         view: usize,
         text: String,
     },
-    /// Raw wheel input over a node that opted in via `wheel_events`;
-    /// x/y are node-local, deltas are pixels (positive = down/right).
     Wheel {
         view: usize,
         node: NodeId,
@@ -686,17 +684,11 @@ impl Engine {
         Ok(())
     }
 
-    /// React to a new terminal geometry from any source (TIOCGWINSZ polling,
-    /// SIGWINCH requery, or a mode 2048 in-band report). A font-size change
-    /// keeps the window pixels but moves the cell size, so both gate a
-    /// relayout; base_px changes force one even when pane sizes are identical.
     fn apply_window(&mut self, ws: &crate::terminal::WindowSize) -> io::Result<()> {
         let grid = (ws.cols, ws.rows);
         let cell = match ws.cell_size() {
             Some(cell) => cell,
             None => {
-                // No pixel info: if the grid changed the cached cell size is
-                // suspect (font zoom), so re-query it once.
                 if grid != self.grid && self.grid != (0, 0) {
                     self.term.forget_cell_size();
                 }
@@ -839,8 +831,6 @@ impl Engine {
                     .expect("checked above");
                 let reply = input.handle_key(key, font, resolved.px, wrap);
                 if reply == InputReply::None {
-                    // Keys the input ignores (⌘C without an input selection,
-                    // Escape) still act on the document selection.
                     if !self.handle_doc_key(&key)? {
                         out.push(EngineEvent::Key {
                             view: self.active_view,
@@ -863,9 +853,6 @@ impl Engine {
         Ok(())
     }
 
-    /// Keyboard on the document selection while no input is focused; the
-    /// bindings mirror the input's selection keys. Returns whether the key
-    /// was consumed.
     fn handle_doc_key(&mut self, key: &KeyEvent) -> io::Result<bool> {
         use Granularity::{Char, Line, Word};
         let view = self.active_view;
@@ -925,11 +912,6 @@ impl Engine {
         }
     }
 
-    /// Mouse down over selectable text starts the selection gesture and,
-    /// like a browser, blurs any focused input; a click target under the
-    /// same point still fires independently. Off-text presses anchor a
-    /// pending selection at the nearest text (blurring only once a drag
-    /// actually selects something), so drags can start from empty space.
     fn begin_text_selection(&mut self, view: usize, local: (f32, f32)) {
         self.clear_doc_selections(Some(view));
         let fonts = &self.fonts;
@@ -964,8 +946,6 @@ impl Engine {
                 let view = self.view_at(point.0);
                 let local = self.to_local(view, point);
                 self.active_view = view;
-                // Clicking one pane takes keyboard ownership from the other,
-                // like clicking devtools blurs the page in a browser.
                 if let Some((focus_view, _)) = self.focused()
                     && focus_view != view
                 {
@@ -1154,7 +1134,6 @@ impl Engine {
         Ok(())
     }
 
-    /// Deliver wheel input to a `wheel_events` node under the point, if any.
     fn emit_wheel(
         &mut self,
         view: usize,
@@ -1182,8 +1161,6 @@ impl Engine {
         true
     }
 
-    /// Note a pointer interaction on the profile timeline, labelled with the
-    /// key of the clickable node under it when there is one.
     fn mark_pointer(&mut self, name: &'static str, point: (f32, f32)) {
         if !crate::profiler::is_recording() {
             return;
@@ -1360,7 +1337,6 @@ impl Engine {
             return Ok(true);
         };
         if key == CONTEXT_MENU_KEY {
-            // A disabled row or menu padding: swallow but stay open.
             return Ok(true);
         }
         if !key.starts_with("menu:") {
@@ -1480,8 +1456,6 @@ impl Engine {
         });
     }
 
-    /// Topmost scroller whose visible bar zone contains the view-local point.
-    /// Hidden bars don't take hits, matching overlay-scrollbar behavior.
     fn bar_at(&self, view: usize, point: (f32, f32)) -> Option<NodeId> {
         let tree = &self.views[view].tree;
         tree.scroll_nodes().into_iter().rev().find(|&id| {
@@ -1502,7 +1476,6 @@ impl Engine {
         let grab = if rects.thumb.contains(rects.thumb.x + 1.0, point.1) {
             point.1 - rects.thumb.y
         } else {
-            // Track click: jump the thumb's center to the click, then drag.
             let center_grab = rects.thumb.h / 2.0;
             self.drag_bar_to(view, id, point.1 - center_grab);
             center_grab
@@ -1543,8 +1516,6 @@ impl Engine {
                 };
                 let mut last_move = last_move;
                 if engaged {
-                    // Hovering counts as activity, so leaving the bar restarts
-                    // the full linger instead of fading almost immediately.
                     last_move = Some(now);
                 }
                 let recent = last_move.is_some_and(|at| now.duration_since(at) < BAR_HIDE_DELAY);
@@ -1776,7 +1747,6 @@ impl Engine {
                 }
             };
             self.stats.frame_ms = ema(self.stats.frame_ms, start.elapsed().as_secs_f32() * 1000.0);
-            // Gaps across idle stretches aren't a frame rate; only count cadence.
             if gap < 0.25 {
                 self.stats.fps = ema(self.stats.fps, 1.0 / gap);
             }

@@ -7,9 +7,6 @@ use crate::text_input::{caret_width, offset_to_point};
 use crate::tree::{NodeId, PxRect, Tree};
 use crate::wrap::wrap_lines;
 
-/// Where paint time went, measured only while a profile is recording and
-/// reported as child spans of tree.paint. The buckets are aggregates across
-/// all nodes, laid out sequentially rather than at their true times.
 #[derive(Default)]
 struct PaintStats {
     rects: f64,
@@ -183,7 +180,6 @@ fn paint_node(
             let line_h = line_metrics.new_line_size;
             let selection = match &node.input {
                 Some(state) => state.input.selection().map(|s| (s, state.selection_color)),
-                // A block container's bands already cover its subtree.
                 None if !in_block => tree
                     .doc_selection_range(id)
                     .map(|s| (s, node.resolved.selection_color)),

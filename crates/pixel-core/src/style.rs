@@ -2,12 +2,6 @@ pub type Color = [u8; 4];
 
 pub const DEFAULT_SELECTION_COLOR: Color = [90, 90, 140, 255];
 
-/// How text selection renders over this container. `Text` hugs the selected
-/// glyphs per node; `Unified` designates the container as a selection block:
-/// whatever slice of the selection covers it paints as one continuous
-/// terminal-style region (full-width middle rows across gaps and empty
-/// lines), no matter where the gesture started — an endpoint outside the
-/// container clamps that edge of the region to the container's full width.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SelectionMode {
     #[default]
@@ -169,8 +163,6 @@ pub struct Style {
     pub hover_color: Option<Color>,
     pub scrollbar: Option<ScrollbarStyle>,
     pub wrap: bool,
-    /// Whether static text in this subtree can be mouse-selected; inherits
-    /// like color, defaults to selectable.
     pub selectable: Option<bool>,
     pub selection_color: Option<Color>,
     pub selection_mode: SelectionMode,

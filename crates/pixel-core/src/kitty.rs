@@ -71,7 +71,6 @@ mod tests {
 
     #[test]
     fn transmit_chunks_large_payloads() {
-        // Pseudo-random pixels so zlib can't shrink them below one chunk.
         let mut seed = 0x12345678u32;
         let pixels: Vec<u8> = (0..64 * 64 * 4)
             .map(|_| {
