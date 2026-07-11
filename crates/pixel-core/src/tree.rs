@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use taffy::TaffyTree;
@@ -6,10 +6,18 @@ use taffy::prelude::TaffyMaxContent as _;
 
 use crate::canvas::measure_text;
 use crate::scroll::ScrollState;
-use crate::style::{
-    Align, Color, Dimension, FlexDirection, Justify, Overflow, Position, ScrollbarStyle, Style,
+use crate::selection::{
+    ClickGesture, ClickTracker, DocPos, DocSelection, line_range_at, line_start, next_char,
+    next_word_boundary, prev_char, prev_word_boundary, word_range_at,
 };
-use crate::text_input::{InputGeometry, TextInput};
+use crate::style::{
+    Align, Color, DEFAULT_SELECTION_COLOR, Dimension, FlexDirection, Justify, Overflow, Position,
+    ScrollbarStyle, SelectionMode, Style,
+};
+use crate::text_input::{
+    Granularity, InputGeometry, TextInput, line_height, offset_to_point, point_to_offset,
+};
+use crate::wrap::{line_of_offset, wrap_lines};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId {
@@ -66,6 +74,7 @@ impl PxRect {
 pub enum HitTarget {
     Input(NodeId),
     Click(NodeId),
+    Text(NodeId),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -127,6 +136,7 @@ pub struct Props {
     pub input: Option<InputProps>,
     pub content_height: Option<f32>,
     pub scroll_events: bool,
+    pub wheel_events: bool,
 }
 
 pub(crate) struct InputState {
@@ -141,6 +151,8 @@ pub(crate) struct Resolved {
     pub color: Color,
     pub px: f32,
     pub font: usize,
+    pub selectable: bool,
+    pub selection_color: Color,
 }
 
 #[derive(Default)]
@@ -164,11 +176,13 @@ pub(crate) struct RNode {
     pub scroll_max: f32,
     pub content_height: Option<f32>,
     pub scroll_events: bool,
+    pub wheel_events: bool,
     pub last_scroll_emit: f32,
     pub bar: BarState,
     pub resolved: Resolved,
     pub abs: PxRect,
     pub visible: PxRect,
+    pub order: u32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -196,9 +210,14 @@ pub struct Tree {
     root: NodeId,
     pub(crate) taffy: TaffyTree<MeasureCtx>,
     keys: HashMap<String, NodeId>,
+    children_dirty: HashSet<NodeId>,
     paint_order: Vec<NodeId>,
     scrollables: Vec<NodeId>,
     focus: Option<NodeId>,
+    doc_selection: Option<DocSelection>,
+    doc_clicks: ClickTracker,
+    doc_selecting: bool,
+    doc_goal_x: Option<f32>,
     base_px: f32,
     needs_layout: bool,
     needs_place: bool,
@@ -209,6 +228,8 @@ pub(crate) const DEFAULT_RESOLVED: Resolved = Resolved {
     color: [255, 255, 255, 255],
     px: 16.0,
     font: 0,
+    selectable: true,
+    selection_color: DEFAULT_SELECTION_COLOR,
 };
 
 impl Tree {
@@ -222,9 +243,14 @@ impl Tree {
             },
             taffy: TaffyTree::new(),
             keys: HashMap::new(),
+            children_dirty: HashSet::new(),
             paint_order: Vec::new(),
             scrollables: Vec::new(),
             focus: None,
+            doc_selection: None,
+            doc_clicks: ClickTracker::default(),
+            doc_selecting: false,
+            doc_goal_x: None,
             base_px: 16.0,
             needs_layout: true,
             needs_place: true,
@@ -257,6 +283,8 @@ impl Tree {
         {
             return;
         }
+        // Programmatic focus deliberately keeps the document selection, like
+        // a browser: only a click into the input clears it (engine-side).
         if self.focus != id {
             self.focus = id;
             self.needs_paint = true;
@@ -319,11 +347,13 @@ impl Tree {
             scroll_max: 0.0,
             content_height: props.content_height,
             scroll_events: props.scroll_events,
+            wheel_events: props.wheel_events,
             last_scroll_emit: 0.0,
             bar: BarState::default(),
             resolved: DEFAULT_RESOLVED,
             abs: PxRect::ZERO,
             visible: PxRect::ZERO,
+            order: 0,
         };
         let id = match self.free.pop() {
             Some(index) => {
@@ -369,7 +399,7 @@ impl Tree {
         };
         self.node_mut(parent).children.insert(index, child);
         self.node_mut(child).parent = Some(parent);
-        self.sync_taffy_children(parent);
+        self.children_dirty.insert(parent);
         self.needs_layout = true;
     }
 
@@ -383,19 +413,27 @@ impl Tree {
         };
         self.node_mut(parent).children.retain(|&c| c != child);
         self.node_mut(child).parent = None;
-        self.sync_taffy_children(parent);
+        self.children_dirty.insert(parent);
     }
 
-    fn sync_taffy_children(&mut self, parent: NodeId) {
-        let ids: Vec<taffy::NodeId> = self
-            .node(parent)
-            .children
-            .iter()
-            .map(|&c| self.node(c).taffy)
-            .collect();
-        self.taffy
-            .set_children(self.node(parent).taffy, &ids)
-            .expect("taffy children");
+    /// Child moves are batched and pushed to taffy once per layout, so
+    /// appending n children costs O(n) instead of O(n^2) syncs.
+    fn sync_dirty_children(&mut self) {
+        let dirty: Vec<NodeId> = self.children_dirty.drain().collect();
+        for parent in dirty {
+            if self.get(parent).is_none() {
+                continue;
+            }
+            let ids: Vec<taffy::NodeId> = self
+                .node(parent)
+                .children
+                .iter()
+                .map(|&c| self.node(c).taffy)
+                .collect();
+            self.taffy
+                .set_children(self.node(parent).taffy, &ids)
+                .expect("taffy children");
+        }
     }
 
     pub fn remove(&mut self, id: NodeId) {
@@ -423,6 +461,11 @@ impl Tree {
             if self.focus == Some(id) {
                 self.focus = None;
             }
+            if let Some(sel) = self.doc_selection
+                && (sel.anchor.node == id || sel.focus.node == id)
+            {
+                self.doc_selection = None;
+            }
         }
         self.needs_layout = true;
     }
@@ -443,6 +486,7 @@ impl Tree {
         node.hidden = props.hidden;
         node.clickable = props.clickable;
         node.scroll_events = props.scroll_events;
+        node.wheel_events = props.wheel_events;
         if node.content_height != props.content_height {
             node.content_height = props.content_height;
             changed = true;
@@ -489,6 +533,11 @@ impl Tree {
         if text_changed {
             changed = true;
             self.needs_layout = true;
+            if let Some(sel) = self.doc_selection
+                && (sel.anchor.node == id || sel.focus.node == id)
+            {
+                self.doc_selection = None;
+            }
         }
         if old_key != props.key {
             self.node_mut(id).key = props.key.clone();
@@ -533,7 +582,9 @@ impl Tree {
     }
 
     pub(crate) fn input_mut(&mut self, id: NodeId) -> Option<&mut TextInput> {
-        self.get_mut(id).and_then(|n| n.input.as_mut()).map(|s| &mut s.input)
+        self.get_mut(id)
+            .and_then(|n| n.input.as_mut())
+            .map(|s| &mut s.input)
     }
 
     pub fn input(&self, id: NodeId) -> Option<&TextInput> {
@@ -561,6 +612,70 @@ impl Tree {
             }
         }
         self.needs_paint = true;
+    }
+
+    pub fn text_of(&self, id: NodeId) -> Option<&str> {
+        self.get(id)?.text.as_deref()
+    }
+
+    pub(crate) fn input_meta(&self, id: NodeId) -> Option<(Resolved, bool)> {
+        let node = self.get(id)?;
+        let submit = node.input.as_ref()?.submit;
+        Some((node.resolved, submit))
+    }
+
+    pub(crate) fn resolved_px(&self, id: NodeId) -> Option<f32> {
+        Some(self.get(id)?.resolved.px)
+    }
+
+    pub(crate) fn bar_opacity(&self, id: NodeId) -> f32 {
+        self.get(id).map_or(0.0, |n| n.bar.opacity)
+    }
+
+    pub(crate) fn bar_state(&self, id: NodeId) -> Option<(f32, f32, Option<Instant>, f32)> {
+        let node = self.get(id)?;
+        Some((
+            node.bar.opacity,
+            node.bar.expand,
+            node.bar.last_move,
+            node.scroll_max,
+        ))
+    }
+
+    pub(crate) fn set_bar_state(
+        &mut self,
+        id: NodeId,
+        opacity: f32,
+        expand: f32,
+        last_move: Option<Instant>,
+    ) {
+        if let Some(node) = self.get_mut(id) {
+            node.bar.opacity = opacity;
+            node.bar.expand = expand;
+            node.bar.last_move = last_move;
+        }
+    }
+
+    pub(crate) fn touch_bar(&mut self, id: NodeId) {
+        if let Some(node) = self.get_mut(id) {
+            node.bar.last_move = Some(Instant::now());
+        }
+    }
+
+    /// Scroll offset ready to emit for a scroll-events node, or None when the
+    /// node opted out or has not moved enough since the last emission.
+    pub(crate) fn take_scroll_emit(&mut self, id: NodeId) -> Option<(Option<String>, f32, f32)> {
+        let node = self.get(id)?;
+        if !node.scroll_events {
+            return None;
+        }
+        let (offset, max) = (node.scroll.position, node.scroll_max);
+        if (offset - node.last_scroll_emit).abs() < 0.5 {
+            return None;
+        }
+        let key = node.key.clone();
+        self.get_mut(id)?.last_scroll_emit = offset;
+        Some((key, offset, max))
     }
 
     pub fn find(&self, key: &str) -> Option<NodeId> {
@@ -611,13 +726,13 @@ impl Tree {
         assert!(!fonts.is_empty());
         self.base_px = base_px;
         if self.needs_layout {
+            crate::profiler::span("tree.sync", || self.sync_dirty_children());
             crate::profiler::span("tree.resolve", || {
                 self.resolve(
                     self.root,
                     Resolved {
-                        color: [255, 255, 255, 255],
                         px: base_px,
-                        font: 0,
+                        ..DEFAULT_RESOLVED
                     },
                 )
             });
@@ -680,6 +795,11 @@ impl Tree {
             color: node.style.color.unwrap_or(inherited.color),
             px: node.style.font_size.unwrap_or(inherited.px),
             font: node.style.font.unwrap_or(inherited.font),
+            selectable: node.style.selectable.unwrap_or(inherited.selectable),
+            selection_color: node
+                .style
+                .selection_color
+                .unwrap_or(inherited.selection_color),
         };
         node.resolved = resolved;
         let taffy = node.taffy;
@@ -711,7 +831,9 @@ impl Tree {
                 let _ = self.taffy.mark_dirty(taffy);
             }
         } else if self.taffy.get_node_context(taffy).is_some() {
-            self.taffy.set_node_context(taffy, None).expect("taffy context");
+            self.taffy
+                .set_node_context(taffy, None)
+                .expect("taffy context");
             let _ = self.taffy.mark_dirty(taffy);
         }
         for child in children {
@@ -722,7 +844,10 @@ impl Tree {
     fn place(&mut self) {
         self.paint_order.clear();
         self.scrollables.clear();
-        let layout = self.taffy.layout(self.node(self.root).taffy).expect("layout");
+        let layout = self
+            .taffy
+            .layout(self.node(self.root).taffy)
+            .expect("layout");
         let window = PxRect {
             x: 0.0,
             y: 0.0,
@@ -750,9 +875,7 @@ impl Tree {
         node.visible = visible;
         let scrolls = node.style.overflow == Overflow::Scroll;
         if scrolls {
-            let content = node
-                .content_height
-                .unwrap_or(layout.content_size.height);
+            let content = node.content_height.unwrap_or(layout.content_size.height);
             node.scroll_max = (content - rect.h).max(0.0);
             let max = node.scroll_max;
             if node.scroll.position > max {
@@ -763,6 +886,7 @@ impl Tree {
             }
             self.scrollables.push(id);
         }
+        self.node_mut(id).order = self.paint_order.len() as u32;
         self.paint_order.push(id);
 
         let node = self.node(id);
@@ -798,6 +922,23 @@ impl Tree {
         Some(self.get(id)?.visible)
     }
 
+    /// Topmost wheel-subscribed node under the point.
+    pub fn hit_wheel(&self, x: f32, y: f32) -> Option<NodeId> {
+        self.paint_order.iter().rev().copied().find(|&id| {
+            self.get(id)
+                .is_some_and(|node| node.wheel_events && node.visible.contains(x, y))
+        })
+    }
+
+    /// Topmost painted node under the point, clickable or not. This is the
+    /// hit test for inspection, where every node is a candidate.
+    pub fn hit_any(&self, x: f32, y: f32) -> Option<NodeId> {
+        self.paint_order.iter().rev().copied().find(|&id| {
+            self.get(id)
+                .is_some_and(|node| node.visible.w > 0.0 && node.visible.contains(x, y))
+        })
+    }
+
     pub fn hit_click(&self, x: f32, y: f32) -> Option<NodeId> {
         self.paint_order.iter().rev().copied().find(|&id| {
             self.get(id)
@@ -828,11 +969,45 @@ impl Tree {
             if node.clickable {
                 return Some(HitTarget::Click(id));
             }
+            if self.selectable_text_leaf(id) {
+                // A clickable or input ancestor still owns the click; the
+                // engine starts the selection gesture separately.
+                return Some(self.interactive_ancestor(id).unwrap_or(HitTarget::Text(id)));
+            }
             if node.style.overflow == Overflow::Scroll
                 && let Some(input) = self.descendant_input(id)
             {
                 return Some(HitTarget::Input(input));
             }
+        }
+        None
+    }
+
+    /// A static text leaf the document selection may cover. Selectability
+    /// is orthogonal to click handling, like user-select in a browser;
+    /// only `selectable: false` (or being an input) opts text out.
+    pub(crate) fn selectable_text_leaf(&self, id: NodeId) -> bool {
+        let Some(node) = self.get(id) else {
+            return false;
+        };
+        node.text.is_some()
+            && node.children.is_empty()
+            && node.input.is_none()
+            && !node.hidden
+            && node.resolved.selectable
+    }
+
+    fn interactive_ancestor(&self, id: NodeId) -> Option<HitTarget> {
+        let mut current = self.get(id)?.parent;
+        while let Some(cur) = current {
+            let node = self.get(cur)?;
+            if node.input.is_some() {
+                return Some(HitTarget::Input(cur));
+            }
+            if node.clickable {
+                return Some(HitTarget::Click(cur));
+            }
+            current = node.parent;
         }
         None
     }
@@ -861,10 +1036,7 @@ impl Tree {
             .iter()
             .rev()
             .copied()
-            .find(|&id| {
-                self.get(id)
-                    .is_some_and(|node| node.visible.contains(x, y))
-            })
+            .find(|&id| self.get(id).is_some_and(|node| node.visible.contains(x, y)))
             .and_then(|id| self.scroll_area(id))
     }
 
@@ -970,8 +1142,12 @@ impl Tree {
     }
 
     pub fn input_geometry(&self, id: NodeId) -> Option<InputGeometry> {
+        self.get(id)?.input.as_ref()?;
+        self.text_geometry(id)
+    }
+
+    pub fn text_geometry(&self, id: NodeId) -> Option<InputGeometry> {
         let node = self.get(id)?;
-        node.input.as_ref()?;
         let layout = self.taffy.layout(node.taffy).ok()?;
         Some(InputGeometry {
             origin: (
@@ -985,6 +1161,544 @@ impl Tree {
                     + crate::wrap::WRAP_SLACK
             }),
         })
+    }
+
+    fn doc_offset_at(&self, id: NodeId, point: (f32, f32), fonts: &[fontdue::Font]) -> usize {
+        match (self.text_geometry(id), self.text_of(id)) {
+            (Some(geometry), Some(text)) => geometry.offset_at(text, point, fonts),
+            _ => 0,
+        }
+    }
+
+    /// Document position directly under the point, if it sits on a
+    /// selectable text leaf.
+    pub fn doc_pos_hit(&self, point: (f32, f32), fonts: &[fontdue::Font]) -> Option<DocPos> {
+        let id = self.paint_order.iter().rev().copied().find(|&id| {
+            self.selectable_text_leaf(id)
+                && self
+                    .get(id)
+                    .is_some_and(|n| n.visible.contains(point.0, point.1))
+        })?;
+        Some(DocPos {
+            node: id,
+            offset: self.doc_offset_at(id, point, fonts),
+        })
+    }
+
+    /// Like `doc_pos_hit`, but snaps to the nearest selectable text when
+    /// the point is in a gap, so drags through empty space keep selecting.
+    /// Points past a node's bottom or top mean its very end or beginning —
+    /// the x position only picks a column when the point is beside a line.
+    pub fn doc_pos_near(&self, point: (f32, f32), fonts: &[fontdue::Font]) -> Option<DocPos> {
+        self.doc_pos_near_impl(point, fonts, true)
+    }
+
+    fn doc_pos_near_impl(
+        &self,
+        point: (f32, f32),
+        fonts: &[fontdue::Font],
+        clamp_to_ends: bool,
+    ) -> Option<DocPos> {
+        if let Some(pos) = self.doc_pos_hit(point, fonts) {
+            return Some(pos);
+        }
+        let mut best: Option<(f32, f32, NodeId)> = None;
+        for &id in &self.paint_order {
+            if !self.selectable_text_leaf(id) {
+                continue;
+            }
+            let v = self.node(id).visible;
+            if v.w <= 0.0 || v.h <= 0.0 {
+                continue;
+            }
+            let dy = (v.y - point.1).max(point.1 - (v.y + v.h)).max(0.0);
+            let dx = (v.x - point.0).max(point.0 - (v.x + v.w)).max(0.0);
+            let closer = best.is_none_or(|(by, bx, _)| dy < by || (dy == by && dx < bx));
+            if closer {
+                best = Some((dy, dx, id));
+            }
+        }
+        let (_, _, id) = best?;
+        let v = self.node(id).visible;
+        let offset = if clamp_to_ends && point.1 >= v.y + v.h {
+            self.text_of(id).map_or(0, str::len)
+        } else if clamp_to_ends && point.1 < v.y {
+            0
+        } else {
+            self.doc_offset_at(id, point, fonts)
+        };
+        Some(DocPos { node: id, offset })
+    }
+
+    /// The current document selection, if both endpoints are still live
+    /// text nodes.
+    pub fn doc_selection(&self) -> Option<DocSelection> {
+        let sel = self.doc_selection?;
+        let valid = |pos: DocPos| {
+            self.get(pos.node)
+                .and_then(|n| n.text.as_deref())
+                .is_some_and(|t| pos.offset <= t.len())
+        };
+        (valid(sel.anchor) && valid(sel.focus)).then_some(sel)
+    }
+
+    /// Endpoints in document order; None while collapsed or invalid.
+    fn doc_range(&self) -> Option<(DocPos, DocPos)> {
+        let sel = self.doc_selection()?;
+        if sel.is_collapsed() {
+            return None;
+        }
+        let key = |pos: DocPos| (self.node(pos.node).order, pos.offset);
+        Some(if key(sel.anchor) <= key(sel.focus) {
+            (sel.anchor, sel.focus)
+        } else {
+            (sel.focus, sel.anchor)
+        })
+    }
+
+    /// The slice of this node's text covered by the document selection.
+    pub fn doc_selection_range(&self, id: NodeId) -> Option<std::ops::Range<usize>> {
+        let (start, end) = self.doc_range()?;
+        let node = self.get(id)?;
+        let text = node.text.as_deref()?;
+        let start_order = self.node(start.node).order;
+        let end_order = self.node(end.node).order;
+        if node.order < start_order || node.order > end_order {
+            return None;
+        }
+        if id != start.node && id != end.node && !self.selectable_text_leaf(id) {
+            return None;
+        }
+        let from = if id == start.node { start.offset } else { 0 };
+        let to = if id == end.node {
+            end.offset
+        } else {
+            text.len()
+        };
+        (from < to).then(|| from..to)
+    }
+
+    /// Selected text across nodes in document order; nodes on different
+    /// rows are joined with a newline.
+    pub fn doc_selected_text(&self) -> Option<String> {
+        self.doc_range()?;
+        let mut out = String::new();
+        let mut prev: Option<PxRect> = None;
+        for &id in &self.paint_order {
+            let Some(range) = self.doc_selection_range(id) else {
+                continue;
+            };
+            let rect = self.node(id).abs;
+            if let Some(prev) = prev {
+                let same_row = rect.y < prev.y + prev.h && rect.y + rect.h > prev.y;
+                if !same_row {
+                    out.push('\n');
+                }
+            }
+            let text = self.node(id).text.as_deref().unwrap_or_default();
+            out.push_str(&text[range]);
+            prev = Some(rect);
+        }
+        (!out.is_empty()).then_some(out)
+    }
+
+    /// Mouse down on a selectable text leaf: place, or select word/line on
+    /// chained clicks — the same gesture protocol inputs use.
+    pub fn doc_select_down(&mut self, point: (f32, f32), fonts: &[fontdue::Font]) -> bool {
+        let Some(pos) = self.doc_pos_hit(point, fonts) else {
+            return false;
+        };
+        let gesture = ClickGesture::from_count(self.doc_clicks.register(point, Instant::now()));
+        let range = {
+            let text = self.text_of(pos.node).unwrap_or_default();
+            match gesture {
+                ClickGesture::Place => None,
+                ClickGesture::Word => word_range_at(text, pos.offset),
+                ClickGesture::Line => Some(line_range_at(text, pos.offset)),
+            }
+        };
+        self.doc_selection = Some(match range {
+            Some(range) => DocSelection {
+                anchor: DocPos {
+                    node: pos.node,
+                    offset: range.start,
+                },
+                focus: DocPos {
+                    node: pos.node,
+                    offset: range.end,
+                },
+            },
+            None => DocSelection::collapsed(pos),
+        });
+        self.doc_selecting = gesture == ClickGesture::Place;
+        self.doc_goal_x = None;
+        self.needs_paint = true;
+        true
+    }
+
+    /// Mouse down away from any text: anchor a pending, collapsed selection
+    /// at the nearest selectable position so a drag into text starts
+    /// selecting from there — a click that never drags selects nothing,
+    /// which is also what dismisses an existing selection.
+    pub fn doc_select_down_near(&mut self, point: (f32, f32), fonts: &[fontdue::Font]) -> bool {
+        let Some(pos) = self.doc_pos_near(point, fonts) else {
+            return false;
+        };
+        self.doc_clicks.register(point, Instant::now());
+        self.doc_selection = Some(DocSelection::collapsed(pos));
+        self.doc_selecting = true;
+        self.doc_goal_x = None;
+        self.needs_paint = true;
+        true
+    }
+
+    pub fn doc_select_drag(&mut self, point: (f32, f32), fonts: &[fontdue::Font]) {
+        if !self.doc_selecting {
+            return;
+        }
+        let Some(pos) = self.doc_pos_near(point, fonts) else {
+            return;
+        };
+        if let Some(sel) = &mut self.doc_selection
+            && sel.focus != pos
+        {
+            sel.focus = pos;
+            self.needs_paint = true;
+        }
+    }
+
+    pub fn doc_select_up(&mut self) {
+        self.doc_selecting = false;
+    }
+
+    pub fn doc_select_all(&mut self) -> bool {
+        let leaves: Vec<NodeId> = self
+            .paint_order
+            .iter()
+            .copied()
+            .filter(|&id| self.selectable_text_leaf(id))
+            .collect();
+        let (Some(&first), Some(&last)) = (leaves.first(), leaves.last()) else {
+            return false;
+        };
+        let end = self.text_of(last).map_or(0, str::len);
+        self.doc_selection = Some(DocSelection {
+            anchor: DocPos {
+                node: first,
+                offset: 0,
+            },
+            focus: DocPos {
+                node: last,
+                offset: end,
+            },
+        });
+        self.doc_goal_x = None;
+        self.needs_paint = true;
+        true
+    }
+
+    /// Clears the document selection; true when a visible selection was
+    /// dismissed.
+    pub fn doc_collapse(&mut self) -> bool {
+        let had = self.doc_range().is_some();
+        if self.doc_selection.take().is_some() {
+            self.needs_paint = true;
+        }
+        self.doc_selecting = false;
+        self.doc_goal_x = None;
+        had
+    }
+
+    fn adjacent_leaf(&self, id: NodeId, forward: bool) -> Option<NodeId> {
+        let at = self.paint_order.iter().position(|&n| n == id)?;
+        if forward {
+            self.paint_order[at + 1..]
+                .iter()
+                .copied()
+                .find(|&n| self.selectable_text_leaf(n))
+        } else {
+            self.paint_order[..at]
+                .iter()
+                .rev()
+                .copied()
+                .find(|&n| self.selectable_text_leaf(n))
+        }
+    }
+
+    /// Shift+arrow: move the selection's focus endpoint, crossing into the
+    /// neighboring text node at the ends. Line granularity stays put at a
+    /// line edge, like the input's cmd+arrow.
+    pub fn doc_extend(&mut self, left: bool, granularity: Granularity) -> bool {
+        let Some(sel) = self.doc_selection() else {
+            return false;
+        };
+        let focus = sel.focus;
+        let text = self.text_of(focus.node).unwrap_or_default();
+        let target = if left {
+            if focus.offset > 0 {
+                let offset = match granularity {
+                    Granularity::Char => prev_char(text, focus.offset),
+                    Granularity::Word => prev_word_boundary(text, focus.offset),
+                    Granularity::Line => line_start(text, focus.offset),
+                };
+                Some(DocPos {
+                    node: focus.node,
+                    offset,
+                })
+            } else if granularity == Granularity::Line {
+                None
+            } else {
+                self.adjacent_leaf(focus.node, false).map(|node| {
+                    let text = self.text_of(node).unwrap_or_default();
+                    let offset = match granularity {
+                        Granularity::Word => prev_word_boundary(text, text.len()),
+                        _ => text.len(),
+                    };
+                    DocPos { node, offset }
+                })
+            }
+        } else if focus.offset < text.len() {
+            let offset = match granularity {
+                Granularity::Char => next_char(text, focus.offset),
+                Granularity::Word => next_word_boundary(text, focus.offset),
+                Granularity::Line => crate::selection::line_end(text, focus.offset),
+            };
+            Some(DocPos {
+                node: focus.node,
+                offset,
+            })
+        } else if granularity == Granularity::Line {
+            None
+        } else {
+            self.adjacent_leaf(focus.node, true).map(|node| {
+                let text = self.text_of(node).unwrap_or_default();
+                let offset = match granularity {
+                    Granularity::Word => next_word_boundary(text, 0),
+                    _ => 0,
+                };
+                DocPos { node, offset }
+            })
+        };
+        let Some(target) = target else {
+            return false;
+        };
+        if target == focus {
+            return false;
+        }
+        if let Some(sel) = &mut self.doc_selection {
+            sel.focus = target;
+        }
+        self.doc_goal_x = None;
+        self.needs_paint = true;
+        true
+    }
+
+    /// Cmd+shift+up/down: extend the focus endpoint to the document's
+    /// first or last selectable position.
+    pub fn doc_extend_edge(&mut self, up: bool) -> bool {
+        let Some(sel) = self.doc_selection() else {
+            return false;
+        };
+        let edge = if up {
+            self.paint_order
+                .iter()
+                .copied()
+                .find(|&id| self.selectable_text_leaf(id))
+                .map(|node| DocPos { node, offset: 0 })
+        } else {
+            self.paint_order
+                .iter()
+                .rev()
+                .copied()
+                .find(|&id| self.selectable_text_leaf(id))
+                .map(|node| DocPos {
+                    node,
+                    offset: self.text_of(node).map_or(0, str::len),
+                })
+        };
+        let Some(target) = edge else {
+            return false;
+        };
+        if target == sel.focus {
+            return false;
+        }
+        if let Some(sel) = &mut self.doc_selection {
+            sel.focus = target;
+        }
+        self.doc_goal_x = None;
+        self.needs_paint = true;
+        true
+    }
+
+    /// Shift+up/down: within the node this mirrors the input's goal-column
+    /// motion; at the node's first/last visual line it hit-tests one line
+    /// beyond the node to cross into the neighbor.
+    pub fn doc_extend_vertical(&mut self, up: bool, fonts: &[fontdue::Font]) -> bool {
+        let Some(sel) = self.doc_selection() else {
+            return false;
+        };
+        let focus = sel.focus;
+        let Some(geometry) = self.text_geometry(focus.node) else {
+            return false;
+        };
+        let Some(text) = self.text_of(focus.node) else {
+            return false;
+        };
+        let font = &fonts[geometry.font.min(fonts.len() - 1)];
+        let px = geometry.px;
+        let lines = wrap_lines(text, font, px, geometry.max_width);
+        let line = line_of_offset(&lines, focus.offset);
+        let line_h = line_height(font, px);
+        let local_x = measure_text(font, &text[lines[line].start..focus.offset], px);
+        let goal_x = self.doc_goal_x.unwrap_or(geometry.origin.0 + local_x);
+        let within = if up { line > 0 } else { line + 1 < lines.len() };
+        let target = if within {
+            let target_line = if up { line - 1 } else { line + 1 };
+            let y = (target_line as f32 + 0.5) * line_h;
+            Some(DocPos {
+                node: focus.node,
+                offset: point_to_offset(
+                    text,
+                    goal_x - geometry.origin.0,
+                    y,
+                    font,
+                    px,
+                    geometry.max_width,
+                ),
+            })
+        } else {
+            let rect = self.node(focus.node).abs;
+            let y = if up {
+                rect.y - line_h * 0.5
+            } else {
+                rect.y + rect.h + line_h * 0.5
+            };
+            // Unclamped: landing in a gap should still pick the goal column
+            // of the neighbor, not jump to its end.
+            match self.doc_pos_near_impl((goal_x, y), fonts, false) {
+                Some(pos) if pos.node != focus.node => Some(pos),
+                _ => Some(DocPos {
+                    node: focus.node,
+                    offset: if up { 0 } else { text.len() },
+                }),
+            }
+        };
+        let Some(target) = target else {
+            return false;
+        };
+        if target == focus {
+            return false;
+        }
+        if let Some(sel) = &mut self.doc_selection {
+            sel.focus = target;
+        }
+        self.doc_goal_x = Some(goal_x);
+        self.needs_paint = true;
+        true
+    }
+
+    fn caret_point(&self, pos: DocPos, fonts: &[fontdue::Font]) -> Option<(f32, f32, f32)> {
+        let geometry = self.text_geometry(pos.node)?;
+        let text = self.text_of(pos.node)?;
+        let font = &fonts[geometry.font.min(fonts.len() - 1)];
+        let (x, y) = offset_to_point(text, pos.offset, font, geometry.px, geometry.max_width);
+        Some((
+            geometry.origin.0 + x,
+            geometry.origin.1 + y,
+            line_height(font, geometry.px),
+        ))
+    }
+
+    fn nearest_unified_ancestor(&self, id: NodeId) -> Option<NodeId> {
+        let mut current = Some(id);
+        while let Some(cur) = current {
+            let node = self.get(cur)?;
+            if node.style.selection_mode == SelectionMode::Unified {
+                return Some(cur);
+            }
+            current = node.parent;
+        }
+        None
+    }
+
+    /// Terminal-style selection regions, one per `Unified` container the
+    /// selection touches. Each container renders its slice of the selection
+    /// as continuous bands regardless of where the gesture started: an
+    /// endpoint outside the container clamps that edge to full width.
+    pub fn doc_selection_blocks(
+        &self,
+        fonts: &[fontdue::Font],
+    ) -> Vec<(NodeId, Vec<PxRect>, Color)> {
+        let Some((start, end)) = self.doc_range() else {
+            return Vec::new();
+        };
+        let mut groups: Vec<(NodeId, DocPos, DocPos)> = Vec::new();
+        for &id in &self.paint_order {
+            let Some(range) = self.doc_selection_range(id) else {
+                continue;
+            };
+            let Some(container) = self.nearest_unified_ancestor(id) else {
+                continue;
+            };
+            let last = DocPos {
+                node: id,
+                offset: range.end,
+            };
+            match groups.iter_mut().find(|(c, _, _)| *c == container) {
+                Some((_, _, group_last)) => *group_last = last,
+                None => groups.push((
+                    container,
+                    DocPos {
+                        node: id,
+                        offset: range.start,
+                    },
+                    last,
+                )),
+            }
+        }
+        groups
+            .into_iter()
+            .filter_map(|(container, first, last)| {
+                let node = self.get(container)?;
+                let rect = node.abs;
+                let color = node.resolved.selection_color;
+                let (cx1, y1, h1) = self.caret_point(first, fonts)?;
+                let (cx2, y2, h2) = self.caret_point(last, fonts)?;
+                let x1 = if first == start { cx1 } else { rect.x };
+                let x2 = if last == end { cx2 } else { rect.x + rect.w };
+                let mut bands = Vec::new();
+                if (y1 - y2).abs() < 0.5 {
+                    bands.push(PxRect {
+                        x: x1,
+                        y: y1,
+                        w: (x2 - x1).max(1.0),
+                        h: h1.max(h2),
+                    });
+                } else {
+                    bands.push(PxRect {
+                        x: x1,
+                        y: y1,
+                        w: (rect.x + rect.w - x1).max(0.0),
+                        h: h1,
+                    });
+                    if y2 > y1 + h1 {
+                        bands.push(PxRect {
+                            x: rect.x,
+                            y: y1 + h1,
+                            w: rect.w,
+                            h: y2 - (y1 + h1),
+                        });
+                    }
+                    bands.push(PxRect {
+                        x: rect.x,
+                        y: y2,
+                        w: (x2 - rect.x).max(0.0),
+                        h: h2,
+                    });
+                }
+                Some((container, bands, color))
+            })
+            .collect()
     }
 }
 
@@ -1300,8 +2014,14 @@ mod tests {
             [9, 9, 9, 255],
             "floating node paints over the sibling that fills the window"
         );
-        assert_eq!(tree.key_of(tree.hit_click(35.0, 45.0).unwrap()), Some("float"));
-        assert_eq!(tree.key_of(tree.hit_click(5.0, 5.0).unwrap()), Some("under"));
+        assert_eq!(
+            tree.key_of(tree.hit_click(35.0, 45.0).unwrap()),
+            Some("float")
+        );
+        assert_eq!(
+            tree.key_of(tree.hit_click(5.0, 5.0).unwrap()),
+            Some("under")
+        );
     }
 
     fn editor(initial: &str) -> Vec<Desc> {
@@ -1359,9 +2079,17 @@ mod tests {
         let canvas = painted(&mut tree, (200, 60), None);
         let selected = geometry.caret_rect("hello", 3, &fonts);
         let [r, g, b, _] = pixel(&canvas, selected.x as u32 + 1, selected.y as u32 + 1);
-        assert_eq!([r, g, b], [0, 255, 0], "selection painted behind the glyphs");
+        assert_eq!(
+            [r, g, b],
+            [0, 255, 0],
+            "selection painted behind the glyphs"
+        );
         let [r, g, b, _] = pixel(&canvas, (caret.x + caret.w / 2.0) as u32, center.1);
-        assert_eq!([r, g, b], [0, 255, 0], "no caret while a selection is active");
+        assert_eq!(
+            [r, g, b],
+            [0, 255, 0],
+            "no caret while a selection is active"
+        );
     }
 
     #[test]
@@ -1490,7 +2218,7 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_drops_nodes_missing_from_the_description()  {
+    fn reconcile_drops_nodes_missing_from_the_description() {
         let label = |key: &str| Desc {
             key: Some(key.into()),
             text: Some(key.into()),
@@ -1662,7 +2390,11 @@ mod tests {
             }],
         );
         let id = tree.find("virtual").unwrap();
-        assert_eq!(tree.scroll_max(id), 600.0, "virtual height wins over measured");
+        assert_eq!(
+            tree.scroll_max(id),
+            600.0,
+            "virtual height wins over measured"
+        );
 
         let rects = tree.scrollbar_rects(id).unwrap();
         let expected_thumb = rects.track.h * 200.0 / 800.0;
@@ -1671,7 +2403,10 @@ mod tests {
             "thumb is viewport/content of the track: {} vs {expected_thumb}",
             rects.thumb.h
         );
-        assert_eq!(rects.thumb.y, rects.track.y, "unscrolled thumb sits at the top");
+        assert_eq!(
+            rects.thumb.y, rects.track.y,
+            "unscrolled thumb sits at the top"
+        );
 
         tree.scroll_state_mut(id).unwrap().position = 600.0;
         let rects = tree.scrollbar_rects(id).unwrap();
@@ -1813,6 +2548,429 @@ mod tests {
             side.w < 200.0,
             "basis auto grows with content and squeezes: {}",
             side.w
+        );
+    }
+
+    fn label_items(a: &str, b: &str) -> Vec<Desc> {
+        vec![
+            Desc {
+                key: Some("a".into()),
+                text: Some(a.into()),
+                ..Desc::default()
+            },
+            Desc {
+                key: Some("b".into()),
+                text: Some(b.into()),
+                ..Desc::default()
+            },
+        ]
+    }
+
+    fn labels(a: &str, b: &str) -> Vec<Desc> {
+        vec![Desc {
+            style: Style {
+                flex_direction: FlexDirection::Column,
+                align_items: Some(Align::Start),
+                ..Style::default()
+            },
+            children: label_items(a, b),
+            ..Desc::default()
+        }]
+    }
+
+    fn point_at(tree: &Tree, id: NodeId, offset: usize, fonts: &[fontdue::Font]) -> (f32, f32) {
+        let geometry = tree.text_geometry(id).unwrap();
+        let text = tree.text_of(id).unwrap();
+        let rect = geometry.caret_rect(text, offset, fonts);
+        (rect.x + 0.1, rect.y + 1.0)
+    }
+
+    #[test]
+    fn doc_selection_spans_text_nodes() {
+        let fonts = [font()];
+        let mut tree = tree_of((400.0, 200.0), labels("first line", "second line"));
+        let a = tree.find("a").unwrap();
+        let b = tree.find("b").unwrap();
+        assert!(tree.doc_select_down(point_at(&tree, a, 6, &fonts), &fonts));
+        tree.doc_select_drag(point_at(&tree, b, 6, &fonts), &fonts);
+        tree.doc_select_up();
+        assert_eq!(tree.doc_selection_range(a), Some(6..10));
+        assert_eq!(tree.doc_selection_range(b), Some(0..6));
+        assert_eq!(tree.doc_selected_text().as_deref(), Some("line\nsecond"));
+    }
+
+    #[test]
+    fn backwards_drags_normalize_by_document_order() {
+        let fonts = [font()];
+        let mut tree = tree_of((400.0, 200.0), labels("first line", "second line"));
+        let a = tree.find("a").unwrap();
+        let b = tree.find("b").unwrap();
+        assert!(tree.doc_select_down(point_at(&tree, b, 6, &fonts), &fonts));
+        tree.doc_select_drag(point_at(&tree, a, 6, &fonts), &fonts);
+        assert_eq!(tree.doc_selection_range(a), Some(6..10));
+        assert_eq!(tree.doc_selection_range(b), Some(0..6));
+    }
+
+    #[test]
+    fn chained_clicks_on_text_select_word_then_line() {
+        let fonts = [font()];
+        let mut tree = tree_of((400.0, 200.0), labels("foo bar baz", "x"));
+        let a = tree.find("a").unwrap();
+        let point = point_at(&tree, a, 5, &fonts);
+        assert!(tree.doc_select_down(point, &fonts));
+        assert_eq!(tree.doc_selection_range(a), None, "single click places");
+        tree.doc_select_down(point, &fonts);
+        assert_eq!(tree.doc_selected_text().as_deref(), Some("bar"));
+        tree.doc_select_down(point, &fonts);
+        assert_eq!(tree.doc_selected_text().as_deref(), Some("foo bar baz"));
+    }
+
+    #[test]
+    fn clickable_and_optout_subtrees_are_not_selectable() {
+        let mut children = label_items("copy me", "label");
+        children[1] = Desc {
+            key: Some("button".into()),
+            clickable: true,
+            children: vec![Desc {
+                key: Some("b".into()),
+                text: Some("label".into()),
+                ..Desc::default()
+            }],
+            ..Desc::default()
+        };
+        children.push(Desc {
+            style: Style {
+                selectable: Some(false),
+                ..Style::default()
+            },
+            children: vec![Desc {
+                key: Some("c".into()),
+                text: Some("locked".into()),
+                ..Desc::default()
+            }],
+            ..Desc::default()
+        });
+        let mut tree = tree_of((400.0, 200.0), children);
+        let fonts = [font()];
+        let a = tree.find("a").unwrap();
+        let b = tree.find("b").unwrap();
+        let c = tree.find("c").unwrap();
+        let at = |tree: &Tree, id| point_at(tree, id, 1, &fonts);
+        let p = at(&tree, a);
+        assert_eq!(tree.hit_target(p.0, p.1), Some(HitTarget::Text(a)));
+        let button = tree.find("button").unwrap();
+        let p = at(&tree, b);
+        assert_eq!(
+            tree.hit_target(p.0, p.1),
+            Some(HitTarget::Click(button)),
+            "the clickable ancestor still owns the click"
+        );
+        assert!(
+            tree.doc_select_down(p, &fonts),
+            "but its label still takes a selection gesture"
+        );
+        let p = at(&tree, c);
+        assert_eq!(
+            tree.hit_target(p.0, p.1),
+            None,
+            "selectable: false opts the subtree out"
+        );
+        assert!(!tree.doc_select_down(p, &fonts));
+    }
+
+    #[test]
+    fn doc_selection_paints_with_the_inherited_color() {
+        let children = vec![Desc {
+            style: Style {
+                selection_color: Some([0, 255, 0, 255]),
+                ..Style::default()
+            },
+            key: Some("p".into()),
+            text: Some("hello".into()),
+            ..Desc::default()
+        }];
+        let mut tree = tree_of((200.0, 60.0), children);
+        assert!(tree.doc_select_all());
+        let id = tree.find("p").unwrap();
+        assert_eq!(tree.doc_selection_range(id), Some(0..5));
+        let fonts = [font()];
+        let rect = tree
+            .text_geometry(id)
+            .unwrap()
+            .caret_rect("hello", 1, &fonts);
+        let canvas = painted(&mut tree, (200, 60), None);
+        let [r, g, b, _] = pixel(&canvas, rect.x as u32 + 1, rect.y as u32 + 1);
+        assert_eq!([r, g, b], [0, 255, 0], "selection painted behind glyphs");
+    }
+
+    #[test]
+    fn structural_changes_drop_the_doc_selection() {
+        let fonts = [font()];
+        let mut tree = tree_of((400.0, 200.0), labels("first", "second"));
+        let a = tree.find("a").unwrap();
+        let b = tree.find("b").unwrap();
+        tree.doc_select_down(point_at(&tree, a, 1, &fonts), &fonts);
+        tree.doc_select_drag(point_at(&tree, b, 3, &fonts), &fonts);
+        assert!(tree.doc_selected_text().is_some());
+        tree.remove(b);
+        assert!(tree.doc_selection().is_none(), "endpoint removal clears");
+
+        let mut tree = tree_of((400.0, 200.0), labels("first", "second"));
+        let a = tree.find("a").unwrap();
+        let b = tree.find("b").unwrap();
+        tree.doc_select_down(point_at(&tree, a, 1, &fonts), &fonts);
+        tree.doc_select_drag(point_at(&tree, b, 3, &fonts), &fonts);
+        tree.update(
+            a,
+            Props {
+                key: Some("a".into()),
+                text: Some("rewritten".into()),
+                ..Props::default()
+            },
+        );
+        assert!(tree.doc_selection().is_none(), "text change clears");
+    }
+
+    #[test]
+    fn shift_arrows_extend_the_selection_across_nodes() {
+        let fonts = [font()];
+        let mut tree = tree_of((400.0, 200.0), labels("ab", "cd"));
+        let a = tree.find("a").unwrap();
+        tree.doc_select_down(point_at(&tree, a, 2, &fonts), &fonts);
+        assert!(tree.doc_extend(false, Granularity::Char), "cross into b");
+        assert!(tree.doc_extend(false, Granularity::Char));
+        assert_eq!(tree.doc_selected_text().as_deref(), Some("c"));
+        assert!(tree.doc_extend(true, Granularity::Char));
+        assert!(
+            tree.doc_extend(true, Granularity::Char),
+            "cross back into a"
+        );
+        assert_eq!(tree.doc_selected_text(), None, "shrunk to the anchor");
+        assert!(tree.doc_extend(true, Granularity::Word));
+        assert_eq!(tree.doc_selected_text().as_deref(), Some("ab"));
+    }
+
+    #[test]
+    fn vertical_extension_crosses_into_the_next_node() {
+        let fonts = [font()];
+        let mut tree = tree_of((400.0, 200.0), labels("one\ntwo", "three"));
+        let a = tree.find("a").unwrap();
+        let b = tree.find("b").unwrap();
+        tree.doc_select_down(point_at(&tree, a, 1, &fonts), &fonts);
+        assert!(
+            tree.doc_extend_vertical(false, &fonts),
+            "into a's second line"
+        );
+        assert_eq!(tree.doc_selection_range(b), None);
+        assert!(tree.doc_extend_vertical(false, &fonts), "into b");
+        assert!(tree.doc_selection_range(b).is_some());
+        assert!(tree.doc_extend_edge(true));
+        assert_eq!(
+            tree.doc_selected_text().as_deref(),
+            Some("o"),
+            "cmd+shift+up reaches the document start"
+        );
+    }
+
+    #[test]
+    fn select_all_joins_rows_with_newlines_but_not_columns() {
+        let mut tree = tree_of((400.0, 200.0), labels("ab", "cd"));
+        assert!(tree.doc_select_all());
+        assert_eq!(tree.doc_selected_text().as_deref(), Some("ab\ncd"));
+
+        let mut tree = tree_of(
+            (400.0, 200.0),
+            vec![Desc {
+                style: Style {
+                    flex_direction: FlexDirection::Row,
+                    ..Style::default()
+                },
+                children: label_items("ab", "cd"),
+                ..Desc::default()
+            }],
+        );
+        assert!(tree.doc_select_all());
+        assert_eq!(
+            tree.doc_selected_text().as_deref(),
+            Some("abcd"),
+            "same visual row concatenates"
+        );
+    }
+
+    #[test]
+    fn programmatic_focus_keeps_the_doc_selection() {
+        let fonts = [font()];
+        let mut children = editor("hello");
+        children.extend(labels("pick", "me"));
+        let mut tree = tree_of((400.0, 200.0), children);
+        let a = tree.find("a").unwrap();
+        tree.doc_select_down(point_at(&tree, a, 0, &fonts), &fonts);
+        tree.doc_select_drag(point_at(&tree, a, 4, &fonts), &fonts);
+        assert_eq!(tree.doc_selected_text().as_deref(), Some("pick"));
+        // An app refocusing its composer on stray keys must not eat the
+        // selection out from under a pending copy.
+        tree.set_focus(Some(tree.find("in").unwrap()));
+        assert_eq!(tree.doc_selected_text().as_deref(), Some("pick"));
+    }
+
+    #[test]
+    fn drags_can_start_in_empty_space() {
+        let fonts = [font()];
+        let mut tree = tree_of((400.0, 200.0), labels("first", "second"));
+        let a = tree.find("a").unwrap();
+        let b = tree.find("b").unwrap();
+        let rect = tree.rect(b).unwrap();
+        // The x of an outside press must not pick a column: below means
+        // the end of the text, above means the beginning.
+        let below = (rect.x + 2.0, rect.y + rect.h + 40.0);
+        assert!(!tree.doc_select_down(below, &fonts), "no text under point");
+        assert!(tree.doc_select_down_near(below, &fonts));
+        assert_eq!(
+            tree.doc_selected_text(),
+            None,
+            "click alone selects nothing"
+        );
+        tree.doc_select_drag(point_at(&tree, b, 3, &fonts), &fonts);
+        assert_eq!(tree.doc_selected_text().as_deref(), Some("ond"));
+
+        let a_rect = tree.rect(a).unwrap();
+        let above = (a_rect.x + a_rect.w - 2.0, a_rect.y - 20.0);
+        assert!(tree.doc_select_down_near(above, &fonts));
+        tree.doc_select_drag(point_at(&tree, a, 2, &fonts), &fonts);
+        assert_eq!(tree.doc_selected_text().as_deref(), Some("fi"));
+    }
+
+    #[test]
+    fn an_outside_click_dismisses_the_selection_and_repaints() {
+        let fonts = [font()];
+        let mut tree = tree_of((400.0, 200.0), labels("first", "second"));
+        let a = tree.find("a").unwrap();
+        tree.doc_select_down(point_at(&tree, a, 0, &fonts), &fonts);
+        tree.doc_select_drag(point_at(&tree, a, 5, &fonts), &fonts);
+        tree.doc_select_up();
+        assert_eq!(tree.doc_selected_text().as_deref(), Some("first"));
+        tree.flush_layout(&[font()], 16.0);
+        tree.clear_paint_flag();
+
+        let rect = tree.rect(a).unwrap();
+        assert!(tree.doc_select_down_near((rect.x, rect.y + 150.0), &fonts));
+        assert_eq!(tree.doc_selected_text(), None);
+        assert!(tree.dirty(), "the stale highlight must repaint away");
+    }
+
+    #[test]
+    fn unified_selection_bands_cover_the_gap_between_nodes() {
+        let fonts = [font()];
+        let mut children = labels("first", "second");
+        children[0].style.selection_mode = SelectionMode::Unified;
+        children[0].style.gap = 10.0;
+        children[0].key = Some("wrap".into());
+        let mut tree = tree_of((400.0, 200.0), children);
+        let a = tree.find("a").unwrap();
+        let b = tree.find("b").unwrap();
+        tree.doc_select_down(point_at(&tree, a, 1, &fonts), &fonts);
+        tree.doc_select_drag(point_at(&tree, b, 3, &fonts), &fonts);
+        let blocks = tree.doc_selection_blocks(&fonts);
+        let (container, bands, color) = blocks.first().cloned().unwrap();
+        assert_eq!(tree.key_of(container), Some("wrap"));
+        assert_eq!(bands.len(), 3);
+        let wrap_rect = tree.rect(container).unwrap();
+        assert_eq!((bands[1].x, bands[1].w), (wrap_rect.x, wrap_rect.w));
+        let a_rect = tree.rect(a).unwrap();
+        let gap = (a_rect.x + 2.0, a_rect.y + a_rect.h + 5.0);
+        assert!(
+            bands[1].y <= gap.1 && gap.1 <= bands[1].y + bands[1].h,
+            "the gap row sits inside the middle band"
+        );
+        let canvas = painted(&mut tree, (400, 200), None);
+        let [r, g, bl, _] = pixel(&canvas, gap.0 as u32, gap.1 as u32);
+        assert_eq!([r, g, bl], [color[0], color[1], color[2]]);
+    }
+
+    #[test]
+    fn unified_selection_on_one_line_is_a_single_tight_band() {
+        let fonts = [font()];
+        let mut tree = tree_of(
+            (400.0, 200.0),
+            vec![Desc {
+                style: Style {
+                    flex_direction: FlexDirection::Row,
+                    gap: 12.0,
+                    selection_mode: SelectionMode::Unified,
+                    ..Style::default()
+                },
+                children: label_items("ab", "cd"),
+                ..Desc::default()
+            }],
+        );
+        let a = tree.find("a").unwrap();
+        let b = tree.find("b").unwrap();
+        tree.doc_select_down(point_at(&tree, a, 1, &fonts), &fonts);
+        tree.doc_select_drag(point_at(&tree, b, 1, &fonts), &fonts);
+        let blocks = tree.doc_selection_blocks(&fonts);
+        let (_, bands, _) = blocks.first().cloned().unwrap();
+        assert_eq!(bands.len(), 1);
+        let a_rect = tree.rect(a).unwrap();
+        let b_rect = tree.rect(b).unwrap();
+        assert!(bands[0].x > a_rect.x && bands[0].x + bands[0].w < b_rect.x + b_rect.w);
+        assert!(
+            bands[0].x + bands[0].w > b_rect.x,
+            "the inter-node gap is inside the band"
+        );
+    }
+
+    #[test]
+    fn selections_without_a_unified_ancestor_have_no_bands() {
+        let fonts = [font()];
+        let mut tree = tree_of((400.0, 200.0), labels("first", "second"));
+        let a = tree.find("a").unwrap();
+        tree.doc_select_down(point_at(&tree, a, 0, &fonts), &fonts);
+        tree.doc_select_drag(point_at(&tree, a, 4, &fonts), &fonts);
+        assert!(tree.doc_selected_text().is_some());
+        assert!(tree.doc_selection_blocks(&fonts).is_empty());
+    }
+
+    #[test]
+    fn blocks_render_even_when_the_selection_starts_outside() {
+        let fonts = [font()];
+        let mut wrap = labels("first", "second");
+        wrap[0].style.selection_mode = SelectionMode::Unified;
+        wrap[0].key = Some("wrap".into());
+        let children = vec![Desc {
+            style: Style {
+                flex_direction: FlexDirection::Column,
+                align_items: Some(Align::Start),
+                ..Style::default()
+            },
+            children: {
+                let mut kids = vec![Desc {
+                    key: Some("head".into()),
+                    text: Some("header line".into()),
+                    ..Desc::default()
+                }];
+                kids.append(&mut wrap);
+                kids
+            },
+            ..Desc::default()
+        }];
+        let mut tree = tree_of((400.0, 200.0), children);
+        let head = tree.find("head").unwrap();
+        let b = tree.find("b").unwrap();
+        tree.doc_select_down(point_at(&tree, head, 1, &fonts), &fonts);
+        tree.doc_select_drag(point_at(&tree, b, 3, &fonts), &fonts);
+
+        let blocks = tree.doc_selection_blocks(&fonts);
+        assert_eq!(blocks.len(), 1, "one block for the designated area");
+        let (container, bands, _) = blocks.first().cloned().unwrap();
+        assert_eq!(tree.key_of(container), Some("wrap"));
+        let rect = tree.rect(container).unwrap();
+        assert_eq!(
+            bands[0].x, rect.x,
+            "start outside the block clamps its first row to full width"
+        );
+        assert!(
+            tree.doc_selection_range(head).is_some(),
+            "text outside the block still selects tightly"
         );
     }
 

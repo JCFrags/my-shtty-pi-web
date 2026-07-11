@@ -32,7 +32,10 @@ fn flaky_test_session() -> String {
          ● Bash(go test ./internal/auth/... -count=25 -run TestToken)\n",
     );
     for i in 1..=6 {
-        t.push_str(&format!("  │ ok   internal/auth  0.4{:02}s (run {i})\n", 7 * i));
+        t.push_str(&format!(
+            "  │ ok   internal/auth  0.4{:02}s (run {i})\n",
+            7 * i
+        ));
     }
     t.push_str(
         "  │ --- FAIL: TestTokenExpiry (0.03s)\n\

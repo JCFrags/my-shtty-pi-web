@@ -13,10 +13,8 @@ pub(crate) fn kitty_query_shm(image_id: u32, name: &str) -> Vec<u8> {
 // and make it very clear what we explicitly support/don't
 pub(crate) fn kitty_transmit_shm(image_id: u32, width: u32, height: u32, name: &str) -> Vec<u8> {
     let payload = BASE64.encode(name);
-    format!(
-        "\x1b_Ga=T,f=32,s={width},v={height},t=s,i={image_id},p=1,q=2,C=1;{payload}\x1b\\"
-    )
-    .into_bytes()
+    format!("\x1b_Ga=T,f=32,s={width},v={height},t=s,i={image_id},p=1,q=2,C=1;{payload}\x1b\\")
+        .into_bytes()
 }
 
 pub fn kitty_transmit(image_id: u32, width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {

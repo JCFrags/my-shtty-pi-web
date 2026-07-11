@@ -56,7 +56,16 @@ fn wrap_logical_line(
             pen = 0.0;
         }
         if pen == 0.0 && word_w > max_width {
-            cursor = break_long_word(text, cursor, chunk_end, font, px, max_width, &mut line_start, out);
+            cursor = break_long_word(
+                text,
+                cursor,
+                chunk_end,
+                font,
+                px,
+                max_width,
+                &mut line_start,
+                out,
+            );
             continue;
         }
         pen += measure_text(font, &text[cursor..chunk_end], px);
@@ -111,7 +120,10 @@ fn break_long_word(
 }
 
 pub fn line_of_offset(lines: &[Range<usize>], offset: usize) -> usize {
-    lines.iter().rposition(|line| line.start <= offset).unwrap_or(0)
+    lines
+        .iter()
+        .rposition(|line| line.start <= offset)
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -126,14 +138,17 @@ mod tests {
     }
 
     fn parts<'a>(text: &'a str, lines: &[Range<usize>]) -> Vec<&'a str> {
-        lines.iter().map(|r| &text[r.clone()]) .collect()
+        lines.iter().map(|r| &text[r.clone()]).collect()
     }
 
     #[test]
     fn no_max_width_gives_logical_lines() {
         let f = font();
         let lines = wrap_lines("one\ntwo\n\nthree", &f, 16.0, None);
-        assert_eq!(parts("one\ntwo\n\nthree", &lines), ["one", "two", "", "three"]);
+        assert_eq!(
+            parts("one\ntwo\n\nthree", &lines),
+            ["one", "two", "", "three"]
+        );
     }
 
     #[test]
@@ -178,8 +193,16 @@ mod tests {
         let lines = vec![0..6, 6..11];
         assert_eq!(line_of_offset(&lines, 0), 0);
         assert_eq!(line_of_offset(&lines, 5), 0);
-        assert_eq!(line_of_offset(&lines, 6), 1, "wrap boundary starts the next line");
-        assert_eq!(line_of_offset(&lines, 11), 1, "text end stays on the last line");
+        assert_eq!(
+            line_of_offset(&lines, 6),
+            1,
+            "wrap boundary starts the next line"
+        );
+        assert_eq!(
+            line_of_offset(&lines, 11),
+            1,
+            "text end stays on the last line"
+        );
     }
 
     #[test]

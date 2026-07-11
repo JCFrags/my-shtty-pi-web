@@ -227,8 +227,7 @@ impl Terminal {
         }
         frame.extend_from_slice(b"\x1b[H");
         if self.shm_frames {
-            let name =
-                crate::profiler::span("kitty.shm", || self.write_shm_frame(&canvas.pixels))?;
+            let name = crate::profiler::span("kitty.shm", || self.write_shm_frame(&canvas.pixels))?;
             frame.extend_from_slice(&crate::kitty::kitty_transmit_shm(
                 1,
                 canvas.width,
@@ -306,10 +305,7 @@ impl Terminal {
     pub fn watch_resize(&mut self) -> io::Result<()> {
         use rustix::fd::AsRawFd as _;
         let waker = self.waker()?;
-        RESIZE_WAKE_FD.store(
-            waker.fd.as_raw_fd(),
-            std::sync::atomic::Ordering::Relaxed,
-        );
+        RESIZE_WAKE_FD.store(waker.fd.as_raw_fd(), std::sync::atomic::Ordering::Relaxed);
         unsafe {
             let mut action: libc::sigaction = std::mem::zeroed();
             action.sa_sigaction = sigwinch_handler as usize;
@@ -552,12 +548,12 @@ fn parse_event(buf: &[u8]) -> Option<(RawEvent, usize)> {
     }
     match *buf.get(1)? {
         b'[' => parse_csi(buf),
-        b'_' | b']' | b'P' | b'X' | b'^' => consume_string_sequence(buf).map(|end| {
-            match parse_osc52_reply(&buf[..end]) {
+        b'_' | b']' | b'P' | b'X' | b'^' => {
+            consume_string_sequence(buf).map(|end| match parse_osc52_reply(&buf[..end]) {
                 Some(text) => (RawEvent::Paste(text), end),
                 None => (RawEvent::Key(KeyEvent::plain(Key::Unknown)), end),
-            }
-        }),
+            })
+        }
         b'O' => {
             let key = match *buf.get(2)? {
                 b'A' => Key::Up,
@@ -627,8 +623,9 @@ fn parse_csi(buf: &[u8]) -> Option<(RawEvent, usize)> {
         let end = buf[body_start..]
             .windows(PASTE_END.len())
             .position(|w| w == PASTE_END)?;
-        let body =
-            normalize_newlines(String::from_utf8_lossy(&buf[body_start..body_start + end]).into_owned());
+        let body = normalize_newlines(
+            String::from_utf8_lossy(&buf[body_start..body_start + end]).into_owned(),
+        );
         return Some((RawEvent::Paste(body), body_start + end + PASTE_END.len()));
     }
     let mut end = 2;
@@ -646,11 +643,26 @@ fn parse_csi(buf: &[u8]) -> Option<(RawEvent, usize)> {
     let mods = decode_mods(param(params, 1).unwrap_or(1));
     let event = match terminator {
         b'A' => RawEvent::Key(KeyEvent { key: Key::Up, mods }),
-        b'B' => RawEvent::Key(KeyEvent { key: Key::Down, mods }),
-        b'C' => RawEvent::Key(KeyEvent { key: Key::Right, mods }),
-        b'D' => RawEvent::Key(KeyEvent { key: Key::Left, mods }),
-        b'H' => RawEvent::Key(KeyEvent { key: Key::Home, mods }),
-        b'F' => RawEvent::Key(KeyEvent { key: Key::End, mods }),
+        b'B' => RawEvent::Key(KeyEvent {
+            key: Key::Down,
+            mods,
+        }),
+        b'C' => RawEvent::Key(KeyEvent {
+            key: Key::Right,
+            mods,
+        }),
+        b'D' => RawEvent::Key(KeyEvent {
+            key: Key::Left,
+            mods,
+        }),
+        b'H' => RawEvent::Key(KeyEvent {
+            key: Key::Home,
+            mods,
+        }),
+        b'F' => RawEvent::Key(KeyEvent {
+            key: Key::End,
+            mods,
+        }),
         b'Z' => RawEvent::Key(KeyEvent {
             key: Key::Tab,
             mods: Mods {
@@ -852,7 +864,10 @@ mod tests {
     fn parses_probe_replies() {
         let parse = |buf: &[u8]| parse_probe_reply(buf, b"_Gi=299;");
         assert_eq!(parse(b"\x1b_Gi=299;OK\x1b\\"), Some(true));
-        assert_eq!(parse(b"noise\x1b_Gi=299;ENOENT:not found\x1b\\"), Some(false));
+        assert_eq!(
+            parse(b"noise\x1b_Gi=299;ENOENT:not found\x1b\\"),
+            Some(false)
+        );
         assert_eq!(parse(b"\x1b_Gi=299;O"), None, "partial");
         assert_eq!(parse(b"\x1b[?1016;1$y"), None);
     }
@@ -864,8 +879,12 @@ mod tests {
         let data: Vec<u8> = (0..8192).map(|i| (i % 251) as u8).collect();
         write_shm(&name, &data).unwrap();
 
-        let fd = rustix::shm::open(&name, rustix::shm::OFlags::RDONLY, rustix::fs::Mode::empty())
-            .unwrap();
+        let fd = rustix::shm::open(
+            &name,
+            rustix::shm::OFlags::RDONLY,
+            rustix::fs::Mode::empty(),
+        )
+        .unwrap();
         let read_back = unsafe {
             let ptr = rustix::mm::mmap(
                 std::ptr::null_mut(),
@@ -1016,10 +1035,7 @@ mod tests {
         assert_eq!(parse_event(b"\x1b[3~"), Some((key(Key::Delete), 4)));
         assert_eq!(parse_event(b"\x1b[H"), Some((key(Key::Home), 3)));
         assert_eq!(parse_event(b"\x1b[F"), Some((key(Key::End), 3)));
-        assert_eq!(
-            parse_event(b"\x1b[Z"),
-            Some((key_mods(Key::Tab, SHIFT), 3))
-        );
+        assert_eq!(parse_event(b"\x1b[Z"), Some((key_mods(Key::Tab, SHIFT), 3)));
 
         assert_eq!(
             parse_event(b"\x1b[99;5u"),

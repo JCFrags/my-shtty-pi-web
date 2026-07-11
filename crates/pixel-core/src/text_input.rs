@@ -1,8 +1,12 @@
 use std::collections::VecDeque;
 use std::ops::Range;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::canvas::measure_text;
+use crate::selection::{
+    ClickGesture, ClickTracker, line_end, line_range_at, line_start, next_char, next_word_boundary,
+    prev_char, prev_word_boundary, snap_to_boundary, word_range_at,
+};
 use crate::terminal::{Key, KeyEvent, Mouse, MouseButton, MouseKind};
 use crate::tree::PxRect;
 use crate::wrap::{line_of_offset, wrap_lines};
@@ -70,25 +74,6 @@ impl InputGeometry {
 
 pub(crate) fn caret_width(px: f32) -> f32 {
     (px / 8.0).max(2.0)
-}
-
-#[derive(Debug, Clone, Default)]
-struct ClickTracker {
-    last: Option<(Instant, (f32, f32))>,
-    count: u32,
-}
-
-impl ClickTracker {
-    fn register(&mut self, point: (f32, f32), now: Instant) -> u32 {
-        let chained = self.last.is_some_and(|(at, p)| {
-            now.duration_since(at) < Duration::from_millis(450)
-                && (p.0 - point.0).abs() < 6.0
-                && (p.1 - point.1).abs() < 6.0
-        });
-        self.count = if chained { self.count + 1 } else { 1 };
-        self.last = Some((now, point));
-        self.count
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -211,7 +196,6 @@ impl TextInput {
         self.record(edit);
     }
 
-    
     fn record(&mut self, edit: Edit) {
         self.redo.clear();
         let may_coalesce = !self.sealed;
@@ -370,46 +354,19 @@ impl TextInput {
     }
 
     pub fn select_word_at(&mut self, offset: usize) {
-        let offset = snap_to_boundary(&self.text, offset);
-        // prefer the word to the left when the click lands on a boundary.
-        let pivot = if self.text[offset..].chars().next().is_some_and(is_word_char) {
-            offset
-        } else if self.text[..offset].chars().next_back().is_some_and(is_word_char) {
-            prev_char(&self.text, offset)
-        } else if offset < self.text.len() {
-            offset
-        } else if offset > 0 {
-            prev_char(&self.text, offset)
-        } else {
+        let Some(range) = word_range_at(&self.text, offset) else {
             return;
         };
-        let class = char_class(self.text[pivot..].chars().next().expect("pivot in bounds"));
-        let mut start = pivot;
-        for (i, c) in self.text[..pivot].char_indices().rev() {
-            if char_class(c) != class {
-                break;
-            }
-            start = i;
-        }
-        let mut end = pivot;
-        for (i, c) in self.text[pivot..].char_indices() {
-            if char_class(c) != class {
-                break;
-            }
-            end = pivot + i + c.len_utf8();
-        }
-        self.anchor = Some(start);
-        self.cursor = end;
+        self.anchor = Some(range.start);
+        self.cursor = range.end;
         self.goal_x = None;
         self.sealed = true;
     }
 
     pub fn select_line_at(&mut self, offset: usize) {
-        let offset = snap_to_boundary(&self.text, offset);
-        let start = line_start(&self.text, offset);
-        let end = line_end(&self.text, offset);
-        self.anchor = Some(start);
-        self.cursor = (end + 1).min(self.text.len());
+        let range = line_range_at(&self.text, offset);
+        self.anchor = Some(range.start);
+        self.cursor = range.end;
         self.goal_x = None;
         self.sealed = true;
     }
@@ -626,13 +583,13 @@ impl TextInput {
         match (mouse.kind, mouse.button) {
             (MouseKind::Down, MouseButton::Left) => {
                 let offset = geometry.offset_at(&self.text, point, fonts);
-                match self.clicks.register(point, Instant::now()) % 3 {
-                    1 => {
+                match ClickGesture::from_count(self.clicks.register(point, Instant::now())) {
+                    ClickGesture::Place => {
                         self.set_cursor(offset, false);
                         self.selecting = true;
                     }
-                    2 => self.select_word_at(offset),
-                    _ => self.select_line_at(offset),
+                    ClickGesture::Word => self.select_word_at(offset),
+                    ClickGesture::Line => self.select_line_at(offset),
                 }
                 InputReply::Selected
             }
@@ -648,87 +605,6 @@ impl TextInput {
             _ => InputReply::None,
         }
     }
-}
-
-fn is_word_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
-}
-
-fn char_class(c: char) -> u8 {
-    if is_word_char(c) {
-        0
-    } else if c == '\n' {
-        1
-    } else {
-        2
-    }
-}
-
-fn snap_to_boundary(text: &str, offset: usize) -> usize {
-    let mut offset = offset.min(text.len());
-    while !text.is_char_boundary(offset) {
-        offset -= 1;
-    }
-    offset
-}
-
-fn prev_char(text: &str, offset: usize) -> usize {
-    text[..offset].char_indices().next_back().map_or(0, |(i, _)| i)
-}
-
-fn next_char(text: &str, offset: usize) -> usize {
-    text[offset..]
-        .chars()
-        .next()
-        .map_or(offset, |c| offset + c.len_utf8())
-}
-
-fn prev_word_boundary(text: &str, offset: usize) -> usize {
-    let mut pos = offset;
-    let mut iter = text[..offset].char_indices().rev().peekable();
-    while let Some(&(i, c)) = iter.peek() {
-        if is_word_char(c) {
-            break;
-        }
-        pos = i;
-        iter.next();
-    }
-    while let Some(&(i, c)) = iter.peek() {
-        if !is_word_char(c) {
-            break;
-        }
-        pos = i;
-        iter.next();
-    }
-    pos
-}
-
-fn next_word_boundary(text: &str, offset: usize) -> usize {
-    let mut pos = offset;
-    let mut iter = text[offset..].char_indices().peekable();
-    while let Some(&(i, c)) = iter.peek() {
-        if is_word_char(c) {
-            break;
-        }
-        pos = offset + i + c.len_utf8();
-        iter.next();
-    }
-    while let Some(&(i, c)) = iter.peek() {
-        if !is_word_char(c) {
-            break;
-        }
-        pos = offset + i + c.len_utf8();
-        iter.next();
-    }
-    pos
-}
-
-fn line_start(text: &str, offset: usize) -> usize {
-    text[..offset].rfind('\n').map_or(0, |i| i + 1)
-}
-
-fn line_end(text: &str, offset: usize) -> usize {
-    text[offset..].find('\n').map_or(text.len(), |i| offset + i)
 }
 
 pub fn line_height(font: &fontdue::Font, px: f32) -> f32 {
@@ -905,7 +781,10 @@ mod tests {
         i.move_down(false, &f, 16.0, None);
         let (x, _) = offset_to_point(i.text(), i.cursor(), &f, 16.0, None);
         let (goal_x, _) = offset_to_point("a long first line", 12, &f, 16.0, None);
-        assert!((x - goal_x).abs() < 1.0, "goal column restored: {x} vs {goal_x}");
+        assert!(
+            (x - goal_x).abs() < 1.0,
+            "goal column restored: {x} vs {goal_x}"
+        );
         i.move_up(false, &f, 16.0, None);
         i.move_up(false, &f, 16.0, None);
         assert_eq!(i.cursor(), 12, "round trip returns home");
@@ -949,7 +828,11 @@ mod tests {
         i.select_word_at(5);
         assert_eq!(i.selected_text(), Some("bar"));
         i.select_word_at(7);
-        assert_eq!(i.selected_text(), Some("bar"), "boundary prefers the word left of it");
+        assert_eq!(
+            i.selected_text(),
+            Some("bar"),
+            "boundary prefers the word left of it"
+        );
         i.select_word_at(3);
         assert_eq!(i.selected_text(), Some("foo"));
     }
@@ -1079,10 +962,12 @@ mod tests {
         assert_eq!(i.text(), "base two");
         i.undo();
         assert_eq!(i.text(), "base");
-        assert!(!i.can_undo() || {
-            i.undo();
-            i.text() == "base"
-        });
+        assert!(
+            !i.can_undo() || {
+                i.undo();
+                i.text() == "base"
+            }
+        );
     }
 
     use crate::terminal::Mods;
@@ -1167,24 +1052,52 @@ mod tests {
             }
         };
 
-        let reply = i.handle_mouse(&event(MouseKind::Down, MouseButton::Left, 8), geometry, &fonts);
+        let reply = i.handle_mouse(
+            &event(MouseKind::Down, MouseButton::Left, 8),
+            geometry,
+            &fonts,
+        );
         assert_eq!(reply, InputReply::Selected);
         assert_eq!(i.cursor(), 8, "click lands the caret at the point");
 
-        i.handle_mouse(&event(MouseKind::Move, MouseButton::Left, 2), geometry, &fonts);
+        i.handle_mouse(
+            &event(MouseKind::Move, MouseButton::Left, 2),
+            geometry,
+            &fonts,
+        );
         assert_eq!(i.selection(), Some(2..8), "dragging extends");
 
-        i.handle_mouse(&event(MouseKind::Up, MouseButton::Left, 2), geometry, &fonts);
-        let reply = i.handle_mouse(&event(MouseKind::Move, MouseButton::Left, 5), geometry, &fonts);
+        i.handle_mouse(
+            &event(MouseKind::Up, MouseButton::Left, 2),
+            geometry,
+            &fonts,
+        );
+        let reply = i.handle_mouse(
+            &event(MouseKind::Move, MouseButton::Left, 5),
+            geometry,
+            &fonts,
+        );
         assert_eq!(reply, InputReply::None, "no drag after release");
         assert_eq!(i.selection(), Some(2..8));
 
         // A second down at the first click's point within the chain window
         // is a double click: the word under it gets selected.
-        i.handle_mouse(&event(MouseKind::Down, MouseButton::Left, 8), geometry, &fonts);
+        i.handle_mouse(
+            &event(MouseKind::Down, MouseButton::Left, 8),
+            geometry,
+            &fonts,
+        );
         assert_eq!(i.selected_text(), Some("world"));
-        i.handle_mouse(&event(MouseKind::Down, MouseButton::Left, 8), geometry, &fonts);
-        assert_eq!(i.selected_text(), Some("hello world"), "third click takes the line");
+        i.handle_mouse(
+            &event(MouseKind::Down, MouseButton::Left, 8),
+            geometry,
+            &fonts,
+        );
+        assert_eq!(
+            i.selected_text(),
+            Some("hello world"),
+            "third click takes the line"
+        );
     }
 
     #[test]
@@ -1221,7 +1134,11 @@ mod tests {
         let f = font();
         let text = "short\nlonger line";
         assert_eq!(point_to_offset(text, -5.0, -10.0, &f, 16.0, None), 0);
-        assert_eq!(point_to_offset(text, 10_000.0, 0.0, &f, 16.0, None), 5, "past line end");
+        assert_eq!(
+            point_to_offset(text, 10_000.0, 0.0, &f, 16.0, None),
+            5,
+            "past line end"
+        );
         assert_eq!(
             point_to_offset(text, 10_000.0, 10_000.0, &f, 16.0, None),
             text.len(),

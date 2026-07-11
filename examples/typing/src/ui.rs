@@ -1,7 +1,7 @@
 use pixel_core::{
     Align, Border, Color, Desc, Dimension, Edges, FlexDirection, FrameStats, Glide, InputAction,
-    InputProps, Justify, MenuEntry, MenuItem, MenuStyle, Overflow, ScrollProfile, Smooth, Style,
-    TerminalColors, Tui, context_menu, fontdue,
+    InputProps, Justify, MenuEntry, MenuItem, MenuStyle, Overflow, ScrollProfile, SelectionMode,
+    Smooth, Style, TerminalColors, Tui, context_menu, fontdue,
 };
 
 static SCROLL_SMOOTH: Smooth = Smooth {
@@ -15,8 +15,7 @@ static SCROLL_GLIDE: Glide = Glide {
 };
 static SCROLL_TUI: Tui = Tui;
 
-pub const PROFILES: [&'static dyn ScrollProfile; 3] =
-    [&SCROLL_SMOOTH, &SCROLL_GLIDE, &SCROLL_TUI];
+pub const PROFILES: [&'static dyn ScrollProfile; 3] = [&SCROLL_SMOOTH, &SCROLL_GLIDE, &SCROLL_TUI];
 
 impl App {
     pub fn profile(&self) -> &'static dyn ScrollProfile {
@@ -46,7 +45,11 @@ impl App {
             return "scroll: native".into();
         }
         let debug = format!("{:?}", PROFILES[self.scroll_profile]);
-        let name = debug.split_whitespace().next().unwrap_or("?").to_lowercase();
+        let name = debug
+            .split_whitespace()
+            .next()
+            .unwrap_or("?")
+            .to_lowercase();
         format!("scroll: {name}")
     }
 }
@@ -234,6 +237,7 @@ pub fn build_ui(
             gap: rem * 0.125,
             background: Some(t.sidebar_bg),
             corner_radius: rem * 0.6,
+            selection_mode: SelectionMode::Unified,
             ..Style::default()
         },
         children: sidebar_children,

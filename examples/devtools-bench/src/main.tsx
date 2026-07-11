@@ -1,3 +1,4 @@
+import React from "react";
 import { createRoot } from "pixel-react";
 
 import { App } from "./app";
@@ -9,6 +10,17 @@ const root = createRoot({
       process.exit(0);
     }
   },
+  onResize() {
+    render();
+  },
 });
 
-root.render(<App info={root.info} />);
+function Boot() {
+  return <App width={root.info.width} />;
+}
+
+function render() {
+  root.render(<Boot />);
+}
+
+render();

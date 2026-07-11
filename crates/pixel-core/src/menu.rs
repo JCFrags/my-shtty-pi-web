@@ -198,7 +198,14 @@ mod tests {
         let mut tree = Tree::new((400.0, 300.0));
         let f = font();
         tree.reconcile(Desc {
-            children: vec![context_menu(items(), at, (400.0, 300.0), 16.0, &f, &style())],
+            children: vec![context_menu(
+                items(),
+                at,
+                (400.0, 300.0),
+                16.0,
+                &f,
+                &style(),
+            )],
             ..Desc::default()
         });
         tree.flush_layout(&[f], 16.0);

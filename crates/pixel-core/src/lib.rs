@@ -3,11 +3,13 @@ mod desc;
 mod engine;
 pub mod ghostty;
 mod kitty;
+pub mod logging;
 mod menu;
 mod native;
 mod paint;
 pub mod profiler;
 mod scroll;
+mod selection;
 mod style;
 mod terminal;
 mod text_input;
@@ -18,15 +20,17 @@ pub use canvas::{Canvas, measure_text};
 pub use desc::Desc;
 pub use engine::{Engine, EngineConfig, EngineEvent, FrameStats, px_for_cell_height};
 pub use kitty::kitty_transmit;
+pub use logging::{LogEntry, LogLevel};
 pub use menu::{CONTEXT_MENU_KEY, MenuEntry, MenuItem, MenuStyle, context_menu};
 pub use native::{NativeDelta, NativeScroll};
 pub use paint::paint;
-pub use profiler::Profiler;
+pub use profiler::{CounterRecord, ProfileData, Profiler, SpanRecord};
 pub use scroll::profiles::{Glide, Smooth, Tui};
 pub use scroll::{ScrollProfile, ScrollState};
+pub use selection::{DocPos, DocSelection};
 pub use style::{
     Align, Border, Color, Dimension, Edges, FlexDirection, Inset, Justify, Overflow, Position,
-    ScrollbarStyle, Style,
+    ScrollbarStyle, SelectionMode, Style,
 };
 pub use terminal::{
     Event, Key, KeyEvent, Mods, Mouse, MouseButton, MouseKind, Terminal, TerminalColors, Waker,

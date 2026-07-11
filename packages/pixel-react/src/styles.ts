@@ -44,6 +44,11 @@ export interface Style {
   hoverColor?: Color;
   scrollbar?: ScrollbarStyle;
   wrap?: boolean;
+  selectable?: boolean;
+  selectionColor?: Color;
+  /** On a container: selections inside render as one continuous
+   *  terminal-style block (full-width middle rows, gaps included). */
+  selectionMode?: "text" | "unified";
 }
 
 export function parseColor(color: Color | undefined): Rgba | undefined {
@@ -91,6 +96,9 @@ export function serializeStyle(style: Style): Record<string, unknown> {
     hoverBackground: parseColor(style.hoverBackground),
     hoverColor: parseColor(style.hoverColor),
     wrap: style.wrap,
+    selectable: style.selectable,
+    selectionColor: parseColor(style.selectionColor),
+    selectionMode: style.selectionMode,
     scrollbar: style.scrollbar && {
       width: style.scrollbar.width,
       hoverWidth: style.scrollbar.hoverWidth,

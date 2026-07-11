@@ -102,7 +102,7 @@ fn upsert_block(config: &str, app_name: &str, keybinds: &[&str]) -> Option<Strin
     Some(updated)
 }
 
-// this makes me uncomfortable, id like to have a link in ghosttys github of 
+// this makes me uncomfortable, id like to have a link in ghosttys github of
 // where they respect this
 pub fn reload() -> io::Result<bool> {
     let mut pid = std::process::id() as i32;
@@ -164,7 +164,9 @@ mod tests {
              # <<< demo: managed keybinds <<<\n"
         );
         assert!(
-            upsert_block("", "demo", BINDS).unwrap().starts_with("# >>>"),
+            upsert_block("", "demo", BINDS)
+                .unwrap()
+                .starts_with("# >>>"),
             "empty config gets just the block"
         );
     }

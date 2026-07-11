@@ -3,10 +3,7 @@ fn main() {
         return;
     }
     println!("cargo:rerun-if-changed=native-scroll-helper.swift");
-    let out = format!(
-        "{}/native-scroll-helper",
-        std::env::var("OUT_DIR").unwrap()
-    );
+    let out = format!("{}/native-scroll-helper", std::env::var("OUT_DIR").unwrap());
     let compiled = std::process::Command::new("swiftc")
         .args(["-O", "native-scroll-helper.swift", "-o", &out])
         .status()

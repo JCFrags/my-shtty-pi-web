@@ -59,6 +59,7 @@ export function App({ info }: { info: EngineInfo }) {
             overflow: "scroll",
             padding: rem,
             gap: rem * 0.75,
+            selectionMode: "unified",
           }}
           onScroll={(e) => {
             if (e.offset < lastOffset.current - 1) follow.current = false;

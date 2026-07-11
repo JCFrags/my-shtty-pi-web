@@ -68,11 +68,20 @@ impl Canvas {
         let y1 = y.clamp(cy1, cy2);
         let x2 = x.saturating_add(w).clamp(x1, cx2);
         let y2 = y.saturating_add(h).clamp(y1, cy2);
-        for row in y1..y2 {
-            for col in x1..x2 {
-                let i = ((row * self.width + col) * 4) as usize;
-                self.pixels[i..i + 4].copy_from_slice(&color);
-            }
+        if x2 <= x1 || y2 <= y1 {
+            return;
+        }
+        // Fill one row, then memcpy it into the rest: large fills (selection
+        // bands can span the viewport) must not run per-pixel loops.
+        let first = ((y1 * self.width + x1) * 4) as usize;
+        let row_len = ((x2 - x1) * 4) as usize;
+        for px in self.pixels[first..first + row_len].chunks_exact_mut(4) {
+            px.copy_from_slice(&color);
+        }
+        let template = self.pixels[first..first + row_len].to_vec();
+        for row in y1 + 1..y2 {
+            let start = ((row * self.width + x1) * 4) as usize;
+            self.pixels[start..start + row_len].copy_from_slice(&template);
         }
     }
 
@@ -144,6 +153,20 @@ impl Canvas {
         radius: f32,
         color: [u8; 4],
     ) {
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        // Square opaque fills skip the path rasterizer: paint_path builds a
+        // full-canvas clip mask and blends per pixel, which made selection
+        // bands cost milliseconds per frame while scrolling.
+        if radius.min(w / 2.0).min(h / 2.0) < 0.5 && color[3] == 255 {
+            let x1 = x.round().max(0.0) as u32;
+            let y1 = y.round().max(0.0) as u32;
+            let x2 = (x + w).round().max(0.0) as u32;
+            let y2 = (y + h).round().max(0.0) as u32;
+            self.fill_rect(x1, y1, x2.saturating_sub(x1), y2.saturating_sub(y1), color);
+            return;
+        }
         if let Some(path) = rounded_rect_path(x, y, w, h, radius) {
             self.paint_path(&path, color, None);
         }
@@ -219,8 +242,7 @@ impl Canvas {
         let Some(mut mask) = tiny_skia::Mask::new(self.width, self.height) else {
             return;
         };
-        let Some(rect) =
-            tiny_skia::Rect::from_ltrb(x1 as f32, y1 as f32, x2 as f32, y2 as f32)
+        let Some(rect) = tiny_skia::Rect::from_ltrb(x1 as f32, y1 as f32, x2 as f32, y2 as f32)
         else {
             return;
         };
@@ -306,9 +328,17 @@ mod tests {
         canvas.push_clip(1.0, 0.0, 2.0, 1.0);
         canvas.fill_rect(0, 0, 4, 1, [7, 7, 7, 255]);
         canvas.blend_mask(0, 0, 4, 1, &[255; 4], [9, 9, 9, 255]);
-        assert_eq!(&canvas.pixels[0..4], &[0, 0, 0, 0], "left of clip untouched");
+        assert_eq!(
+            &canvas.pixels[0..4],
+            &[0, 0, 0, 0],
+            "left of clip untouched"
+        );
         assert_eq!(&canvas.pixels[4..8], &[9, 9, 9, 255]);
-        assert_eq!(&canvas.pixels[12..16], &[0, 0, 0, 0], "right of clip untouched");
+        assert_eq!(
+            &canvas.pixels[12..16],
+            &[0, 0, 0, 0],
+            "right of clip untouched"
+        );
 
         canvas.pop_clip();
         canvas.fill_rect(0, 0, 4, 1, [7, 7, 7, 255]);
@@ -332,7 +362,11 @@ mod tests {
         canvas.push_clip(0.0, 0.0, 2.0, 4.0);
         canvas.fill_rounded_rect(0.0, 0.0, 4.0, 4.0, 0.0, [8, 8, 8, 255]);
         assert_eq!(&canvas.pixels[0..4], &[8, 8, 8, 255]);
-        assert_eq!(&canvas.pixels[8..12], &[0, 0, 0, 0], "beyond clip untouched");
+        assert_eq!(
+            &canvas.pixels[8..12],
+            &[0, 0, 0, 0],
+            "beyond clip untouched"
+        );
     }
 
     #[test]
