@@ -1166,7 +1166,7 @@ impl Engine {
         match self.menu.click(&mut self.comp.views[view].tree, local) {
             MenuClick::KeepOpen | MenuClick::Dismissed => {}
             MenuClick::Action(action) => self.apply_input_action(action, out)?,
-            MenuClick::Inspect { target, at } => {
+            MenuClick::Devtools { target, at } => {
                 if let Some(node) = target {
                     out.push(EngineEvent::Inspect {
                         view,

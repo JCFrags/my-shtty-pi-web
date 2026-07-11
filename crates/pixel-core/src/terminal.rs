@@ -227,6 +227,11 @@ impl Terminal {
             }
         }
         frame.extend_from_slice(b"\x1b[H");
+        /*
+          we eventualy need to be more principled about
+          being generic over graphcis protocols to support
+          more terminals (even if degraded)
+         */
         if self.shm_frames {
             let name = crate::profiler::span("kitty.shm", || self.write_shm_frame(&canvas.pixels))?;
             frame.extend_from_slice(&crate::kitty::kitty_transmit_shm(

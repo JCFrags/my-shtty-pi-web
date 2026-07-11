@@ -64,7 +64,13 @@ pub(crate) enum MenuClick {
     KeepOpen,
     Dismissed,
     Action(InputAction),
-    Inspect {
+    Devtools {
+        /*
+        this used to be "inspect element" and we still track
+        the target node we are inspecting at open
+
+        we should remove this its not a helpful feature
+         */
         target: Option<NodeId>,
         at: (f32, f32),
     },
@@ -135,10 +141,10 @@ impl MenuController {
         }
         if include_inspect {
             entries.push(MenuEntry::Item(MenuItem::new(
-                "Inspect Element",
+                "Open Devtools",
                 None,
                 true,
-                "menu:inspect",
+                "menu:devtools",
             )));
         }
         if entries.is_empty() {
@@ -186,7 +192,7 @@ impl MenuController {
             "menu:copy" => MenuClick::Action(InputAction::Copy),
             "menu:paste" => MenuClick::Action(InputAction::Paste),
             "menu:select-all" => MenuClick::Action(InputAction::SelectAll),
-            "menu:inspect" => MenuClick::Inspect { target, at },
+            "menu:devtools" => MenuClick::Devtools { target, at },
             _ => MenuClick::Dismissed,
         }
     }
