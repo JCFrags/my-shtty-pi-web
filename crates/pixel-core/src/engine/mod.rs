@@ -1,10 +1,13 @@
+mod compositor;
+
 use std::io;
 use std::time::{Duration, Instant};
 
+use compositor::Compositor;
+
 use crate::canvas::{Canvas, measure_text};
-use crate::desc::Desc;
 use crate::logging;
-use crate::menu::{CONTEXT_MENU_KEY, MenuEntry, MenuItem, MenuStyle, context_menu};
+use crate::menu::{MenuClick, MenuController};
 use crate::native::NativeScroll;
 use crate::paint::paint;
 use crate::profiler::{ProfileData, Profiler};
@@ -20,16 +23,9 @@ use crate::tree::{HitTarget, NodeId, Tree};
 
 const FALLBACK_CELL: (u32, u32) = (16, 32);
 const FRAME_POLL: Duration = Duration::from_millis(6);
-const BAR_HIDE_DELAY: Duration = Duration::from_millis(1000);
-const DIVIDER_W: u32 = 6;
-const DIVIDER_GRAB: f32 = 5.0;
-const MIN_PANE: u32 = 160;
 
 const HIGHLIGHT_FILL: Color = [64, 140, 255, 60];
 const HIGHLIGHT_BORDER: Color = [82, 148, 255, 230];
-const DIVIDER_BG: Color = [32, 33, 38, 255];
-const DIVIDER_BG_ACTIVE: Color = [58, 96, 168, 255];
-const DIVIDER_GRIP: Color = [118, 122, 132, 255];
 
 fn key_label(key: &KeyEvent) -> String {
     let mut label = String::from("key ");
@@ -76,14 +72,6 @@ fn is_plain_enter(key: &KeyEvent) -> bool {
         && !key.mods.ctrl
         && !key.mods.alt
         && !key.mods.sup
-}
-
-fn step_toward(value: f32, up: bool, up_rate: f32, down_rate: f32) -> f32 {
-    if up {
-        (value + up_rate).min(1.0)
-    } else {
-        (value - down_rate).max(0.0)
-    }
 }
 
 fn window_from(ws: &crate::terminal::WindowSize, cell: (u32, u32)) -> (u32, u32) {
@@ -187,37 +175,6 @@ pub struct FrameStats {
     pub fps: f32,
 }
 
-struct View {
-    tree: Tree,
-    canvas: Canvas,
-    clear_color: Color,
-    origin_x: u32,
-    size: (u32, u32),
-}
-
-impl View {
-    fn new(window: (u32, u32)) -> Self {
-        Self {
-            tree: Tree::new((window.0 as f32, window.1 as f32)),
-            canvas: Canvas::new(window.0, window.1),
-            clear_color: [0, 0, 0, 255],
-            origin_x: 0,
-            size: window,
-        }
-    }
-
-    fn contains(&self, x: f32) -> bool {
-        x >= self.origin_x as f32 && x < (self.origin_x + self.size.0) as f32
-    }
-}
-
-struct MenuState {
-    view: usize,
-    root: NodeId,
-    target: Option<NodeId>,
-    at: (f32, f32),
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DragTarget {
     Input(NodeId),
@@ -226,11 +183,10 @@ enum DragTarget {
 
 pub struct Engine {
     term: Terminal,
-    views: Vec<View>,
+    comp: Compositor,
     fonts: Vec<fontdue::Font>,
     cell_metrics_font: usize,
     profiler: Profiler,
-    window: (u32, u32),
     cell: (u32, u32),
     grid: (u32, u32),
     base_px: f32,
@@ -243,14 +199,10 @@ pub struct Engine {
     native: Option<NativeScroll>,
     use_native: bool,
     profile: &'static dyn ScrollProfile,
-    frame_canvas: Canvas,
-    compose_dirty: bool,
-    split: Option<f32>,
-    divider_drag: bool,
-    divider_hover: bool,
     default_menu: bool,
-    menu: Option<MenuState>,
+    menu: MenuController,
     inspect_mode: bool,
+    inspect_view: usize,
     inspect_hover: Option<NodeId>,
     highlight: Option<(usize, NodeId)>,
     emit_logs: bool,
@@ -295,11 +247,10 @@ impl Engine {
         );
         Ok(Self {
             term,
-            views: vec![View::new(window), View::new((0, 0))],
+            comp: Compositor::new(window),
             fonts: config.fonts,
             cell_metrics_font: config.cell_metrics_font,
             profiler: Profiler::new(),
-            window,
             cell,
             grid: (0, 0),
             base_px,
@@ -312,14 +263,10 @@ impl Engine {
             native,
             use_native,
             profile: &DEFAULT_PROFILE,
-            frame_canvas: Canvas::new(window.0, window.1),
-            compose_dirty: true,
-            split: None,
-            divider_drag: false,
-            divider_hover: false,
             default_menu: false,
-            menu: None,
+            menu: MenuController::default(),
             inspect_mode: false,
+            inspect_view: 0,
             inspect_hover: None,
             highlight: None,
             emit_logs: false,
@@ -340,31 +287,31 @@ impl Engine {
     }
 
     pub fn tree(&self) -> &Tree {
-        &self.views[0].tree
+        &self.comp.views[0].tree
     }
 
     pub fn tree_mut(&mut self) -> &mut Tree {
-        &mut self.views[0].tree
+        &mut self.comp.views[0].tree
     }
 
     pub fn view_tree(&self, view: usize) -> Option<&Tree> {
-        self.views.get(view).map(|v| &v.tree)
+        self.comp.views.get(view).map(|v| &v.tree)
     }
 
     pub fn view_tree_mut(&mut self, view: usize) -> Option<&mut Tree> {
-        self.views.get_mut(view).map(|v| &mut v.tree)
+        self.comp.views.get_mut(view).map(|v| &mut v.tree)
     }
 
     pub fn view_count(&self) -> usize {
-        self.views.len()
+        self.comp.views.len()
     }
 
     pub fn view_size(&self, view: usize) -> (u32, u32) {
-        self.views.get(view).map_or((0, 0), |v| v.size)
+        self.comp.views.get(view).map_or((0, 0), |v| v.size)
     }
 
     pub fn window_px(&self) -> (u32, u32) {
-        self.window
+        self.comp.window
     }
 
     pub fn cell_px(&self) -> (u32, u32) {
@@ -392,11 +339,31 @@ impl Engine {
     }
 
     pub fn split(&self) -> Option<f32> {
-        self.split
+        self.comp.split()
+    }
+
+    pub fn add_view(&mut self) -> usize {
+        let view = self.comp.add_view();
+        logging::info("engine", format!("view {view} created"));
+        view
+    }
+
+    pub fn set_pane(&mut self, slot: usize, view: usize) {
+        if self.comp.set_pane(slot, view) {
+            logging::info("engine", format!("pane {slot} shows view {view}"));
+            let resized = self.comp.apply_layout(true);
+            self.push_resizes(resized);
+        }
+    }
+
+    pub fn set_inspect_view(&mut self, view: usize) {
+        if view < self.comp.views.len() {
+            self.inspect_view = view;
+        }
     }
 
     pub fn set_clear_color(&mut self, view: usize, color: Color) {
-        let Some(v) = self.views.get_mut(view) else {
+        let Some(v) = self.comp.views.get_mut(view) else {
             return;
         };
         if v.clear_color != color {
@@ -420,7 +387,7 @@ impl Engine {
         if self.inspect_mode != enabled {
             self.inspect_mode = enabled;
             self.inspect_hover = None;
-            self.compose_dirty = true;
+            self.comp.dirty = true;
         }
     }
 
@@ -431,26 +398,34 @@ impl Engine {
     pub fn set_highlight(&mut self, target: Option<(usize, NodeId)>) {
         if self.highlight != target {
             self.highlight = target;
-            self.compose_dirty = true;
+            self.comp.dirty = true;
         }
     }
 
-    /// Fraction of the window width given to view 0; `None` collapses the
-    /// second view and gives view 0 the whole window.
     pub fn set_split(&mut self, split: Option<f32>) {
-        let split = split.map(|f| f.clamp(0.15, 0.85));
-        if self.split == split {
+        if !self.comp.set_split(split) {
             return;
         }
         logging::info(
             "engine",
-            match split {
+            match self.comp.split() {
                 Some(f) => format!("split screen at {:.0}%", f * 100.0),
                 None => "split screen closed".into(),
             },
         );
-        self.split = split;
-        self.apply_pane_layout(false);
+        let resized = self.comp.apply_layout(false);
+        self.push_resizes(resized);
+    }
+
+    fn push_resizes(&mut self, resized: Vec<(usize, (u32, u32))>) {
+        for (view, size) in resized {
+            self.pending.push(EngineEvent::Resize {
+                view,
+                width: size.0,
+                height: size.1,
+                base_px: self.base_px,
+            });
+        }
     }
 
     pub fn set_scroll_profile(&mut self, profile: &'static dyn ScrollProfile) {
@@ -522,26 +497,26 @@ impl Engine {
     pub fn flush_view_layout(&mut self, view: usize) {
         let base_px = self.base_px;
         let fonts = &self.fonts;
-        if let Some(v) = self.views.get_mut(view) {
+        if let Some(v) = self.comp.views.get_mut(view) {
             v.tree.flush_layout(fonts, base_px);
         }
     }
 
     pub fn set_focus(&mut self, view: usize, id: Option<NodeId>) {
-        if view >= self.views.len() {
+        if view >= self.comp.views.len() {
             return;
         }
-        for (i, v) in self.views.iter_mut().enumerate() {
+        for (i, v) in self.comp.views.iter_mut().enumerate() {
             if i != view {
                 v.tree.set_focus(None);
             }
         }
-        self.views[view].tree.set_focus(id);
+        self.comp.views[view].tree.set_focus(id);
         self.focus_view = view;
     }
 
     fn focused(&self) -> Option<(usize, NodeId)> {
-        self.views[self.focus_view]
+        self.comp.views[self.focus_view]
             .tree
             .focus()
             .map(|id| (self.focus_view, id))
@@ -555,7 +530,7 @@ impl Engine {
         let Some((view, focus)) = self.focused() else {
             return self.apply_doc_action(action);
         };
-        let Some(input) = self.views[view].tree.input_mut(focus) else {
+        let Some(input) = self.comp.views[view].tree.input_mut(focus) else {
             return Ok(());
         };
         let reply = input.apply(action);
@@ -569,12 +544,12 @@ impl Engine {
         let view = self.active_view;
         match action {
             InputAction::Copy => {
-                if let Some(text) = self.views[view].tree.doc_selected_text() {
+                if let Some(text) = self.comp.views[view].tree.doc_selected_text() {
                     self.term.set_clipboard(&text)?;
                 }
             }
             InputAction::SelectAll => {
-                self.views[view].tree.doc_select_all();
+                self.comp.views[view].tree.doc_select_all();
             }
             _ => {}
         }
@@ -629,51 +604,6 @@ impl Engine {
         out.extend(entries.into_iter().map(EngineEvent::Log));
     }
 
-    fn active_view_count(&self) -> usize {
-        if self.split.is_some() {
-            self.views.len()
-        } else {
-            1
-        }
-    }
-
-    fn divider_x(&self) -> Option<u32> {
-        let f = self.split?;
-        let w = self.window.0;
-        if w <= 2 * MIN_PANE + DIVIDER_W {
-            return Some(w.saturating_sub(DIVIDER_W) / 2);
-        }
-        let x = (w as f32 * f).round() as u32;
-        Some(x.clamp(MIN_PANE, w - MIN_PANE - DIVIDER_W))
-    }
-
-    fn apply_pane_layout(&mut self, force: bool) {
-        let (w, h) = self.window;
-        let panes: [(u32, u32); 2] = match self.divider_x() {
-            Some(dx) => [(0, dx), (dx + DIVIDER_W, w.saturating_sub(dx + DIVIDER_W))],
-            None => [(0, w), (0, 0)],
-        };
-        let active = self.active_view_count();
-        for (i, (origin, width)) in panes.iter().enumerate() {
-            let view = &mut self.views[i];
-            let size = (*width, h);
-            let changed = force || view.size != size || view.origin_x != *origin;
-            view.origin_x = *origin;
-            view.size = size;
-            if !changed || i >= active {
-                continue;
-            }
-            view.tree.set_window((size.0 as f32, size.1 as f32));
-            self.pending.push(EngineEvent::Resize {
-                view: i,
-                width: size.0,
-                height: size.1,
-                base_px: self.base_px,
-            });
-        }
-        self.compose_dirty = true;
-    }
-
     fn check_resize(&mut self, out: &mut Vec<EngineEvent>) -> io::Result<()> {
         let ws = self.term.size()?;
         if ws.cols == 0 && ws.width_px == 0 {
@@ -697,7 +627,7 @@ impl Engine {
         };
         self.grid = grid;
         let window = window_from(ws, cell);
-        if window == self.window && cell == self.cell {
+        if window == self.comp.window && cell == self.cell {
             return Ok(());
         }
         let base_px = px_for_cell_height(
@@ -708,8 +638,8 @@ impl Engine {
             "engine",
             format!(
                 "resize {}x{} cell {}x{} base {:.1}px -> {}x{} cell {}x{} base {base_px:.1}px",
-                self.window.0,
-                self.window.1,
+                self.comp.window.0,
+                self.comp.window.1,
                 self.cell.0,
                 self.cell.1,
                 self.base_px,
@@ -730,39 +660,22 @@ impl Engine {
             );
         }
         let base_changed = (base_px - self.base_px).abs() > 0.01;
-        self.window = window;
+        self.comp.window = window;
         self.cell = cell;
         self.base_px = base_px;
-        self.apply_pane_layout(base_changed);
+        let resized = self.comp.apply_layout(base_changed);
+        self.push_resizes(resized);
         Ok(())
     }
 
     fn animating(&self) -> bool {
-        let scrolling = self.views.iter().take(self.active_view_count()).any(|v| {
-            v.tree
-                .scroll_nodes()
+        let scrolling = self.comp.active_views().into_iter().any(|view| {
+            let tree = &self.comp.views[view].tree;
+            tree.scroll_nodes()
                 .iter()
-                .any(|&id| v.tree.scroll_state(id).is_some_and(|s| !s.settled()))
+                .any(|&id| tree.scroll_state(id).is_some_and(|s| !s.settled()))
         });
         scrolling || self.bars_animating()
-    }
-
-    fn view_at(&self, x: f32) -> usize {
-        if self.split.is_some() && self.views[1].contains(x) {
-            1
-        } else {
-            0
-        }
-    }
-
-    fn to_local(&self, view: usize, point: (f32, f32)) -> (f32, f32) {
-        (point.0 - self.views[view].origin_x as f32, point.1)
-    }
-
-    fn on_divider(&self, x: f32) -> bool {
-        self.divider_x().is_some_and(|dx| {
-            x >= dx as f32 - DIVIDER_GRAB && x < (dx + DIVIDER_W) as f32 + DIVIDER_GRAB
-        })
     }
 
     fn handle_event(&mut self, event: Event, out: &mut Vec<EngineEvent>) -> io::Result<()> {
@@ -777,7 +690,7 @@ impl Engine {
                     );
                 }
                 if let Some((view, focus)) = self.focused() {
-                    if let Some(input) = self.views[view].tree.input_mut(focus) {
+                    if let Some(input) = self.comp.views[view].tree.input_mut(focus) {
                         input.insert(&text);
                         self.finish_reply(view, focus, InputReply::Edited, out)?;
                     }
@@ -800,7 +713,7 @@ impl Engine {
             crate::profiler::mark("key", self.active_view as u32, key_label(&key));
         }
         if key.key == crate::terminal::Key::Escape {
-            if self.menu.is_some() {
+            if self.menu.is_open() {
                 self.close_menu();
                 return Ok(());
             }
@@ -810,7 +723,7 @@ impl Engine {
             }
         }
         let focused = self.focused().and_then(|(view, id)| {
-            self.views[view]
+            self.comp.views[view]
                 .tree
                 .input_meta(id)
                 .map(|(resolved, submit)| (view, id, resolved, submit))
@@ -820,12 +733,12 @@ impl Engine {
                 self.submit_input(view, focus, out)?;
             }
             Some((view, focus, resolved, _)) => {
-                let wrap = self.views[view]
+                let wrap = self.comp.views[view]
                     .tree
                     .input_geometry(focus)
                     .and_then(|g| g.max_width);
                 let font = &self.fonts[resolved.font.min(self.fonts.len() - 1)];
-                let input = self.views[view]
+                let input = self.comp.views[view]
                     .tree
                     .input_mut(focus)
                     .expect("checked above");
@@ -867,7 +780,7 @@ impl Engine {
         };
         let handled = match key.key {
             crate::terminal::Key::Char('c') if combo => {
-                match self.views[view].tree.doc_selected_text() {
+                match self.comp.views[view].tree.doc_selected_text() {
                     Some(text) => {
                         self.term.set_clipboard(&text)?;
                         true
@@ -875,29 +788,29 @@ impl Engine {
                     None => false,
                 }
             }
-            crate::terminal::Key::Char('a') if m.sup => self.views[view].tree.doc_select_all(),
-            crate::terminal::Key::Escape => self.views[view].tree.doc_collapse(),
+            crate::terminal::Key::Char('a') if m.sup => self.comp.views[view].tree.doc_select_all(),
+            crate::terminal::Key::Escape => self.comp.views[view].tree.doc_collapse(),
             crate::terminal::Key::Left if m.shift => {
-                self.views[view].tree.doc_extend(true, horizontal)
+                self.comp.views[view].tree.doc_extend(true, horizontal)
             }
             crate::terminal::Key::Right if m.shift => {
-                self.views[view].tree.doc_extend(false, horizontal)
+                self.comp.views[view].tree.doc_extend(false, horizontal)
             }
-            crate::terminal::Key::Home if m.shift => self.views[view].tree.doc_extend(true, Line),
-            crate::terminal::Key::End if m.shift => self.views[view].tree.doc_extend(false, Line),
+            crate::terminal::Key::Home if m.shift => self.comp.views[view].tree.doc_extend(true, Line),
+            crate::terminal::Key::End if m.shift => self.comp.views[view].tree.doc_extend(false, Line),
             crate::terminal::Key::Up if m.shift && m.sup => {
-                self.views[view].tree.doc_extend_edge(true)
+                self.comp.views[view].tree.doc_extend_edge(true)
             }
             crate::terminal::Key::Down if m.shift && m.sup => {
-                self.views[view].tree.doc_extend_edge(false)
+                self.comp.views[view].tree.doc_extend_edge(false)
             }
             crate::terminal::Key::Up if m.shift => {
                 let fonts = &self.fonts;
-                self.views[view].tree.doc_extend_vertical(true, fonts)
+                self.comp.views[view].tree.doc_extend_vertical(true, fonts)
             }
             crate::terminal::Key::Down if m.shift => {
                 let fonts = &self.fonts;
-                self.views[view].tree.doc_extend_vertical(false, fonts)
+                self.comp.views[view].tree.doc_extend_vertical(false, fonts)
             }
             _ => false,
         };
@@ -905,7 +818,7 @@ impl Engine {
     }
 
     fn clear_doc_selections(&mut self, except: Option<usize>) {
-        for (i, v) in self.views.iter_mut().enumerate() {
+        for (i, v) in self.comp.views.iter_mut().enumerate() {
             if except != Some(i) {
                 v.tree.doc_collapse();
             }
@@ -915,15 +828,15 @@ impl Engine {
     fn begin_text_selection(&mut self, view: usize, local: (f32, f32)) {
         self.clear_doc_selections(Some(view));
         let fonts = &self.fonts;
-        if self.views[view].tree.doc_select_down(local, fonts) {
+        if self.comp.views[view].tree.doc_select_down(local, fonts) {
             if let Some((focus_view, _)) = self.focused() {
-                self.views[focus_view].tree.set_focus(None);
+                self.comp.views[focus_view].tree.set_focus(None);
             }
             self.drag = Some((view, DragTarget::Text));
-        } else if self.views[view].tree.doc_select_down_near(local, fonts) {
+        } else if self.comp.views[view].tree.doc_select_down_near(local, fonts) {
             self.drag = Some((view, DragTarget::Text));
         } else {
-            self.views[view].tree.doc_collapse();
+            self.comp.views[view].tree.doc_collapse();
         }
     }
 
@@ -935,30 +848,30 @@ impl Engine {
                 if self.handle_menu_click(point, out)? {
                     return Ok(());
                 }
-                if self.on_divider(point.0) {
+                if self.comp.on_divider(point.0) {
                     if crate::profiler::is_recording() {
                         crate::profiler::mark("drag", 0, "divider drag".into());
                     }
-                    self.divider_drag = true;
-                    self.compose_dirty = true;
+                    self.comp.divider_drag = true;
+                    self.comp.dirty = true;
                     return Ok(());
                 }
-                let view = self.view_at(point.0);
-                let local = self.to_local(view, point);
+                let view = self.comp.view_at(point.0);
+                let local = self.comp.to_local(view, point);
                 self.active_view = view;
                 if let Some((focus_view, _)) = self.focused()
                     && focus_view != view
                 {
-                    self.views[focus_view].tree.set_focus(None);
+                    self.comp.views[focus_view].tree.set_focus(None);
                 }
-                if self.inspect_mode && view == 0 {
+                if self.inspect_mode && view == self.inspect_view {
                     self.finish_inspect(local, out);
                     return Ok(());
                 }
                 if self.begin_bar_drag(view, local) {
                     return Ok(());
                 }
-                let node = match self.views[view].tree.hit_target(local.0, local.1) {
+                let node = match self.comp.views[view].tree.hit_target(local.0, local.1) {
                     Some(HitTarget::Input(id)) => {
                         self.clear_doc_selections(None);
                         self.set_focus(view, Some(id));
@@ -983,7 +896,7 @@ impl Engine {
                     out.push(EngineEvent::Click {
                         view,
                         node,
-                        key: self.views[view].tree.key_of(node).map(str::to_string),
+                        key: self.comp.views[view].tree.key_of(node).map(str::to_string),
                         x: local.0,
                         y: local.1,
                     });
@@ -992,11 +905,11 @@ impl Engine {
             MouseKind::Down if mouse.button == MouseButton::Right => {
                 self.mark_pointer("right-click", point);
                 self.close_menu();
-                if self.on_divider(point.0) {
+                if self.comp.on_divider(point.0) {
                     return Ok(());
                 }
-                let view = self.view_at(point.0);
-                let local = self.to_local(view, point);
+                let view = self.comp.view_at(point.0);
+                let local = self.comp.to_local(view, point);
                 self.active_view = view;
                 if self.default_menu {
                     self.open_menu(view, local);
@@ -1009,51 +922,49 @@ impl Engine {
             }
             MouseKind::Move => {
                 self.cursor = Some(point);
-                if self.divider_drag {
-                    self.drag_divider(point.0);
+                if self.comp.divider_drag {
+                    let resized = self.comp.drag_divider(point.0);
+                    self.push_resizes(resized);
                     return Ok(());
                 }
-                let divider_hover = self.on_divider(point.0);
-                if divider_hover != self.divider_hover {
-                    self.divider_hover = divider_hover;
-                    self.compose_dirty = true;
-                }
+                let divider_hover = self.comp.on_divider(point.0);
+                self.comp.set_divider_hover(divider_hover);
                 if let Some((view, id, grab)) = self.bar_drag {
-                    let local = self.to_local(view, point);
+                    let local = self.comp.to_local(view, point);
                     self.drag_bar_to(view, id, local.1 - grab);
                     return Ok(());
                 }
-                let view = self.view_at(point.0);
-                let local = self.to_local(view, point);
+                let view = self.comp.view_at(point.0);
+                let local = self.comp.to_local(view, point);
                 if self.inspect_mode {
-                    let over = (view == 0)
-                        .then(|| self.views[0].tree.hit_any(local.0, local.1))
+                    let over = (view == self.inspect_view)
+                        .then(|| self.comp.views[view].tree.hit_any(local.0, local.1))
                         .flatten();
                     if over != self.inspect_hover {
                         self.inspect_hover = over;
-                        self.compose_dirty = true;
+                        self.comp.dirty = true;
                     }
                 }
                 let bar_hover = self.bar_at(view, local).map(|id| (view, id));
                 if bar_hover != self.bar_hover {
                     self.bar_hover = bar_hover;
-                    self.views[view].tree.mark_paint();
+                    self.comp.views[view].tree.mark_paint();
                 }
-                let hover = self.views[view]
+                let hover = self.comp.views[view]
                     .tree
                     .hover_at(local.0, local.1)
                     .map(|id| (view, id));
                 if hover != self.hover {
                     if let Some((old, _)) = self.hover {
-                        self.views[old].tree.mark_paint();
+                        self.comp.views[old].tree.mark_paint();
                     }
                     if let Some((new, _)) = hover {
-                        self.views[new].tree.mark_paint();
+                        self.comp.views[new].tree.mark_paint();
                     }
                     self.hover = hover;
                 }
                 if let Some((view, target)) = self.drag {
-                    let local = self.to_local(view, point);
+                    let local = self.comp.to_local(view, point);
                     match target {
                         DragTarget::Input(id) => {
                             let translated = Mouse {
@@ -1065,28 +976,28 @@ impl Engine {
                         }
                         DragTarget::Text => {
                             let fonts = &self.fonts;
-                            self.views[view]
+                            self.comp.views[view]
                                 .tree
                                 .doc_select_drag((local.0, local.1), fonts);
                             if let Some((focus_view, _)) = self.focused()
-                                && self.views[view]
+                                && self.comp.views[view]
                                     .tree
                                     .doc_selection()
                                     .is_some_and(|sel| !sel.is_collapsed())
                             {
-                                self.views[focus_view].tree.set_focus(None);
+                                self.comp.views[focus_view].tree.set_focus(None);
                             }
                         }
                     }
                 }
             }
             MouseKind::Up => {
-                self.divider_drag = false;
+                self.comp.divider_drag = false;
                 self.bar_drag = None;
                 if let Some((view, target)) = self.drag.take() {
                     match target {
                         DragTarget::Input(id) => {
-                            let local = self.to_local(view, point);
+                            let local = self.comp.to_local(view, point);
                             let translated = Mouse {
                                 x: local.0.max(0.0) as u32,
                                 y: local.1.max(0.0) as u32,
@@ -1094,13 +1005,13 @@ impl Engine {
                             };
                             self.forward_mouse(view, id, &translated, out)?;
                         }
-                        DragTarget::Text => self.views[view].tree.doc_select_up(),
+                        DragTarget::Text => self.comp.views[view].tree.doc_select_up(),
                     }
                 }
             }
             MouseKind::ScrollLeft | MouseKind::ScrollRight => {
-                let view = self.view_at(point.0);
-                let local = self.to_local(view, point);
+                let view = self.comp.view_at(point.0);
+                let local = self.comp.to_local(view, point);
                 let delta = if mouse.kind == MouseKind::ScrollLeft {
                     -(self.cell.0 as f32)
                 } else {
@@ -1109,9 +1020,9 @@ impl Engine {
                 self.emit_wheel(view, local, delta, 0.0, false, out);
             }
             MouseKind::ScrollUp | MouseKind::ScrollDown if !self.native_scroll_active() => {
-                let view = self.view_at(point.0);
+                let view = self.comp.view_at(point.0);
                 self.mark_scroll(view);
-                let local = self.to_local(view, point);
+                let local = self.comp.to_local(view, point);
                 let delta = if mouse.kind == MouseKind::ScrollUp {
                     -(self.cell.1 as f32)
                 } else {
@@ -1120,11 +1031,11 @@ impl Engine {
                 if self.emit_wheel(view, local, 0.0, delta, false, out) {
                     return Ok(());
                 }
-                if let Some(area) = self.views[view].tree.scroll_area_at(local.0, local.1) {
+                if let Some(area) = self.comp.views[view].tree.scroll_area_at(local.0, local.1) {
                     let max = area.max_scroll();
                     let node = area.node;
                     let profile = self.profile;
-                    if let Some(state) = self.views[view].tree.scroll_state_mut(node) {
+                    if let Some(state) = self.comp.views[view].tree.scroll_state_mut(node) {
                         state.tick(profile, delta, max);
                     }
                 }
@@ -1143,7 +1054,7 @@ impl Engine {
         precise: bool,
         out: &mut Vec<EngineEvent>,
     ) -> bool {
-        let tree = &self.views[view].tree;
+        let tree = &self.comp.views[view].tree;
         let Some(node) = tree.hit_wheel(local.0, local.1) else {
             return false;
         };
@@ -1165,12 +1076,12 @@ impl Engine {
         if !crate::profiler::is_recording() {
             return;
         }
-        let view = self.view_at(point.0);
-        let local = self.to_local(view, point);
-        let target = self.views[view]
+        let view = self.comp.view_at(point.0);
+        let local = self.comp.to_local(view, point);
+        let target = self.comp.views[view]
             .tree
             .hit_click(local.0, local.1)
-            .and_then(|id| self.views[view].tree.key_of(id))
+            .and_then(|id| self.comp.views[view].tree.key_of(id))
             .map(str::to_string);
         let label = match target {
             Some(key) => format!("{name} #{key}"),
@@ -1197,174 +1108,75 @@ impl Engine {
         );
     }
 
-    fn drag_divider(&mut self, x: f32) {
-        let w = self.window.0.max(1) as f32;
-        let f = (x / w).clamp(0.15, 0.85);
-        if self.split != Some(f) {
-            self.split = Some(f);
-            self.apply_pane_layout(false);
-        }
-    }
-
     fn finish_inspect(&mut self, local: (f32, f32), out: &mut Vec<EngineEvent>) {
         self.inspect_mode = false;
+        let view = self.inspect_view;
         let node = self
             .inspect_hover
             .take()
-            .or_else(|| self.views[0].tree.hit_any(local.0, local.1));
-        self.compose_dirty = true;
+            .or_else(|| self.comp.views[view].tree.hit_any(local.0, local.1));
+        self.comp.dirty = true;
         let Some(node) = node else {
             return;
         };
         out.push(EngineEvent::Inspect {
-            view: 0,
+            view,
             node,
-            key: self.views[0].tree.key_of(node).map(str::to_string),
+            key: self.comp.views[view].tree.key_of(node).map(str::to_string),
             x: local.0,
             y: local.1,
         });
     }
 
-    fn menu_style() -> MenuStyle {
-        MenuStyle {
-            background: [30, 31, 36, 252],
-            foreground: [222, 224, 230, 255],
-            disabled: [110, 112, 122, 255],
-            hover: [62, 66, 80, 255],
-            shortcut: [138, 141, 152, 255],
-            border: [72, 75, 86, 255],
-        }
-    }
-
     fn open_menu(&mut self, view: usize, at: (f32, f32)) {
-        let target = self.views[view].tree.hit_any(at.0, at.1);
-        let input_target = match self.views[view].tree.hit_target(at.0, at.1) {
-            Some(HitTarget::Input(id)) => Some(id),
-            _ => None,
-        };
-        if let Some(id) = input_target {
-            self.set_focus(view, Some(id));
-        }
-        let mut entries: Vec<MenuEntry> = Vec::new();
-        if let Some(id) = input_target
-            && let Some(input) = self.views[view].tree.input(id)
-        {
-            let has_selection = input.selection().is_some();
-            let item = |label: &str, shortcut: &str, enabled: bool, key: &str| {
-                MenuEntry::Item(MenuItem::new(label, Some(shortcut), enabled, key))
-            };
-            entries.push(item("Undo", "⌘Z", input.can_undo(), "menu:undo"));
-            entries.push(item("Redo", "⇧⌘Z", input.can_redo(), "menu:redo"));
-            entries.push(MenuEntry::Separator);
-            entries.push(item("Cut", "⌘X", has_selection, "menu:cut"));
-            entries.push(item("Copy", "⌘C", has_selection, "menu:copy"));
-            entries.push(item("Paste", "⌘V", true, "menu:paste"));
-            entries.push(item("Select All", "⌘A", true, "menu:select-all"));
-            entries.push(MenuEntry::Separator);
-        }
-        if input_target.is_none() {
-            let tree = &self.views[view].tree;
-            let over_text = matches!(tree.hit_target(at.0, at.1), Some(HitTarget::Text(_)));
-            let has_selection = tree.doc_selected_text().is_some();
-            if over_text || has_selection {
-                let item = |label: &str, shortcut: &str, enabled: bool, key: &str| {
-                    MenuEntry::Item(MenuItem::new(label, Some(shortcut), enabled, key))
-                };
-                entries.push(item("Copy", "⌘C", has_selection, "menu:copy"));
-                entries.push(item("Select All", "⌘A", true, "menu:select-all"));
-                entries.push(MenuEntry::Separator);
-            }
-        }
-        if view == 0 {
-            entries.push(MenuEntry::Item(MenuItem::new(
-                "Inspect Element",
-                None,
-                true,
-                "menu:inspect",
-            )));
-        }
-        if entries.is_empty() {
-            return;
-        }
-        let size = self.views[view].size;
-        let style = Self::menu_style();
-        let desc = context_menu(
-            entries,
+        let size = self.comp.views[view].size;
+        let focus = self.menu.open(
+            &mut self.comp.views[view].tree,
+            view,
             at,
             (size.0 as f32, size.1 as f32),
             self.base_px,
             &self.fonts[0],
-            &style,
+            view == self.inspect_view,
         );
-        let tree = &mut self.views[view].tree;
-        let root = tree.root();
-        let menu_root = mount_desc(tree, root, desc);
-        self.menu = Some(MenuState {
-            view,
-            root: menu_root,
-            target,
-            at,
-        });
-    }
-
-    fn close_menu(&mut self) {
-        if let Some(state) = self.menu.take() {
-            self.views[state.view].tree.remove(state.root);
+        if let Some(id) = focus {
+            self.set_focus(view, Some(id));
         }
     }
 
-    /// Returns true when the click was swallowed by an open context menu.
+    fn close_menu(&mut self) {
+        if let Some(view) = self.menu.view() {
+            self.menu.close(&mut self.comp.views[view].tree);
+        }
+    }
+
     fn handle_menu_click(
         &mut self,
         point: (f32, f32),
         out: &mut Vec<EngineEvent>,
     ) -> io::Result<bool> {
-        let Some(state) = &self.menu else {
+        let Some(view) = self.menu.view() else {
             return Ok(false);
         };
-        let view = state.view;
-        if self.view_at(point.0) != view {
+        if self.comp.view_at(point.0) != view {
             self.close_menu();
             return Ok(true);
         }
-        let local = self.to_local(view, point);
-        let Some(hit) = self.views[view].tree.hit_click(local.0, local.1) else {
-            self.close_menu();
-            return Ok(true);
-        };
-        let Some(key) = self.views[view].tree.key_of(hit).map(str::to_string) else {
-            self.close_menu();
-            return Ok(true);
-        };
-        if key == CONTEXT_MENU_KEY {
-            return Ok(true);
-        }
-        if !key.starts_with("menu:") {
-            self.close_menu();
-            return Ok(true);
-        }
-        let target = state.target;
-        let at = state.at;
-        self.close_menu();
-        match key.as_str() {
-            "menu:undo" => self.apply_input_action(InputAction::Undo, out)?,
-            "menu:redo" => self.apply_input_action(InputAction::Redo, out)?,
-            "menu:cut" => self.apply_input_action(InputAction::Cut, out)?,
-            "menu:copy" => self.apply_input_action(InputAction::Copy, out)?,
-            "menu:paste" => self.apply_input_action(InputAction::Paste, out)?,
-            "menu:select-all" => self.apply_input_action(InputAction::SelectAll, out)?,
-            "menu:inspect" => {
+        let local = self.comp.to_local(view, point);
+        match self.menu.click(&mut self.comp.views[view].tree, local) {
+            MenuClick::KeepOpen | MenuClick::Dismissed => {}
+            MenuClick::Action(action) => self.apply_input_action(action, out)?,
+            MenuClick::Inspect { target, at } => {
                 if let Some(node) = target {
                     out.push(EngineEvent::Inspect {
                         view,
                         node,
-                        key: self.views[view].tree.key_of(node).map(str::to_string),
+                        key: self.comp.views[view].tree.key_of(node).map(str::to_string),
                         x: at.0,
                         y: at.1,
                     });
                 }
             }
-            _ => {}
         }
         Ok(true)
     }
@@ -1376,11 +1188,11 @@ impl Engine {
         mouse: &Mouse,
         out: &mut Vec<EngineEvent>,
     ) -> io::Result<()> {
-        let Some(geometry) = self.views[view].tree.input_geometry(id) else {
+        let Some(geometry) = self.comp.views[view].tree.input_geometry(id) else {
             return Ok(());
         };
         let fonts = &self.fonts;
-        let Some(input) = self.views[view].tree.input_mut(id) else {
+        let Some(input) = self.comp.views[view].tree.input_mut(id) else {
             return Ok(());
         };
         let reply = input.handle_mouse(mouse, geometry, fonts);
@@ -1399,20 +1211,20 @@ impl Engine {
     ) -> io::Result<()> {
         match reply {
             InputReply::None => {}
-            InputReply::Selected => self.views[view].tree.mark_paint(),
+            InputReply::Selected => self.comp.views[view].tree.mark_paint(),
             InputReply::Moved => {
                 self.reveal = true;
-                self.views[view].tree.mark_paint();
+                self.comp.views[view].tree.mark_paint();
             }
             InputReply::Edited => {
-                self.views[view].tree.sync_input_text(id);
+                self.comp.views[view].tree.sync_input_text(id);
                 self.reveal = true;
                 self.push_change(view, id, out);
             }
             InputReply::Copy(text) => self.term.set_clipboard(&text)?,
             InputReply::Cut(text) => {
                 self.term.set_clipboard(&text)?;
-                self.views[view].tree.sync_input_text(id);
+                self.comp.views[view].tree.sync_input_text(id);
                 self.reveal = true;
                 self.push_change(view, id, out);
             }
@@ -1427,7 +1239,7 @@ impl Engine {
         id: NodeId,
         out: &mut Vec<EngineEvent>,
     ) -> io::Result<()> {
-        let text = self.views[view]
+        let text = self.comp.views[view]
             .tree
             .input_text(id)
             .unwrap_or_default()
@@ -1435,29 +1247,29 @@ impl Engine {
         out.push(EngineEvent::Submit {
             view,
             node: id,
-            key: self.views[view].tree.key_of(id).map(str::to_string),
+            key: self.comp.views[view].tree.key_of(id).map(str::to_string),
             text,
         });
-        self.views[view]
+        self.comp.views[view]
             .tree
             .edit_input(id, |input| input.replace_all(""));
         self.finish_reply(view, id, InputReply::Edited, out)
     }
 
     fn push_change(&mut self, view: usize, id: NodeId, out: &mut Vec<EngineEvent>) {
-        let Some(text) = self.views[view].tree.input_text(id) else {
+        let Some(text) = self.comp.views[view].tree.input_text(id) else {
             return;
         };
         out.push(EngineEvent::Change {
             view,
             node: id,
-            key: self.views[view].tree.key_of(id).map(str::to_string),
+            key: self.comp.views[view].tree.key_of(id).map(str::to_string),
             text: text.to_string(),
         });
     }
 
     fn bar_at(&self, view: usize, point: (f32, f32)) -> Option<NodeId> {
-        let tree = &self.views[view].tree;
+        let tree = &self.comp.views[view].tree;
         tree.scroll_nodes().into_iter().rev().find(|&id| {
             tree.bar_opacity(id) > 0.1
                 && tree
@@ -1470,7 +1282,7 @@ impl Engine {
         let Some(id) = self.bar_at(view, point) else {
             return false;
         };
-        let Some(rects) = self.views[view].tree.scrollbar_rects(id) else {
+        let Some(rects) = self.comp.views[view].tree.scrollbar_rects(id) else {
             return false;
         };
         let grab = if rects.thumb.contains(rects.thumb.x + 1.0, point.1) {
@@ -1486,10 +1298,10 @@ impl Engine {
     }
 
     fn drag_bar_to(&mut self, view: usize, id: NodeId, thumb_y: f32) {
-        let Some(position) = self.views[view].tree.scroll_pos_for_thumb(id, thumb_y) else {
+        let Some(position) = self.comp.views[view].tree.scroll_pos_for_thumb(id, thumb_y) else {
             return;
         };
-        let tree = &mut self.views[view].tree;
+        let tree = &mut self.comp.views[view].tree;
         if let Some(state) = tree.scroll_state_mut(id)
             && state.position != position
         {
@@ -1501,32 +1313,18 @@ impl Engine {
     }
 
     fn touch_bar(&mut self, view: usize, id: NodeId) {
-        self.views[view].tree.touch_bar(id);
+        self.comp.views[view].tree.touch_bar(id);
     }
 
     fn step_bars(&mut self, dt: f32) {
         let now = Instant::now();
-        for view in 0..self.active_view_count() {
-            for id in self.views[view].tree.scroll_nodes() {
+        for view in self.comp.active_views() {
+            for id in self.comp.views[view].tree.scroll_nodes() {
                 let engaged = self.bar_hover == Some((view, id))
                     || self.bar_drag.map(|(v, d, _)| (v, d)) == Some((view, id));
-                let tree = &mut self.views[view].tree;
-                let Some((opacity, expand, last_move, scroll_max)) = tree.bar_state(id) else {
-                    continue;
-                };
-                let mut last_move = last_move;
-                if engaged {
-                    last_move = Some(now);
-                }
-                let recent = last_move.is_some_and(|at| now.duration_since(at) < BAR_HIDE_DELAY);
-                let show = scroll_max > 0.0 && (recent || engaged);
-                let next_opacity = step_toward(opacity, show, dt / 0.10, dt / 0.30);
-                let next_expand = step_toward(expand, engaged, dt / 0.10, dt / 0.10);
-                if next_opacity != opacity || next_expand != expand {
-                    tree.set_bar_state(id, next_opacity, next_expand, last_move);
+                let tree = &mut self.comp.views[view].tree;
+                if tree.step_bar(id, engaged, dt, now) {
                     tree.mark_paint();
-                } else if engaged {
-                    tree.set_bar_state(id, next_opacity, next_expand, last_move);
                 }
             }
         }
@@ -1534,22 +1332,18 @@ impl Engine {
 
     fn bars_animating(&self) -> bool {
         let now = Instant::now();
-        self.views.iter().take(self.active_view_count()).any(|v| {
-            v.tree.scroll_nodes().iter().any(|&id| {
-                v.tree
-                    .bar_state(id)
-                    .is_some_and(|(opacity, _, last_move, _)| {
-                        opacity > 0.0
-                            || last_move.is_some_and(|at| now.duration_since(at) < BAR_HIDE_DELAY)
-                    })
-            })
+        self.comp.active_views().into_iter().any(|view| {
+            let tree = &self.comp.views[view].tree;
+            tree.scroll_nodes()
+                .iter()
+                .any(|&id| tree.bar_animating(id, now))
         })
     }
 
     fn emit_scroll_events(&mut self, out: &mut Vec<EngineEvent>) {
-        for view in 0..self.active_view_count() {
-            for id in self.views[view].tree.scroll_nodes() {
-                let tree = &mut self.views[view].tree;
+        for view in self.comp.active_views() {
+            for id in self.comp.views[view].tree.scroll_nodes() {
+                let tree = &mut self.comp.views[view].tree;
                 let Some((key, offset, max)) = tree.take_scroll_emit(id) else {
                     continue;
                 };
@@ -1565,12 +1359,12 @@ impl Engine {
     }
 
     pub fn scroll_to(&mut self, view: usize, id: NodeId, offset: f32, smooth: bool) {
-        if view >= self.views.len() {
+        if view >= self.comp.views.len() {
             return;
         }
         let fonts = &self.fonts;
         let base_px = self.base_px;
-        let tree = &mut self.views[view].tree;
+        let tree = &mut self.comp.views[view].tree;
         tree.flush_layout(fonts, base_px);
         let max = tree.scroll_max(id);
         let offset = offset.clamp(0.0, max);
@@ -1598,10 +1392,10 @@ impl Engine {
         let Some(cursor) = self.cursor else {
             return;
         };
-        let view = self.view_at(cursor.0);
+        let view = self.comp.view_at(cursor.0);
         self.mark_scroll(view);
-        let local = self.to_local(view, cursor);
-        if self.views[view].tree.hit_wheel(local.0, local.1).is_some() {
+        let local = self.comp.to_local(view, cursor);
+        if self.comp.views[view].tree.hit_wheel(local.0, local.1).is_some() {
             let cell_h = self.cell.1 as f32;
             let mut delta_y = 0.0;
             let mut precise = false;
@@ -1616,14 +1410,14 @@ impl Engine {
             self.emit_wheel(view, local, 0.0, delta_y, precise, out);
             return;
         }
-        let Some(area) = self.views[view].tree.scroll_area_at(local.0, local.1) else {
+        let Some(area) = self.comp.views[view].tree.scroll_area_at(local.0, local.1) else {
             return;
         };
         let (node, max) = (area.node, area.max_scroll());
         let cell_h = self.cell.1 as f32;
         let profile = self.profile;
         let mut moved = false;
-        if let Some(state) = self.views[view].tree.scroll_state_mut(node) {
+        if let Some(state) = self.comp.views[view].tree.scroll_state_mut(node) {
             for delta in deltas {
                 if delta.precise {
                     let next = (state.position - delta.delta_y * scale).clamp(0.0, max);
@@ -1638,15 +1432,15 @@ impl Engine {
             }
         }
         if moved {
-            self.views[view].tree.mark_place();
+            self.comp.views[view].tree.mark_place();
         }
         self.touch_bar(view, node);
     }
 
     fn step_scrolls(&mut self, dt: f32) {
         let profile = self.profile;
-        for view in 0..self.active_view_count() {
-            let tree = &mut self.views[view].tree;
+        for view in self.comp.active_views() {
+            let tree = &mut self.comp.views[view].tree;
             for id in tree.scroll_nodes() {
                 let max = tree.scroll_max(id);
                 if let Some(state) = tree.scroll_state_mut(id)
@@ -1665,8 +1459,8 @@ impl Engine {
         };
         let fonts = &self.fonts;
         let base_px = self.base_px;
-        self.views[view].tree.flush_layout(fonts, base_px);
-        let tree = &self.views[view].tree;
+        self.comp.views[view].tree.flush_layout(fonts, base_px);
+        let tree = &self.comp.views[view].tree;
         let Some(scroller) = tree.parent(focus).and_then(|p| tree.scroll_parent(p)) else {
             return;
         };
@@ -1688,36 +1482,36 @@ impl Engine {
         let margin = px * 1.1;
         let current = tree.scroll_state(scroller).map_or(0.0, |s| s.target);
         if let Some(target) = area.target_to_reveal(caret, current, margin)
-            && let Some(state) = self.views[view].tree.scroll_state_mut(scroller)
+            && let Some(state) = self.comp.views[view].tree.scroll_state_mut(scroller)
         {
             state.set_target(target);
         }
     }
 
     fn frame(&mut self) -> io::Result<()> {
-        let active = self.active_view_count();
-        let views_dirty = self.views.iter().take(active).any(|v| v.tree.dirty());
-        if !views_dirty && !self.compose_dirty {
+        let active = self.comp.active_views();
+        let views_dirty = active.iter().any(|&v| self.comp.views[v].tree.dirty());
+        if !views_dirty && !self.comp.dirty {
             return Ok(());
         }
         crate::profiler::span("frame", || -> io::Result<()> {
             let start = Instant::now();
-            for i in 0..active {
-                if !self.views[i].tree.dirty() {
+            for i in active {
+                if !self.comp.views[i].tree.dirty() {
                     continue;
                 }
-                let size = self.views[i].size;
+                let size = self.comp.views[i].size;
                 if size.0 == 0 || size.1 == 0 {
                     continue;
                 }
                 crate::profiler::set_view(i as u32);
                 let cursor = self
                     .cursor
-                    .filter(|&(x, _)| self.view_at(x) == i)
-                    .map(|c| self.to_local(i, c));
+                    .filter(|&(x, _)| self.comp.view_at(x) == i)
+                    .map(|c| self.comp.to_local(i, c));
                 let fonts = &self.fonts;
                 let base_px = self.base_px;
-                let view = &mut self.views[i];
+                let view = &mut self.comp.views[i];
                 crate::profiler::span("canvas.clear", || {
                     if (view.canvas.width, view.canvas.height) != size {
                         view.canvas = Canvas::new(size.0, size.1);
@@ -1727,14 +1521,14 @@ impl Engine {
                 view.tree.flush_layout(fonts, base_px);
                 paint(&view.tree, &mut view.canvas, fonts, cursor);
                 view.tree.clear_paint_flag();
-                self.compose_dirty = true;
+                self.comp.dirty = true;
             }
             crate::profiler::set_view(0);
-            if !self.compose_dirty {
+            if !self.comp.dirty {
                 return Ok(());
             }
             self.compose();
-            let bytes = crate::profiler::span("draw", || self.term.draw(&self.frame_canvas))?;
+            let bytes = crate::profiler::span("draw", || self.term.draw(&self.comp.frame))?;
             crate::profiler::count("bytes", bytes as u64);
 
             let gap = start.duration_since(self.last_frame).as_secs_f32();
@@ -1756,58 +1550,24 @@ impl Engine {
 
     fn compose(&mut self) {
         crate::profiler::span("compose", || {
-            if (self.frame_canvas.width, self.frame_canvas.height) != self.window {
-                self.frame_canvas = Canvas::new(self.window.0, self.window.1);
-            }
-            for i in 0..self.active_view_count() {
-                let origin = self.views[i].origin_x;
-                let (canvas, frame) = (&self.views[i].canvas, &mut self.frame_canvas);
-                blit(frame, canvas, origin, 0);
-            }
-            self.draw_divider();
+            self.comp.compose();
             if let Some((view, id)) = self.highlight {
                 self.draw_node_overlay(view, id, false);
             }
             if self.inspect_mode
                 && let Some(id) = self.inspect_hover
             {
-                self.draw_node_overlay(0, id, true);
+                self.draw_node_overlay(self.inspect_view, id, true);
             }
         });
-        self.compose_dirty = false;
-    }
-
-    fn draw_divider(&mut self) {
-        let Some(dx) = self.divider_x() else {
-            return;
-        };
-        let engaged = self.divider_hover || self.divider_drag;
-        let bg = if engaged {
-            DIVIDER_BG_ACTIVE
-        } else {
-            DIVIDER_BG
-        };
-        self.frame_canvas
-            .fill_rect(dx, 0, DIVIDER_W, self.window.1, bg);
-        let cx = dx as f32 + DIVIDER_W as f32 / 2.0;
-        let cy = self.window.1 as f32 / 2.0;
-        for i in -1..=1i32 {
-            self.frame_canvas.fill_rounded_rect(
-                cx - 1.0,
-                cy + (i as f32) * 7.0 - 1.0,
-                2.0,
-                2.0,
-                1.0,
-                DIVIDER_GRIP,
-            );
-        }
+        self.comp.dirty = false;
     }
 
     fn draw_node_overlay(&mut self, view: usize, id: NodeId, with_label: bool) {
-        if view >= self.active_view_count() {
+        if !self.comp.is_active(view) {
             return;
         }
-        let Some(v) = self.views.get(view) else {
+        let Some(v) = self.comp.views.get(view) else {
             return;
         };
         let Some(rect) = v.tree.visible_rect(id) else {
@@ -1818,9 +1578,9 @@ impl Engine {
         }
         let x = rect.x + v.origin_x as f32;
         let key = v.tree.key_of(id).map(str::to_string);
-        self.frame_canvas
+        self.comp.frame
             .fill_rounded_rect(x, rect.y, rect.w, rect.h, 0.0, HIGHLIGHT_FILL);
-        self.frame_canvas.stroke_rounded_rect(
+        self.comp.frame.stroke_rounded_rect(
             x,
             rect.y,
             rect.w,
@@ -1842,17 +1602,17 @@ impl Engine {
         let line_h = crate::text_input::line_height(font, px);
         let pad = px * 0.4;
         let (w, h) = (text_w + pad * 2.0, line_h + pad);
-        let lx = (x).min(self.window.0 as f32 - w).max(0.0);
+        let lx = (x).min(self.comp.window.0 as f32 - w).max(0.0);
         let mut ly = rect.y + rect.h + 4.0;
-        if ly + h > self.window.1 as f32 {
+        if ly + h > self.comp.window.1 as f32 {
             ly = (rect.y - h - 4.0).max(0.0);
         }
-        self.frame_canvas
+        self.comp.frame
             .fill_rounded_rect(lx, ly, w, h, 4.0, [24, 26, 32, 245]);
-        self.frame_canvas
+        self.comp.frame
             .stroke_rounded_rect(lx, ly, w, h, 4.0, 1.0, [72, 75, 86, 255]);
         if let Some(metrics) = font.horizontal_line_metrics(px) {
-            self.frame_canvas.draw_text(
+            self.comp.frame.draw_text(
                 font,
                 &label,
                 (lx + pad) as i32,
@@ -1862,29 +1622,6 @@ impl Engine {
             );
         }
     }
-}
-
-fn blit(dst: &mut Canvas, src: &Canvas, x: u32, y: u32) {
-    if src.width == 0 || src.height == 0 || x >= dst.width || y >= dst.height {
-        return;
-    }
-    let cols = src.width.min(dst.width - x) as usize;
-    let rows = src.height.min(dst.height - y) as usize;
-    for row in 0..rows {
-        let src_start = row * src.width as usize * 4;
-        let dst_start = ((y as usize + row) * dst.width as usize + x as usize) * 4;
-        dst.pixels[dst_start..dst_start + cols * 4]
-            .copy_from_slice(&src.pixels[src_start..src_start + cols * 4]);
-    }
-}
-
-fn mount_desc(tree: &mut Tree, parent: NodeId, desc: Desc) -> NodeId {
-    let id = tree.create(desc.props());
-    tree.append(parent, id);
-    for child in desc.children {
-        mount_desc(tree, id, child);
-    }
-    id
 }
 
 pub fn px_for_cell_height(font: &fontdue::Font, cell_height: f32) -> f32 {

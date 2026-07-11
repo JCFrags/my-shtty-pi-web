@@ -213,10 +213,7 @@ pub fn build_ui(
         style: Style {
             padding: Edges::symmetric(rem * 0.6, rem * 0.35),
             corner_radius: rem * 0.4,
-            border: Some(Border {
-                width: hair,
-                color: t.hairline,
-            }),
+            border: Some(Border::all(hair, t.hairline)),
             color: Some(t.accent),
             hover_background: Some(t.item_hover),
             ..Style::default()

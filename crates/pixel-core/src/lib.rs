@@ -9,6 +9,7 @@ mod native;
 mod paint;
 pub mod profiler;
 mod scroll;
+mod scrollbar;
 mod selection;
 mod style;
 mod terminal;
@@ -28,10 +29,11 @@ pub use paint::paint;
 pub use profiler::{CounterRecord, ProfileData, Profiler, SpanRecord};
 pub use scroll::profiles::{Glide, Smooth, Tui};
 pub use scroll::{ScrollProfile, ScrollState};
+pub use scrollbar::ScrollbarRects;
 pub use selection::{DocPos, DocSelection};
 pub use style::{
-    Align, Border, Color, Dimension, Edges, FlexDirection, Inset, Justify, Overflow, Position,
-    ScrollbarStyle, SelectionMode, Style,
+    Align, Border, BorderSide, Color, Dimension, Edges, FlexDirection, Inset, Justify, Overflow,
+    Position, ScrollbarStyle, SelectionMode, Style,
 };
 pub use terminal::{
     Event, Key, KeyEvent, Mods, Mouse, MouseButton, MouseKind, Terminal, TerminalColors, Waker,
@@ -42,7 +44,7 @@ pub use text_input::{
     point_to_offset,
 };
 pub use throttle::CpuThrottle;
-pub use tree::{HitTarget, InputProps, NodeId, Props, PxRect, ScrollArea, ScrollbarRects, Tree};
+pub use tree::{HitTarget, InputProps, NodeId, Props, PxRect, ScrollArea, Tree};
 pub use wrap::{line_of_offset, wrap_lines};
 
 pub use fontdue;

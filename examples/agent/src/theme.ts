@@ -2,6 +2,7 @@ import type { EngineInfo, Rgba } from "pixel-react";
 
 export interface Theme {
   bg: Rgba;
+  bgAlt: Rgba;
   fg: Rgba;
   muted: Rgba;
   accent: Rgba;
@@ -31,6 +32,7 @@ export function makeTheme(colors: EngineInfo["colors"]): Theme {
   const accent = colors.palette[13] ?? colors.palette[12] ?? [159, 134, 235, 255];
   return {
     bg,
+    bgAlt: mix(bg, fg, 0.05),
     fg,
     muted: mix(fg, bg, 0.45),
     accent,

@@ -3,8 +3,6 @@ use serde_json::json;
 
 use crate::ops::IdMap;
 
-/// Inspect targets can be engine-internal nodes (context menu rows, text
-/// leaves the app never registered); walk up to the nearest node JS knows.
 fn nearest_ext(engine: &Engine, ids: &IdMap, view: usize, node: NodeId) -> Option<u32> {
     let tree = engine.view_tree(view)?;
     let mut current = Some(node);

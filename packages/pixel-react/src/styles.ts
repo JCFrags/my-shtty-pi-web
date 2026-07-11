@@ -19,6 +19,12 @@ export interface ScrollbarStyle {
   trackColor?: Color;
 }
 
+export type BorderSide = [width: number, color: Color];
+
+export type Border =
+  | { width: number; color: Color }
+  | { top?: BorderSide; right?: BorderSide; bottom?: BorderSide; left?: BorderSide };
+
 export interface Style {
   flexDirection?: "row" | "column";
   flexGrow?: number;
@@ -36,7 +42,7 @@ export interface Style {
   alignItems?: "start" | "center" | "end" | "stretch";
   background?: Color;
   cornerRadius?: number;
-  border?: { width: number; color: Color };
+  border?: Border;
   color?: Color;
   fontSize?: number;
   font?: number;
@@ -68,6 +74,19 @@ export function parseColor(color: Color | undefined): Rgba | undefined {
   return [int(0), int(2), int(4), hex.length === 8 ? int(6) : 255];
 }
 
+function serializeBorder(border: Border): Record<string, unknown> {
+  if ("width" in border) {
+    return { width: border.width, color: parseColor(border.color) };
+  }
+  const side = (s: BorderSide | undefined) => s && [s[0], parseColor(s[1])];
+  return {
+    top: side(border.top),
+    right: side(border.right),
+    bottom: side(border.bottom),
+    left: side(border.left),
+  };
+}
+
 export function serializeStyle(style: Style): Record<string, unknown> {
   return {
     flexDirection: style.flexDirection,
@@ -86,10 +105,7 @@ export function serializeStyle(style: Style): Record<string, unknown> {
     alignItems: style.alignItems,
     background: parseColor(style.background),
     cornerRadius: style.cornerRadius,
-    border: style.border && {
-      width: style.border.width,
-      color: parseColor(style.border.color),
-    },
+    border: style.border && serializeBorder(style.border),
     color: parseColor(style.color),
     fontSize: style.fontSize,
     font: style.font,

@@ -185,3 +185,7 @@ pub(crate) fn line_range_at(text: &str, offset: usize) -> Range<usize> {
     let end = line_end(text, offset);
     start..(end + 1).min(text.len())
 }
+
+mod doc;
+
+pub(crate) use doc::{DocLayout, DocSelectionState};

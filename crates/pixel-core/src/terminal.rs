@@ -12,8 +12,6 @@ pub enum Event {
     Mouse(Mouse),
     Paste(String),
     Focus(bool),
-    /// In-band resize notification (mode 2048): the terminal pushed its new
-    /// text-area size, including on font-size changes.
     WindowSize(WindowSize),
 }
 
@@ -380,8 +378,6 @@ impl Terminal {
         })
     }
 
-    /// Drop the cached `CSI 16t` cell size; on terminals that don't report
-    /// pixels in the winsize, a font-size change invalidates it.
     pub fn forget_cell_size(&mut self) {
         self.cell = None;
     }
@@ -712,9 +708,6 @@ fn parse_csi(buf: &[u8]) -> Option<(RawEvent, usize)> {
     Some((event, end))
 }
 
-/// Mode 2048 report: `CSI 48 ; rows ; cols ; height_px ; width_px t`.
-/// Fields may carry colon-separated subparameters; only the leading number
-/// counts. Pixel-incapable terminals report the pixel fields as 0.
 fn parse_resize_report(params: &[u8]) -> Option<WindowSize> {
     let mut fields = params.split(|&b| b == b';').map(|field| {
         let digits: Vec<u8> = field

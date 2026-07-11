@@ -67,14 +67,12 @@ export function App({ info }: { info: EngineInfo }) {
             lastOffset.current = e.offset;
           }}
         >
-          {session.items.length === 0 && (
-            <Text style={{ color: theme.muted }}>ask claude anything</Text>
-          )}
           {session.items.map((item, i) => (
             <Message key={i} ctx={ctx} item={item} />
           ))}
         </Box>
         {session.ask && <AskBox ctx={ctx} ask={session.ask} />}
+        {session.working && <WorkingStatus ctx={ctx} session={session} />}
         <Composer ctx={ctx} inputRef={input} />
       </Box>
     </Box>
@@ -158,19 +156,6 @@ function SidebarItem({ ctx, session, at }: { ctx: Ctx; session: Session; at: num
 
 function Header({ ctx, session }: { ctx: Ctx; session: Session }) {
   const { theme, rem } = ctx;
-  const [frame, setFrame] = useState(0);
-  useEffect(() => {
-    if (!session.working) return;
-    const timer = setInterval(() => setFrame((f) => f + 1), 250);
-    return () => clearInterval(timer);
-  }, [session.working]);
-
-  const status = session.working
-    ? `${session.activity || "working"}${".".repeat(1 + (frame % 3))}`
-    : session.cost > 0
-      ? `$${session.cost.toFixed(4)}`
-      : "idle";
-
   return (
     <Box
       style={{
@@ -178,29 +163,7 @@ function Header({ ctx, session }: { ctx: Ctx; session: Session }) {
         gap: rem * 0.5,
         padding: { left: rem, right: rem, top: rem * 0.5, bottom: rem * 0.5 },
       }}
-    >
-      <Chip ctx={ctx} color={theme.fg}>
-        {session.model.replace(/^claude-/, "") || "…"}
-      </Chip>
-      <Chip ctx={ctx} color={session.mode === "bypassPermissions" ? theme.red : theme.muted}>
-        {session.mode}
-      </Chip>
-      <Chip ctx={ctx} color={theme.muted}>
-        {`thinking ${THINKING[session.thinking].label}`}
-      </Chip>
-      <Box style={{ flexGrow: 1 }} />
-      <Text
-        style={{
-          color: session.working ? theme.accent : theme.muted,
-          fontSize: rem * 0.85,
-          font: FONT_MONO,
-          wrap: false,
-          flexShrink: 0,
-        }}
-      >
-        {status}
-      </Text>
-    </Box>
+    />
   );
 }
 
@@ -208,9 +171,15 @@ function Message({ ctx, item }: { ctx: Ctx; item: Item }) {
   const { theme, rem } = ctx;
   if (item.kind === "user") {
     return (
-      <Box style={{ gap: rem * 0.5 }}>
-        <Text style={{ color: theme.accent, flexShrink: 0 }}>{">"}</Text>
-        <Text style={{ color: theme.muted }}>{item.text}</Text>
+      <Box
+        style={{
+          margin: { left: -rem, right: -rem },
+          padding: { left: rem, right: rem, top: rem * 0.5, bottom: rem * 0.5 },
+          background: theme.bgAlt,
+          border: { top: [1, theme.hairline], bottom: [1, theme.hairline] },
+        }}
+      >
+        <Text>&gt; {item.text}</Text>
       </Box>
     );
   }
@@ -271,12 +240,45 @@ function AskBox({ ctx: { theme, rem }, ask }: { ctx: Ctx; ask: Ask }) {
   );
 }
 
+function WorkingStatus({ ctx, session }: { ctx: Ctx; session: Session }) {
+  const { theme, rem } = ctx;
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setFrame((f) => f + 1), 250);
+    return () => clearInterval(timer);
+  }, []);
+
+  const status = `${session.activity || "working"}${".".repeat(1 + (frame % 3))}`;
+
+  return (
+    <Box
+      style={{
+        alignItems: "center",
+        gap: rem * 0.5,
+        padding: { left: rem, right: rem, bottom: rem * 0.5 },
+      }}
+    >
+      <Text
+        style={{
+          color: theme.accent,
+          fontSize: rem * 0.85,
+          font: FONT_MONO,
+          wrap: false,
+          flexShrink: 0,
+        }}
+      >
+        {status}
+      </Text>
+    </Box>
+  );
+}
+
 function Composer({ ctx: { theme, rem }, inputRef }: { ctx: Ctx; inputRef: React.Ref<NodeHandle> }) {
+  const session = store.active();
   return (
     <Box style={{ flexDirection: "column", flexShrink: 0 }}>
       <Box style={{ height: Math.max(rem / 16, 1), width: "100%", background: theme.hairline }} />
-      <Box style={{ alignItems: "start", gap: rem * 0.5, padding: rem * 0.75 }}>
-        <Text style={{ color: theme.accent, flexShrink: 0 }}>{">"}</Text>
+      <Box style={{ alignItems: "start", padding: rem * 0.75 }}>
         <Input
           ref={inputRef}
           style={{ flexGrow: 1, flexBasis: 0 }}
@@ -288,6 +290,27 @@ function Composer({ ctx: { theme, rem }, inputRef }: { ctx: Ctx; inputRef: React
             if (trimmed) store.active().send(trimmed);
           }}
         />
+      </Box>
+      <Box
+        style={{
+          alignItems: "center",
+          gap: rem * 0.5,
+          padding: { left: rem, right: rem, bottom: rem * 0.5 },
+        }}
+      >
+        <PickerChip ctx={{ theme, rem }} color={theme.fg} onClick={() => session.cycleModel()}>
+          {session.model.replace(/^claude-/, "") || "…"}
+        </PickerChip>
+        <PickerChip
+          ctx={{ theme, rem }}
+          color={session.mode === "bypassPermissions" ? theme.red : theme.muted}
+          onClick={() => session.cycleMode()}
+        >
+          {session.mode}
+        </PickerChip>
+        <PickerChip ctx={{ theme, rem }} color={theme.muted} onClick={() => session.cycleThinking()}>
+          {`thinking ${THINKING[session.thinking].label}`}
+        </PickerChip>
       </Box>
     </Box>
   );
@@ -320,6 +343,36 @@ function Chip({ ctx: { theme, rem }, color, children }: { ctx: Ctx; color: Theme
         flexShrink: 0,
         wrap: false,
       }}
+    >
+      {children}
+    </Text>
+  );
+}
+
+function PickerChip({
+  ctx: { theme, rem },
+  color,
+  children,
+  onClick,
+}: {
+  ctx: Ctx;
+  color: Theme[keyof Theme];
+  children: string;
+  onClick: () => void;
+}) {
+  return (
+    <Text
+      style={{
+        padding: { left: rem * 0.6, right: rem * 0.6, top: rem * 0.15, bottom: rem * 0.15 },
+        cornerRadius: 999,
+        hoverBackground: theme.itemHover,
+        color,
+        fontSize: rem * 0.85,
+        font: FONT_MONO,
+        flexShrink: 0,
+        wrap: false,
+      }}
+      onClick={onClick}
     >
       {children}
     </Text>

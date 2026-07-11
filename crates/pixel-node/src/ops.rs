@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use pixel_core::{
-    Align, Border, Color, Dimension, Edges, Engine, FlexDirection, InputProps, Inset, Justify,
-    NodeId, Overflow, Position, Props, ScrollbarStyle, SelectionMode, Style,
+    Align, Border, BorderSide, Color, Dimension, Edges, Engine, FlexDirection, InputProps, Inset,
+    Justify, NodeId, Overflow, Position, Props, ScrollbarStyle, SelectionMode, Style,
 };
 use serde::Deserialize;
 
@@ -81,8 +81,16 @@ enum Op {
     SetSplit {
         fraction: Option<f32>,
     },
+    AddView {},
+    SetPane {
+        #[serde(default = "default_pane_slot")]
+        slot: usize,
+        view: usize,
+    },
     SetInspectMode {
         on: bool,
+        #[serde(default)]
+        view: usize,
     },
     SetDefaultMenu {
         on: bool,
@@ -99,14 +107,17 @@ enum Op {
     },
 }
 
+fn default_pane_slot() -> usize {
+    1
+}
+
 #[derive(Deserialize)]
 struct Envelope<'a> {
     #[serde(default)]
     view: usize,
     #[serde(default)]
     seq: Option<u64>,
-    // Raw slices instead of Value trees: batches can hold tens of
-    // thousands of ops and building Values dominated apply time.
+    // we want to use slices instead of Value trees since batches can hold tens of thousands of ops 
     #[serde(borrow)]
     ops: Vec<&'a serde_json::value::RawValue>,
 }
@@ -169,10 +180,42 @@ struct InsetDto {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BorderDto {
-    width: f32,
-    color: Color,
+#[serde(untagged)]
+enum BorderDto {
+    Uniform {
+        width: f32,
+        color: Color,
+    },
+    Sides {
+        #[serde(default)]
+        top: Option<(f32, Color)>,
+        #[serde(default)]
+        right: Option<(f32, Color)>,
+        #[serde(default)]
+        bottom: Option<(f32, Color)>,
+        #[serde(default)]
+        left: Option<(f32, Color)>,
+    },
+}
+
+impl BorderDto {
+    fn into_border(self) -> Border {
+        let side = |s: Option<(f32, Color)>| s.map(|(width, color)| BorderSide { width, color });
+        match self {
+            BorderDto::Uniform { width, color } => Border::all(width, color),
+            BorderDto::Sides {
+                top,
+                right,
+                bottom,
+                left,
+            } => Border {
+                top: side(top),
+                right: side(right),
+                bottom: side(bottom),
+                left: side(left),
+            },
+        }
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -311,10 +354,7 @@ impl StyleDto {
             }),
             background: self.background,
             corner_radius: self.corner_radius.unwrap_or(0.0),
-            border: self.border.map(|b| Border {
-                width: b.width,
-                color: b.color,
-            }),
+            border: self.border.map(BorderDto::into_border),
             color: self.color,
             font_size: self.font_size,
             font: self.font,
@@ -363,7 +403,7 @@ pub struct OpOutcome {
     pub error: Option<String>,
 }
 
-pub fn apply_ops(engine: &mut Engine, ids: &mut [IdMap], json: &str) -> OpOutcome {
+pub fn apply_ops(engine: &mut Engine, ids: &mut Vec<IdMap>, json: &str) -> OpOutcome {
     let envelope: Envelope = match serde_json::from_str(json) {
         Ok(envelope) => envelope,
         Err(e) => {
@@ -398,11 +438,19 @@ pub fn apply_ops(engine: &mut Engine, ids: &mut [IdMap], json: &str) -> OpOutcom
 
 fn apply_op(
     engine: &mut Engine,
-    ids: &mut [IdMap],
+    ids: &mut Vec<IdMap>,
     view: usize,
     op: Op,
     replies: &mut Vec<String>,
 ) {
+    if let Op::AddView {} = op {
+        let new_view = engine.add_view();
+        let root = engine.view_tree(new_view).expect("view exists").root();
+        ids.push(IdMap::new(root));
+        let reply = serde_json::json!({ "type": "viewCreated", "view": new_view });
+        replies.push(reply.to_string());
+        return;
+    }
     let base_px = engine.base_px();
     let map = &mut ids[view];
     let Some(tree) = engine.view_tree_mut(view) else {
@@ -453,7 +501,12 @@ fn apply_op(
         }
         Op::SetClearColor { color } => engine.set_clear_color(view, color),
         Op::SetSplit { fraction } => engine.set_split(fraction),
-        Op::SetInspectMode { on } => engine.set_inspect_mode(on),
+        Op::AddView {} => unreachable!("handled before the per-view bindings"),
+        Op::SetPane { slot, view } => engine.set_pane(slot, view),
+        Op::SetInspectMode { on, view } => {
+            engine.set_inspect_view(view);
+            engine.set_inspect_mode(on);
+        }
         Op::SetDefaultMenu { on } => engine.set_default_menu(on),
         Op::Highlight {
             view: target_view,

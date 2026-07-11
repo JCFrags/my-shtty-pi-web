@@ -4,6 +4,8 @@ use crate::desc::Desc;
 use crate::style::{
     Align, Border, Color, Dimension, Edges, FlexDirection, Inset, Justify, Position, Style,
 };
+use crate::text_input::InputAction;
+use crate::tree::{HitTarget, NodeId, Tree};
 
 pub const CONTEXT_MENU_KEY: &str = "context-menu";
 
@@ -43,6 +45,151 @@ pub struct MenuStyle {
     pub hover: Color,
     pub shortcut: Color,
     pub border: Color,
+}
+
+impl Default for MenuStyle {
+    fn default() -> Self {
+        Self {
+            background: [30, 31, 36, 252],
+            foreground: [222, 224, 230, 255],
+            disabled: [110, 112, 122, 255],
+            hover: [62, 66, 80, 255],
+            shortcut: [138, 141, 152, 255],
+            border: [72, 75, 86, 255],
+        }
+    }
+}
+
+pub(crate) enum MenuClick {
+    KeepOpen,
+    Dismissed,
+    Action(InputAction),
+    Inspect {
+        target: Option<NodeId>,
+        at: (f32, f32),
+    },
+}
+
+#[derive(Default)]
+pub(crate) struct MenuController {
+    open: Option<OpenMenu>,
+}
+
+struct OpenMenu {
+    view: usize,
+    root: NodeId,
+    target: Option<NodeId>,
+    at: (f32, f32),
+}
+
+impl MenuController {
+    pub(crate) fn is_open(&self) -> bool {
+        self.open.is_some()
+    }
+
+    pub(crate) fn view(&self) -> Option<usize> {
+        self.open.as_ref().map(|open| open.view)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn open(
+        &mut self,
+        tree: &mut Tree,
+        view: usize,
+        at: (f32, f32),
+        size: (f32, f32),
+        px: f32,
+        font: &fontdue::Font,
+        include_inspect: bool,
+    ) -> Option<NodeId> {
+        let target = tree.hit_any(at.0, at.1);
+        let input_target = match tree.hit_target(at.0, at.1) {
+            Some(HitTarget::Input(id)) => Some(id),
+            _ => None,
+        };
+        let item = |label: &str, shortcut: &str, enabled: bool, key: &str| {
+            MenuEntry::Item(MenuItem::new(label, Some(shortcut), enabled, key))
+        };
+        let mut entries: Vec<MenuEntry> = Vec::new();
+        if let Some(id) = input_target
+            && let Some(input) = tree.input(id)
+        {
+            let has_selection = input.selection().is_some();
+            entries.push(item("Undo", "⌘Z", input.can_undo(), "menu:undo"));
+            entries.push(item("Redo", "⇧⌘Z", input.can_redo(), "menu:redo"));
+            entries.push(MenuEntry::Separator);
+            entries.push(item("Cut", "⌘X", has_selection, "menu:cut"));
+            entries.push(item("Copy", "⌘C", has_selection, "menu:copy"));
+            entries.push(item("Paste", "⌘V", true, "menu:paste"));
+            entries.push(item("Select All", "⌘A", true, "menu:select-all"));
+            entries.push(MenuEntry::Separator);
+        }
+        if input_target.is_none() {
+            let over_text = matches!(tree.hit_target(at.0, at.1), Some(HitTarget::Text(_)));
+            let has_selection = tree.doc_selected_text().is_some();
+            if over_text || has_selection {
+                entries.push(item("Copy", "⌘C", has_selection, "menu:copy"));
+                entries.push(item("Select All", "⌘A", true, "menu:select-all"));
+                entries.push(MenuEntry::Separator);
+            }
+        }
+        if include_inspect {
+            entries.push(MenuEntry::Item(MenuItem::new(
+                "Inspect Element",
+                None,
+                true,
+                "menu:inspect",
+            )));
+        }
+        if entries.is_empty() {
+            return input_target;
+        }
+        let desc = context_menu(entries, at, size, px, font, &MenuStyle::default());
+        let root = tree.root();
+        let menu_root = tree.mount(root, desc);
+        self.open = Some(OpenMenu {
+            view,
+            root: menu_root,
+            target,
+            at,
+        });
+        input_target
+    }
+
+    pub(crate) fn close(&mut self, tree: &mut Tree) {
+        if let Some(open) = self.open.take() {
+            tree.remove(open.root);
+        }
+    }
+
+    pub(crate) fn click(&mut self, tree: &mut Tree, local: (f32, f32)) -> MenuClick {
+        let Some(open) = &self.open else {
+            return MenuClick::Dismissed;
+        };
+        let (target, at) = (open.target, open.at);
+        let key = tree
+            .hit_click(local.0, local.1)
+            .and_then(|hit| tree.key_of(hit))
+            .map(str::to_string);
+        let Some(key) = key else {
+            self.close(tree);
+            return MenuClick::Dismissed;
+        };
+        if key == CONTEXT_MENU_KEY {
+            return MenuClick::KeepOpen;
+        }
+        self.close(tree);
+        match key.as_str() {
+            "menu:undo" => MenuClick::Action(InputAction::Undo),
+            "menu:redo" => MenuClick::Action(InputAction::Redo),
+            "menu:cut" => MenuClick::Action(InputAction::Cut),
+            "menu:copy" => MenuClick::Action(InputAction::Copy),
+            "menu:paste" => MenuClick::Action(InputAction::Paste),
+            "menu:select-all" => MenuClick::Action(InputAction::SelectAll),
+            "menu:inspect" => MenuClick::Inspect { target, at },
+            _ => MenuClick::Dismissed,
+        }
+    }
 }
 
 pub fn context_menu(

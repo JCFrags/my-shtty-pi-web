@@ -72,7 +72,7 @@ pub fn paint(
             fonts,
             cursor,
             &blocks,
-            false,
+            None,
             &mut stats,
         );
         if let (Some(stats), Some(start_ms)) = (stats, start_ms) {
@@ -89,7 +89,7 @@ fn paint_node(
     fonts: &[fontdue::Font],
     cursor: Option<(f32, f32)>,
     blocks: &[(NodeId, Vec<PxRect>, Color)],
-    in_block: bool,
+    enclosing_block: Option<(&[PxRect], Color)>,
     stats: &mut Option<PaintStats>,
 ) {
     let Some(node) = tree.get(id) else {
@@ -125,16 +125,42 @@ fn paint_node(
                 );
             }
             if let Some(border) = node.style.border {
-                canvas.stroke_rounded_rect(
-                    rect.x,
-                    rect.y,
-                    rect.w,
-                    rect.h,
-                    node.style.corner_radius,
-                    border.width,
-                    border.color,
-                );
+                match border.uniform() {
+                    Some(side) => canvas.stroke_rounded_rect(
+                        rect.x,
+                        rect.y,
+                        rect.w,
+                        rect.h,
+                        node.style.corner_radius,
+                        side.width,
+                        side.color,
+                    ),
+                    None => {
+                        if let Some(s) = border.top {
+                            canvas.fill_rounded_rect(rect.x, rect.y, rect.w, s.width, 0.0, s.color);
+                        }
+                        if let Some(s) = border.bottom {
+                            let y = rect.y + rect.h - s.width;
+                            canvas.fill_rounded_rect(rect.x, y, rect.w, s.width, 0.0, s.color);
+                        }
+                        if let Some(s) = border.left {
+                            canvas.fill_rounded_rect(rect.x, rect.y, s.width, rect.h, 0.0, s.color);
+                        }
+                        if let Some(s) = border.right {
+                            let x = rect.x + rect.w - s.width;
+                            canvas.fill_rounded_rect(x, rect.y, s.width, rect.h, 0.0, s.color);
+                        }
+                    }
+                }
             }
+        });
+    }
+
+    if let Some((bands, color)) = enclosing_block
+        && (background.is_some() || node.style.border.is_some())
+    {
+        timed(stats.as_mut().map(|s| &mut s.selection), || {
+            fill_bands(canvas, bands, visible, color);
         });
     }
 
@@ -146,15 +172,13 @@ fn paint_node(
     let block = blocks.iter().find(|(container, _, _)| *container == id);
     if let Some((_, bands, color)) = block {
         timed(stats.as_mut().map(|s| &mut s.selection), || {
-            for band in bands {
-                let band = band.intersect(visible);
-                if band.w > 0.0 && band.h > 0.0 {
-                    canvas.fill_rounded_rect(band.x, band.y, band.w, band.h, 0.0, *color);
-                }
-            }
+            fill_bands(canvas, bands, visible, *color);
         });
     }
-    let in_block = in_block || block.is_some();
+    let enclosing_block = block
+        .map(|(_, bands, color)| (bands.as_slice(), *color))
+        .or(enclosing_block);
+    let in_block = enclosing_block.is_some();
 
     if let Some(text) = &node.text {
         let px = node.resolved.px;
@@ -241,13 +265,31 @@ fn paint_node(
     }
 
     for &child in &node.children {
-        paint_node(tree, child, canvas, fonts, cursor, blocks, in_block, stats);
+        paint_node(
+            tree,
+            child,
+            canvas,
+            fonts,
+            cursor,
+            blocks,
+            enclosing_block,
+            stats,
+        );
     }
     timed(stats.as_mut().map(|s| &mut s.bars), || {
         paint_scrollbar(tree, id, canvas)
     });
     if clips_children {
         canvas.pop_clip();
+    }
+}
+
+fn fill_bands(canvas: &mut Canvas, bands: &[PxRect], clip: PxRect, color: Color) {
+    for band in bands {
+        let band = band.intersect(clip);
+        if band.w > 0.0 && band.h > 0.0 {
+            canvas.fill_rounded_rect(band.x, band.y, band.w, band.h, 0.0, color);
+        }
     }
 }
 

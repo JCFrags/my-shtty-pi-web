@@ -101,14 +101,38 @@ impl Inset {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Border {
+pub struct BorderSide {
     pub width: f32,
     pub color: Color,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Border {
+    pub top: Option<BorderSide>,
+    pub right: Option<BorderSide>,
+    pub bottom: Option<BorderSide>,
+    pub left: Option<BorderSide>,
+}
+
 impl Border {
+    pub fn all(width: f32, color: Color) -> Self {
+        let side = Some(BorderSide { width, color });
+        Self {
+            top: side,
+            right: side,
+            bottom: side,
+            left: side,
+        }
+    }
+
     pub fn hairline(color: Color) -> Self {
-        Self { width: 1.0, color }
+        Self::all(1.0, color)
+    }
+
+    pub(crate) fn uniform(&self) -> Option<BorderSide> {
+        let side = self.top?;
+        (self.right == Some(side) && self.bottom == Some(side) && self.left == Some(side))
+            .then_some(side)
     }
 }
 

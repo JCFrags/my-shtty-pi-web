@@ -36,6 +36,15 @@ impl Desc {
 }
 
 impl Tree {
+    pub fn mount(&mut self, parent: NodeId, desc: Desc) -> NodeId {
+        let id = self.create(desc.props());
+        self.append(parent, id);
+        for child in desc.children {
+            self.mount(id, child);
+        }
+        id
+    }
+
     pub fn reconcile(&mut self, desc: Desc) {
         crate::profiler::span("tree.reconcile", || {
             let root = self.root();
