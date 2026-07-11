@@ -289,16 +289,6 @@ function Composer({ ctx: { theme, rem }, inputRef }: { ctx: Ctx; inputRef: React
           }}
         />
       </Box>
-      <Text
-        style={{
-          padding: { left: rem * 0.75, right: rem * 0.75, bottom: rem * 0.5 },
-          color: theme.muted,
-          fontSize: rem * 0.8,
-        }}
-      >
-        enter send · shift+enter newline · cmd+b sessions · ^o model · ^p permissions · ^t
-        thinking · esc interrupt · ^q quit
-      </Text>
     </Box>
   );
 }

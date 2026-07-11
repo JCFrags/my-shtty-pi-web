@@ -74,17 +74,7 @@ function LogLine(props: { entry: SourcedRow; showTarget: boolean; rem: number })
 const SOURCES = ["program", "engine", "both"] as const;
 const LEVEL_FILTERS = ["all", "info", "warn", "error"] as const;
 
-const EMPTY_TEXT: Record<(typeof SOURCES)[number], string> = {
-  program: "Program output lands here — console.log, stdout and stderr.",
-  engine: "Engine logs appear here.",
-  both: "Program and engine logs, interleaved by time.",
-};
 
-/**
- * A row's target label only appears when it says something the current view
- * doesn't already imply: stdout/stderr for program logs, subsystems like
- * profiler/inspect for engine logs, and the source itself in the merged view.
- */
 function targetVisible(entry: SourcedRow, source: (typeof SOURCES)[number]): boolean {
   if (entry.source === "program") return entry.row.target !== "console";
   if (source === "both") return true;
@@ -175,8 +165,6 @@ export function LogPanel(props: { rem: number }) {
         >
           <Input
             style={{
-              // Fill the box: an empty input measures zero wide and would
-              // otherwise be impossible to click.
               flexGrow: 1,
               flexBasis: 0,
               fontSize: rem * 0.72,
@@ -191,26 +179,22 @@ export function LogPanel(props: { rem: number }) {
         </Box>
       </Box>
       <Divider />
-      {rows.length === 0 ? (
-        <Empty rem={rem} text={entries.length === 0 ? EMPTY_TEXT[source] : "No matches."} />
-      ) : (
-        <Box
-          ref={list}
-          style={{ flexDirection: "column", flexGrow: 1, flexBasis: 0, overflow: "scroll" }}
-          onScroll={(e) => {
-            follow.current = e.offset >= e.max - 2;
-          }}
-        >
-          {rows.slice(-500).map((entry) => (
-            <LogLine
-              key={`${entry.source}-${entry.row.id}`}
-              entry={entry}
-              showTarget={targetVisible(entry, source)}
-              rem={rem}
-            />
-          ))}
-        </Box>
-      )}
+      <Box
+        ref={list}
+        style={{ flexDirection: "column", flexGrow: 1, flexBasis: 0, overflow: "scroll" }}
+        onScroll={(e) => {
+          follow.current = e.offset >= e.max - 2;
+        }}
+      >
+        {rows.slice(-500).map((entry) => (
+          <LogLine
+            key={`${entry.source}-${entry.row.id}`}
+            entry={entry}
+            showTarget={targetVisible(entry, source)}
+            rem={rem}
+          />
+        ))}
+      </Box>
     </Box>
   );
 }

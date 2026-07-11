@@ -16,7 +16,6 @@ interface Viewport {
 export const viewportStore = createStore<Viewport | null>(null);
 const selectedSpanStore = createStore<TimeSpan | null>(null);
 
-/** W/S zoom, A/D pan, F fits the whole recording — Chrome's flame chart keys. */
 export function profilerHandleKey(key: string): boolean {
   const session = profilerStore.get().session;
   const viewport = viewportStore.get();
@@ -174,8 +173,6 @@ function InteractionsLane(props: {
     labelW: number;
   }
   const placed: Placed[] = [];
-  // One row unless a pill would overlap its predecessor at this zoom;
-  // then it drops to the second row, Chrome-style.
   const rowEnds = [-Infinity, -Infinity];
   for (const mark of marks) {
     const rawX = (mark.start - viewport.t0) * scale;
@@ -187,8 +184,6 @@ function InteractionsLane(props: {
     placed.push({ mark, x, w, row, labelW: 0 });
     if (placed.length >= 300) break;
   }
-  // Show the label beside the pill when it fits before the next pill
-  // in the same row.
   const estCharW = rem * 0.42;
   for (let i = 0; i < placed.length; i++) {
     const entry = placed[i];
@@ -276,10 +271,7 @@ function Lane(props: {
   let lastEnd = -Infinity;
   for (const span of spans) {
     if (span.start + span.dur < viewport.t0 || span.start > viewport.t1) continue;
-    // Interactions are sparse and matter at any zoom; never cull them.
     if (span.lane !== "interaction") {
-      // Sub-pixel spans collapse into one marker per pixel column instead of
-      // disappearing, so a zoomed-out chart still shows where work happened.
       if (span.dur * scale < 0.4 && span.depth === 0) {
         if ((span.start - lastEnd) * scale < 1.2) continue;
         lastEnd = span.start + span.dur;
@@ -298,8 +290,6 @@ function Lane(props: {
       </Box>
       <Box style={{ height: (maxDepth + 1) * rowH + 2, overflow: "hidden" }}>
         {visible.map((span, i) => {
-          // Clamp to the viewport so labels stay readable when a span
-          // extends past the left edge.
           const rawX = (span.start - viewport.t0) * scale;
           const minW = span.lane === "interaction" ? 3 : 1.5;
           const right = rawX + Math.max(span.dur * scale - 0.5, minW);
@@ -456,7 +446,6 @@ export function ProfilerPanel(props: { rem: number }) {
       );
       return;
     }
-    // Scroll up zooms in around the cursor, like a map.
     const dy = e.precise ? e.deltaY : e.deltaY * 3;
     const factor = Math.exp(dy * 0.0035);
     const total = session.end - session.start || 1;
@@ -520,18 +509,18 @@ export function ProfilerPanel(props: { rem: number }) {
         )}
         <Box style={{ flexGrow: 1 }} />
         <Text style={{ color: theme.faint, fontSize: rem * 0.62, wrap: false }}>
-          scroll zooms · sideways swipe pans · f fit
+          f=fit
         </Text>
       </Toolbar>
       <Divider />
       {state.recording ? (
-        <Empty rem={rem} text="Recording… interact with the app, then press Stop." />
+        <Empty rem={rem} text="Recording…" />
       ) : state.pendingStop ? (
-        <Empty rem={rem} text="Waiting for the engine profile…" />
+        <Empty rem={rem} text="Waiting for profile…" />
       ) : !session || !viewport ? (
         <Empty
           rem={rem}
-          text="Press Record, use the app, press Stop — you get a flame chart of React, the bridge and the engine."
+          text=""
         />
       ) : (
         <Box

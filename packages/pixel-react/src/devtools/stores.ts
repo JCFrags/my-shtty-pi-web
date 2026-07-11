@@ -1,9 +1,7 @@
 import { createLogStore, createStore } from "./store";
 
-/** Logs printed by the user's program (console.*, stdout, stderr). */
 export const consoleLogs = createLogStore();
 
-/** Logs emitted by the engine and bridge. */
 export const engineLogs = createLogStore();
 
 export interface LayoutRect {
@@ -39,7 +37,6 @@ export interface InspectorState {
   selectedId: number | null;
   expanded: ReadonlySet<number>;
   picking: boolean;
-  /** Bumped by the host config whenever the app tree mutates. */
   treeVersion: number;
 }
 
@@ -52,7 +49,6 @@ export const inspectorStore = createStore<InspectorState>({
 
 export interface TimeSpan {
   name: string;
-  /** Wall-clock epoch ms, so engine and JS spans share one axis. */
   start: number;
   dur: number;
   depth: number;
@@ -63,7 +59,6 @@ export interface TimeSpan {
 
 export interface CounterSample {
   name: string;
-  /** Wall-clock epoch ms, like TimeSpan.start. */
   at: number;
   value: number;
 }
@@ -74,13 +69,11 @@ export interface ProfileSession {
   end: number;
   frames: TimeSpan[];
   counters: CounterSample[];
-  /** User input during the recording, as lane 'interaction' pseudo-spans. */
   marks: TimeSpan[];
 }
 
 export interface ProfilerState {
   recording: boolean;
-  /** Set while waiting for the engine to send its half of the recording. */
   pendingStop: boolean;
   session: ProfileSession | null;
   startedAt: number;
@@ -93,7 +86,6 @@ export const profilerStore = createStore<ProfilerState>({
   startedAt: 0,
 });
 
-/** JS-side spans accumulated during an active recording. */
 export const pendingSpans: TimeSpan[] = [];
 
 export function recordSpan(span: TimeSpan) {
@@ -107,7 +99,6 @@ export interface DevtoolsState {
   width: number;
   height: number;
   basePx: number;
-  /** CPU throttle rate applied to the app's threads; 1 = off. */
   cpuRate: number;
 }
 

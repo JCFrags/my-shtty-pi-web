@@ -206,7 +206,6 @@ export function ElementsPanel(props: { rem: number }) {
       if (row.depth < 3 && row.expandable) expanded.add(row.instance.id);
     }
     inspectorStore.update((s) => ({ ...s, expanded }));
-    // Rows above only include collapsed depths, so one pass per fresh open.
   }, [rows, inspector.expanded.size]);
 
   const selected =

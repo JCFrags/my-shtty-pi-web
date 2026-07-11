@@ -1,14 +1,6 @@
 import type { Container } from "../host-config";
 import { profilerStore, recordSpan } from "./stores";
 
-/**
- * React tracks per-fiber render timings (actualStartTime/actualDuration) for
- * any subtree below a <Profiler>, and reports commits through the devtools
- * global hook. We install a minimal hook and, while a recording is active,
- * turn the committed fiber tree into flame-graph spans — the same data the
- * React DevTools profiler visualizes.
- */
-
 const PERFORMED_WORK = 0b1;
 
 interface FiberLike {
@@ -113,7 +105,6 @@ export function installFiberHook() {
       try {
         collect(root.current.child, 0, performance.timeOrigin);
       } catch {
-        // Fiber internals shifted under us; commit-level spans still work.
       }
     },
     onCommitFiberUnmount() {},

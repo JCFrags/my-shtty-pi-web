@@ -42,7 +42,7 @@ function mountDevtools() {
     false,
     null,
     "pixel-devtools",
-    () => {},
+    () => { },
     null
   );
   reconciler.updateContainer(createElement(DevtoolsApp), devtoolsRoot, null, null);
@@ -103,7 +103,6 @@ export function selectNode(id: number, reveal = false) {
     }
     return { ...state, selectedId: id, expanded, picking: false };
   });
-  flashHighlight(id);
 }
 
 let highlightTimer: ReturnType<typeof setTimeout> | null = null;
@@ -116,14 +115,6 @@ export function setHighlight(id: number | null) {
   engineOp({ op: "highlight", view: APP_VIEW, id });
 }
 
-/** Briefly outline the node in the app pane, like clicking a row in Chrome. */
-export function flashHighlight(id: number) {
-  setHighlight(id);
-  highlightTimer = setTimeout(() => {
-    highlightTimer = null;
-    engineOp({ op: "highlight", view: APP_VIEW, id: null });
-  }, 1200);
-}
 
 export function setPicking(on: boolean) {
   inspectorStore.update((s) => ({ ...s, picking: on }));

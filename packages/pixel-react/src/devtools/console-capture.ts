@@ -5,11 +5,6 @@ import type { LogLevel } from "./store";
 
 let installed = false;
 
-/**
- * The engine owns the terminal, so anything the program writes to stdout or
- * stderr would corrupt the frame stream. Capture console methods and raw
- * stream writes into the devtools console instead.
- */
 export function installConsoleCapture() {
   if (installed) return;
   installed = true;

@@ -22,7 +22,6 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-/** Keys the engine routes to the devtools pane (view 1). */
 export function handleDevtoolsKey(key: string): boolean {
   const state = devtoolsStore.get();
   if (!state.open) return false;
