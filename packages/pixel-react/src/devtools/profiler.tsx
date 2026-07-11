@@ -507,7 +507,7 @@ export function ProfilerPanel(props: { rem: number }) {
           active={devtools.cpuRate > 1}
           danger={devtools.cpuRate > 1}
           onClick={() => {
-            const rates = [1, 4, 10];
+            const rates = [1, 2, 4, 10];
             const next = rates[(rates.indexOf(devtools.cpuRate) + 1) % rates.length];
             setCpuThrottle(next);
           }}
