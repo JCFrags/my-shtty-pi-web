@@ -1,11 +1,9 @@
 import { randomUUID } from "node:crypto";
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { makeCollection } from "@pixel/db/schema";
 
-import { appendLog } from "./db";
+import { appendLog, createSession } from "./db/client";
 import { schedulePersist } from "./db/persist";
-import type { LogEntry, SessionRow } from "./db/schema";
 import { detail } from "./transcript";
 import type {
   ModelInfo,
@@ -70,14 +68,12 @@ export interface RestoredSession {
   permissionMode: string;
   costUsd: number;
   items: Item[];
-  log: SessionRow["log"];
 }
 
 export class Session {
   readonly dbId: string;
   readonly createdAt: number;
-  readonly logRef: SessionRow["log"];
-  // transcript persisted before the log collection existed; frozen at hydrate
+  // transcript persisted before the log table existed; frozen at hydrate
   readonly legacyItems: Item[] = [];
   sdkSessionId: string | null = null;
   firstUserText = "";
@@ -92,7 +88,6 @@ export class Session {
   private q: Query | null = null;
   private queue: SDKUserMessage[] = [];
   private wake: (() => void) | null = null;
-  private logChain = Promise.resolve();
 
   constructor(private notify: () => void, restored?: RestoredSession) {
     if (restored) {
@@ -104,21 +99,22 @@ export class Session {
       this.mode = restored.permissionMode as PermissionMode;
       this.cost = restored.costUsd;
       this.legacyItems = restored.items;
-      this.logRef = restored.log;
     } else {
       this.dbId = randomUUID();
       this.createdAt = Date.now();
-      this.logRef = makeCollection<LogEntry>(`log-${this.dbId}`);
+      // the session row must exist before the first log insert satisfies its foreign key;
+      // the debounced persist would land it too late
+      createSession({ id: this.dbId, createdAt: this.createdAt });
       this.connect();
     }
   }
 
-  // Ordered per session so log entries land in the collection in arrival order.
   private log(message: unknown) {
-    const entry = { at: Date.now(), message: JSON.stringify(message) };
-    this.logChain = this.logChain
-      .then(() => appendLog(this.logRef.collectionId, entry))
-      .catch((error) => console.error("failed to log agent message", error));
+    try {
+      appendLog(this.dbId, { at: Date.now(), message: JSON.stringify(message) });
+    } catch (error) {
+      console.error("failed to log agent message", error);
+    }
   }
 
   // Restored sessions stay disconnected until the first send, so opening

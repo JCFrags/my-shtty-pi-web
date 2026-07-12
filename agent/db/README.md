@@ -1,1 +1,0 @@
-A typescript document database built for local multi process syncronization

@@ -1,23 +1,13 @@
 {
-  "version": "1",
+  "version": "7",
+  "dialect": "sqlite",
   "entries": [
     {
       "idx": 0,
-      "tag": "init",
-      "when": 1783808202459,
-      "file": "init_1783808202459"
-    },
-    {
-      "idx": 1,
-      "tag": "sessions_snapshot",
-      "when": 1783809524321,
-      "file": "sessions_snapshot_1783809524321"
-    },
-    {
-      "idx": 2,
-      "tag": "migration",
-      "when": 1783811663212,
-      "file": "migration_1783811663212"
+      "version": "6",
+      "when": 1783840083440,
+      "tag": "0000_third_agent_zero",
+      "breakpoints": true
     }
   ]
 }

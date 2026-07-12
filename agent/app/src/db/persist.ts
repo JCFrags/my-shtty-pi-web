@@ -1,4 +1,8 @@
-import { getDb } from "./index";
+import { eq } from "drizzle-orm";
+
+import { db } from "./client";
+import { touched } from "./invalidate";
+import { appState, sessions } from "./schema";
 import type { ItemRow, SessionRow } from "./schema";
 import { Session, store, type Item, type ToolCall } from "../session";
 
@@ -60,50 +64,64 @@ function snapshotSessions(): { sessions: SessionRow[]; activeSessionId: string }
       permissionMode: s.mode,
       costUsd: s.cost,
       items: flattenItems(s.legacyItems),
-      log: s.logRef,
     })),
     activeSessionId: store.active()?.dbId ?? "",
   };
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null;
-let writing: Promise<void> = Promise.resolve();
 
-function write(): Promise<void> {
+function write(): void {
   const snap = snapshotSessions();
-  writing = getDb()
-    .then(async ({ client }) => {
-      await client.sessions.set(snap.sessions);
-      await client.activeSessionId.set(snap.activeSessionId);
-    })
-    .catch((error) => {
-      console.error("failed to persist sessions", error);
+  try {
+    db.transaction((tx) => {
+      for (const row of snap.sessions) {
+        tx.insert(sessions)
+          .values(row)
+          .onConflictDoUpdate({
+            target: sessions.id,
+            set: {
+              sdkSessionId: row.sdkSessionId,
+              title: row.title,
+              model: row.model,
+              permissionMode: row.permissionMode,
+              costUsd: row.costUsd,
+              items: row.items,
+            },
+          })
+          .run();
+      }
+      tx.insert(appState)
+        .values({ key: "activeSessionId", value: snap.activeSessionId })
+        .onConflictDoUpdate({ target: appState.key, set: { value: snap.activeSessionId } })
+        .run();
     });
-  return writing;
+  } catch (error) {
+    console.error("failed to persist sessions", error);
+    return;
+  }
+  touched("sessions", "app_state");
 }
 
 export function schedulePersist(): void {
   if (timer) return;
   timer = setTimeout(() => {
     timer = null;
-    void write();
+    write();
   }, 300);
 }
 
-export async function flushPersist(): Promise<void> {
+export function flushPersist(): void {
   if (timer) {
     clearTimeout(timer);
     timer = null;
   }
-  await write();
-  const { flush } = await getDb();
-  await flush();
+  write();
 }
 
-export async function hydrateStore(): Promise<void> {
-  const { client } = await getDb();
-  const rows = client.sessions.read();
-  const activeId = client.activeSessionId.read();
+export function hydrateStore(): void {
+  const rows = db.select().from(sessions).orderBy(sessions.createdAt).all();
+  const active = db.select().from(appState).where(eq(appState.key, "activeSessionId")).get();
   for (const row of rows) {
     store.sessions.push(
       new Session(store.notify, {
@@ -115,11 +133,10 @@ export async function hydrateStore(): Promise<void> {
         permissionMode: row.permissionMode,
         costUsd: row.costUsd,
         items: rebuildItems(row.items),
-        log: row.log,
       }),
     );
   }
-  const at = store.sessions.findIndex((s) => s.dbId === activeId);
+  const at = store.sessions.findIndex((s) => s.dbId === active?.value);
   if (at >= 0) store.at = at;
   if (store.sessions.length === 0) store.add();
   store.notify();

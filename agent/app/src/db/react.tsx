@@ -1,38 +1,29 @@
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
-import { createKyjuReact } from "@pixel/db/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import { getDb, getDbSync, type DbConnection } from "./index";
-import type { AppShape } from "./schema";
+import { onDbWrite } from "./invalidate";
 
-const kyju = createKyjuReact<AppShape>();
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: Infinity,
+      gcTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      refetchOnMount: false,
+      retry: false,
+      networkMode: "always",
+    },
+  },
+});
 
-export const useDb = kyju.useDb;
-export const useCollection = kyju.useCollection;
+onDbWrite((tables) => {
+  for (const table of tables) {
+    void queryClient.invalidateQueries({ queryKey: [table] });
+  }
+});
 
-export function DbProvider({
-  children,
-  fallback = null,
-}: {
-  children: ReactNode;
-  fallback?: ReactNode;
-}) {
-  const [conn, setConn] = useState<DbConnection | null>(getDbSync);
-
-  useEffect(() => {
-    let live = true;
-    void getDb().then((c) => {
-      if (live) setConn(c);
-    });
-    return () => {
-      live = false;
-    };
-  }, []);
-
-  if (!conn) return <>{fallback}</>;
-  return (
-    <kyju.KyjuProvider client={conn.client} replica={conn.replica}>
-      {children}
-    </kyju.KyjuProvider>
-  );
+export function DbProvider({ children }: { children: ReactNode }) {
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }

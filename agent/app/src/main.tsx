@@ -1,19 +1,21 @@
 import { createRoot } from "pixel-react";
 
 import { App } from "./App";
+import { closeDb } from "./db/client";
 import { flushPersist, hydrateStore } from "./db/persist";
 import { DbProvider } from "./db/react";
 import { PALETTE_ACTIONS } from "./palette";
 import { store } from "./session";
 
-await hydrateStore();
+hydrateStore();
 
 const root = createRoot({
   onKey(event) {
     if (event.mods.ctrl && event.key === "q") {
       root.stop();
-      void flushPersist().finally(() => process.exit(0));
-      return;
+      flushPersist();
+      closeDb();
+      process.exit(0);
     }
     if (event.mods.super && event.key === "b") {
       store.toggleSidebar();
@@ -51,7 +53,7 @@ const root = createRoot({
 
 function render() {
   root.render(
-    <DbProvider fallback={<App info={{ ...root.info }} />}>
+    <DbProvider>
       <App info={{ ...root.info }} />
     </DbProvider>,
   );

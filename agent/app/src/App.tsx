@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { Box, diff, HIGHLIGHT_CAPTURES, highlight, Input, Text } from "pixel-react";
 import type { EngineInfo, NodeHandle, Rgba, TextSpan } from "pixel-react";
 
-import { useCollection } from "./db/react";
+import { useSessionLog } from "./db/hooks";
 import { PALETTE_ACTIONS } from "./palette";
 import { PERMISSION_MODES, store, THINKING } from "./session";
 import type { Ask, Item, Session, ToolCall } from "./session";
@@ -23,8 +23,8 @@ export function App({ info }: { info: EngineInfo }) {
   const rem = info.basePx;
   const ctx = { theme, rem };
   const session = store.active();
-  const log = useCollection(session.logRef);
-  const items = transcript(session.dbId, session.legacyItems, log.items);
+  const log = useSessionLog(session.dbId);
+  const items = transcript(session.dbId, session.legacyItems, log);
 
   const list = useRef<NodeHandle | null>(null);
   const input = useRef<NodeHandle | null>(null);

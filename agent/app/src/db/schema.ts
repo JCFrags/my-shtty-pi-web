@@ -1,44 +1,53 @@
-import { createSchema, f } from "@pixel/db/schema";
-import { z } from "zod";
+import { sql } from "drizzle-orm";
+import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
-const toolRow = z.object({
-  toolId: z.string(),
-  name: z.string(),
-  detail: z.string(),
-  status: z.enum(["running", "ok", "error"]),
-  parentToolId: z.string().nullable(),
+export interface ToolRow {
+  toolId: string;
+  name: string;
+  detail: string;
+  status: "running" | "ok" | "error";
+  parentToolId: string | null;
+}
+
+export interface ItemRow {
+  kind: "user" | "assistant" | "tool";
+  text: string;
+  tool: ToolRow | null;
+}
+
+export interface LogEntry {
+  at: number;
+  message: string;
+}
+
+export const sessions = sqliteTable("sessions", {
+  id: text("id").primaryKey(),
+  sdkSessionId: text("sdk_session_id"),
+  createdAt: integer("created_at").notNull(),
+  title: text("title").notNull().default(""),
+  model: text("model").notNull().default(""),
+  permissionMode: text("permission_mode").notNull().default("default"),
+  costUsd: real("cost_usd").notNull().default(0),
+  // transcript from before the log table existed; empty for new sessions
+  items: text("items", { mode: "json" }).$type<ItemRow[]>().notNull().default(sql`'[]'`),
 });
 
-const itemRow = z.object({
-  kind: z.enum(["user", "assistant", "tool"]),
-  text: z.string(),
-  tool: toolRow.nullable(),
+export const logs = sqliteTable(
+  "logs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    at: integer("at").notNull(),
+    message: text("message").notNull(),
+  },
+  (t) => [index("logs_session_idx").on(t.sessionId, t.id)],
+);
+
+export const appState = sqliteTable("app_state", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
 });
 
-const logEntry = z.object({
-  at: z.number(),
-  message: z.string(),
-});
-
-const sessionRow = z.object({
-  id: z.string(),
-  sdkSessionId: z.string().nullable(),
-  createdAt: z.number(),
-  title: z.string(),
-  model: z.string(),
-  permissionMode: z.string(),
-  costUsd: z.number(),
-  // transcript from before the log collection existed; empty for new sessions
-  items: z.array(itemRow),
-  log: f.collection(logEntry),
-});
-
-export const schema = createSchema({
-  sessions: f.array(sessionRow).default([]),
-  activeSessionId: f.string().default(""),
-});
-
-export type SessionRow = z.infer<typeof sessionRow>;
-export type ItemRow = z.infer<typeof itemRow>;
-export type LogEntry = z.infer<typeof logEntry>;
-export type AppShape = (typeof schema)["shape"];
+export type SessionRow = typeof sessions.$inferSelect;

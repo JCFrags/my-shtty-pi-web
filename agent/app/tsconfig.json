@@ -9,5 +9,5 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["src", "migrations", "db.config.ts", "tsdown.config.ts"]
+  "include": ["src", "scripts", "drizzle.config.ts", "tsdown.config.ts"]
 }
