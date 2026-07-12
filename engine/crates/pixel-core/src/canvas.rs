@@ -194,9 +194,6 @@ impl Canvas {
         if cx1 == cx2 || cy1 == cy2 {
             return;
         }
-        // The mask covers the whole canvas and is expensive to build, so skip
-        // it when the path (plus stroke overhang and an AA pixel) can't cross
-        // the clip edge anyway.
         let pad = stroke_width.unwrap_or(0.0) / 2.0 + 1.0;
         let bounds = path.bounds();
         let inside = self.clip_stack.is_empty()
