@@ -4,8 +4,6 @@ use std::sync::OnceLock;
 use napi_derive::napi;
 use tree_sitter_highlight::{Highlight, HighlightConfiguration, HighlightEvent, Highlighter};
 
-// Order matters: HighlightSpan.capture indexes into this list, and the JS
-// side maps those indices to theme colors via highlightCaptures().
 pub const CAPTURE_NAMES: &[&str] = &[
     "attribute",
     "comment",
@@ -24,7 +22,9 @@ pub const CAPTURE_NAMES: &[&str] = &[
     "type",
     "variable",
 ];
-
+/**
+ * we eventually will lazily download this
+ */
 fn canonical(language: &str) -> Option<&'static str> {
     Some(match language.to_ascii_lowercase().as_str() {
         "js" | "jsx" | "javascript" | "mjs" | "cjs" => "javascript",
@@ -55,8 +55,6 @@ fn configs() -> &'static HashMap<&'static str, HighlightConfiguration> {
                 Err(e) => pixel_core::logging::error("highlight", format!("{name}: {e}")),
             }
         };
-        // Later patterns win, so the language-specific queries follow the
-        // javascript base they build on.
         let js = format!(
             "{}\n{}",
             tree_sitter_javascript::HIGHLIGHT_QUERY,
@@ -123,10 +121,8 @@ fn configs() -> &'static HashMap<&'static str, HighlightConfiguration> {
 
 #[napi(object)]
 pub struct HighlightSpan {
-    /// Byte offset into the UTF-8 source.
     pub start: u32,
     pub end: u32,
-    /// Index into highlightCaptures().
     pub capture: u32,
 }
 
@@ -167,6 +163,7 @@ pub fn highlight(source: String, language: String) -> Vec<HighlightSpan> {
     spans
 }
 
+#[cfg_attr(test, allow(dead_code))]
 #[napi]
 pub fn highlight_captures() -> Vec<String> {
     CAPTURE_NAMES.iter().map(|s| s.to_string()).collect()

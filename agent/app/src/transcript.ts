@@ -28,19 +28,16 @@ interface FoldState {
 
 const folds = new Map<string, FoldState>();
 
-// Log entries are append-only, so each session folds incrementally: only
-// entries past `applied` are parsed on re-render.
-export function transcript(sessionId: string, prefix: Item[], entries: readonly LogEntry[]): Item[] {
+export function transcript(sessionId: string, entries: readonly LogEntry[]): Item[] {
   let state = folds.get(sessionId);
   if (!state || state.applied > entries.length) {
-    state = { applied: 0, items: [...prefix], tools: new Map(), draftFrom: null };
+    state = { applied: 0, items: [], tools: new Map(), draftFrom: null };
     folds.set(sessionId, state);
   }
   for (; state.applied < entries.length; state.applied++) {
     try {
       apply(state, JSON.parse(entries[state.applied].message));
     } catch {
-      // a malformed entry should not take down the whole transcript
     }
   }
   return state.items;
@@ -67,7 +64,6 @@ function apply(state: FoldState, message: any) {
     }
     case "assistant": {
       const inSubagent = message.parent_tool_use_id !== null;
-      // Replace streamed drafts with the authoritative message.
       if (!inSubagent && state.draftFrom !== null) {
         state.items.splice(state.draftFrom);
         state.draftFrom = null;

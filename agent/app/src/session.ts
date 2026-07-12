@@ -19,8 +19,6 @@ export interface ToolCall {
   detail: string;
   input: Record<string, unknown>;
   status: "running" | "ok" | "error";
-  // The SDK's tool_use_result: structured per-tool data for presentation
-  // (Edit/Write carry the full pre-change file).
   result?: unknown;
   kids: ToolCall[];
 }
@@ -49,8 +47,6 @@ export const THINKING = [
   { label: "high", tokens: 32_000 },
 ];
 
-// The available models are account-level, so one connected session's list
-// serves every session, including restored ones that aren't connected yet.
 let availableModels: ModelInfo[] = [];
 
 interface Block {
@@ -67,14 +63,11 @@ export interface RestoredSession {
   model: string;
   permissionMode: string;
   costUsd: number;
-  items: Item[];
 }
 
 export class Session {
   readonly dbId: string;
   readonly createdAt: number;
-  // transcript persisted before the log table existed; frozen at hydrate
-  readonly legacyItems: Item[] = [];
   sdkSessionId: string | null = null;
   firstUserText = "";
   working = false;
@@ -98,7 +91,6 @@ export class Session {
       this.model = restored.model;
       this.mode = restored.permissionMode as PermissionMode;
       this.cost = restored.costUsd;
-      this.legacyItems = restored.items;
     } else {
       this.dbId = randomUUID();
       this.createdAt = Date.now();
@@ -117,8 +109,6 @@ export class Session {
     }
   }
 
-  // Restored sessions stay disconnected until the first send, so opening
-  // the app doesn't spawn one agent process per historical session.
   private connect() {
     if (this.q) return;
     const thinkingTokens = THINKING[this.thinking].tokens;
@@ -197,8 +187,6 @@ export class Session {
     return availableModels;
   }
 
-  // Restored sessions haven't connected, so the picker asks for a connection
-  // to fetch the model list instead of waiting for the first send.
   loadModels() {
     if (availableModels.length === 0) this.connect();
   }
@@ -257,8 +245,6 @@ export class Session {
     }
   }
 
-  // Transcript items are folded from the log collection on the frontend;
-  // this only tracks control state.
   private handle(message: SDKMessage) {
     switch (message.type) {
       case "system":

@@ -329,8 +329,6 @@ fn fill_bands(canvas: &mut Canvas, bands: &[PxRect], clip: PxRect, color: Color)
     }
 }
 
-// Spans are expected sorted and non-overlapping; overlaps clamp to whatever
-// the previous span left uncovered.
 fn split_by_spans(
     line: Range<usize>,
     spans: &[TextSpan],

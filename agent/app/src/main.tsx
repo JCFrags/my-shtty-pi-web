@@ -1,6 +1,6 @@
 import { createRoot } from "pixel-react";
 
-import { App } from "./App";
+import { App } from "./app";
 import { closeDb } from "./db/client";
 import { flushPersist, hydrateStore } from "./db/persist";
 import { DbProvider } from "./db/react";
@@ -47,6 +47,9 @@ const root = createRoot({
     if (event.mods.ctrl && event.key === "t") session.cycleThinking();
   },
   onResize() {
+    /**
+     * this should not be needed
+     */
     render();
   },
 });

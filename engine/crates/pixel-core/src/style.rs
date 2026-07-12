@@ -82,10 +82,12 @@ pub enum Position {
     Absolute,
 }
 
+/**
+ * hm, not sure if we want an explicit inset api
+ */
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InsetValue {
     Px(f32),
-    /// Fraction of the parent's size (1.0 = 100%).
     Percent(f32),
 }
 

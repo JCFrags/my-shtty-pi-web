@@ -1,19 +1,4 @@
-import { sql } from "drizzle-orm";
 import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
-
-export interface ToolRow {
-  toolId: string;
-  name: string;
-  detail: string;
-  status: "running" | "ok" | "error";
-  parentToolId: string | null;
-}
-
-export interface ItemRow {
-  kind: "user" | "assistant" | "tool";
-  text: string;
-  tool: ToolRow | null;
-}
 
 export interface LogEntry {
   at: number;
@@ -28,8 +13,6 @@ export const sessions = sqliteTable("sessions", {
   model: text("model").notNull().default(""),
   permissionMode: text("permission_mode").notNull().default("default"),
   costUsd: real("cost_usd").notNull().default(0),
-  // transcript from before the log table existed; empty for new sessions
-  items: text("items", { mode: "json" }).$type<ItemRow[]>().notNull().default(sql`'[]'`),
 });
 
 export const logs = sqliteTable(

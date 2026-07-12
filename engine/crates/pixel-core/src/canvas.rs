@@ -269,13 +269,10 @@ impl Canvas {
     }
 }
 
-// radius order: top-left, top-right, bottom-right, bottom-left
 fn rounded_rect_path(x: f32, y: f32, w: f32, h: f32, radius: [f32; 4]) -> Option<tiny_skia::Path> {
     if w <= 0.0 || h <= 0.0 {
         return None;
     }
-    // Clamping every corner to half of each side keeps opposite corners from
-    // overlapping, so no CSS-style proportional rescale is needed on top.
     let mut r = radius.map(|r| r.max(0.0).min(w / 2.0).min(h / 2.0));
     for v in &mut r {
         if *v < 0.5 {
@@ -288,8 +285,7 @@ fn rounded_rect_path(x: f32, y: f32, w: f32, h: f32, radius: [f32; 4]) -> Option
             tiny_skia::Rect::from_xywh(x, y, w, h)?,
         ));
     }
-    // Quarter circles as cubic beziers; K is the standard circle approximation.
-    const K: f32 = 0.552_284_8;
+    const K: f32 = 0.552_284_8; // circle approximation
     let mut pb = tiny_skia::PathBuilder::new();
     pb.move_to(x + tl, y);
     pb.line_to(x + w - tr, y);

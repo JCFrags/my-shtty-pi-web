@@ -60,12 +60,10 @@ export interface EngineKeyEvent {
 
 export interface RootOptions {
   onKey?: (event: EngineKeyEvent) => void;
-  /** Providing this disables the engine's built-in context menu. */
   onRightClick?: (event: { x: number; y: number }) => void;
   onPaste?: (text: string) => void;
   onEngineExit?: (error: string | null) => void;
   onResize?: (size: { width: number; height: number; basePx: number }) => void;
-  /** Set false to disable the devtools integration entirely. */
   devtools?: boolean;
 }
 

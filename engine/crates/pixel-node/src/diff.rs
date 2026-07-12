@@ -3,7 +3,6 @@ use std::time::Duration;
 use napi_derive::napi;
 use similar::{Algorithm, ChangeTag, DiffTag, InlineChangeOptions, TextDiff};
 
-/// Byte range relative to the row's text, painted as emphasis background.
 #[napi(object)]
 pub struct DiffEmphasis {
     pub start: u32,
@@ -12,19 +11,12 @@ pub struct DiffEmphasis {
 
 #[napi(object)]
 pub struct DiffRow {
-    /// "context" | "del" | "add" | "gap"
     pub kind: String,
-    /// 1-based line numbers in each source; absent where the row has no side.
     pub old_line: Option<u32>,
     pub new_line: Option<u32>,
-    /// Line content without the trailing newline; empty for gap rows.
     pub text: String,
-    /// Byte offset of `text` within its side's source: the old source for
-    /// "del" rows, the new source otherwise. Intersect highlight() spans of
-    /// that source with [sideStart, sideStart + byte length of text).
     pub side_start: u32,
     pub emphasis: Vec<DiffEmphasis>,
-    /// Hidden unchanged line count, only on "gap" rows.
     pub count: Option<u32>,
 }
 
@@ -73,6 +65,10 @@ fn gap_row(count: u32) -> DiffRow {
 pub fn diff(old_source: String, new_source: String, context_lines: Option<u32>) -> Vec<DiffRow> {
     let context = context_lines.unwrap_or(3) as usize;
     let text_diff = TextDiff::configure()
+    /*
+      todo: we need to see which algorithm we like the best (configurable ideally) 
+      and if there are perf issues we should probably be able to make it just work
+     */
         .algorithm(Algorithm::Myers)
         .timeout(Duration::from_millis(500))
         .diff_lines(old_source.as_str(), new_source.as_str());

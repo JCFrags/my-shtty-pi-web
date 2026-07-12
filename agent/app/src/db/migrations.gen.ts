@@ -8,5 +8,11 @@ export const migrations: { id: string; statements: string[] }[] = [
       "CREATE INDEX `logs_session_idx` ON `logs` (`session_id`,`id`);",
       "CREATE TABLE `sessions` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`sdk_session_id` text,\n\t`created_at` integer NOT NULL,\n\t`title` text DEFAULT '' NOT NULL,\n\t`model` text DEFAULT '' NOT NULL,\n\t`permission_mode` text DEFAULT 'default' NOT NULL,\n\t`cost_usd` real DEFAULT 0 NOT NULL,\n\t`items` text DEFAULT '[]' NOT NULL\n);"
     ]
+  },
+  {
+    "id": "0001_complete_bloodstrike",
+    "statements": [
+      "ALTER TABLE `sessions` DROP COLUMN `items`;"
+    ]
   }
 ];

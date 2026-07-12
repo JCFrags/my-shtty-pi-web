@@ -87,8 +87,6 @@ impl PixelEngine {
         })
         .map_err(err)?;
         let waker = engine.waker().map_err(err)?;
-        // The constructor runs on the JS main thread; register it so cpu
-        // throttling slows React/user code, not just the engine.
         engine.cpu_throttle().register_current_thread();
         let (width, height) = engine.window_px();
         let (cell_w, cell_h) = engine.cell_px();

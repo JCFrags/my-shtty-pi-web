@@ -18,7 +18,6 @@ export interface ScrollEvent {
 }
 
 export interface WheelEvent {
-  /** Position within the node, in px. */
   x: number;
   y: number;
   deltaX: number;
@@ -30,21 +29,17 @@ export interface BoxProps {
   style?: Style;
   id?: string;
   onClick?: (event: ClickEvent) => void;
-  /** Fires when a click lands outside this node's visible rect. */
   onClickOutside?: (event: ClickEvent) => void;
   onScroll?: (event: ScrollEvent) => void;
-  /** Receive raw wheel input instead of engine scrolling. */
   onWheel?: (event: WheelEvent) => void;
   contentHeight?: number;
   children?: React.ReactNode;
 }
 
 export interface TextSpan {
-  /** Byte offset into the UTF-8 text, as produced by highlight(). */
   start: number;
   end: number;
   color: Color;
-  /** Fills behind just this range, over the node/ancestor background. */
   background?: Color;
 }
 
@@ -79,7 +74,6 @@ export interface Instance {
   children: Instance[];
   mounted: boolean;
   hidden: boolean;
-  /** Serialized form of the last props sent to the engine. */
   lastSent: string | null;
 }
 
@@ -194,15 +188,15 @@ function mutated(view: number) {
 }
 
 /**
- * React re-renders hand us fresh props objects even when nothing changed, so
- * an update op per host element per commit would flood the engine (a 60Hz
- * animation over a big static list serializes megabytes per second). Compare
- * the serialized form against what the engine already has and skip no-ops.
+ * minor optimization so we can serialize/deserialize less data
  */
 function pushPropsIfChanged(
   instance: Instance,
   serialized: Record<string, unknown>
 ): boolean {
+  /**
+   * todo: we shouldn't need to send user props to rust, need to make sure we aren't
+   */
   const json = JSON.stringify(serialized);
   if (json === instance.lastSent) return false;
   instance.lastSent = json;

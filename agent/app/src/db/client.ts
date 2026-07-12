@@ -21,7 +21,6 @@ export function openDb(file: string) {
   return { sqlite, db: drizzle(sqlite, { schema }) };
 }
 
-// walks to the package root so the path is right from both src/ (tsx) and dist/ (bundled)
 function packageRoot(): string {
   let dir = path.dirname(fileURLToPath(import.meta.url));
   while (!fs.existsSync(path.join(dir, "package.json"))) {

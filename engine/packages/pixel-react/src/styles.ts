@@ -65,8 +65,11 @@ export interface Style {
   wrap?: boolean;
   selectable?: boolean;
   selectionColor?: Color;
-  /** On a container: selections inside render as one continuous
-   *  terminal-style block (full-width middle rows, gaps included). */
+  /**
+   * bespoke property so that we can get selection that feels more like a terminal
+   * 
+   * makes the highlight extend to the entire available space of the selection container instead of just the text
+   */
   selectionMode?: "text" | "unified";
 }
 
