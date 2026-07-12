@@ -1,6 +1,6 @@
 import { createRoot } from "pixel-react";
 
-import { App } from "./app";
+import { App } from "./ui/app";
 import { closeDb } from "./db/client";
 import { flushPersist, hydrateStore } from "./db/persist";
 import { DbProvider } from "./db/react";

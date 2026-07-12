@@ -5,7 +5,7 @@ import type { EngineInfo, NodeHandle } from "pixel-react";
 import { useSessionLog } from "../db/hooks";
 import { store } from "../session";
 import type { Session } from "../session";
-import { makeTheme } from "../theme";
+import { makeTheme, type Ctx } from "../theme";
 import { transcript } from "../transcript";
 import { Composer } from "./composer";
 import { Message } from "./message";
@@ -13,7 +13,6 @@ import { Palette } from "./palette";
 import { Settings } from "./settings";
 import { Sidebar } from "./sidebar";
 import { AskBox, WorkingStatus } from "./status";
-import type { Ctx } from "./ui";
 
 export function App({ info }: { info: EngineInfo }) {
   useSyncExternalStore(store.subscribe, store.snapshot);

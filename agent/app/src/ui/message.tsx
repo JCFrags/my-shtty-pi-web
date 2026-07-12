@@ -3,7 +3,7 @@ import { Box, HIGHLIGHT_CAPTURES, highlight, Text } from "pixel-react";
 
 import type { Item } from "../session";
 import { ToolRow } from "./tool";
-import { FONT_MONO, type Ctx } from "./ui";
+import { FONT_MONO, type Ctx } from "../theme";
 
 export function Message({ ctx, item }: { ctx: Ctx; item: Item }) {
   const { theme, rem } = ctx;

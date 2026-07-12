@@ -1,7 +1,7 @@
 import { Box, Text } from "pixel-react";
 
 import { store } from "../session";
-import type { Ctx } from "./ui";
+import type { Ctx } from "../theme";
 
 export function Settings({ ctx }: { ctx: Ctx }) {
   const { theme, rem } = ctx;

@@ -3,7 +3,7 @@ import { Box, diff, HIGHLIGHT_CAPTURES, highlight, Text } from "pixel-react";
 import type { Rgba, TextSpan } from "pixel-react";
 
 import type { ToolCall } from "../session";
-import { FONT_MONO, type Ctx } from "./ui";
+import { FONT_MONO, type Ctx } from "../theme";
 
 const MAX_DIFF_ROWS = 14;
 

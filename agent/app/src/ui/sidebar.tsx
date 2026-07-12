@@ -2,7 +2,8 @@ import { Box, Text } from "pixel-react";
 
 import { store } from "../session";
 import type { Session } from "../session";
-import { Dot, type Ctx } from "./ui";
+import { Dot } from "./dot";
+import type { Ctx } from "../theme";
 
 export function Sidebar({ ctx }: { ctx: Ctx }) {
   const { theme, rem } = ctx;

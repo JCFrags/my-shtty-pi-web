@@ -2,7 +2,8 @@ import { Box, Text } from "pixel-react";
 
 import type { ToolCall } from "../session";
 import { DiffCard, diffSources } from "./diff";
-import { Dot, FONT_MONO, type Ctx } from "./ui";
+import { Dot } from "./dot";
+import { FONT_MONO, type Ctx } from "../theme";
 
 export function ToolRow({ ctx, call }: { ctx: Ctx; call: ToolCall }) {
   const { theme, rem } = ctx;

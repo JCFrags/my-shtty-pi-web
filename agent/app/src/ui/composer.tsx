@@ -4,7 +4,7 @@ import type { NodeHandle, Rgba } from "pixel-react";
 
 import { PERMISSION_MODES, store, THINKING } from "../session";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
-import { FONT_MONO, PickerChip, type Ctx } from "./ui";
+import { FONT_MONO, type Ctx } from "../theme";
 
 export function Composer({ ctx: { theme, rem }, inputRef }: { ctx: Ctx; inputRef: React.Ref<NodeHandle> }) {
   const session = store.active();
@@ -154,6 +154,36 @@ function ModelPicker({ ctx }: { ctx: Ctx }) {
         </Box>
       )}
     </Box>
+  );
+}
+
+function PickerChip({
+  ctx: { theme, rem },
+  color,
+  children,
+  onClick,
+}: {
+  ctx: Ctx;
+  color: Rgba;
+  children: string;
+  onClick: () => void;
+}) {
+  return (
+    <Text
+      style={{
+        padding: { left: rem * 0.6, right: rem * 0.6, top: rem * 0.15, bottom: rem * 0.15 },
+        cornerRadius: 999,
+        hoverBackground: theme.itemHover,
+        color,
+        fontSize: rem * 0.85,
+        font: FONT_MONO,
+        flexShrink: 0,
+        wrap: false,
+      }}
+      onClick={onClick}
+    >
+      {children}
+    </Text>
   );
 }
 

@@ -1,5 +1,12 @@
 import type { EngineInfo, Rgba } from "pixel-react";
 
+export const FONT_MONO = 1;
+
+export interface Ctx {
+  theme: Theme;
+  rem: number;
+}
+
 export interface Theme {
   bg: Rgba;
   bgAlt: Rgba;

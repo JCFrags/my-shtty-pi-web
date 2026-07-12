@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Box, Text } from "pixel-react";
 
 import type { Ask, Session } from "../session";
-import { FONT_MONO, type Ctx } from "./ui";
+import { FONT_MONO, type Ctx } from "../theme";
 
 export function AskBox({ ctx: { theme, rem }, ask }: { ctx: Ctx; ask: Ask }) {
   return (
