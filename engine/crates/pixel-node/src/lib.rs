@@ -27,7 +27,10 @@ static UI_FONT_BYTES: &[u8] = include_bytes!("../../../examples/typing/assets/In
 static MONO_FONT_BYTES: &[u8] =
     include_bytes!("../../../examples/typing/assets/JetBrainsMono-Regular.ttf");
 
-const SYSTEM_UI_FONTS: &[&str] = &["/System/Library/Fonts/SFNS.ttf"];
+const SYSTEM_UI_FONTS: &[&str] = &[
+    "/System/Library/Fonts/SFNSRounded.ttf",
+    "/System/Library/Fonts/SFNS.ttf",
+];
 const SYSTEM_MONO_FONTS: &[&str] = &["/System/Library/Fonts/SFNSMono.ttf"];
 
 fn load_font(candidates: &[&str], fallback: &'static [u8]) -> fontdue::Font {

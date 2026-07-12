@@ -32,6 +32,8 @@ export interface BoxProps {
   onClickOutside?: (event: ClickEvent) => void;
   onScroll?: (event: ScrollEvent) => void;
   onWheel?: (event: WheelEvent) => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
   contentHeight?: number;
   children?: React.ReactNode;
 }
@@ -41,14 +43,29 @@ export interface TextSpan {
   end: number;
   color: Color;
   background?: Color;
+  bold?: boolean;
 }
 
 export interface TextProps {
   style?: Style;
   id?: string;
   onClick?: (event: ClickEvent) => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
   spans?: TextSpan[];
   children?: React.ReactNode;
+}
+
+export interface InputAttachment {
+  id: number;
+  path: string;
+  width: number;
+  height: number;
+}
+
+export interface AttachmentRef {
+  id: number;
+  path: string;
 }
 
 export interface InputProps {
@@ -59,11 +76,19 @@ export interface InputProps {
   caretColor?: Style["color"];
   selectionColor?: Style["color"];
   autoFocus?: boolean;
-  onChange?: (text: string) => void;
-  onSubmit?: (text: string) => void;
+  onChange?: (text: string, attachments: AttachmentRef[]) => void;
+  onSubmit?: (text: string, attachments: AttachmentRef[]) => void;
+  onAttach?: (attachment: InputAttachment) => void;
 }
 
-export type AnyProps = BoxProps & TextProps & InputProps;
+export interface ImageProps {
+  style?: Style;
+  id?: string;
+  src: string;
+  onClick?: (event: ClickEvent) => void;
+}
+
+export type AnyProps = BoxProps & TextProps & InputProps & Partial<ImageProps>;
 
 export interface Instance {
   id: number;
@@ -157,6 +182,7 @@ function serializeProps(
     contentHeight: props.contentHeight,
     scrollEvents: !!props.onScroll,
     wheelEvents: !!props.onWheel,
+    hoverEvents: !!(props.onMouseEnter || props.onMouseLeave),
     outsideClickEvents: !!props.onClickOutside,
   };
   if (type === "text") {
@@ -167,8 +193,11 @@ function serializeProps(
         end: s.end,
         color: parseColor(s.color),
         background: s.background && parseColor(s.background),
+        bold: s.bold,
       }));
     }
+  } else if (type === "image") {
+    base.image = { src: props.src ?? "" };
   } else if (type === "input") {
     const valueChanged = !prevProps || props.value !== prevProps.value;
     base.input = {

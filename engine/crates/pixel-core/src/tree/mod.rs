@@ -12,7 +12,7 @@ use crate::scroll::ScrollState;
 use crate::scrollbar::{self, BarState, ScrollbarRects};
 use crate::selection::{DocLayout, DocSelection, DocSelectionState};
 use crate::style::{
-    Color, DEFAULT_SELECTION_COLOR, Dimension, FlexDirection, Overflow, ScrollbarStyle,
+    Color, DEFAULT_SELECTION_COLOR, Dimension, Edges, FlexDirection, Overflow, ScrollbarStyle,
     SelectionMode, Style,
 };
 use crate::text_input::{Granularity, InputGeometry, TextInput};
@@ -66,6 +66,13 @@ impl PxRect {
             h: ((self.y + self.h).min(other.y + other.h) - y).max(0.0),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct BoxMetrics {
+    pub padding: Edges,
+    pub border: Edges,
+    pub margin: Edges,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,6 +131,11 @@ impl Default for InputProps {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageProps {
+    pub src: String,
+}
+
 /// Byte range of the node's text painted in its own color, optionally over
 /// its own background fill.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -132,6 +144,7 @@ pub struct TextSpan {
     pub end: usize,
     pub color: Color,
     pub background: Option<Color>,
+    pub bold: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -142,9 +155,11 @@ pub struct Props {
     pub clickable: bool,
     pub hidden: bool,
     pub input: Option<InputProps>,
+    pub image: Option<ImageProps>,
     pub content_height: Option<f32>,
     pub scroll_events: bool,
     pub wheel_events: bool,
+    pub hover_events: bool,
     pub outside_click_events: bool,
     pub spans: Vec<TextSpan>,
 }
@@ -172,6 +187,7 @@ pub(crate) struct RNode {
     pub clickable: bool,
     pub hidden: bool,
     pub input: Option<InputState>,
+    pub image: Option<ImageProps>,
     pub parent: Option<NodeId>,
     pub children: Vec<NodeId>,
     pub taffy: taffy::NodeId,
@@ -180,6 +196,7 @@ pub(crate) struct RNode {
     pub content_height: Option<f32>,
     pub scroll_events: bool,
     pub wheel_events: bool,
+    pub hover_events: bool,
     pub outside_click_events: bool,
     pub spans: Vec<TextSpan>,
     pub last_scroll_emit: f32,
@@ -323,6 +340,7 @@ impl Tree {
                 selection_color: p.selection_color,
                 submit: p.submit,
             }),
+            image: props.image,
             parent: None,
             children: Vec::new(),
             taffy,
@@ -331,6 +349,7 @@ impl Tree {
             content_height: props.content_height,
             scroll_events: props.scroll_events,
             wheel_events: props.wheel_events,
+            hover_events: props.hover_events,
             outside_click_events: props.outside_click_events,
             spans: props.spans,
             last_scroll_emit: 0.0,
@@ -465,15 +484,25 @@ impl Tree {
         node.clickable = props.clickable;
         node.scroll_events = props.scroll_events;
         node.wheel_events = props.wheel_events;
+        node.hover_events = props.hover_events;
         node.outside_click_events = props.outside_click_events;
         if node.spans != props.spans {
             node.spans = props.spans;
             changed = true;
         }
+        let mut image_changed = false;
+        if node.image != props.image {
+            node.image = props.image;
+            changed = true;
+            image_changed = true;
+        }
         if node.content_height != props.content_height {
             node.content_height = props.content_height;
             changed = true;
             self.needs_place = true;
+        }
+        if image_changed {
+            self.needs_layout = true;
         }
         let node = self.node_mut(id);
         let mut input_removed = false;
@@ -739,35 +768,26 @@ impl Tree {
         node.resolved = resolved;
         let taffy = node.taffy;
         let children = node.children.clone();
-        if node.text.is_some() && children.is_empty() {
-            let text = node.text.clone().unwrap_or_default();
-            let wrap = node.style.wrap;
-            let stale = match self.taffy.get_node_context(taffy) {
-                Some(ctx) => {
-                    ctx.text != text
-                        || ctx.px != resolved.px
-                        || ctx.font != resolved.font
-                        || ctx.wrap != wrap
-                }
-                None => true,
-            };
-            if stale {
-                self.taffy
-                    .set_node_context(
-                        taffy,
-                        Some(MeasureCtx {
-                            text,
-                            px: resolved.px,
-                            font: resolved.font,
-                            wrap,
-                        }),
-                    )
-                    .expect("taffy context");
-                let _ = self.taffy.mark_dirty(taffy);
-            }
-        } else if self.taffy.get_node_context(taffy).is_some() {
+        let want = if !children.is_empty() {
+            None
+        } else if let Some(image) = &node.image {
+            Some(MeasureCtx::Image {
+                src: image.src.clone(),
+                size: crate::image_cache::image_size(&image.src),
+            })
+        } else if let Some(text) = &node.text {
+            Some(MeasureCtx::Text {
+                text: text.clone(),
+                px: resolved.px,
+                font: resolved.font,
+                wrap: node.style.wrap,
+            })
+        } else {
+            None
+        };
+        if self.taffy.get_node_context(taffy) != want.as_ref() {
             self.taffy
-                .set_node_context(taffy, None)
+                .set_node_context(taffy, want)
                 .expect("taffy context");
             let _ = self.taffy.mark_dirty(taffy);
         }
@@ -861,6 +881,29 @@ impl Tree {
         self.paint_order.iter().rev().copied().find(|&id| {
             self.get(id)
                 .is_some_and(|node| node.wheel_events && node.visible.contains(x, y))
+        })
+    }
+
+    pub fn hit_hover(&self, x: f32, y: f32) -> Option<NodeId> {
+        self.paint_order.iter().rev().copied().find(|&id| {
+            self.get(id)
+                .is_some_and(|node| node.hover_events && node.visible.contains(x, y))
+        })
+    }
+
+    pub fn box_metrics(&self, id: NodeId) -> Option<BoxMetrics> {
+        let node = self.get(id)?;
+        let side = |s: Option<crate::style::BorderSide>| s.map_or(0.0, |s| s.width);
+        let border = node.style.border.unwrap_or_default();
+        Some(BoxMetrics {
+            padding: node.style.padding,
+            margin: node.style.margin,
+            border: Edges {
+                left: side(border.left),
+                right: side(border.right),
+                top: side(border.top),
+                bottom: side(border.bottom),
+            },
         })
     }
 

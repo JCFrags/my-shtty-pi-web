@@ -1,34 +1,67 @@
 import { useState } from "react";
-import { Box, Input, Text } from "pixel-react";
+import { Box, Image, Input, Text } from "pixel-react";
 import type { NodeHandle, Rgba } from "pixel-react";
 
 import { PERMISSION_MODES, store, THINKING } from "../session";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
-import { FONT_MONO, type Ctx } from "../theme";
+import type { Ctx } from "../theme";
 
 export function Composer({ ctx: { theme, rem }, inputRef }: { ctx: Ctx; inputRef: React.Ref<NodeHandle> }) {
   const session = store.active();
   return (
     <Box style={{ flexDirection: "column", flexShrink: 0 }}>
-      <Box style={{ height: Math.max(rem / 16, 1), width: "100%", background: theme.hairline }} />
+      <Box
+        style={{ height: Math.ceil(Math.max(rem / 16, 1) + 0.5), width: "100%", background: theme.separator }}
+      />
+      {store.composerAttachments.length > 0 && (
+        <Box
+          style={{
+            gap: rem * 0.5,
+            alignItems: "start",
+            padding: { left: rem * 0.75, right: rem * 0.75, top: rem * 0.75 },
+          }}
+        >
+          {store.composerAttachments.map((attachment) => (
+            <Image
+              key={attachment.id}
+              src={attachment.path}
+              style={{
+                height: rem * 4,
+                cornerRadius: rem * 0.4,
+                border: { width: Math.max(rem / 16, 1), color: theme.hairline },
+              }}
+            />
+          ))}
+        </Box>
+      )}
       <Box style={{ alignItems: "start", padding: rem * 0.75 }}>
         <Input
+          key={store.composerEpoch}
           ref={inputRef}
           style={{ flexGrow: 1, flexBasis: 0 }}
           caretColor={theme.accent}
           selectionColor={theme.selection}
           autoFocus
-          onSubmit={(text) => {
-            const trimmed = text.trim();
-            if (trimmed) store.active().send(trimmed);
+          onChange={(text, attachments) => {
+            store.composerText = text;
+            store.syncComposerAttachments(attachments);
+          }}
+          onAttach={(attachment) => store.addComposerAttachment(attachment)}
+          onSubmit={(text, attachments) => {
+            store.composerText = "";
+            store.syncComposerAttachments([]);
+            store.active().send(text, attachments);
           }}
         />
       </Box>
       <Box
+        style={{ height: Math.ceil(Math.max(rem / 16, 1) + 0.5), width: "100%", background: theme.separator }}
+      />
+      <Box
         style={{
-          alignItems: "center",
+          alignItems: "end",
           gap: rem * 0.5,
-          padding: { left: rem, right: rem },
+          padding: { left: rem, right: rem, top: rem * 0.5, bottom: rem * 0.5 },
         }}
       >
         <ModelPicker ctx={{ theme, rem }} />
@@ -86,7 +119,6 @@ function ModelPicker({ ctx }: { ctx: Ctx }) {
                 padding: itemPad,
                 color: theme.muted,
                 fontSize: rem * 0.85,
-                font: FONT_MONO,
                 wrap: false,
               }}
             >
@@ -102,7 +134,6 @@ function ModelPicker({ ctx }: { ctx: Ctx }) {
                 hoverBackground: theme.itemHover,
                 color: item.value === session.model ? theme.accent : theme.fg,
                 fontSize: rem * 0.85,
-                font: FONT_MONO,
                 wrap: false,
               }}
               onClick={() => {
@@ -125,7 +156,6 @@ function ModelPicker({ ctx }: { ctx: Ctx }) {
               padding: { left: rem * 0.6, right: rem * 0.6, top: rem * 0.15, bottom: rem * 0.15 },
               color: theme.muted,
               fontSize: rem * 0.7,
-              font: FONT_MONO,
               wrap: false,
             }}
           >
@@ -140,7 +170,6 @@ function ModelPicker({ ctx }: { ctx: Ctx }) {
                 hoverBackground: theme.itemHover,
                 color: i === session.thinking ? theme.accent : theme.fg,
                 fontSize: rem * 0.85,
-                font: FONT_MONO,
                 wrap: false,
               }}
               onClick={() => {
@@ -176,7 +205,6 @@ function PickerChip({
         hoverBackground: theme.itemHover,
         color,
         fontSize: rem * 0.85,
-        font: FONT_MONO,
         flexShrink: 0,
         wrap: false,
       }}
@@ -239,7 +267,6 @@ function Picker({
                 padding: itemPad,
                 color: theme.muted,
                 fontSize: rem * 0.85,
-                font: FONT_MONO,
                 wrap: false,
               }}
             >
@@ -255,7 +282,6 @@ function Picker({
                 hoverBackground: theme.itemHover,
                 color: item.value === selected ? theme.accent : theme.fg,
                 fontSize: rem * 0.85,
-                font: FONT_MONO,
                 wrap: false,
               }}
               onClick={() => {

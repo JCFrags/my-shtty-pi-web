@@ -553,6 +553,7 @@ fn spans_color_glyph_runs_within_one_text_node() {
             end: 1,
             color: [255, 0, 0, 255],
             background: None,
+            bold: false,
         }],
         ..Props::default()
     });
@@ -586,6 +587,7 @@ fn span_background_fills_behind_the_byte_range_only() {
             end: 1,
             color: [255, 255, 255, 255],
             background: Some([0, 0, 255, 255]),
+            bold: false,
         }],
         ..Props::default()
     });

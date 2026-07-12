@@ -1,5 +1,14 @@
-use pixel_core::{Engine, EngineEvent, Key, KeyEvent, NodeId, ProfileData};
+use pixel_core::{AttachmentRef, Engine, EngineEvent, Key, KeyEvent, NodeId, ProfileData};
 use serde_json::json;
+
+fn attachments_json(attachments: &[AttachmentRef]) -> serde_json::Value {
+    json!(
+        attachments
+            .iter()
+            .map(|a| json!({ "id": a.id, "path": a.path }))
+            .collect::<Vec<_>>()
+    )
+}
 
 use crate::ops::IdMap;
 
@@ -56,24 +65,28 @@ pub fn event_json(event: &EngineEvent, engine: &Engine, ids: &[IdMap]) -> Option
             node,
             key,
             text,
+            attachments,
         } => json!({
             "type": "change",
             "view": view,
             "node": ids.get(*view)?.ext(*node)?,
             "key": key,
             "text": text,
+            "attachments": attachments_json(attachments),
         }),
         EngineEvent::Submit {
             view,
             node,
             key,
             text,
+            attachments,
         } => json!({
             "type": "submit",
             "view": view,
             "node": ids.get(*view)?.ext(*node)?,
             "key": key,
             "text": text,
+            "attachments": attachments_json(attachments),
         }),
         EngineEvent::Scroll {
             view,
@@ -140,6 +153,36 @@ pub fn event_json(event: &EngineEvent, engine: &Engine, ids: &[IdMap]) -> Option
             "type": "paste",
             "view": view,
             "text": text,
+        }),
+        EngineEvent::Attachment {
+            view,
+            node,
+            key,
+            id,
+            path,
+            width,
+            height,
+        } => json!({
+            "type": "attachment",
+            "view": view,
+            "node": ids.get(*view)?.ext(*node)?,
+            "key": key,
+            "id": id,
+            "path": path,
+            "width": width,
+            "height": height,
+        }),
+        EngineEvent::HoverEnter { view, node, key } => json!({
+            "type": "hoverEnter",
+            "view": view,
+            "node": ids.get(*view)?.ext(*node)?,
+            "key": key,
+        }),
+        EngineEvent::HoverLeave { view, node, key } => json!({
+            "type": "hoverLeave",
+            "view": view,
+            "node": ids.get(*view)?.ext(*node)?,
+            "key": key,
         }),
         EngineEvent::Log(entry) => json!({
             "type": "log",

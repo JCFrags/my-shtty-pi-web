@@ -30,13 +30,16 @@ import {
 } from "./devtools/stores";
 import type { LogLevel } from "./devtools/store";
 
-export { Box, Text, Input } from "./components";
+export { Box, Text, Input, Image } from "./components";
 export type { NodeHandle } from "./components";
 export type {
   BoxProps,
   TextProps,
   TextSpan,
   InputProps,
+  InputAttachment,
+  AttachmentRef,
+  ImageProps,
   ClickEvent,
   ScrollEvent,
   WheelEvent,
@@ -70,6 +73,7 @@ export interface RootOptions {
 export interface PixelRoot {
   info: EngineInfo;
   render(element: ReactNode): void;
+  registerFont(path: string): Promise<number>;
   stop(): void;
   openDevtools(): void;
   closeDevtools(): void;
@@ -91,6 +95,10 @@ interface EngineEventJson {
   basePx?: number;
   message?: string;
   error?: string | null;
+  path?: string;
+  id?: number;
+  attachments?: Array<{ id: number; path: string }>;
+  font?: number;
   seq?: number;
   epochMs?: number;
   deltaX?: number;
@@ -152,6 +160,12 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
     };
   }
 
+  const fontIds = new Map<string, number>();
+  const fontRequests = new Map<
+    string,
+    Array<{ resolve: (font: number) => void; reject: (error: Error) => void }>
+  >();
+
   const dispatch = (event: EngineEventJson) => {
     const view = event.view ?? APP_VIEW;
     switch (event.type) {
@@ -167,17 +181,37 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
       }
       case "change": {
         const props = bridge.propsById[view]?.get(event.node!);
-        props?.onChange?.(event.text!);
+        props?.onChange?.(event.text!, event.attachments ?? []);
         break;
       }
       case "submit": {
         const props = bridge.propsById[view]?.get(event.node!);
-        props?.onSubmit?.(event.text!);
+        props?.onSubmit?.(event.text!, event.attachments ?? []);
+        break;
+      }
+      case "attachment": {
+        const props = bridge.propsById[view]?.get(event.node!);
+        props?.onAttach?.({
+          id: event.id!,
+          path: event.path!,
+          width: event.width!,
+          height: event.height!,
+        });
         break;
       }
       case "scroll": {
         const props = bridge.propsById[view]?.get(event.node!);
         props?.onScroll?.({ offset: event.offset!, max: event.max! });
+        break;
+      }
+      case "hoverEnter": {
+        const props = bridge.propsById[view]?.get(event.node!);
+        props?.onMouseEnter?.();
+        break;
+      }
+      case "hoverLeave": {
+        const props = bridge.propsById[view]?.get(event.node!);
+        props?.onMouseLeave?.();
         break;
       }
       case "wheel": {
@@ -260,6 +294,18 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
       case "error":
         engineLogs.push("error", "bridge", event.message ?? "unknown bridge error");
         break;
+      case "fontRegistered": {
+        const pending = fontRequests.get(event.path!) ?? [];
+        fontRequests.delete(event.path!);
+        if (event.font != null) {
+          fontIds.set(event.path!, event.font);
+          for (const p of pending) p.resolve(event.font);
+        } else {
+          const error = new Error(event.error ?? "font failed to load");
+          for (const p of pending) p.reject(error);
+        }
+        break;
+      }
       case "exit":
         if (options.onEngineExit) {
           options.onEngineExit(event.error ?? null);
@@ -314,6 +360,20 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
         ? createElement(ReactProfiler, { id: "pixel-app", onRender: onAppRender }, element)
         : element;
       reconciler.updateContainer(wrapped, root, null, null);
+    },
+    registerFont(path: string) {
+      const known = fontIds.get(path);
+      if (known != null) return Promise.resolve(known);
+      return new Promise<number>((resolve, reject) => {
+        const pending = fontRequests.get(path);
+        if (pending) {
+          pending.push({ resolve, reject });
+          return;
+        }
+        fontRequests.set(path, [{ resolve, reject }]);
+        bridge.push(APP_VIEW, { op: "registerFont", path });
+        bridge.flush();
+      });
     },
     stop() {
       reconciler.flushSync(() => {

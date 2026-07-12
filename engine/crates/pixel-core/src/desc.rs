@@ -1,5 +1,5 @@
 use crate::style::Style;
-use crate::tree::{InputProps, NodeId, Props, Tree};
+use crate::tree::{ImageProps, InputProps, NodeId, Props, Tree};
 
 #[derive(Default)]
 pub struct Desc {
@@ -8,6 +8,7 @@ pub struct Desc {
     pub key: Option<String>,
     pub clickable: bool,
     pub input: Option<InputProps>,
+    pub image: Option<ImageProps>,
     pub content_height: Option<f32>,
     pub scroll_events: bool,
     pub wheel_events: bool,
@@ -23,9 +24,11 @@ impl Desc {
             clickable: self.clickable,
             hidden: false,
             input: self.input.clone(),
+            image: self.image.clone(),
             content_height: self.content_height,
             scroll_events: self.scroll_events,
             wheel_events: self.wheel_events,
+            hover_events: false,
             outside_click_events: false,
             spans: Vec::new(),
         }

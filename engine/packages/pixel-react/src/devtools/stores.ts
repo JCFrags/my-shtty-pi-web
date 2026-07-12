@@ -4,6 +4,13 @@ export const consoleLogs = createLogStore();
 
 export const engineLogs = createLogStore();
 
+export interface BoxEdges {
+  l: number;
+  t: number;
+  r: number;
+  b: number;
+}
+
 export interface LayoutRect {
   id: number;
   x: number;
@@ -15,6 +22,9 @@ export interface LayoutRect {
   scroll?: number;
   scrollMax?: number;
   text?: string;
+  padding?: BoxEdges;
+  border?: BoxEdges;
+  margin?: BoxEdges;
 }
 
 export interface LayoutSnapshot {

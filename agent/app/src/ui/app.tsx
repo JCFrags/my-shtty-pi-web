@@ -36,9 +36,9 @@ export function App({ info }: { info: EngineInfo }) {
     if (follow.current) list.current?.scrollTo(1e9, true);
   });
   useEffect(() => {
-    if (session.ask || store.palette) input.current?.blur();
+    if (session.ask || store.palette || store.settings) input.current?.blur();
     else input.current?.focus();
-  }, [session.ask, store.palette]);
+  }, [session.ask, store.palette, store.settings]);
 
   return (
     <Box
@@ -48,6 +48,10 @@ export function App({ info }: { info: EngineInfo }) {
         background: theme.bg,
         color: theme.fg,
         fontSize: rem,
+        font: store.fontId,
+      }}
+      onClick={() => {
+        if (!session.ask) input.current?.focus();
       }}
     >
       {store.sidebar && <Sidebar ctx={ctx} />}

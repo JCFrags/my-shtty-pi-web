@@ -3,13 +3,18 @@ use std::time::Instant;
 
 use crate::canvas::{Canvas, measure_text};
 use crate::style::{Color, Overflow};
-use crate::text_input::{caret_width, offset_to_point};
+use crate::text_input::{Atom, caret_width, offset_to_point, pill_geometry};
 use crate::tree::{NodeId, PxRect, TextSpan, Tree};
 use crate::wrap::wrap_lines;
+
+const PILL_BG: Color = [38, 79, 155, 255];
+const PILL_BORDER: Color = [98, 145, 220, 200];
+const PILL_LABEL: Color = [219, 234, 254, 255];
 
 #[derive(Default)]
 struct PaintStats {
     rects: f64,
+    images: f64,
     wrap: f64,
     glyphs: f64,
     selection: f64,
@@ -24,6 +29,7 @@ impl PaintStats {
         let mut at = start_ms;
         let buckets = [
             ("paint.rects", self.rects, Some(self.rect_count)),
+            ("paint.images", self.images, None),
             ("paint.wrap", self.wrap, None),
             ("paint.glyphs", self.glyphs, Some(self.glyph_count)),
             ("paint.selection", self.selection, None),
@@ -156,6 +162,21 @@ fn paint_node(
         });
     }
 
+    if let Some(image) = &node.image {
+        timed(stats.as_mut().map(|s| &mut s.images), || {
+            crate::image_cache::with_image(&image.src, |pixmap| {
+                canvas.draw_image(
+                    rect.x,
+                    rect.y,
+                    rect.w,
+                    rect.h,
+                    node.style.corner_radius,
+                    pixmap,
+                );
+            });
+        });
+    }
+
     if let Some((bands, color)) = enclosing_block
         && (background.is_some() || node.style.border.is_some())
     {
@@ -262,11 +283,24 @@ fn paint_node(
                         continue;
                     }
                     let mut x = origin.0;
-                    for (range, segment_color) in split_by_spans(line.clone(), &node.spans, color) {
+                    for (range, segment_color, bold) in
+                        split_by_spans(line.clone(), &node.spans, color)
+                    {
                         let Some(segment) = text.get(range) else {
                             continue;
                         };
                         canvas.draw_text(font, segment, x as i32, baseline, px, segment_color);
+                        if bold {
+                            let offset = (px / 24.0).max(1.0) as i32;
+                            canvas.draw_text(
+                                font,
+                                segment,
+                                x as i32 + offset,
+                                baseline,
+                                px,
+                                segment_color,
+                            );
+                        }
                         x += measure_text(font, segment, px);
                     }
                 }
@@ -281,6 +315,16 @@ fn paint_node(
                         break;
                     }
                     stats.glyph_count += text[line.clone()].chars().count() as u64;
+                }
+            }
+            if let Some(state) = &node.input {
+                for atom in state.input.atoms() {
+                    let (x, y) = offset_to_point(text, atom.offset, font, px, wrap);
+                    let top = origin.1 + y;
+                    if top + line_h < visible.y || top > visible.y + visible.h {
+                        continue;
+                    }
+                    paint_atom_pill(canvas, font, origin.0 + x, top, px, atom);
                 }
             }
             if let Some(state) = &node.input
@@ -320,6 +364,44 @@ fn paint_node(
     }
 }
 
+fn paint_atom_pill(canvas: &mut Canvas, font: &fontdue::Font, x: f32, y: f32, px: f32, atom: &Atom) {
+    let g = pill_geometry(font, px);
+    let top = y + g.inset;
+    let radius = [(g.h * 0.22).max(2.0); 4];
+    canvas.fill_rounded_rect(x, top, g.w, g.h, radius, PILL_BG);
+    canvas.stroke_rounded_rect(x, top, g.w, g.h, radius, 1.0, PILL_BORDER);
+    let thumb = g.h - 2.0 * g.thumb_pad;
+    let drew_thumb = crate::image_cache::with_image(&atom.src, |pixmap| {
+        canvas.draw_image(
+            x + g.pad,
+            top + g.thumb_pad,
+            thumb,
+            thumb,
+            [thumb * 0.25; 4],
+            pixmap,
+        );
+    })
+    .is_some();
+    let label_x = if drew_thumb {
+        x + g.pad + thumb + g.gap
+    } else {
+        x + (g.w - g.label_w) / 2.0
+    };
+    if let Some(metrics) = font.horizontal_line_metrics(g.label_px) {
+        let baseline = top + (g.h + metrics.ascent + metrics.descent) / 2.0;
+        canvas.push_clip(x, top, g.w, g.h);
+        canvas.draw_text(
+            font,
+            &atom.label,
+            label_x.round() as i32,
+            baseline.round() as i32,
+            g.label_px,
+            PILL_LABEL,
+        );
+        canvas.pop_clip();
+    }
+}
+
 fn fill_bands(canvas: &mut Canvas, bands: &[PxRect], clip: PxRect, color: Color) {
     for band in bands {
         let band = band.intersect(clip);
@@ -333,7 +415,7 @@ fn split_by_spans(
     line: Range<usize>,
     spans: &[TextSpan],
     fallback: Color,
-) -> Vec<(Range<usize>, Color)> {
+) -> Vec<(Range<usize>, Color, bool)> {
     let mut out = Vec::new();
     let mut at = line.start;
     for span in spans {
@@ -346,13 +428,13 @@ fn split_by_spans(
             continue;
         }
         if start > at {
-            out.push((at..start, fallback));
+            out.push((at..start, fallback, false));
         }
-        out.push((start..end, span.color));
+        out.push((start..end, span.color, span.bold));
         at = end;
     }
     if at < line.end {
-        out.push((at..line.end, fallback));
+        out.push((at..line.end, fallback, false));
     }
     out
 }
@@ -470,13 +552,14 @@ mod tests {
             end,
             color: RED,
             background: None,
+            bold: false,
         }
     }
 
     #[test]
     fn no_spans_yields_the_whole_line_in_the_fallback_color() {
         let out = split_by_spans(0..10, &[], FALLBACK);
-        assert_eq!(out, vec![(0..10, FALLBACK)]);
+        assert_eq!(out, vec![(0..10, FALLBACK, false)]);
     }
 
     #[test]
@@ -485,11 +568,11 @@ mod tests {
         assert_eq!(
             out,
             vec![
-                (0..2, FALLBACK),
-                (2..4, RED),
-                (4..6, FALLBACK),
-                (6..8, RED),
-                (8..10, FALLBACK),
+                (0..2, FALLBACK, false),
+                (2..4, RED, false),
+                (4..6, FALLBACK, false),
+                (6..8, RED, false),
+                (8..10, FALLBACK, false),
             ]
         );
     }
@@ -497,13 +580,70 @@ mod tests {
     #[test]
     fn spans_clamp_to_the_line_and_ignore_outside_ranges() {
         let out = split_by_spans(5..10, &[span(0, 3), span(4, 7), span(9, 20)], FALLBACK);
-        assert_eq!(out, vec![(5..7, RED), (7..9, FALLBACK), (9..10, RED)]);
+        assert_eq!(
+            out,
+            vec![(5..7, RED, false), (7..9, FALLBACK, false), (9..10, RED, false)]
+        );
     }
 
     #[test]
     fn overlapping_spans_keep_earlier_coverage() {
         let out = split_by_spans(0..10, &[span(0, 5), span(3, 8)], FALLBACK);
-        assert_eq!(out, vec![(0..5, RED), (5..8, RED), (8..10, FALLBACK)]);
+        assert_eq!(
+            out,
+            vec![(0..5, RED, false), (5..8, RED, false), (8..10, FALLBACK, false)]
+        );
+    }
+
+    #[test]
+    fn bold_spans_carry_their_flag_through_the_split() {
+        let bold = TextSpan { bold: true, ..span(2, 4) };
+        let out = split_by_spans(0..6, &[bold], FALLBACK);
+        assert_eq!(
+            out,
+            vec![(0..2, FALLBACK, false), (2..4, RED, true), (4..6, FALLBACK, false)]
+        );
+    }
+
+    #[test]
+    fn image_nodes_measure_to_aspect_size_and_paint_pixels() {
+        let font = fontdue::Font::from_bytes(FONT_BYTES, fontdue::FontSettings::default()).unwrap();
+        let dir = std::env::temp_dir().join("pixel-paint-image-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("solid.png");
+        image::RgbaImage::from_pixel(4, 2, image::Rgba([0, 200, 0, 255]))
+            .save(&path)
+            .unwrap();
+
+        let mut tree = Tree::new((100.0, 100.0));
+        tree.reconcile(Desc {
+            style: Style {
+                align_items: Some(crate::style::Align::Start),
+                ..Style::default()
+            },
+            children: vec![Desc {
+                style: Style {
+                    width: Dimension::Px(40.0),
+                    ..Style::default()
+                },
+                image: Some(crate::tree::ImageProps {
+                    src: path.to_string_lossy().to_string(),
+                }),
+                ..Desc::default()
+            }],
+            ..Desc::default()
+        });
+        tree.flush_layout(std::slice::from_ref(&font), 16.0);
+        let node = tree.children(tree.root())[0];
+        let rect = tree.rect(node).unwrap();
+        assert_eq!((rect.w, rect.h), (40.0, 20.0), "height follows aspect");
+
+        let mut canvas = Canvas::new(100, 100);
+        paint(&tree, &mut canvas, std::slice::from_ref(&font), None);
+        let center = &canvas.pixels[((10 * 100 + 20) * 4) as usize..][..4];
+        assert_eq!(center, &[0, 200, 0, 255]);
+        let outside = &canvas.pixels[((50 * 100 + 50) * 4) as usize..][..4];
+        assert_eq!(outside, &[0, 0, 0, 0]);
     }
 
     #[test]

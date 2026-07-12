@@ -3,7 +3,7 @@ import { Box, diff, HIGHLIGHT_CAPTURES, highlight, Text } from "pixel-react";
 import type { Rgba, TextSpan } from "pixel-react";
 
 import type { ToolCall } from "../session";
-import { FONT_MONO, type Ctx } from "../theme";
+import type { Ctx } from "../theme";
 
 const MAX_DIFF_ROWS = 14;
 
@@ -142,13 +142,13 @@ export function DiffCard({ ctx, sources }: { ctx: Ctx; sources: DiffSources }) {
   const shown = expanded || rows.length <= MAX_DIFF_ROWS ? rows : rows.slice(0, MAX_DIFF_ROWS);
 
   return (
-    <Box style={{ flexDirection: "column", overflow: "hidden" }}>
+    <Box style={{ flexDirection: "column", flexGrow: 1, flexBasis: 0, overflow: "hidden" }}>
       {shown.map((row, i) => {
         if (row.kind === "gap") {
           return (
             <Text
               key={i}
-              style={{ color: theme.muted, fontSize: rem * 0.8, font: FONT_MONO }}
+              style={{ color: theme.muted, fontSize: rem * 0.8 }}
             >
               {`${" ".repeat(gutterWidth + 1)}… ${row.count} unchanged lines`}
             </Text>
@@ -190,7 +190,6 @@ export function DiffCard({ ctx, sources }: { ctx: Ctx; sources: DiffSources }) {
             <Text
               style={{
                 color: removed ? theme.red : added ? theme.green : theme.muted,
-                font: FONT_MONO,
                 fontSize: rem * 0.9,
                 flexShrink: 0,
                 wrap: false,
@@ -198,7 +197,7 @@ export function DiffCard({ ctx, sources }: { ctx: Ctx; sources: DiffSources }) {
             >
               {`${String(lineNo ?? "").padStart(gutterWidth)} ${sign} `}
             </Text>
-            <Text style={{ font: FONT_MONO, fontSize: rem * 0.9, wrap: false }} spans={spans}>
+            <Text style={{ fontSize: rem * 0.9, wrap: false }} spans={spans}>
               {row.text || " "}
             </Text>
           </Box>
@@ -209,7 +208,6 @@ export function DiffCard({ ctx, sources }: { ctx: Ctx; sources: DiffSources }) {
           style={{
             color: theme.muted,
             fontSize: rem * 0.8,
-            font: FONT_MONO,
             hoverColor: theme.fg,
           }}
           onClick={() => setExpanded(true)}

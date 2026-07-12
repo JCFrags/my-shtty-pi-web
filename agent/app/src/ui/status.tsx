@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Box, Text } from "pixel-react";
 
 import type { Ask, Session } from "../session";
-import { FONT_MONO, type Ctx } from "../theme";
+import type { Ctx } from "../theme";
 
 export function AskBox({ ctx: { theme, rem }, ask }: { ctx: Ctx; ask: Ask }) {
   return (
@@ -17,8 +17,8 @@ export function AskBox({ ctx: { theme, rem }, ask }: { ctx: Ctx; ask: Ask }) {
       }}
     >
       <Box style={{ gap: rem * 0.5, overflow: "hidden" }}>
-        <Text style={{ color: theme.accent, font: FONT_MONO, flexShrink: 0 }}>{ask.tool}</Text>
-        <Text style={{ color: theme.muted, font: FONT_MONO, wrap: false }}>{ask.detail}</Text>
+        <Text style={{ color: theme.accent, flexShrink: 0 }}>{ask.tool}</Text>
+        <Text style={{ color: theme.muted, wrap: false }}>{ask.detail}</Text>
       </Box>
       <Text style={{ color: theme.muted, fontSize: rem * 0.85 }}>enter allow · esc deny</Text>
     </Box>
@@ -47,7 +47,6 @@ export function WorkingStatus({ ctx, session }: { ctx: Ctx; session: Session }) 
         style={{
           color: theme.accent,
           fontSize: rem * 0.85,
-          font: FONT_MONO,
           wrap: false,
           flexShrink: 0,
         }}

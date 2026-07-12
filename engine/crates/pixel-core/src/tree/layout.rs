@@ -3,11 +3,19 @@ use crate::canvas::measure_text;
 use crate::style::{Align, Dimension, FlexDirection, InsetValue, Justify, Overflow, Position, Style};
 use crate::wrap::wrap_lines;
 
-pub(crate) struct MeasureCtx {
-    pub text: String,
-    pub px: f32,
-    pub font: usize,
-    pub wrap: bool,
+#[derive(PartialEq)]
+pub(crate) enum MeasureCtx {
+    Text {
+        text: String,
+        px: f32,
+        font: usize,
+        wrap: bool,
+    },
+    Image {
+        src: String,
+        // Natural pixel size; None while the source fails to decode.
+        size: Option<(u32, u32)>,
+    },
 }
 
 pub(super) fn measure(
@@ -16,14 +24,68 @@ pub(super) fn measure(
     context: Option<&MeasureCtx>,
     fonts: &[fontdue::Font],
 ) -> taffy::Size<f32> {
-    let Some(ctx) = context else {
+    match context {
+        None => taffy::Size::ZERO,
+        Some(MeasureCtx::Image { size, .. }) => measure_image(known, available, *size),
+        Some(MeasureCtx::Text {
+            text,
+            px,
+            font,
+            wrap,
+        }) => measure_wrapped_text(known, available, text, *px, *font, *wrap, fonts),
+    }
+}
+
+fn measure_image(
+    known: taffy::Size<Option<f32>>,
+    available: taffy::Size<taffy::AvailableSpace>,
+    size: Option<(u32, u32)>,
+) -> taffy::Size<f32> {
+    let Some((nw, nh)) = size else {
         return taffy::Size::ZERO;
     };
-    let font = &fonts[ctx.font.min(fonts.len() - 1)];
+    let (nw, nh) = (nw as f32, nh as f32);
+    match (known.width, known.height) {
+        (Some(w), Some(h)) => taffy::Size {
+            width: w,
+            height: h,
+        },
+        (Some(w), None) => taffy::Size {
+            width: w,
+            height: w * nh / nw,
+        },
+        (None, Some(h)) => taffy::Size {
+            width: h * nw / nh,
+            height: h,
+        },
+        (None, None) => {
+            let width = match available.width {
+                taffy::AvailableSpace::Definite(aw) => nw.min(aw),
+                _ => nw,
+            };
+            taffy::Size {
+                width,
+                height: width * nh / nw,
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn measure_wrapped_text(
+    known: taffy::Size<Option<f32>>,
+    available: taffy::Size<taffy::AvailableSpace>,
+    text: &str,
+    px: f32,
+    font: usize,
+    wrap: bool,
+    fonts: &[fontdue::Font],
+) -> taffy::Size<f32> {
+    let font = &fonts[font.min(fonts.len() - 1)];
     let line = font
-        .horizontal_line_metrics(ctx.px)
-        .map_or(ctx.px, |m| m.new_line_size);
-    let max_width = if ctx.wrap {
+        .horizontal_line_metrics(px)
+        .map_or(px, |m| m.new_line_size);
+    let max_width = if wrap {
         match (known.width, available.width) {
             (Some(w), _) => Some(w),
             (None, taffy::AvailableSpace::Definite(w)) => Some(w),
@@ -33,12 +95,12 @@ pub(super) fn measure(
     } else {
         None
     };
-    let lines = wrap_lines(&ctx.text, font, ctx.px, max_width);
+    let lines = wrap_lines(text, font, px, max_width);
     let widest = lines
         .iter()
         .map(|r| {
-            let visible = ctx.text[r.clone()].trim_end_matches(' ');
-            measure_text(font, visible, ctx.px)
+            let visible = text[r.clone()].trim_end_matches(' ');
+            measure_text(font, visible, px)
         })
         .fold(0.0f32, f32::max);
     taffy::Size {

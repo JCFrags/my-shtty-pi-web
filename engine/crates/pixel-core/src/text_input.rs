@@ -76,6 +76,79 @@ pub(crate) fn caret_width(px: f32) -> f32 {
     (px / 8.0).max(2.0)
 }
 
+/// An inline attachment anchored to one U+FFFC (object replacement) character
+/// in the buffer. Being a single character makes it atomic for cursor motion
+/// and deletion with no extra bookkeeping.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Atom {
+    pub offset: usize,
+    pub id: u64,
+    pub label: String,
+    pub src: String,
+}
+
+pub const ATOM_CHAR: char = '\u{FFFC}';
+
+pub(crate) const ATOM_LABEL: &str = "Image";
+
+/// Pill box sized to fit thumbnail + label + padding. All measurement paths
+/// share this so wrapping, caret math, and painting agree; labels are assumed
+/// to be ATOM_LABEL-sized and clipped otherwise.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PillGeometry {
+    pub w: f32,
+    pub h: f32,
+    pub inset: f32,
+    pub pad: f32,
+    pub gap: f32,
+    pub thumb_pad: f32,
+    pub label_px: f32,
+    pub label_w: f32,
+    pub advance: f32,
+}
+
+std::thread_local! {
+    static PILL_CACHE: std::cell::RefCell<std::collections::HashMap<(usize, u32), PillGeometry>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+pub(crate) fn pill_geometry(font: &fontdue::Font, px: f32) -> PillGeometry {
+    PILL_CACHE.with_borrow_mut(|cache| {
+        *cache
+            .entry((font.file_hash(), px.to_bits()))
+            .or_insert_with(|| {
+                let line_h = line_height(font, px);
+                let inset = (line_h * 0.08).max(1.0);
+                let h = line_h - 2.0 * inset;
+                let pad = (h * 0.28).max(3.0);
+                let gap = (h * 0.18).max(2.0);
+                let thumb_pad = (h * 0.14).max(2.0);
+                let thumb = h - 2.0 * thumb_pad;
+                let label_px = px * 0.75;
+                let label_w: f32 = ATOM_LABEL
+                    .chars()
+                    .map(|c| font.metrics(c, label_px).advance_width)
+                    .sum();
+                let w = (pad + thumb + gap + label_w + pad).ceil();
+                PillGeometry {
+                    w,
+                    h,
+                    inset,
+                    pad,
+                    gap,
+                    thumb_pad,
+                    label_px,
+                    label_w,
+                    advance: w + (px * 0.25).max(2.0),
+                }
+            })
+    })
+}
+
+pub fn atom_advance(font: &fontdue::Font, px: f32) -> f32 {
+    pill_geometry(font, px).advance
+}
+
 #[derive(Debug, Clone)]
 struct Edit {
     at: usize,
@@ -84,6 +157,11 @@ struct Edit {
     cursor_before: usize,
     anchor_before: Option<usize>,
     kind: EditKind,
+    // Atoms that lived in the removed/inserted text, offsets relative to
+    // `at`. Undo re-adds removed_atoms and stashes into inserted_atoms;
+    // redo does the reverse.
+    removed_atoms: Vec<Atom>,
+    inserted_atoms: Vec<Atom>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +184,8 @@ pub struct TextInput {
     sealed: bool,
     clicks: ClickTracker,
     selecting: bool,
+    atoms: Vec<Atom>,
+    next_atom: u64,
 }
 
 impl TextInput {
@@ -139,6 +219,12 @@ impl TextInput {
     }
 
     pub fn insert(&mut self, s: &str) {
+        // Typed and pasted text must never carry the atom placeholder, or
+        // the placeholder-to-attachment mapping would drift.
+        if s.contains(ATOM_CHAR) {
+            let sanitized: String = s.chars().filter(|&c| c != ATOM_CHAR).collect();
+            return self.insert(&sanitized);
+        }
         // The caret is a zero-width selection: replacing it is insertion.
         let caret = self.cursor..self.cursor;
         let range = self.selection().unwrap_or(caret);
@@ -148,6 +234,68 @@ impl TextInput {
             EditKind::Other
         };
         self.splice(range, s, kind);
+    }
+
+    pub fn atoms(&self) -> &[Atom] {
+        &self.atoms
+    }
+
+    pub fn insert_atom(&mut self, label: &str, src: &str) -> u64 {
+        let caret = self.cursor..self.cursor;
+        let range = self.selection().unwrap_or(caret);
+        let at = range.start;
+        let mut buf = [0u8; 4];
+        self.splice(range, ATOM_CHAR.encode_utf8(&mut buf), EditKind::Other);
+        let id = self.next_atom;
+        self.next_atom += 1;
+        let index = self
+            .atoms
+            .iter()
+            .position(|a| a.offset >= at)
+            .unwrap_or(self.atoms.len());
+        self.atoms.insert(
+            index,
+            Atom {
+                offset: at,
+                id,
+                label: label.to_string(),
+                src: src.to_string(),
+            },
+        );
+        id
+    }
+
+    /// Splits atoms around a text replacement at `at`: atoms inside the old
+    /// range move into `stash` (offsets made relative to `at`), atoms after
+    /// it shift, and `restore` re-enters at absolute offsets.
+    fn remap_atoms(
+        &mut self,
+        at: usize,
+        old_len: usize,
+        new_len: usize,
+        stash: &mut Vec<Atom>,
+        restore: &mut Vec<Atom>,
+    ) {
+        let mut kept = Vec::with_capacity(self.atoms.len() + restore.len());
+        for mut atom in self.atoms.drain(..) {
+            if atom.offset < at {
+                kept.push(atom);
+            } else if atom.offset < at + old_len {
+                atom.offset -= at;
+                stash.push(atom);
+            } else {
+                atom.offset = atom.offset - old_len + new_len;
+                kept.push(atom);
+            }
+        }
+        for atom in restore.drain(..) {
+            kept.push(Atom {
+                offset: at + atom.offset,
+                ..atom
+            });
+        }
+        kept.sort_by_key(|a| a.offset);
+        self.atoms = kept;
     }
 
     pub fn delete_selection(&mut self) -> bool {
@@ -181,6 +329,14 @@ impl TextInput {
     }
 
     fn splice(&mut self, range: Range<usize>, replacement: &str, kind: EditKind) {
+        let mut removed_atoms = Vec::new();
+        self.remap_atoms(
+            range.start,
+            range.len(),
+            replacement.len(),
+            &mut removed_atoms,
+            &mut Vec::new(),
+        );
         let edit = Edit {
             at: range.start,
             removed: self.text[range.clone()].to_string(),
@@ -188,6 +344,8 @@ impl TextInput {
             cursor_before: self.cursor,
             anchor_before: self.anchor,
             kind,
+            removed_atoms,
+            inserted_atoms: Vec::new(),
         };
         self.text.replace_range(range.clone(), replacement);
         self.cursor = range.start + replacement.len();
@@ -212,6 +370,10 @@ impl TextInput {
                     if edit.at + edit.removed.len() == prev.at =>
                 {
                     prev.at = edit.at;
+                    for atom in &mut prev.removed_atoms {
+                        atom.offset += edit.removed.len();
+                    }
+                    prev.removed_atoms.splice(0..0, edit.removed_atoms);
                     prev.removed = format!("{}{}", edit.removed, prev.removed);
                     return;
                 }
@@ -233,11 +395,21 @@ impl TextInput {
     }
 
     pub fn undo(&mut self) -> bool {
-        let Some(edit) = self.undo.pop_back() else {
+        let Some(mut edit) = self.undo.pop_back() else {
             return false;
         };
         self.text
             .replace_range(edit.at..edit.at + edit.inserted.len(), &edit.removed);
+        let (mut stash, mut restore) =
+            (std::mem::take(&mut edit.inserted_atoms), std::mem::take(&mut edit.removed_atoms));
+        self.remap_atoms(
+            edit.at,
+            edit.inserted.len(),
+            edit.removed.len(),
+            &mut stash,
+            &mut restore,
+        );
+        edit.inserted_atoms = stash;
         self.cursor = edit.cursor_before;
         self.anchor = edit.anchor_before;
         self.goal_x = None;
@@ -247,11 +419,21 @@ impl TextInput {
     }
 
     pub fn redo(&mut self) -> bool {
-        let Some(edit) = self.redo.pop() else {
+        let Some(mut edit) = self.redo.pop() else {
             return false;
         };
         self.text
             .replace_range(edit.at..edit.at + edit.removed.len(), &edit.inserted);
+        let (mut stash, mut restore) =
+            (std::mem::take(&mut edit.removed_atoms), std::mem::take(&mut edit.inserted_atoms));
+        self.remap_atoms(
+            edit.at,
+            edit.removed.len(),
+            edit.inserted.len(),
+            &mut stash,
+            &mut restore,
+        );
+        edit.removed_atoms = stash;
         self.cursor = edit.at + edit.inserted.len();
         self.anchor = None;
         self.goal_x = None;
@@ -967,6 +1149,113 @@ mod tests {
                 i.undo();
                 i.text() == "base"
             }
+        );
+    }
+
+    #[test]
+    fn atoms_insert_as_one_char_and_track_position() {
+        let mut i = input("hello ", 6);
+        let id = i.insert_atom("Image", "/tmp/a.png");
+        assert_eq!(i.text(), format!("hello {ATOM_CHAR}"));
+        assert_eq!(i.atoms().len(), 1);
+        assert_eq!(i.atoms()[0].offset, 6);
+        assert_eq!(i.atoms()[0].id, id);
+        assert_eq!(i.cursor(), 6 + ATOM_CHAR.len_utf8());
+
+        i.set_cursor(0, false);
+        i.insert("x");
+        assert_eq!(i.atoms()[0].offset, 7, "typing before shifts the atom");
+        i.move_doc_end(false);
+        i.insert("y");
+        assert_eq!(i.atoms()[0].offset, 7, "typing after leaves it");
+    }
+
+    #[test]
+    fn cursor_and_backspace_treat_the_atom_as_a_unit() {
+        let mut i = input("ab", 2);
+        i.insert_atom("Image", "/tmp/a.png");
+        i.insert("cd");
+        i.move_left(Granularity::Char, false);
+        i.move_left(Granularity::Char, false);
+        i.move_left(Granularity::Char, false);
+        assert_eq!(i.cursor(), 2, "one left arrow crosses the whole atom");
+        i.move_right(Granularity::Char, false);
+        assert_eq!(i.cursor(), 2 + ATOM_CHAR.len_utf8());
+        i.delete_backward(Granularity::Char);
+        assert_eq!(i.text(), "abcd");
+        assert!(i.atoms().is_empty(), "deleting the char drops the atom");
+    }
+
+    #[test]
+    fn undo_restores_deleted_atoms_and_redo_removes_them_again() {
+        let mut i = input("", 0);
+        let id = i.insert_atom("Image", "/tmp/a.png");
+        i.delete_backward(Granularity::Char);
+        assert!(i.atoms().is_empty());
+        assert!(i.undo());
+        assert_eq!(i.atoms().len(), 1, "undo restores the attachment");
+        assert_eq!(i.atoms()[0].id, id);
+        assert_eq!(i.atoms()[0].src, "/tmp/a.png");
+        assert!(i.redo());
+        assert!(i.atoms().is_empty());
+        assert!(i.undo());
+        assert!(i.undo(), "undoing the insert removes the atom");
+        assert_eq!(i.text(), "");
+        assert!(i.atoms().is_empty());
+        assert!(i.redo());
+        assert_eq!(i.atoms().len(), 1, "redoing the insert brings it back");
+    }
+
+    #[test]
+    fn replacing_a_selection_across_an_atom_drops_it() {
+        let mut i = input("one ", 4);
+        i.insert_atom("Image", "/tmp/a.png");
+        i.insert(" two");
+        i.select_all();
+        i.insert("clean");
+        assert_eq!(i.text(), "clean");
+        assert!(i.atoms().is_empty());
+        i.undo();
+        assert_eq!(i.atoms().len(), 1, "undo of the replace restores it");
+        assert_eq!(i.atoms()[0].offset, 4);
+    }
+
+    #[test]
+    fn backspace_runs_across_atoms_restore_in_one_undo() {
+        let mut i = input("", 0);
+        i.insert("ab");
+        i.insert_atom("Image", "/tmp/a.png");
+        i.set_cursor(i.text().len(), false);
+        i.delete_backward(Granularity::Char);
+        i.delete_backward(Granularity::Char);
+        i.delete_backward(Granularity::Char);
+        assert_eq!(i.text(), "");
+        assert!(i.atoms().is_empty());
+        i.undo();
+        assert_eq!(i.text(), format!("ab{ATOM_CHAR}"));
+        assert_eq!(i.atoms().len(), 1);
+        assert_eq!(i.atoms()[0].offset, 2);
+    }
+
+    #[test]
+    fn pasted_text_cannot_forge_atom_placeholders() {
+        let mut i = input("", 0);
+        i.insert(&format!("a{ATOM_CHAR}b"));
+        assert_eq!(i.text(), "ab");
+        assert!(i.atoms().is_empty());
+    }
+
+    #[test]
+    fn atom_advance_flows_through_measurement() {
+        let f = font();
+        let text = format!("a{ATOM_CHAR}b");
+        let with = measure_text(&f, &text, 16.0);
+        let without = measure_text(&f, "ab", 16.0);
+        assert!((with - without - atom_advance(&f, 16.0)).abs() < 0.01);
+        let (x, _) = offset_to_point(&text, 1 + ATOM_CHAR.len_utf8(), &f, 16.0, None);
+        assert!(
+            (x - measure_text(&f, "a", 16.0) - atom_advance(&f, 16.0)).abs() < 0.01,
+            "caret after the atom sits past the pill"
         );
     }
 

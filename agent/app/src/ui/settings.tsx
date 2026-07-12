@@ -1,10 +1,22 @@
+import { useEffect, useRef } from "react";
 import { Box, Text } from "pixel-react";
+import type { NodeHandle } from "pixel-react";
 
+import { applyFont, fontRows } from "../fonts";
 import { store } from "../session";
 import type { Ctx } from "../theme";
 
 export function Settings({ ctx }: { ctx: Ctx }) {
   const { theme, rem } = ctx;
+  const rows = fontRows(store.settingsQuery);
+  const list = useRef<NodeHandle | null>(null);
+  const rowHeight = rem * 1.75;
+  const listHeight = rem * 16;
+
+  useEffect(() => {
+    list.current?.scrollTo(Math.max(0, rowHeight * store.settingsAt - listHeight / 2));
+  }, [store.settingsAt, store.settingsQuery]);
+
   return (
     <Box
       style={{
@@ -20,7 +32,6 @@ export function Settings({ ctx }: { ctx: Ctx }) {
         style={{
           flexDirection: "column",
           width: rem * 28,
-          maxHeight: "80%",
           background: theme.bgAlt,
           border: { width: Math.max(rem / 16, 1), color: theme.hairline },
           cornerRadius: rem * 0.5,
@@ -30,20 +41,56 @@ export function Settings({ ctx }: { ctx: Ctx }) {
       >
         <Box
           style={{
+            alignItems: "center",
+            gap: rem * 0.1,
             padding: { left: rem * 0.8, right: rem * 0.8, top: rem * 0.6, bottom: rem * 0.6 },
             border: { bottom: [Math.max(rem / 16, 1), theme.hairline] },
           }}
         >
-          <Text style={{ fontSize: rem * 1.1 }}>settings</Text>
+          {store.settingsQuery ? <Text style={{ wrap: false }}>{store.settingsQuery}</Text> : null}
+          <Box style={{ width: rem * 0.1, height: rem * 1.1, background: theme.accent }} />
+          {!store.settingsQuery && (
+            <Text style={{ color: theme.muted, wrap: false }}>search fonts</Text>
+          )}
         </Box>
         <Box
+          ref={list}
           style={{
             flexDirection: "column",
-            padding: rem * 0.8,
+            height: listHeight,
+            padding: rem * 0.4,
+            gap: rem * 0.15,
             overflow: "scroll",
           }}
         >
-          <Text style={{ color: theme.muted, fontSize: rem * 0.85 }}>general</Text>
+          {rows.length === 0 && (
+            <Text style={{ color: theme.muted, fontSize: rem * 0.9, padding: rem * 0.5 }}>
+              no fonts match
+            </Text>
+          )}
+          {rows.map((row, i) => (
+            <Box
+              key={row.path ?? "default"}
+              style={{
+                flexShrink: 0,
+                padding: { left: rem * 0.5, right: rem * 0.5, top: rem * 0.25, bottom: rem * 0.25 },
+                cornerRadius: rem * 0.25,
+                background: i === store.settingsAt ? theme.itemActive : undefined,
+                hoverBackground: i === store.settingsAt ? undefined : theme.itemHover,
+              }}
+              onClick={() => void applyFont(row.path)}
+            >
+              <Text
+                style={{
+                  fontSize: rem * 0.9,
+                  color: row.path === store.fontPath ? theme.accent : theme.fg,
+                  wrap: false,
+                }}
+              >
+                {row.label}
+              </Text>
+            </Box>
+          ))}
         </Box>
       </Box>
     </Box>

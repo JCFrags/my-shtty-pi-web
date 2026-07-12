@@ -2,8 +2,15 @@ import React, { useEffect, useMemo } from "react";
 
 import { Box, Text } from "../components";
 import { APP_VIEW, getBridge, Instance } from "../host-config";
-import { findInstance, selectNode, setPicking, toggleExpanded } from "./controller";
-import { inspectorStore, LayoutRect, layoutStore } from "./stores";
+import {
+  findInstance,
+  HighlightArea,
+  selectNode,
+  setHighlight,
+  setPicking,
+  toggleExpanded,
+} from "./controller";
+import { BoxEdges, inspectorStore, LayoutRect, layoutStore } from "./stores";
 import { useStore } from "./store";
 import { MONO, theme } from "./theme";
 import { Button, Divider, Empty, Toolbar } from "./ui";
@@ -62,6 +69,8 @@ function ElementRow(props: { row: Row; selected: boolean; expanded: boolean; rem
         if (row.expandable) toggleExpanded(instance.id);
         selectNode(instance.id);
       }}
+      onMouseEnter={() => setHighlight(instance.id)}
+      onMouseLeave={() => setHighlight(null)}
     >
       <Text
         style={{
@@ -89,6 +98,97 @@ function ElementRow(props: { row: Row; selected: boolean; expanded: boolean; rem
           </Text>
         </Box>
       )}
+    </Box>
+  );
+}
+
+const ZERO_EDGES: BoxEdges = { l: 0, t: 0, r: 0, b: 0 };
+
+const BOX_COLORS: Record<HighlightArea, { bg: string; hover: string }> = {
+  margin: { bg: "#f6b26bb8", hover: "#f6b26b" },
+  border: { bg: "#ffe599b8", hover: "#ffe599" },
+  padding: { bg: "#93c47db8", hover: "#93c47d" },
+  content: { bg: "#6fa8dcb8", hover: "#6fa8dc" },
+};
+
+const BOX_TEXT = "#1c1e21";
+
+function formatPx(value: number): string {
+  return `${Math.round(value * 10) / 10}`;
+}
+
+function BoxValue(props: { value: string; rem: number }) {
+  return (
+    <Text style={{ color: BOX_TEXT, fontSize: props.rem * 0.62, font: MONO, wrap: false }}>
+      {props.value}
+    </Text>
+  );
+}
+
+function BoxRing(props: {
+  id: number;
+  area: HighlightArea;
+  edges: BoxEdges;
+  rem: number;
+  children: React.ReactNode;
+}) {
+  const { id, area, edges, rem, children } = props;
+  const colors = BOX_COLORS[area];
+  const edge = (v: number) => (v === 0 ? "-" : formatPx(v));
+  return (
+    <Box
+      style={{
+        flexDirection: "column",
+        alignItems: "center",
+        background: colors.bg,
+        hoverBackground: colors.hover,
+        padding: { left: rem * 0.45, right: rem * 0.45, top: rem * 0.1, bottom: rem * 0.1 },
+      }}
+      onMouseEnter={() => setHighlight(id, area)}
+      onMouseLeave={() => setHighlight(null)}
+    >
+      <Box style={{ position: "absolute", inset: { left: rem * 0.25, top: rem * 0.12 } }}>
+        <Text style={{ color: BOX_TEXT, fontSize: rem * 0.56, font: MONO, wrap: false }}>
+          {area}
+        </Text>
+      </Box>
+      <BoxValue rem={rem} value={edge(edges.t)} />
+      <Box style={{ flexDirection: "row", alignItems: "center", gap: rem * 0.45 }}>
+        <BoxValue rem={rem} value={edge(edges.l)} />
+        {children}
+        <BoxValue rem={rem} value={edge(edges.r)} />
+      </Box>
+      <BoxValue rem={rem} value={edge(edges.b)} />
+    </Box>
+  );
+}
+
+function BoxModel(props: { id: number; rect: LayoutRect; rem: number }) {
+  const { id, rect, rem } = props;
+  const padding = rect.padding ?? ZERO_EDGES;
+  const border = rect.border ?? ZERO_EDGES;
+  const margin = rect.margin ?? ZERO_EDGES;
+  const contentW = Math.max(0, rect.w - border.l - border.r - padding.l - padding.r);
+  const contentH = Math.max(0, rect.h - border.t - border.b - padding.t - padding.b);
+  return (
+    <Box style={{ flexDirection: "column", alignItems: "center", padding: rem * 0.4 }}>
+      <BoxRing id={id} area="margin" edges={margin} rem={rem}>
+        <BoxRing id={id} area="border" edges={border} rem={rem}>
+          <BoxRing id={id} area="padding" edges={padding} rem={rem}>
+            <Box
+              style={{
+                background: BOX_COLORS.content.bg,
+                hoverBackground: BOX_COLORS.content.hover,
+                padding: { left: rem * 0.7, right: rem * 0.7, top: rem * 0.18, bottom: rem * 0.18 },
+              }}
+              onMouseEnter={() => setHighlight(id, "content")}
+              onMouseLeave={() => setHighlight(null)}
+            >
+              <BoxValue rem={rem} value={`${formatPx(contentW)} × ${formatPx(contentH)}`} />
+            </Box>
+          </BoxRing>
+        </BoxRing>
+      </BoxRing>
     </Box>
   );
 }
@@ -151,6 +251,7 @@ function Details(props: { instance: Instance | null; rect: LayoutRect | null; re
         </Text>
       </Box>
       <Divider />
+      {rect && <BoxModel id={instance.id} rect={rect} rem={rem} />}
       {rect ? (
         <Box style={{ flexDirection: "column", padding: { top: rem * 0.25, bottom: rem * 0.25 } }}>
           <DetailRow rem={rem} name="position" value={`${rect.x.toFixed(0)}, ${rect.y.toFixed(0)}`} />
@@ -198,6 +299,8 @@ export function ElementsPanel(props: { rem: number }) {
     () => flattenTree(inspector.expanded),
     [inspector.expanded, inspector.treeVersion]
   );
+
+  useEffect(() => () => setHighlight(null), []);
 
   useEffect(() => {
     if (inspector.expanded.size > 0 || rows.length === 0) return;

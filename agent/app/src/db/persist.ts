@@ -46,6 +46,11 @@ function write(): void {
         .values({ key: "activeSessionId", value: snap.activeSessionId })
         .onConflictDoUpdate({ target: appState.key, set: { value: snap.activeSessionId } })
         .run();
+      const fontPath = store.fontPath ?? "";
+      tx.insert(appState)
+        .values({ key: "fontPath", value: fontPath })
+        .onConflictDoUpdate({ target: appState.key, set: { value: fontPath } })
+        .run();
     });
   } catch (error) {
     console.error("failed to persist sessions", error);
@@ -73,6 +78,8 @@ export function flushPersist(): void {
 export function hydrateStore(): void {
   const rows = db.select().from(sessions).orderBy(sessions.createdAt).all();
   const active = db.select().from(appState).where(eq(appState.key, "activeSessionId")).get();
+  const fontPath = db.select().from(appState).where(eq(appState.key, "fontPath")).get();
+  store.fontPath = fontPath?.value || null;
   for (const row of rows) {
     store.sessions.push(
       new Session(store.notify, {

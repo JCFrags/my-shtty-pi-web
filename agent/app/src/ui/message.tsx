@@ -1,9 +1,10 @@
 import { useMemo } from "react";
-import { Box, HIGHLIGHT_CAPTURES, highlight, Text } from "pixel-react";
+import { Box, HIGHLIGHT_CAPTURES, highlight, Image, Text } from "pixel-react";
 
+import { parseInline } from "../markdown";
 import type { Item } from "../session";
 import { ToolRow } from "./tool";
-import { FONT_MONO, type Ctx } from "../theme";
+import type { Ctx } from "../theme";
 
 export function Message({ ctx, item }: { ctx: Ctx; item: Item }) {
   const { theme, rem } = ctx;
@@ -11,13 +12,26 @@ export function Message({ ctx, item }: { ctx: Ctx; item: Item }) {
     return (
       <Box
         style={{
+          flexDirection: "column",
+          gap: rem * 0.5,
           margin: { left: -rem, right: -rem },
           padding: { left: rem, right: rem, top: rem * 0.5, bottom: rem * 0.5 },
-          background: theme.bgAlt,
-          border: { top: [1, theme.hairline], bottom: [1, theme.hairline] },
+          background: theme.userBg,
+          border: { top: [1, theme.separator], bottom: [1, theme.separator] },
         }}
       >
-        <Text>&gt; {item.text}</Text>
+        {item.images && (
+          <Box style={{ gap: rem * 0.5, alignItems: "start" }}>
+            {item.images.map((src, i) => (
+              <Image
+                key={i}
+                src={src}
+                style={{ height: rem * 5, cornerRadius: rem * 0.4 }}
+              />
+            ))}
+          </Box>
+        )}
+        {(item.text || !item.images) && <Text>&gt; {item.text}</Text>}
       </Box>
     );
   }
@@ -26,7 +40,7 @@ export function Message({ ctx, item }: { ctx: Ctx; item: Item }) {
   }
   const parts = segments(item.text);
   if (parts.length === 1 && !parts[0].code) {
-    return <Text>{parts[0].text}</Text>;
+    return <Prose ctx={ctx} text={parts[0].text} />;
   }
   return (
     <Box style={{ flexDirection: "column", gap: rem * 0.5 }}>
@@ -34,11 +48,28 @@ export function Message({ ctx, item }: { ctx: Ctx; item: Item }) {
         part.code ? (
           <CodeBlock key={i} ctx={ctx} language={part.language} code={part.text} />
         ) : (
-          <Text key={i}>{part.text}</Text>
+          <Prose key={i} ctx={ctx} text={part.text} />
         )
       )}
     </Box>
   );
+}
+
+function Prose({ ctx, text }: { ctx: Ctx; text: string }) {
+  const { theme } = ctx;
+  const { text: clean, spans } = useMemo(() => parseInline(text), [text]);
+  const textSpans = useMemo(
+    () =>
+      spans.map((s) => ({
+        start: s.start,
+        end: s.end,
+        color: s.code ? theme.accent : theme.fg,
+        bold: s.bold,
+      })),
+    [spans, theme]
+  );
+  if (textSpans.length === 0) return <Text>{clean}</Text>;
+  return <Text spans={textSpans}>{clean}</Text>;
 }
 
 interface Segment {
@@ -91,7 +122,7 @@ function CodeBlock({ ctx, language, code }: { ctx: Ctx; language: string; code: 
   return (
     <Box
       style={{ overflow: "hidden" }}>
-      <Text style={{ font: FONT_MONO, fontSize: rem * 0.9, wrap: false }} spans={spans}>
+      <Text style={{ fontSize: rem * 0.9, wrap: false }} spans={spans}>
         {code}
       </Text>
     </Box>

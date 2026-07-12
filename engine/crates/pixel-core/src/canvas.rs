@@ -93,6 +93,12 @@ impl Canvas {
         let mut pen_x = x as f32;
         GLYPH_CACHE.with_borrow_mut(|cache| {
             for ch in text.chars() {
+                if ch == crate::text_input::ATOM_CHAR {
+                    // Atom placeholders reserve pill width; the pill itself is
+                    // painted by the input's paint pass, not as a glyph.
+                    pen_x += crate::text_input::atom_advance(font, px);
+                    continue;
+                }
                 let (metrics, coverage) = cache
                     .entry((font.file_hash(), ch, px.to_bits()))
                     .or_insert_with(|| font.rasterize(ch, px));
@@ -187,6 +193,70 @@ impl Canvas {
         ) {
             self.paint_path(&path, color, Some(width));
         }
+    }
+
+    pub fn draw_image(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        radius: [f32; 4],
+        image: tiny_skia::PixmapRef<'_>,
+    ) {
+        if w <= 0.0 || h <= 0.0 || image.width() == 0 || image.height() == 0 {
+            return;
+        }
+        let (cx1, cy1, cx2, cy2) = self.clip_bounds();
+        if cx1 == cx2 || cy1 == cy2 {
+            return;
+        }
+        let Some(path) = rounded_rect_path(x, y, w, h, radius) else {
+            return;
+        };
+        let bounds = path.bounds();
+        let inside = self.clip_stack.is_empty()
+            || (bounds.left() >= cx1 as f32
+                && bounds.top() >= cy1 as f32
+                && bounds.right() <= cx2 as f32
+                && bounds.bottom() <= cy2 as f32);
+        let mask = if inside {
+            None
+        } else {
+            self.ensure_clip_mask();
+            self.clip_mask.as_ref().map(|(mask, _)| mask)
+        };
+        let Some(mut pixmap) =
+            tiny_skia::PixmapMut::from_bytes(&mut self.pixels, self.width, self.height)
+        else {
+            return;
+        };
+        let to_rect = tiny_skia::Transform::from_row(
+            w / image.width() as f32,
+            0.0,
+            0.0,
+            h / image.height() as f32,
+            x,
+            y,
+        );
+        let mut paint = tiny_skia::Paint {
+            shader: tiny_skia::Pattern::new(
+                image,
+                tiny_skia::SpreadMode::Pad,
+                tiny_skia::FilterQuality::Bilinear,
+                1.0,
+                to_rect,
+            ),
+            ..tiny_skia::Paint::default()
+        };
+        paint.anti_alias = true;
+        pixmap.fill_path(
+            &path,
+            &paint,
+            tiny_skia::FillRule::Winding,
+            tiny_skia::Transform::identity(),
+            mask,
+        );
     }
 
     fn paint_path(&mut self, path: &tiny_skia::Path, color: [u8; 4], stroke_width: Option<f32>) {
@@ -313,6 +383,9 @@ pub fn measure_text(font: &fontdue::Font, text: &str, px: f32) -> f32 {
     ADVANCE_CACHE.with_borrow_mut(|cache| {
         text.chars()
             .map(|ch| {
+                if ch == crate::text_input::ATOM_CHAR {
+                    return crate::text_input::atom_advance(font, px);
+                }
                 *cache
                     .entry((font.file_hash(), ch, px.to_bits()))
                     .or_insert_with(|| font.metrics(ch, px).advance_width)

@@ -188,6 +188,9 @@ fn main() -> std::io::Result<()> {
                     }
                 }
                 EngineEvent::Paste { .. }
+                | EngineEvent::Attachment { .. }
+                | EngineEvent::HoverEnter { .. }
+                | EngineEvent::HoverLeave { .. }
                 | EngineEvent::ClickOutside { .. }
                 | EngineEvent::Scroll { .. }
                 | EngineEvent::Submit { .. }

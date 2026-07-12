@@ -4,6 +4,7 @@ import { App } from "./ui/app";
 import { closeDb } from "./db/client";
 import { flushPersist, hydrateStore } from "./db/persist";
 import { DbProvider } from "./db/react";
+import { applyFont, fontRows, initFonts } from "./fonts";
 import { PALETTE_ACTIONS } from "./palette";
 import { store } from "./session";
 
@@ -11,7 +12,11 @@ hydrateStore();
 
 const root = createRoot({
   onKey(event) {
-    if (event.mods.ctrl && event.key === "q") {
+    if (event.mods.ctrl && event.key === "c") {
+      if (store.composerText) {
+        store.clearComposer();
+        return;
+      }
       root.stop();
       flushPersist();
       closeDb();
@@ -25,10 +30,27 @@ const root = createRoot({
       store.togglePalette();
       return;
     }
+    if (store.settings) {
+      const rows = fontRows(store.settingsQuery);
+      const ctrl = (letter: string) => event.mods.ctrl && event.key === letter;
+      if (event.key === "escape") store.closeSettings();
+      else if (event.key === "up" || ctrl("p")) store.moveSettings(-1, rows.length);
+      else if (event.key === "down" || ctrl("n")) store.moveSettings(1, rows.length);
+      else if (event.key === "enter") {
+        const row = rows[store.settingsAt];
+        if (row) void applyFont(row.path);
+      } else if (event.key === "backspace") {
+        store.setSettingsQuery(store.settingsQuery.slice(0, -1));
+      } else if (event.key.length === 1 && !event.mods.ctrl && !event.mods.super) {
+        store.setSettingsQuery(store.settingsQuery + event.key);
+      }
+      return;
+    }
     if (store.palette) {
+      const ctrl = (letter: string) => event.mods.ctrl && event.key === letter;
       if (event.key === "escape") store.closePalette();
-      if (event.key === "up") store.movePalette(-1, PALETTE_ACTIONS.length);
-      if (event.key === "down") store.movePalette(1, PALETTE_ACTIONS.length);
+      if (event.key === "up" || ctrl("p")) store.movePalette(-1, PALETTE_ACTIONS.length);
+      if (event.key === "down" || ctrl("n")) store.movePalette(1, PALETTE_ACTIONS.length);
       if (event.key === "enter") {
         PALETTE_ACTIONS[store.paletteAt].run();
         store.closePalette();
@@ -53,6 +75,8 @@ const root = createRoot({
     render();
   },
 });
+
+initFonts((path) => root.registerFont(path));
 
 function render() {
   root.render(

@@ -9,6 +9,7 @@ interface Block {
   input?: Record<string, unknown>;
   tool_use_id?: string;
   is_error?: boolean;
+  path?: string;
 }
 
 export function detail(input: Record<string, unknown>): string {
@@ -99,13 +100,24 @@ function apply(state: FoldState, message: any) {
         break;
       }
       if (!Array.isArray(content)) break;
+      const texts: string[] = [];
+      const images: string[] = [];
       for (const block of content as Block[]) {
+        if (block.type === "text" && block.text) texts.push(block.text);
+        if (block.type === "image_path" && block.path) images.push(block.path);
         if (block.type !== "tool_result" || !block.tool_use_id) continue;
         const call = state.tools.get(block.tool_use_id);
         if (call) {
           call.status = block.is_error ? "error" : "ok";
           call.result = message.tool_use_result;
         }
+      }
+      if (texts.length || images.length) {
+        state.items.push({
+          kind: "user",
+          text: texts.join("\n"),
+          images: images.length ? images : undefined,
+        });
       }
       break;
     }

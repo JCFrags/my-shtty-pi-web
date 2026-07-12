@@ -3,7 +3,7 @@ import { Box, Text } from "pixel-react";
 import type { ToolCall } from "../session";
 import { DiffCard, diffSources } from "./diff";
 import { Dot } from "./dot";
-import { FONT_MONO, type Ctx } from "../theme";
+import type { Ctx } from "../theme";
 
 export function ToolRow({ ctx, call }: { ctx: Ctx; call: ToolCall }) {
   const { theme, rem } = ctx;
@@ -20,10 +20,8 @@ export function ToolRow({ ctx, call }: { ctx: Ctx; call: ToolCall }) {
     <Box style={{ flexDirection: "column", gap: rem * 0.25 }}>
       <Box style={{ gap: rem * 0.5, alignItems: "center", overflow: "hidden" }}>
         <Dot ctx={ctx} color={color} />
-        <Text style={{ font: FONT_MONO, fontSize: rem * 0.9, flexShrink: 0, wrap: false }}>
-          {call.name}
-        </Text>
-        <Text style={{ color: theme.muted, font: FONT_MONO, fontSize: rem * 0.9, wrap: false }}>
+        <Text style={{ fontSize: rem * 0.9, flexShrink: 0, wrap: false }}>{call.name}</Text>
+        <Text style={{ color: theme.muted, fontSize: rem * 0.9, wrap: false }}>
           {call.detail}
         </Text>
       </Box>

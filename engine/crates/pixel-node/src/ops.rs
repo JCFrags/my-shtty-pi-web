@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use pixel_core::{
-    Align, Border, BorderSide, Color, Dimension, Edges, Engine, FlexDirection, InputProps, Inset,
-    InsetValue, Justify, NodeId, Overflow, Position, Props, ScrollbarStyle, SelectionMode, Style,
-    TextSpan,
+    Align, Border, BorderSide, Color, Dimension, Edges, Engine, FlexDirection, HighlightArea,
+    ImageProps, InputProps, Inset, InsetValue, Justify, NodeId, Overflow, Position, Props,
+    ScrollbarStyle, SelectionMode, Style, TextSpan,
 };
 use serde::Deserialize;
 
@@ -99,6 +99,8 @@ enum Op {
     Highlight {
         view: usize,
         id: Option<u32>,
+        #[serde(default)]
+        area: Option<String>,
     },
     QueryLayout {},
     ProfileStart {},
@@ -106,6 +108,26 @@ enum Op {
     SetCpuThrottle {
         rate: f32,
     },
+    RegisterFont {
+        path: String,
+    },
+}
+
+fn register_font(engine: &mut Engine, path: &str) -> String {
+    let loaded = std::fs::read(path).map_err(|e| e.to_string()).and_then(|bytes| {
+        pixel_core::fontdue::Font::from_bytes(bytes, pixel_core::fontdue::FontSettings::default())
+            .map_err(str::to_string)
+    });
+    match loaded {
+        Ok(font) => {
+            let index = engine.add_font(font);
+            serde_json::json!({ "type": "fontRegistered", "path": path, "font": index })
+        }
+        Err(error) => {
+            serde_json::json!({ "type": "fontRegistered", "path": path, "error": error })
+        }
+    }
+    .to_string()
 }
 
 fn default_pane_slot() -> usize {
@@ -132,9 +154,11 @@ struct PropsDto {
     clickable: bool,
     hidden: bool,
     input: Option<InputDto>,
+    image: Option<ImageDto>,
     content_height: Option<f32>,
     scroll_events: bool,
     wheel_events: bool,
+    hover_events: bool,
     outside_click_events: bool,
     spans: Vec<SpanDto>,
 }
@@ -147,6 +171,14 @@ struct SpanDto {
     color: Color,
     #[serde(default)]
     background: Option<Color>,
+    #[serde(default)]
+    bold: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImageDto {
+    src: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -449,9 +481,11 @@ impl PropsDto {
                     submit: i.submit,
                 }
             }),
+            image: self.image.map(|i| ImageProps { src: i.src }),
             content_height: self.content_height,
             scroll_events: self.scroll_events,
             wheel_events: self.wheel_events,
+            hover_events: self.hover_events,
             outside_click_events: self.outside_click_events,
             spans: self
                 .spans
@@ -461,6 +495,7 @@ impl PropsDto {
                     end: s.end,
                     color: s.color,
                     background: s.background,
+                    bold: s.bold,
                 })
                 .collect(),
         }
@@ -518,6 +553,10 @@ fn apply_op(
         ids.push(IdMap::new(root));
         let reply = serde_json::json!({ "type": "viewCreated", "view": new_view });
         replies.push(reply.to_string());
+        return;
+    }
+    if let Op::RegisterFont { path } = op {
+        replies.push(register_font(engine, &path));
         return;
     }
     let base_px = engine.base_px();
@@ -580,11 +619,19 @@ fn apply_op(
         Op::Highlight {
             view: target_view,
             id,
+            area,
         } => {
+            let area = match area.as_deref() {
+                Some("content") => HighlightArea::Content,
+                Some("padding") => HighlightArea::Padding,
+                Some("border") => HighlightArea::Border,
+                Some("margin") => HighlightArea::Margin,
+                _ => HighlightArea::All,
+            };
             let target = id.and_then(|id| {
                 ids.get(target_view)
                     .and_then(|m| m.node(id))
-                    .map(|node| (target_view, node))
+                    .map(|node| (target_view, node, area))
             });
             engine.set_highlight(target);
         }
@@ -595,6 +642,7 @@ fn apply_op(
         Op::ProfileStart {} => engine.profile_start(),
         Op::ProfileStop {} => engine.profile_stop(),
         Op::SetCpuThrottle { rate } => engine.set_cpu_throttle(rate),
+        Op::RegisterFont { .. } => unreachable!("handled before the per-view bindings"),
     }
 }
 
@@ -632,6 +680,18 @@ fn layout_json(engine: &Engine, ids: &IdMap, view: usize) -> String {
             }
             if let Some(text) = tree.text_of(id) {
                 node["text"] = json!(text.chars().take(120).collect::<String>());
+            }
+            if let Some(metrics) = tree.box_metrics(id) {
+                let edges = |e: Edges| json!({ "l": e.left, "t": e.top, "r": e.right, "b": e.bottom });
+                if metrics.padding != Edges::default() {
+                    node["padding"] = edges(metrics.padding);
+                }
+                if metrics.border != Edges::default() {
+                    node["border"] = edges(metrics.border);
+                }
+                if metrics.margin != Edges::default() {
+                    node["margin"] = edges(metrics.margin);
+                }
             }
             nodes.push(node);
         }

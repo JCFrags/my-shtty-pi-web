@@ -105,14 +105,16 @@ export function selectNode(id: number, reveal = false) {
   });
 }
 
+export type HighlightArea = "content" | "padding" | "border" | "margin";
+
 let highlightTimer: ReturnType<typeof setTimeout> | null = null;
 
-export function setHighlight(id: number | null) {
+export function setHighlight(id: number | null, area?: HighlightArea) {
   if (highlightTimer) {
     clearTimeout(highlightTimer);
     highlightTimer = null;
   }
-  engineOp({ op: "highlight", view: APP_VIEW, id });
+  engineOp({ op: "highlight", view: APP_VIEW, id, area });
 }
 
 

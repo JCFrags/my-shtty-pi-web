@@ -1,6 +1,5 @@
 import type { EngineInfo, Rgba } from "pixel-react";
 
-export const FONT_MONO = 1;
 
 export interface Ctx {
   theme: Theme;
@@ -10,6 +9,7 @@ export interface Ctx {
 export interface Theme {
   bg: Rgba;
   bgAlt: Rgba;
+  userBg: Rgba;
   fg: Rgba;
   muted: Rgba;
   accent: Rgba;
@@ -18,6 +18,7 @@ export interface Theme {
   chipBg: Rgba;
   menuBg: Rgba;
   hairline: Rgba;
+  separator: Rgba;
   selection: Rgba;
   sidebarBg: Rgba;
   itemHover: Rgba;
@@ -56,6 +57,7 @@ export function makeTheme(colors: EngineInfo["colors"]): Theme {
   return {
     bg,
     bgAlt: mix(bg, fg, 0.05),
+    userBg: mix(bg, fg, 0.1),
     fg,
     muted,
     accent,
@@ -64,6 +66,7 @@ export function makeTheme(colors: EngineInfo["colors"]): Theme {
     chipBg: mix(bg, fg, 0.09),
     menuBg: mix(bg, fg, 0.08),
     hairline: mix(bg, fg, 0.15),
+    separator: mix(bg, fg, 0.24),
     selection: mix(bg, accent, 0.35),
     sidebarBg: mix(bg, fg, 0.05),
     itemHover: mix(bg, fg, 0.11),

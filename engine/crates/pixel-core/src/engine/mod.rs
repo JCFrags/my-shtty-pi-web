@@ -13,19 +13,31 @@ use crate::paint::paint;
 use crate::profiler::{ProfileData, Profiler};
 use crate::scroll::ScrollProfile;
 use crate::scroll::profiles::Smooth;
-use crate::style::Color;
+use crate::style::{Color, Edges};
 use crate::terminal::{
     Event, KeyEvent, Mouse, MouseButton, MouseKind, Terminal, TerminalColors, Waker,
 };
 use crate::text_input::{Granularity, InputAction, InputReply};
 use crate::throttle::CpuThrottle;
-use crate::tree::{HitTarget, NodeId, Tree};
+use crate::tree::{HitTarget, NodeId, PxRect, Tree};
 
 const FALLBACK_CELL: (u32, u32) = (16, 32);
 const FRAME_POLL: Duration = Duration::from_millis(6);
 
-const HIGHLIGHT_FILL: Color = [64, 140, 255, 60];
-const HIGHLIGHT_BORDER: Color = [82, 148, 255, 230];
+const CONTENT_FILL: Color = [111, 168, 220, 150];
+const PADDING_FILL: Color = [147, 196, 125, 140];
+const BORDER_FILL: Color = [255, 229, 153, 150];
+const MARGIN_FILL: Color = [246, 178, 107, 150];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HighlightArea {
+    #[default]
+    All,
+    Content,
+    Padding,
+    Border,
+    Margin,
+}
 
 fn key_label(key: &KeyEvent) -> String {
     let mut label = String::from("key ");
@@ -100,6 +112,12 @@ pub struct EngineConfig {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct AttachmentRef {
+    pub id: u64,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum EngineEvent {
     Click {
         view: usize,
@@ -125,12 +143,14 @@ pub enum EngineEvent {
         node: NodeId,
         key: Option<String>,
         text: String,
+        attachments: Vec<AttachmentRef>,
     },
     Submit {
         view: usize,
         node: NodeId,
         key: Option<String>,
         text: String,
+        attachments: Vec<AttachmentRef>,
     },
     Scroll {
         view: usize,
@@ -160,6 +180,15 @@ pub enum EngineEvent {
         view: usize,
         text: String,
     },
+    Attachment {
+        view: usize,
+        node: NodeId,
+        key: Option<String>,
+        id: u64,
+        path: String,
+        width: u32,
+        height: u32,
+    },
     Wheel {
         view: usize,
         node: NodeId,
@@ -169,6 +198,16 @@ pub enum EngineEvent {
         delta_x: f32,
         delta_y: f32,
         precise: bool,
+    },
+    HoverEnter {
+        view: usize,
+        node: NodeId,
+        key: Option<String>,
+    },
+    HoverLeave {
+        view: usize,
+        node: NodeId,
+        key: Option<String>,
     },
     Log(logging::LogEntry),
     Profile(ProfileData),
@@ -209,7 +248,8 @@ pub struct Engine {
     inspect_mode: bool,
     inspect_view: usize,
     inspect_hover: Option<NodeId>,
-    highlight: Option<(usize, NodeId)>,
+    highlight: Option<(usize, NodeId, HighlightArea)>,
+    hover_target: Option<(usize, NodeId)>,
     emit_logs: bool,
     log_cursor: u64,
     drag: Option<(usize, DragTarget)>,
@@ -271,6 +311,7 @@ impl Engine {
             inspect_view: 0,
             inspect_hover: None,
             highlight: None,
+            hover_target: None,
             emit_logs: false,
             log_cursor: 0,
             drag: None,
@@ -336,6 +377,11 @@ impl Engine {
         &self.fonts
     }
 
+    pub fn add_font(&mut self, font: fontdue::Font) -> usize {
+        self.fonts.push(font);
+        self.fonts.len() - 1
+    }
+
     pub fn cursor(&self) -> Option<(f32, f32)> {
         self.cursor
     }
@@ -397,7 +443,7 @@ impl Engine {
         self.inspect_mode
     }
 
-    pub fn set_highlight(&mut self, target: Option<(usize, NodeId)>) {
+    pub fn set_highlight(&mut self, target: Option<(usize, NodeId, HighlightArea)>) {
         if self.highlight != target {
             self.highlight = target;
             self.comp.dirty = true;
@@ -687,7 +733,9 @@ impl Engine {
                     );
                 }
                 if let Some((view, focus)) = self.focused() {
-                    if let Some(input) = self.comp.views[view].tree.input_mut(focus) {
+                    if let Some(image) = crate::clipboard_image::image_path_from_paste(&text) {
+                        self.push_attachment(view, focus, image, out)?;
+                    } else if let Some(input) = self.comp.views[view].tree.input_mut(focus) {
                         input.insert(&text);
                         self.finish_reply(view, focus, InputReply::Edited, out)?;
                     }
@@ -972,6 +1020,27 @@ impl Engine {
                     }
                     self.hover = hover;
                 }
+                let hover_target = self.comp.views[view]
+                    .tree
+                    .hit_hover(local.0, local.1)
+                    .map(|id| (view, id));
+                if hover_target != self.hover_target {
+                    if let Some((v, node)) = self.hover_target {
+                        out.push(EngineEvent::HoverLeave {
+                            view: v,
+                            node,
+                            key: self.comp.views[v].tree.key_of(node).map(str::to_string),
+                        });
+                    }
+                    if let Some((v, node)) = hover_target {
+                        out.push(EngineEvent::HoverEnter {
+                            view: v,
+                            node,
+                            key: self.comp.views[v].tree.key_of(node).map(str::to_string),
+                        });
+                    }
+                    self.hover_target = hover_target;
+                }
                 if let Some((view, target)) = self.drag {
                     let local = self.comp.to_local(view, point);
                     match target {
@@ -1237,9 +1306,54 @@ impl Engine {
                 self.reveal = true;
                 self.push_change(view, id, out);
             }
-            InputReply::RequestPaste => self.term.request_clipboard()?,
+            InputReply::RequestPaste => {
+                match crate::clipboard_image::read_clipboard_image() {
+                    Some(image) => self.push_attachment(view, id, image, out)?,
+                    None => self.term.request_clipboard()?,
+                }
+            }
         }
         Ok(())
+    }
+
+    fn push_attachment(
+        &mut self,
+        view: usize,
+        id: NodeId,
+        image: crate::clipboard_image::PastedImage,
+        out: &mut Vec<EngineEvent>,
+    ) -> io::Result<()> {
+        logging::info(
+            "engine",
+            format!("attachment {}x{} {}", image.width, image.height, image.path),
+        );
+        let Some(input) = self.comp.views[view].tree.input_mut(id) else {
+            return Ok(());
+        };
+        let atom_id = input.insert_atom("Image", &image.path);
+        out.push(EngineEvent::Attachment {
+            view,
+            node: id,
+            key: self.comp.views[view].tree.key_of(id).map(str::to_string),
+            id: atom_id,
+            path: image.path,
+            width: image.width,
+            height: image.height,
+        });
+        self.finish_reply(view, id, InputReply::Edited, out)
+    }
+
+    fn input_attachments(&self, view: usize, id: NodeId) -> Vec<AttachmentRef> {
+        self.comp.views[view].tree.input(id).map_or(Vec::new(), |input| {
+            input
+                .atoms()
+                .iter()
+                .map(|a| AttachmentRef {
+                    id: a.id,
+                    path: a.src.clone(),
+                })
+                .collect()
+        })
     }
 
     fn submit_input(
@@ -1258,6 +1372,7 @@ impl Engine {
             node: id,
             key: self.comp.views[view].tree.key_of(id).map(str::to_string),
             text,
+            attachments: self.input_attachments(view, id),
         });
         self.comp.views[view]
             .tree
@@ -1269,11 +1384,13 @@ impl Engine {
         let Some(text) = self.comp.views[view].tree.input_text(id) else {
             return;
         };
+        let text = text.to_string();
         out.push(EngineEvent::Change {
             view,
             node: id,
             key: self.comp.views[view].tree.key_of(id).map(str::to_string),
-            text: text.to_string(),
+            text,
+            attachments: self.input_attachments(view, id),
         });
     }
 
@@ -1560,61 +1677,81 @@ impl Engine {
     fn compose(&mut self) {
         crate::profiler::span("compose", || {
             self.comp.compose();
-            if let Some((view, id)) = self.highlight {
-                self.draw_node_overlay(view, id, false);
+            if let Some((view, id, area)) = self.highlight {
+                self.draw_node_overlay(view, id, area, false);
             }
             if self.inspect_mode
                 && let Some(id) = self.inspect_hover
             {
-                self.draw_node_overlay(self.inspect_view, id, true);
+                self.draw_node_overlay(self.inspect_view, id, HighlightArea::All, true);
             }
         });
         self.comp.dirty = false;
     }
 
-    fn draw_node_overlay(&mut self, view: usize, id: NodeId, with_label: bool) {
+    fn draw_node_overlay(&mut self, view: usize, id: NodeId, area: HighlightArea, with_label: bool) {
         if !self.comp.is_active(view) {
             return;
         }
         let Some(v) = self.comp.views.get(view) else {
             return;
         };
-        let Some(rect) = v.tree.visible_rect(id) else {
+        let Some(visible) = v.tree.visible_rect(id) else {
             return;
         };
-        if rect.w <= 0.0 || rect.h <= 0.0 {
+        if visible.w <= 0.0 || visible.h <= 0.0 {
             return;
         }
-        let x = rect.x + v.origin_x as f32;
+        let Some(abs) = v.tree.rect(id) else {
+            return;
+        };
+        let metrics = v.tree.box_metrics(id).unwrap_or_default();
         let key = v.tree.key_of(id).map(str::to_string);
-        self.comp.frame
-            .fill_rounded_rect(x, rect.y, rect.w, rect.h, [0.0; 4], HIGHLIGHT_FILL);
-        self.comp.frame.stroke_rounded_rect(
-            x,
-            rect.y,
-            rect.w,
-            rect.h,
-            [0.0; 4],
-            1.0,
-            HIGHLIGHT_BORDER,
-        );
+        let clip = PxRect {
+            x: v.origin_x as f32,
+            y: 0.0,
+            w: v.size.0 as f32,
+            h: v.size.1 as f32,
+        };
+        let border_box = PxRect {
+            x: abs.x + v.origin_x as f32,
+            y: abs.y,
+            w: abs.w,
+            h: abs.h,
+        };
+        let padding_box = inset(border_box, metrics.border);
+        let content_box = inset(padding_box, metrics.padding);
+        let margin_box = outset(border_box, metrics.margin);
+        let frame = &mut self.comp.frame;
+        match area {
+            HighlightArea::All => {
+                fill_clipped(frame, content_box, clip, CONTENT_FILL);
+                fill_ring(frame, padding_box, content_box, clip, PADDING_FILL);
+                fill_ring(frame, border_box, padding_box, clip, BORDER_FILL);
+                fill_ring(frame, margin_box, border_box, clip, MARGIN_FILL);
+            }
+            HighlightArea::Content => fill_clipped(frame, content_box, clip, CONTENT_FILL),
+            HighlightArea::Padding => fill_ring(frame, padding_box, content_box, clip, PADDING_FILL),
+            HighlightArea::Border => fill_ring(frame, border_box, padding_box, clip, BORDER_FILL),
+            HighlightArea::Margin => fill_ring(frame, margin_box, border_box, clip, MARGIN_FILL),
+        }
         if !with_label {
             return;
         }
         let px = self.base_px * 0.85;
         let label = match key {
-            Some(key) => format!("{key}  {:.0} × {:.0}", rect.w, rect.h),
-            None => format!("{:.0} × {:.0}", rect.w, rect.h),
+            Some(key) => format!("{key}  {:.0} × {:.0}", abs.w, abs.h),
+            None => format!("{:.0} × {:.0}", abs.w, abs.h),
         };
         let font = &self.fonts[0];
         let text_w = measure_text(font, &label, px);
         let line_h = crate::text_input::line_height(font, px);
         let pad = px * 0.4;
         let (w, h) = (text_w + pad * 2.0, line_h + pad);
-        let lx = (x).min(self.comp.window.0 as f32 - w).max(0.0);
-        let mut ly = rect.y + rect.h + 4.0;
+        let lx = border_box.x.min(self.comp.window.0 as f32 - w).max(0.0);
+        let mut ly = border_box.y + border_box.h + 4.0;
         if ly + h > self.comp.window.1 as f32 {
-            ly = (rect.y - h - 4.0).max(0.0);
+            ly = (border_box.y - h - 4.0).max(0.0);
         }
         self.comp.frame
             .fill_rounded_rect(lx, ly, w, h, [4.0; 4], [24, 26, 32, 245]);
@@ -1630,6 +1767,63 @@ impl Engine {
                 [186, 210, 255, 255],
             );
         }
+    }
+}
+
+fn inset(r: PxRect, e: Edges) -> PxRect {
+    PxRect {
+        x: r.x + e.left,
+        y: r.y + e.top,
+        w: (r.w - e.left - e.right).max(0.0),
+        h: (r.h - e.top - e.bottom).max(0.0),
+    }
+}
+
+fn outset(r: PxRect, e: Edges) -> PxRect {
+    PxRect {
+        x: r.x - e.left,
+        y: r.y - e.top,
+        w: r.w + e.left + e.right,
+        h: r.h + e.top + e.bottom,
+    }
+}
+
+fn fill_clipped(frame: &mut Canvas, rect: PxRect, clip: PxRect, color: Color) {
+    let r = rect.intersect(clip);
+    if r.w > 0.0 && r.h > 0.0 {
+        frame.fill_rounded_rect(r.x, r.y, r.w, r.h, [0.0; 4], color);
+    }
+}
+
+fn fill_ring(frame: &mut Canvas, outer: PxRect, inner: PxRect, clip: PxRect, color: Color) {
+    let strips = [
+        PxRect {
+            x: outer.x,
+            y: outer.y,
+            w: outer.w,
+            h: inner.y - outer.y,
+        },
+        PxRect {
+            x: outer.x,
+            y: inner.y + inner.h,
+            w: outer.w,
+            h: (outer.y + outer.h) - (inner.y + inner.h),
+        },
+        PxRect {
+            x: outer.x,
+            y: inner.y,
+            w: inner.x - outer.x,
+            h: inner.h,
+        },
+        PxRect {
+            x: inner.x + inner.w,
+            y: inner.y,
+            w: (outer.x + outer.w) - (inner.x + inner.w),
+            h: inner.h,
+        },
+    ];
+    for strip in strips {
+        fill_clipped(frame, strip, clip, color);
     }
 }
 

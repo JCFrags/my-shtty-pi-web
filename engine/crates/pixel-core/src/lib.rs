@@ -1,7 +1,9 @@
 mod canvas;
+pub mod clipboard_image;
 mod desc;
 mod engine;
 pub mod ghostty;
+mod image_cache;
 mod kitty;
 pub mod logging;
 mod menu;
@@ -20,7 +22,10 @@ mod wrap;
 
 pub use canvas::{Canvas, measure_text};
 pub use desc::Desc;
-pub use engine::{Engine, EngineConfig, EngineEvent, FrameStats, px_for_cell_height};
+pub use engine::{
+    AttachmentRef, Engine, EngineConfig, EngineEvent, FrameStats, HighlightArea,
+    px_for_cell_height,
+};
 pub use kitty::kitty_transmit;
 pub use logging::{LogEntry, LogLevel};
 pub use menu::{CONTEXT_MENU_KEY, MenuEntry, MenuItem, MenuStyle, context_menu};
@@ -40,11 +45,14 @@ pub use terminal::{
     WindowSize,
 };
 pub use text_input::{
-    Granularity, InputAction, InputGeometry, InputReply, TextInput, line_height, offset_to_point,
-    point_to_offset,
+    ATOM_CHAR, Atom, Granularity, InputAction, InputGeometry, InputReply, TextInput, atom_advance,
+    line_height, offset_to_point, point_to_offset,
 };
 pub use throttle::CpuThrottle;
-pub use tree::{HitTarget, InputProps, NodeId, Props, PxRect, ScrollArea, TextSpan, Tree};
+pub use tree::{
+    BoxMetrics, HitTarget, ImageProps, InputProps, NodeId, Props, PxRect, ScrollArea, TextSpan,
+    Tree,
+};
 pub use wrap::{line_of_offset, wrap_lines};
 
 pub use fontdue;

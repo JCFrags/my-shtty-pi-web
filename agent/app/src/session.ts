@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { extname } from "node:path";
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import type { AttachmentRef, InputAttachment } from "pixel-react";
 
 import { appendLog, createSession } from "./db/client";
 import { schedulePersist } from "./db/persist";
@@ -24,7 +27,7 @@ export interface ToolCall {
 }
 
 export type Item =
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; images?: string[] }
   | { kind: "assistant"; text: string }
   | { kind: "tool"; call: ToolCall };
 
@@ -48,6 +51,14 @@ export const THINKING = [
 ];
 
 let availableModels: ModelInfo[] = [];
+
+const IMAGE_MEDIA: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+};
 
 interface Block {
   type: string;
@@ -154,17 +165,53 @@ export class Session {
     return text.length > 22 ? `${text.slice(0, 21)}…` : text;
   }
 
-  send(text: string) {
+  send(text: string, attachments: AttachmentRef[] = []) {
+    const clean = text.replace(/\uFFFC/g, "").trim();
+    const images = attachments.flatMap((a) => {
+      const media = IMAGE_MEDIA[extname(a.path).toLowerCase()];
+      if (!media) return [];
+      try {
+        return [{ path: a.path, media, data: readFileSync(a.path).toString("base64") }];
+      } catch {
+        return [];
+      }
+    });
+    if (!clean && images.length === 0) return;
     this.connect();
-    this.firstUserText ||= text;
+    this.firstUserText ||= clean || "image";
     this.working = true;
+    const content =
+      images.length === 0
+        ? clean
+        : [
+            ...images.map((a) => ({
+              type: "image" as const,
+              source: { type: "base64" as const, media_type: a.media, data: a.data },
+            })),
+            ...(clean ? [{ type: "text" as const, text: clean }] : []),
+          ];
     const message: SDKUserMessage = {
       type: "user",
       session_id: "",
       parent_tool_use_id: null,
-      message: { role: "user", content: text },
+      message: { role: "user", content } as SDKUserMessage["message"],
     };
-    this.log(message);
+    // Log with image bytes swapped for paths so transcripts stay small and
+    // renderable; the full base64 goes only to the model.
+    const logged =
+      images.length === 0
+        ? message
+        : {
+            ...message,
+            message: {
+              role: "user",
+              content: [
+                ...images.map((a) => ({ type: "image_path", path: a.path })),
+                ...(clean ? [{ type: "text", text: clean }] : []),
+              ],
+            },
+          };
+    this.log(logged);
     this.queue.push(message);
     this.wake?.();
     this.notify();
@@ -294,6 +341,14 @@ class Store {
   palette = false;
   paletteAt = 0;
   settings = false;
+  settingsAt = 0;
+  settingsQuery = "";
+  composerText = "";
+  composerEpoch = 0;
+  composerAttachments: InputAttachment[] = [];
+  private attachmentsSeen = new Map<number, InputAttachment>();
+  fontPath: string | null = null;
+  fontId = 0;
 
   private version = 0;
   private listeners = new Set<() => void>();
@@ -334,6 +389,7 @@ class Store {
   togglePalette() {
     this.palette = !this.palette;
     this.paletteAt = 0;
+    this.settings = false;
     this.notify();
   }
 
@@ -349,11 +405,61 @@ class Store {
 
   openSettings() {
     this.settings = true;
+    this.settingsAt = 0;
+    this.settingsQuery = "";
     this.notify();
   }
 
   closeSettings() {
     this.settings = false;
+    this.notify();
+  }
+
+  moveSettings(delta: number, count: number) {
+    if (count === 0) return;
+    this.settingsAt = (this.settingsAt + delta + count) % count;
+    this.notify();
+  }
+
+  setSettingsQuery(query: string) {
+    this.settingsQuery = query;
+    this.settingsAt = 0;
+    this.notify();
+  }
+
+  clearComposer() {
+    this.composerText = "";
+    this.composerAttachments = [];
+    this.attachmentsSeen.clear();
+    this.composerEpoch += 1;
+    this.notify();
+  }
+
+  addComposerAttachment(attachment: InputAttachment) {
+    this.attachmentsSeen.set(attachment.id, attachment);
+    this.composerAttachments = [...this.composerAttachments, attachment];
+    this.notify();
+  }
+
+  /// The engine's attachment list rides every change event; deleting a pill
+  /// in the input (or undoing) is reflected here.
+  syncComposerAttachments(refs: AttachmentRef[]) {
+    const current = this.composerAttachments;
+    if (
+      refs.length === current.length &&
+      refs.every((ref, i) => ref.id === current[i].id)
+    ) {
+      return;
+    }
+    this.composerAttachments = refs.map(
+      (ref) => this.attachmentsSeen.get(ref.id) ?? { ...ref, width: 0, height: 0 }
+    );
+    this.notify();
+  }
+
+  setFont(path: string | null, id: number) {
+    this.fontPath = path;
+    this.fontId = id;
     this.notify();
   }
 }
