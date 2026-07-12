@@ -1,0 +1,18 @@
+{
+  "id": "2329a9ff-8d64-4883-ae57-d48f39f07e14",
+  "prevId": "c4666c07-1731-4120-85ae-5efe3350b0d5",
+  "fields": {
+    "sessions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "2fa2db4e1f91c865",
+      "default": []
+    },
+    "activeSessionId": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": ""
+    }
+  }
+}

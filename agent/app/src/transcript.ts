@@ -1,0 +1,125 @@
+import type { LogEntry } from "./db/schema";
+import type { Item, ToolCall } from "./session";
+
+interface Block {
+  type: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  tool_use_id?: string;
+  is_error?: boolean;
+}
+
+export function detail(input: Record<string, unknown>): string {
+  const keys = ["command", "file_path", "path", "pattern", "url", "query", "description", "prompt"];
+  const found = keys.map((k) => input[k]).find((v) => typeof v === "string");
+  const text = (found as string) ?? JSON.stringify(input) ?? "";
+  const flat = text.replace(/\s+/g, " ");
+  return flat.length > 64 ? `${flat.slice(0, 61)}…` : flat;
+}
+
+interface FoldState {
+  applied: number;
+  items: Item[];
+  tools: Map<string, ToolCall>;
+  draftFrom: number | null;
+}
+
+const folds = new Map<string, FoldState>();
+
+// Log entries are append-only, so each session folds incrementally: only
+// entries past `applied` are parsed on re-render.
+export function transcript(sessionId: string, prefix: Item[], entries: readonly LogEntry[]): Item[] {
+  let state = folds.get(sessionId);
+  if (!state || state.applied > entries.length) {
+    state = { applied: 0, items: [...prefix], tools: new Map(), draftFrom: null };
+    folds.set(sessionId, state);
+  }
+  for (; state.applied < entries.length; state.applied++) {
+    try {
+      apply(state, JSON.parse(entries[state.applied].message));
+    } catch {
+      // a malformed entry should not take down the whole transcript
+    }
+  }
+  return state.items;
+}
+
+function apply(state: FoldState, message: any) {
+  switch (message.type) {
+    case "stream_event": {
+      if (message.parent_tool_use_id !== null) break;
+      const event = message.event as {
+        type: string;
+        content_block?: Block;
+        delta?: { type: string; text?: string };
+      };
+      if (event.type === "content_block_start" && event.content_block?.type === "text") {
+        state.draftFrom ??= state.items.length;
+        state.items.push({ kind: "assistant", text: "" });
+      }
+      if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+        const last = state.items[state.items.length - 1];
+        if (last?.kind === "assistant") last.text += event.delta.text ?? "";
+      }
+      break;
+    }
+    case "assistant": {
+      const inSubagent = message.parent_tool_use_id !== null;
+      // Replace streamed drafts with the authoritative message.
+      if (!inSubagent && state.draftFrom !== null) {
+        state.items.splice(state.draftFrom);
+        state.draftFrom = null;
+      }
+      for (const block of message.message.content as Block[]) {
+        if (block.type === "text" && block.text && !inSubagent) {
+          state.items.push({ kind: "assistant", text: block.text });
+        }
+        if (block.type === "tool_use" && block.id && block.name) {
+          const input = block.input ?? {};
+          const call: ToolCall = {
+            id: block.id,
+            name: block.name,
+            detail: detail(input),
+            input,
+            status: "running",
+            kids: [],
+          };
+          state.tools.set(call.id, call);
+          const parent = message.parent_tool_use_id
+            ? state.tools.get(message.parent_tool_use_id)
+            : undefined;
+          if (parent) parent.kids.push(call);
+          else state.items.push({ kind: "tool", call });
+        }
+      }
+      break;
+    }
+    case "user": {
+      const content = message.message?.content;
+      if (typeof content === "string") {
+        state.items.push({ kind: "user", text: content });
+        break;
+      }
+      if (!Array.isArray(content)) break;
+      for (const block of content as Block[]) {
+        if (block.type !== "tool_result" || !block.tool_use_id) continue;
+        const call = state.tools.get(block.tool_use_id);
+        if (call) {
+          call.status = block.is_error ? "error" : "ok";
+          call.result = message.tool_use_result;
+        }
+      }
+      break;
+    }
+    case "result":
+      if (message.subtype !== "success") {
+        state.items.push({ kind: "assistant", text: `error: ${message.subtype}` });
+      }
+      break;
+    case "app_error":
+      state.items.push({ kind: "assistant", text: `error: ${message.text}` });
+      break;
+  }
+}

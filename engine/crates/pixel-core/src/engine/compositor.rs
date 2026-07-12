@@ -1,0 +1,225 @@
+
+use crate::canvas::Canvas;
+use crate::style::Color;
+use crate::tree::Tree;
+
+const DIVIDER_W: u32 = 6;
+const DIVIDER_GRAB: f32 = 5.0;
+const MIN_PANE: u32 = 160;
+
+const DIVIDER_BG: Color = [32, 33, 38, 255];
+const DIVIDER_BG_ACTIVE: Color = [58, 96, 168, 255];
+const DIVIDER_GRIP: Color = [118, 122, 132, 255];
+
+pub(super) struct View {
+    pub tree: Tree,
+    pub canvas: Canvas,
+    pub clear_color: Color,
+    pub origin_x: u32,
+    pub size: (u32, u32),
+}
+
+impl View {
+    fn new(window: (u32, u32)) -> Self {
+        Self {
+            tree: Tree::new((window.0 as f32, window.1 as f32)),
+            canvas: Canvas::new(window.0, window.1),
+            clear_color: [0, 0, 0, 255],
+            origin_x: 0,
+            size: window,
+        }
+    }
+
+    fn contains(&self, x: f32) -> bool {
+        x >= self.origin_x as f32 && x < (self.origin_x + self.size.0) as f32
+    }
+}
+
+pub(super) struct Compositor {
+    pub views: Vec<View>,
+    pub window: (u32, u32),
+    pub frame: Canvas,
+    pub dirty: bool,
+    pub divider_drag: bool,
+    split: Option<f32>,
+    panes: [usize; 2],
+    divider_hover: bool,
+}
+
+impl Compositor {
+    pub fn new(window: (u32, u32)) -> Self {
+        Self {
+            views: vec![View::new(window), View::new((0, 0))],
+            window,
+            frame: Canvas::new(window.0, window.1),
+            dirty: true,
+            divider_drag: false,
+            split: None,
+            panes: [0, 1],
+            divider_hover: false,
+        }
+    }
+
+    pub fn add_view(&mut self) -> usize {
+        self.views.push(View::new((0, 0)));
+        self.views.len() - 1
+    }
+
+    pub fn split(&self) -> Option<f32> {
+        self.split
+    }
+
+    pub fn set_split(&mut self, split: Option<f32>) -> bool {
+        let split = split.map(|f| f.clamp(0.15, 0.85));
+        if self.split == split {
+            return false;
+        }
+        self.split = split;
+        true
+    }
+
+    pub fn set_pane(&mut self, slot: usize, view: usize) -> bool {
+        if slot >= self.panes.len() || view >= self.views.len() {
+            return false;
+        }
+        let other = self.panes[1 - slot];
+        if self.panes[slot] == view || other == view {
+            return false;
+        }
+        self.panes[slot] = view;
+        true
+    }
+
+    pub fn active_views(&self) -> Vec<usize> {
+        if self.split.is_some() {
+            vec![self.panes[0], self.panes[1]]
+        } else {
+            vec![self.panes[0]]
+        }
+    }
+
+    pub fn is_active(&self, view: usize) -> bool {
+        self.active_views().contains(&view)
+    }
+
+    pub fn view_at(&self, x: f32) -> usize {
+        if self.split.is_some() && self.views[self.panes[1]].contains(x) {
+            self.panes[1]
+        } else {
+            self.panes[0]
+        }
+    }
+
+    pub fn to_local(&self, view: usize, point: (f32, f32)) -> (f32, f32) {
+        (point.0 - self.views[view].origin_x as f32, point.1)
+    }
+
+    pub fn divider_x(&self) -> Option<u32> {
+        let f = self.split?;
+        let w = self.window.0;
+        if w <= 2 * MIN_PANE + DIVIDER_W {
+            return Some(w.saturating_sub(DIVIDER_W) / 2);
+        }
+        let x = (w as f32 * f).round() as u32;
+        Some(x.clamp(MIN_PANE, w - MIN_PANE - DIVIDER_W))
+    }
+
+    pub fn on_divider(&self, x: f32) -> bool {
+        self.divider_x().is_some_and(|dx| {
+            x >= dx as f32 - DIVIDER_GRAB && x < (dx + DIVIDER_W) as f32 + DIVIDER_GRAB
+        })
+    }
+
+    pub fn set_divider_hover(&mut self, on: bool) {
+        if self.divider_hover != on {
+            self.divider_hover = on;
+            self.dirty = true;
+        }
+    }
+
+    pub fn apply_layout(&mut self, force: bool) -> Vec<(usize, (u32, u32))> {
+        let (w, h) = self.window;
+        let rects: [(u32, u32); 2] = match self.divider_x() {
+            Some(dx) => [(0, dx), (dx + DIVIDER_W, w.saturating_sub(dx + DIVIDER_W))],
+            None => [(0, w), (0, 0)],
+        };
+        let active = self.active_views();
+        let mut resized = Vec::new();
+        for (slot, (origin, width)) in rects.iter().enumerate() {
+            let index = self.panes[slot];
+            let view = &mut self.views[index];
+            let size = (*width, h);
+            let changed = force || view.size != size || view.origin_x != *origin;
+            view.origin_x = *origin;
+            view.size = size;
+            if !changed || !active.contains(&index) {
+                continue;
+            }
+            view.tree.set_window((size.0 as f32, size.1 as f32));
+            resized.push((index, size));
+        }
+        self.dirty = true;
+        resized
+    }
+
+    pub fn drag_divider(&mut self, x: f32) -> Vec<(usize, (u32, u32))> {
+        let w = self.window.0.max(1) as f32;
+        let f = (x / w).clamp(0.15, 0.85);
+        if self.split == Some(f) {
+            return Vec::new();
+        }
+        self.split = Some(f);
+        self.apply_layout(false)
+    }
+
+    pub fn compose(&mut self) {
+        if (self.frame.width, self.frame.height) != self.window {
+            self.frame = Canvas::new(self.window.0, self.window.1);
+        }
+        for view in self.active_views() {
+            let origin = self.views[view].origin_x;
+            let (canvas, frame) = (&self.views[view].canvas, &mut self.frame);
+            blit(frame, canvas, origin, 0);
+        }
+        self.draw_divider();
+    }
+
+    fn draw_divider(&mut self) {
+        let Some(dx) = self.divider_x() else {
+            return;
+        };
+        let engaged = self.divider_hover || self.divider_drag;
+        let bg = if engaged {
+            DIVIDER_BG_ACTIVE
+        } else {
+            DIVIDER_BG
+        };
+        self.frame.fill_rect(dx, 0, DIVIDER_W, self.window.1, bg);
+        let cx = dx as f32 + DIVIDER_W as f32 / 2.0;
+        let cy = self.window.1 as f32 / 2.0;
+        for i in -1..=1i32 {
+            self.frame.fill_rounded_rect(
+                cx - 1.0,
+                cy + (i as f32) * 7.0 - 1.0,
+                2.0,
+                2.0,
+                [1.0; 4],
+                DIVIDER_GRIP,
+            );
+        }
+    }
+}
+
+fn blit(dst: &mut Canvas, src: &Canvas, x: u32, y: u32) {
+    if src.width == 0 || src.height == 0 || x >= dst.width || y >= dst.height {
+        return;
+    }
+    let cols = src.width.min(dst.width - x) as usize;
+    let rows = src.height.min(dst.height - y) as usize;
+    for row in 0..rows {
+        let src_start = row * src.width as usize * 4;
+        let dst_start = ((y as usize + row) * dst.width as usize + x as usize) * 4;
+        dst.pixels[dst_start..dst_start + cols * 4]
+            .copy_from_slice(&src.pixels[src_start..src_start + cols * 4]);
+    }
+}

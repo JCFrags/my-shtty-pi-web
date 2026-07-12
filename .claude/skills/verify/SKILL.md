@@ -7,7 +7,7 @@ The apps here render via the kitty graphics protocol, so they can be verified
 without a real terminal: spawn the binary in a Python pty, feed it bytes, and
 decode the frames it emits.
 
-1. `cargo build --workspace`, binary at `target/debug/typing`.
+1. `cd engine && cargo build --workspace`, binary at `engine/target/debug/typing`.
 2. Spawn in a pty with `TIOCSWINSZ` set including **pixel** dimensions (e.g.
    rows=30 cols=100 xpixel=800 ypixel=600) so the app skips the `CSI 16 t`
    cell-size query. Set `TERM=xterm-kitty`, `preexec_fn=os.setsid`.

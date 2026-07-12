@@ -1,0 +1,20 @@
+{
+  "id": "c4666c07-1731-4120-85ae-5efe3350b0d5",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "fields": {
+    "sessions": {
+      "kind": "collection",
+      "debugName": "sessions"
+    },
+    "items": {
+      "kind": "collection",
+      "debugName": "items"
+    },
+    "activeSessionId": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": ""
+    }
+  }
+}

@@ -1,5 +1,5 @@
 # Cargo build artifacts
-/target/
+/engine/target/
 # Backup files from `cargo fix` / rustfmt
 **/*.rs.bk
 # Keep Cargo.lock committed: this repo builds binaries, so reproducible builds win.
@@ -36,5 +36,8 @@ Thumbs.db
 
 # Node
 node_modules/
-packages/pixel-react/dist/
-packages/pixel-react/native/
+engine/packages/pixel-react/dist/
+engine/packages/pixel-react/native/
+agent/db/dist/
+agent/app/dist/
+agent/app/.data/

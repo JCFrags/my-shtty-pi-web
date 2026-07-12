@@ -1,0 +1,6 @@
+packages:
+  - engine/packages/*
+  - engine/examples/*
+  - agent/*
+onlyBuiltDependencies:
+  - esbuild

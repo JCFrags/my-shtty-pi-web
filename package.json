@@ -1,10 +1,5 @@
 {
   "name": "terminal-graphics-engine",
   "private": true,
-  "workspaces": [
-    "packages/pixel-react",
-    "examples/typing-react",
-    "examples/agent",
-    "examples/devtools-bench"
-  ]
+  "packageManager": "pnpm@10.13.1"
 }

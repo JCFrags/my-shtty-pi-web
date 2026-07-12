@@ -1,0 +1,78 @@
+{
+  "name": "@pixel/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsdown",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.typetest.json"
+  },
+  "bin": {
+    "pixel-db": "./dist/cli-bin.mjs"
+  },
+  "main": "./dist/index.mjs",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./effect": {
+      "types": "./dist/effect.d.mts",
+      "default": "./dist/effect.mjs"
+    },
+    "./react": {
+      "types": "./dist/react.d.mts",
+      "default": "./dist/react.mjs"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.mts",
+      "default": "./dist/schema.mjs"
+    },
+    "./migrations": {
+      "types": "./dist/migrations.d.mts",
+      "default": "./dist/migrations.mjs"
+    },
+    "./config": {
+      "types": "./dist/config.d.mts",
+      "default": "./dist/config.mjs"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.mts",
+      "default": "./dist/cli.mjs"
+    },
+    "./loader": {
+      "types": "./dist/loader.d.mts",
+      "default": "./dist/loader.mjs"
+    },
+    "./transport": {
+      "types": "./dist/transport.d.mts",
+      "default": "./dist/transport.mjs"
+    }
+  },
+  "dependencies": {
+    "@effect/cli": "^0.73.2",
+    "@effect/platform": "^0.94.5",
+    "@effect/platform-node": "^0.104.1",
+    "@types/node": "^25.5.0",
+    "effect": "3.21.1",
+    "nanoid": "^5.1.6"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "zod": "^4"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "jsdom": "^26.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsdown": "^0.15.7",
+    "type-testing": "^0.2.0",
+    "typescript": "^5.4.5",
+    "vitest": "^3.2.4",
+    "zod": "^4"
+  }
+}
