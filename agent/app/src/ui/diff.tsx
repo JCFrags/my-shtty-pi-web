@@ -3,7 +3,7 @@ import { Box, diff, HIGHLIGHT_CAPTURES, highlight, Text } from "pixel-react";
 import type { Rgba, TextSpan } from "pixel-react";
 
 import type { ToolCall } from "../session";
-import type { Ctx } from "../theme";
+import { useCtx } from "../theme";
 
 const MAX_DIFF_ROWS = 14;
 
@@ -118,8 +118,8 @@ function overlayEmphasis(
   return out;
 }
 
-export function DiffCard({ ctx, sources }: { ctx: Ctx; sources: DiffSources }) {
-  const { theme, rem } = ctx;
+export function DiffCard({ sources }: { sources: DiffSources }) {
+  const { theme } = useCtx();
   const [expanded, setExpanded] = useState(false);
   const language = langFromPath(sources.path);
   const { rows, syntax } = useMemo(() => {

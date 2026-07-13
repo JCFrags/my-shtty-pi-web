@@ -37,6 +37,8 @@ fn from_file(path: &Path) -> Option<PastedImage> {
 
 /// Copying in Finder puts file paths on the clipboard; browsers and
 /// screenshot tools put bitmap data. Prefer files, fall back to bitmap.
+/// Runs on the engine thread: the read/downscale/encode spans are what a
+/// paste-triggered frame stall looks like in a profile.
 pub fn read_clipboard_image() -> Option<PastedImage> {
     let mut clipboard = arboard::Clipboard::new().ok()?;
     if let Ok(files) = clipboard.get().file_list()
@@ -44,16 +46,16 @@ pub fn read_clipboard_image() -> Option<PastedImage> {
     {
         return Some(pasted);
     }
-    let img = clipboard.get_image().ok()?;
+    let img = crate::profiler::span("clipboard.image.read", || clipboard.get_image()).ok()?;
     let rgba = image::RgbaImage::from_raw(
         img.width as u32,
         img.height as u32,
         img.bytes.into_owned(),
     )?;
-    let rgba = downscale(rgba);
+    let rgba = crate::profiler::span("clipboard.image.downscale", || downscale(rgba));
     let (width, height) = rgba.dimensions();
     let path = temp_path();
-    rgba.save(&path).ok()?;
+    crate::profiler::span("clipboard.image.encode", || rgba.save(&path)).ok()?;
     let src = path.to_string_lossy().into_owned();
     crate::image_cache::insert_decoded(src.clone(), &rgba);
     Some(PastedImage {

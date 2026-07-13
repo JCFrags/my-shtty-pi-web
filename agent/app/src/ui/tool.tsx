@@ -3,10 +3,10 @@ import { Box, Text } from "pixel-react";
 import type { ToolCall } from "../session";
 import { DiffCard, diffSources } from "./diff";
 import { Dot } from "./dot";
-import type { Ctx } from "../theme";
+import { useCtx } from "../theme";
 
-export function ToolRow({ ctx, call }: { ctx: Ctx; call: ToolCall }) {
-  const { theme, rem } = ctx;
+export function ToolRow({ call }: { call: ToolCall }) {
+  const { theme, rem } = useCtx();
   const color =
     call.status === "running"
       ? theme.accent
@@ -19,7 +19,7 @@ export function ToolRow({ ctx, call }: { ctx: Ctx; call: ToolCall }) {
   return (
     <Box style={{ flexDirection: "column", gap: rem * 0.25 }}>
       <Box style={{ gap: rem * 0.5, alignItems: "center", overflow: "hidden" }}>
-        <Dot ctx={ctx} color={color} />
+        <Dot color={color} />
         <Text style={{ flexShrink: 0, wrap: false }}>{call.name}</Text>
         <Text style={{ color: theme.muted, wrap: false }}>
           {call.detail}
@@ -27,13 +27,13 @@ export function ToolRow({ ctx, call }: { ctx: Ctx; call: ToolCall }) {
       </Box>
       {sources && (
         <Box style={{ margin: { left: rem } }}>
-          <DiffCard ctx={ctx} sources={sources} />
+          <DiffCard sources={sources} />
         </Box>
       )}
       {call.kids.length > 0 && (
         <Box style={{ flexDirection: "column", gap: rem * 0.25, margin: { left: rem } }}>
           {call.kids.map((kid) => (
-            <ToolRow key={kid.id} ctx={ctx} call={kid} />
+            <ToolRow key={kid.id} call={kid} />
           ))}
         </Box>
       )}

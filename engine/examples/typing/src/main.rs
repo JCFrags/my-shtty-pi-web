@@ -163,7 +163,12 @@ fn main() -> std::io::Result<()> {
                         && let Some(geometry) = engine.tree().input_geometry(input)
                         && let Some(text) = engine.tree().input_text(input).map(str::to_string)
                     {
-                        let offset = geometry.offset_at(&text, (x, y), engine.fonts());
+                        let marks = engine
+                            .tree()
+                            .input(input)
+                            .map(|i| i.marks().to_vec())
+                            .unwrap_or_default();
+                        let offset = geometry.offset_at(&text, &marks, (x, y), engine.fonts());
                         let in_selection = engine
                             .tree()
                             .input(input)
@@ -189,7 +194,7 @@ fn main() -> std::io::Result<()> {
                 }
                 EngineEvent::Paste { .. }
                 | EngineEvent::Caret { .. }
-                | EngineEvent::Attachment { .. }
+                | EngineEvent::PasteImage { .. }
                 | EngineEvent::HoverEnter { .. }
                 | EngineEvent::HoverLeave { .. }
                 | EngineEvent::ClickOutside { .. }

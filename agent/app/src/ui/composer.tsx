@@ -5,16 +5,21 @@ import type { NodeHandle, Rgba } from "pixel-react";
 import { menus } from "../menu";
 import { PERMISSION_MODES, store, THINKING } from "../session";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
-import type { Ctx } from "../theme";
+import { useCtx } from "../theme";
 
-export function Composer({ ctx: { theme, rem }, inputRef }: { ctx: Ctx; inputRef: React.Ref<NodeHandle> }) {
+export function Composer({ inputRef }: { inputRef: React.RefObject<NodeHandle | null> }) {
+  const { theme, rem } = useCtx();
   const session = store.active();
+  const attached = store.composerMarks.flatMap((mark) => {
+    const image = store.composerImage(mark.id);
+    return image ? [{ id: mark.id, path: image.path }] : [];
+  });
   return (
     <Box style={{ flexDirection: "column", flexShrink: 0 }}>
       <Box
         style={{ height: Math.ceil(Math.max(rem / 16, 1) + 0.5), width: "100%", background: theme.separator }}
       />
-      {store.composerAttachments.length > 0 && (
+      {attached.length > 0 && (
         <Box
           style={{
             gap: rem * 0.5,
@@ -22,7 +27,7 @@ export function Composer({ ctx: { theme, rem }, inputRef }: { ctx: Ctx; inputRef
             padding: { left: rem * 0.75, right: rem * 0.75, top: rem * 0.75 },
           }}
         >
-          {store.composerAttachments.map((attachment) => (
+          {attached.map((attachment) => (
             <Image
               key={attachment.id}
               src={attachment.path}
@@ -31,6 +36,7 @@ export function Composer({ ctx: { theme, rem }, inputRef }: { ctx: Ctx; inputRef
                 cornerRadius: rem * 0.4,
                 border: { width: Math.max(rem / 16, 1), color: theme.hairline },
               }}
+              placeholder={<Box style={{ background: theme.bgAlt }} />}
             />
           ))}
         </Box>
@@ -38,25 +44,38 @@ export function Composer({ ctx: { theme, rem }, inputRef }: { ctx: Ctx; inputRef
       <Box style={{ alignItems: "start", padding: rem * 0.75 }}>
         <Input
           key={store.composerEpoch}
-          ref={inputRef}
+          ref={inputRef as React.Ref<NodeHandle>}
           style={{ flexGrow: 1, flexBasis: 0 }}
           caretColor={theme.accent}
           selectionColor={theme.selection}
           autoFocus
-          onChange={(text, attachments, change) => {
+          onChange={(text, change) => {
             store.composerText = text;
-            store.syncComposerAttachments(attachments);
+            store.syncComposerMarks(change.marks);
             menus.onChange(text, change);
           }}
           onCaret={(caret) => menus.onCaret(caret)}
-          onAttach={(attachment) => store.addComposerAttachment(attachment)}
-          onSubmit={(text, attachments) => {
-            menus.reset();
-            store.composerText = "";
-            store.syncComposerAttachments([]);
-            store.active().send(text, attachments);
+          onPasteImage={(image) => {
+            const id = store.addComposerImage(image);
+            inputRef.current?.insertMark(id);
           }}
-        />
+          onSubmit={(text, marks) => {
+            menus.reset();
+            const paths = marks.flatMap((mark) => {
+              const image = store.composerImage(mark.id);
+              return image ? [{ path: image.path }] : [];
+            });
+            store.composerText = "";
+            store.syncComposerMarks([]);
+            store.active().send(text, paths);
+          }}
+        >
+          {attached.map((attachment) => (
+            <Input.Widget key={attachment.id} markId={attachment.id}>
+              <AttachmentPill path={attachment.path} />
+            </Input.Widget>
+          ))}
+        </Input>
       </Box>
       <Box
         style={{ height: Math.ceil(Math.max(rem / 16, 1) + 0.5), width: "100%", background: theme.separator }}
@@ -68,9 +87,8 @@ export function Composer({ ctx: { theme, rem }, inputRef }: { ctx: Ctx; inputRef
           padding: { left: rem, right: rem, top: rem * 0.5, bottom: rem * 0.5 },
         }}
       >
-        <ModelPicker ctx={{ theme, rem }} />
+        <ModelPicker />
         <Picker
-          ctx={{ theme, rem }}
           color={session.mode === "bypassPermissions" ? theme.red : theme.muted}
           label={session.mode}
           items={PERMISSION_MODES.map((mode) => ({ value: mode, label: mode }))}
@@ -82,8 +100,32 @@ export function Composer({ ctx: { theme, rem }, inputRef }: { ctx: Ctx; inputRef
   );
 }
 
-function ModelPicker({ ctx }: { ctx: Ctx }) {
-  const { theme, rem } = ctx;
+function AttachmentPill({ path }: { path: string }) {
+  const { theme, rem } = useCtx();
+  return (
+    <Box
+      style={{
+        alignItems: "center",
+        gap: rem * 0.3,
+        padding: { left: rem * 0.25, right: rem * 0.45, top: rem * 0.1, bottom: rem * 0.1 },
+        margin: { left: rem * 0.1, right: rem * 0.25 },
+        background: theme.chipBg,
+        border: { width: Math.max(rem / 16, 1), color: theme.hairline },
+        cornerRadius: rem * 0.3,
+      }}
+    >
+      <Image
+        src={path}
+        style={{ height: rem * 0.85, cornerRadius: rem * 0.15 }}
+        placeholder={<Box style={{ background: theme.bgAlt }} />}
+      />
+      <Text style={{ color: theme.muted, fontSize: rem * 0.75, wrap: false }}>Image</Text>
+    </Box>
+  );
+}
+
+function ModelPicker() {
+  const { theme, rem } = useCtx();
   const session = store.active();
   const [open, setOpen] = useState(false);
   const itemPad = { left: rem * 0.6, right: rem * 0.6, top: rem * 0.3, bottom: rem * 0.3 };
@@ -94,7 +136,6 @@ function ModelPicker({ ctx }: { ctx: Ctx }) {
   return (
     <Box>
       <PickerChip
-        ctx={ctx}
         color={theme.fg}
         onClick={() => {
           if (!open) session.loadModels();
@@ -187,16 +228,15 @@ function ModelPicker({ ctx }: { ctx: Ctx }) {
 }
 
 function PickerChip({
-  ctx: { theme, rem },
   color,
   children,
   onClick,
 }: {
-  ctx: Ctx;
   color: Rgba;
   children: string;
   onClick: () => void;
 }) {
+  const { theme, rem } = useCtx();
   return (
     <Text
       style={{
@@ -215,7 +255,6 @@ function PickerChip({
 }
 
 function Picker({
-  ctx,
   color,
   label,
   items,
@@ -223,7 +262,6 @@ function Picker({
   onPick,
   onOpen,
 }: {
-  ctx: Ctx;
   color: Rgba;
   label: string;
   items: { value: string; label: string }[];
@@ -231,13 +269,12 @@ function Picker({
   onPick: (value: string) => void;
   onOpen?: () => void;
 }) {
-  const { theme, rem } = ctx;
+  const { theme, rem } = useCtx();
   const [open, setOpen] = useState(false);
   const itemPad = { left: rem * 0.6, right: rem * 0.6, top: rem * 0.3, bottom: rem * 0.3 };
   return (
     <Box>
       <PickerChip
-        ctx={ctx}
         color={color}
         onClick={() => {
           if (!open) onOpen?.();

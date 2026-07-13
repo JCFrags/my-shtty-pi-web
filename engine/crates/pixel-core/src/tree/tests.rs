@@ -270,7 +270,7 @@ fn input_nodes_paint_caret_and_selection_and_expose_geometry() {
     let geometry = tree.input_geometry(id).unwrap();
     assert_eq!(geometry.origin, (4.0, 4.0), "origin is inside the padding");
     let fonts = [font()];
-    let caret = geometry.caret_rect("hello", 2, &fonts);
+    let caret = geometry.caret_rect("hello", &[], 2, &fonts);
     let canvas = painted(&mut tree, (200, 60), None);
     let center = (
         (caret.x + caret.w / 2.0) as u32,
@@ -279,7 +279,7 @@ fn input_nodes_paint_caret_and_selection_and_expose_geometry() {
     let [r, g, b, _] = pixel(&canvas, center.0, center.1);
     assert_eq!([r, g, b], [255, 0, 0], "caret painted");
     assert_eq!(
-        geometry.offset_at("hello", (caret.x + 0.1, caret.y + 1.0), &fonts),
+        geometry.offset_at("hello", &[], (caret.x + 0.1, caret.y + 1.0), &fonts),
         2,
         "geometry maps points back to offsets"
     );
@@ -287,7 +287,7 @@ fn input_nodes_paint_caret_and_selection_and_expose_geometry() {
     tree.input_mut(id).unwrap().set_cursor(4, true);
     tree.mark_paint();
     let canvas = painted(&mut tree, (200, 60), None);
-    let selected = geometry.caret_rect("hello", 3, &fonts);
+    let selected = geometry.caret_rect("hello", &[], 3, &fonts);
     let [r, g, b, _] = pixel(&canvas, selected.x as u32 + 1, selected.y as u32 + 1);
     assert_eq!(
         [r, g, b],
@@ -325,7 +325,7 @@ fn caret_only_paints_on_the_focused_input() {
     tree.input_mut(id).unwrap().set_cursor(2, false);
     tree.mark_paint();
     let geometry = tree.input_geometry(id).unwrap();
-    let caret = geometry.caret_rect("hello", 2, &[font()]);
+    let caret = geometry.caret_rect("hello", &[], 2, &[font()]);
     let canvas = painted(&mut tree, (200, 60), None);
     let [r, g, b, _] = pixel(
         &canvas,
@@ -832,15 +832,15 @@ fn soft_wrapped_input_maps_offsets_through_wrap_boundaries() {
 
     let fonts = [font()];
     let text = "alpha beta gamma delta epsilon zeta";
-    let last = geometry.caret_rect(text, text.len(), &fonts);
-    let first = geometry.caret_rect(text, 0, &fonts);
+    let last = geometry.caret_rect(text, &[], text.len(), &fonts);
+    let first = geometry.caret_rect(text, &[], 0, &fonts);
     assert!(
         last.y > first.y,
         "caret wraps to later visual lines: {} > {}",
         last.y,
         first.y
     );
-    let round_trip = geometry.offset_at(text, (last.x + 0.1, last.y + 1.0), &fonts);
+    let round_trip = geometry.offset_at(text, &[], (last.x + 0.1, last.y + 1.0), &fonts);
     assert_eq!(round_trip, text.len(), "click maps back through the wrap");
 }
 
@@ -916,7 +916,7 @@ fn labels(a: &str, b: &str) -> Vec<Desc> {
 fn point_at(tree: &Tree, id: NodeId, offset: usize, fonts: &[fontdue::Font]) -> (f32, f32) {
     let geometry = tree.text_geometry(id).unwrap();
     let text = tree.text_of(id).unwrap();
-    let rect = geometry.caret_rect(text, offset, fonts);
+    let rect = geometry.caret_rect(text, &[], offset, fonts);
     (rect.x + 0.1, rect.y + 1.0)
 }
 
@@ -1032,7 +1032,7 @@ fn doc_selection_paints_with_the_inherited_color() {
     let rect = tree
         .text_geometry(id)
         .unwrap()
-        .caret_rect("hello", 1, &fonts);
+        .caret_rect("hello", &[], 1, &fonts);
     let canvas = painted(&mut tree, (200, 60), None);
     let [r, g, b, _] = pixel(&canvas, rect.x as u32 + 1, rect.y as u32 + 1);
     assert_eq!([r, g, b], [0, 255, 0], "selection painted behind glyphs");
@@ -1432,7 +1432,7 @@ fn unified_bands_stay_visible_over_child_backgrounds() {
     let caret = tree
         .text_geometry(b)
         .unwrap()
-        .caret_rect("second", 0, &fonts);
+        .caret_rect("second", &[], 0, &fonts);
     let canvas = painted(&mut tree, (400, 200), None);
     assert_eq!(
         pixel(&canvas, caret.x as u32 + 1, caret.y as u32 + 1),
@@ -1443,5 +1443,149 @@ fn unified_bands_stay_visible_over_child_backgrounds() {
         pixel(&canvas, row.x as u32 + 2, caret.y as u32 + 1),
         [0, 200, 0, 255],
         "band covers the row's own background, not the other way around"
+    );
+}
+
+#[test]
+fn placeholder_slot_fills_the_image_rect_until_the_decode_lands() {
+    let dir = std::env::temp_dir().join("pixel-tree-slot-test");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("slot.png");
+    image::RgbaImage::from_pixel(4, 2, image::Rgba([0, 200, 0, 255]))
+        .save(&path)
+        .unwrap();
+    let mut tree = tree_of(
+        (200.0, 100.0),
+        vec![Desc {
+            style: Style {
+                align_items: Some(Align::Start),
+                ..Style::default()
+            },
+            children: vec![Desc {
+                style: Style {
+                    width: Dimension::Px(40.0),
+                    ..Style::default()
+                },
+                image: Some(ImageProps {
+                    src: path.to_string_lossy().to_string(),
+                }),
+                key: Some("img".into()),
+                children: vec![Desc {
+                    style: Style {
+                        background: Some([50, 50, 50, 255]),
+                        ..Style::default()
+                    },
+                    slot: Some(SlotKind::Placeholder),
+                    key: Some("ph".into()),
+                    ..Desc::default()
+                }],
+                ..Desc::default()
+            }],
+            ..Desc::default()
+        }],
+    );
+
+    let img = tree.find("img").unwrap();
+    let ph = tree.find("ph").unwrap();
+    let img_rect = tree.rect(img).unwrap();
+    assert_eq!(
+        (img_rect.w, img_rect.h),
+        (40.0, 20.0),
+        "sniffed size drives layout while pending"
+    );
+    assert_eq!(
+        tree.rect(ph).unwrap(),
+        img_rect,
+        "placeholder is pinned to the image rect"
+    );
+    let canvas = painted(&mut tree, (200, 100), None);
+    assert_eq!(pixel(&canvas, 20, 10), [50, 50, 50, 255]);
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !crate::image_cache::drain_completed().any {
+        assert!(std::time::Instant::now() < deadline, "decode never landed");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    tree.mark_place();
+    let canvas = painted(&mut tree, (200, 100), None);
+    assert_eq!(tree.rect(ph).unwrap(), PxRect::ZERO, "placeholder retires");
+    assert_eq!(pixel(&canvas, 20, 10), [0, 200, 0, 255]);
+}
+
+#[test]
+fn mark_widgets_reserve_width_and_place_inline() {
+    let fonts = [font()];
+    let mut tree = Tree::new((400.0, 100.0));
+    let input = tree.create(Props {
+        style: Style {
+            width: Dimension::Px(300.0),
+            ..Style::default()
+        },
+        input: Some(InputProps {
+            initial: "ab".into(),
+            ..InputProps::default()
+        }),
+        ..Props::default()
+    });
+    tree.append(tree.root(), input);
+    tree.edit_input(input, |i| {
+        i.set_cursor(1, false);
+        i.insert_mark(5);
+    });
+    let widget = tree.create(Props {
+        style: Style {
+            width: Dimension::Px(40.0),
+            height: Dimension::Px(10.0),
+            ..Style::default()
+        },
+        mark: Some(5),
+        ..Props::default()
+    });
+    tree.append(input, widget);
+    tree.flush_layout(&fonts, 16.0);
+
+    let geometry = tree.input_geometry(input).unwrap();
+    let text = tree.input_text(input).unwrap().to_string();
+    let marks = tree.input(input).unwrap().marks().to_vec();
+    assert_eq!(marks[0].advance, 40.0, "widget width becomes the mark advance");
+
+    let after = 1 + crate::text_input::MARK_CHAR.len_utf8();
+    let before_caret = geometry.caret_rect(&text, &marks, 1, &fonts);
+    let after_caret = geometry.caret_rect(&text, &marks, after, &fonts);
+    assert!(
+        (after_caret.x - before_caret.x - 40.0).abs() < 0.01,
+        "caret crosses the widget: {} -> {}",
+        before_caret.x,
+        after_caret.x
+    );
+
+    let rect = tree.rect(widget).unwrap();
+    assert!(
+        (rect.x - before_caret.x).abs() < 0.5,
+        "widget sits at the mark: {} vs {}",
+        rect.x,
+        before_caret.x
+    );
+    assert_eq!((rect.w, rect.h), (40.0, 10.0));
+
+    tree.edit_input(input, |i| {
+        i.set_cursor(after, false);
+        i.delete_backward(Granularity::Char);
+    });
+    tree.flush_layout(&fonts, 16.0);
+    assert_eq!(
+        tree.rect(widget),
+        Some(PxRect::ZERO),
+        "widget hides once its sentinel is deleted"
+    );
+
+    tree.edit_input(input, |i| {
+        assert!(i.undo());
+    });
+    tree.flush_layout(&fonts, 16.0);
+    assert_eq!(
+        tree.rect(widget).map(|r| r.w),
+        Some(40.0),
+        "undo restores the mark and the widget comes back"
     );
 }

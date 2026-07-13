@@ -14,6 +14,7 @@ pub struct SpanRecord {
     pub depth: u32,
     pub view: u32,
     pub arg: Option<u64>,
+    pub label: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -91,10 +92,28 @@ pub fn set_view(view: u32) {
 }
 
 pub fn span<T>(name: &'static str, work: impl FnOnce() -> T) -> T {
-    span_arg(name, None, work)
+    span_full(name, None, None, work)
 }
 
 pub fn span_arg<T>(name: &'static str, arg: Option<u64>, work: impl FnOnce() -> T) -> T {
+    span_full(name, arg, None, work)
+}
+
+pub fn span_labeled<T>(
+    name: &'static str,
+    label: impl FnOnce() -> String,
+    work: impl FnOnce() -> T,
+) -> T {
+    let label = is_recording().then(label);
+    span_full(name, None, label, work)
+}
+
+fn span_full<T>(
+    name: &'static str,
+    arg: Option<u64>,
+    label: Option<String>,
+    work: impl FnOnce() -> T,
+) -> T {
     let begin = ACTIVE.with(|active| {
         active.borrow_mut().as_mut().map(|r| {
             r.depth += 1;
@@ -115,11 +134,48 @@ pub fn span_arg<T>(name: &'static str, arg: Option<u64>, work: impl FnOnce() -> 
                     depth,
                     view,
                     arg,
+                    label,
                 });
             }
         });
     }
     result
+}
+
+// Recording-relative time of an instant captured on any thread (Instant is
+// process-wide monotonic); instants predating the recording clamp to 0.
+pub fn ms_of(at: Instant) -> Option<f64> {
+    ACTIVE.with(|active| {
+        active
+            .borrow()
+            .as_ref()
+            .map(|r| at.saturating_duration_since(r.started).as_secs_f64() * 1000.0)
+    })
+}
+
+// Record a span whose timing was measured elsewhere (e.g. a worker thread).
+pub fn emit_span(
+    name: &'static str,
+    start_ms: f64,
+    dur_ms: f64,
+    depth: u32,
+    arg: Option<u64>,
+    label: Option<String>,
+) {
+    ACTIVE.with(|active| {
+        if let Some(r) = active.borrow_mut().as_mut() {
+            let view = r.view;
+            r.spans.push(SpanRecord {
+                name,
+                start_ms,
+                dur_ms,
+                depth,
+                view,
+                arg,
+                label,
+            });
+        }
+    });
 }
 
 pub fn count(name: &'static str, value: u64) {
@@ -190,6 +246,7 @@ pub fn emit(name: &'static str, start_ms: f64, dur_ms: f64, arg: Option<u64>) {
                 depth,
                 view,
                 arg,
+                label: None,
             });
         }
     });
@@ -253,13 +310,17 @@ fn report_json(data: &ProfileData) -> String {
     out.push_str("\n  },\n  \"spans\": [\n");
     for (i, s) in data.spans.iter().enumerate() {
         out.push_str(&format!(
-            "    {{\"name\": \"{}\", \"start_ms\": {:.3}, \"dur_ms\": {:.3}, \"depth\": {}, \"view\": {}{}}}{}\n",
+            "    {{\"name\": \"{}\", \"start_ms\": {:.3}, \"dur_ms\": {:.3}, \"depth\": {}, \"view\": {}{}{}}}{}\n",
             s.name,
             s.start_ms,
             s.dur_ms,
             s.depth,
             s.view,
             s.arg.map_or(String::new(), |a| format!(", \"arg\": {a}")),
+            s.label.as_deref().map_or(String::new(), |l| format!(
+                ", \"label\": \"{}\"",
+                l.replace('\\', "\\\\").replace('"', "\\\"")
+            )),
             if i + 1 == data.spans.len() { "" } else { "," }
         ));
     }

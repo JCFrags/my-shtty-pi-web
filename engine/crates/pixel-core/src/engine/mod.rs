@@ -134,9 +134,9 @@ pub struct EngineConfig {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct AttachmentRef {
+pub struct MarkRef {
     pub id: u64,
-    pub path: String,
+    pub offset: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,7 +182,7 @@ pub enum EngineEvent {
         node: NodeId,
         key: Option<String>,
         text: String,
-        attachments: Vec<AttachmentRef>,
+        marks: Vec<MarkRef>,
         cursor: usize,
         caret: PxRect,
         source: ChangeSource,
@@ -199,7 +199,7 @@ pub enum EngineEvent {
         node: NodeId,
         key: Option<String>,
         text: String,
-        attachments: Vec<AttachmentRef>,
+        marks: Vec<MarkRef>,
     },
     Scroll {
         view: usize,
@@ -229,11 +229,12 @@ pub enum EngineEvent {
         view: usize,
         text: String,
     },
-    Attachment {
+    // An image landed on a focused input via paste or drag-drop. The engine
+    // only reports it; whether it becomes an inline widget is app policy.
+    PasteImage {
         view: usize,
         node: NodeId,
         key: Option<String>,
-        id: u64,
         path: String,
         width: u32,
         height: u32,
@@ -557,6 +558,9 @@ impl Engine {
     }
 
     pub fn profiler_toggle(&mut self) -> io::Result<Option<std::path::PathBuf>> {
+        if crate::profiler::is_recording() {
+            crate::image_cache::emit_pending_waits();
+        }
         self.profiler.toggle()
     }
 
@@ -572,6 +576,9 @@ impl Engine {
     }
 
     pub fn profile_stop(&mut self) {
+        if crate::profiler::is_recording() {
+            crate::image_cache::emit_pending_waits();
+        }
         if let Some(data) = crate::profiler::stop() {
             logging::info(
                 "profiler",
@@ -701,13 +708,29 @@ impl Engine {
         if !self.throttle_registered {
             self.throttle_registered = true;
             self.cpu_throttle.register_current_thread();
+            if let Ok(waker) = self.waker() {
+                crate::image_cache::set_waker(move || waker.wake());
+            }
         }
+        self.drain_images();
         let mut out = Vec::new();
         out.append(&mut self.pending);
+        if !out.is_empty() {
+            // Deliver op-generated events before painting: the caller loops
+            // straight back into pump for the frame, and the embedder's
+            // thread reacts to the events in parallel with it.
+            self.drain_logs(&mut out);
+            return Ok(out);
+        }
         self.check_resize(&mut out)?;
         self.frame()?;
         let first_wait = if self.animating() {
             Some(FRAME_POLL)
+        } else if !out.is_empty() {
+            // Ops applied between pumps (e.g. an input splice) push their
+            // events into `pending`; blocking here would sit on them until
+            // unrelated terminal input arrives, so deliver first.
+            Some(Duration::ZERO)
         } else {
             wait
         };
@@ -728,10 +751,27 @@ impl Engine {
             self.reveal_caret();
         }
         self.emit_scroll_events(&mut out);
+        self.drain_images();
         out.append(&mut self.pending);
         self.frame()?;
         self.drain_logs(&mut out);
         Ok(out)
+    }
+
+    fn drain_images(&mut self) {
+        let landed = crate::image_cache::drain_completed();
+        if !landed.any {
+            return;
+        }
+        // A decode changes slot visibility (place) and, when the header sniff
+        // missed the size, the image's intrinsic size (layout).
+        for view in &mut self.comp.views {
+            if landed.resized {
+                view.tree.mark_layout();
+            } else {
+                view.tree.mark_place();
+            }
+        }
     }
 
     fn drain_logs(&mut self, out: &mut Vec<EngineEvent>) {
@@ -827,7 +867,7 @@ impl Engine {
                 }
                 if let Some((view, focus)) = self.focused() {
                     if let Some(image) = crate::clipboard_image::image_path_from_paste(&text) {
-                        self.push_attachment(view, focus, image, out)?;
+                        self.push_paste_image(view, focus, image, out);
                     } else if let Some(input) = self.comp.views[view].tree.input_mut(focus) {
                         input.insert(&text);
                         self.finish_reply(view, focus, InputReply::Edited, ChangeSource::Paste, out)?;
@@ -1421,8 +1461,11 @@ impl Engine {
                 self.push_change(view, id, source, out);
             }
             InputReply::RequestPaste => {
-                match crate::clipboard_image::read_clipboard_image() {
-                    Some(image) => self.push_attachment(view, id, image, out)?,
+                let image = crate::profiler::span("clipboard.image", || {
+                    crate::clipboard_image::read_clipboard_image()
+                });
+                match image {
+                    Some(image) => self.push_paste_image(view, id, image, out),
                     None => self.term.request_clipboard()?,
                 }
             }
@@ -1430,41 +1473,49 @@ impl Engine {
         Ok(())
     }
 
-    fn push_attachment(
+    fn push_paste_image(
         &mut self,
         view: usize,
         id: NodeId,
         image: crate::clipboard_image::PastedImage,
         out: &mut Vec<EngineEvent>,
-    ) -> io::Result<()> {
+    ) {
         logging::info(
             "engine",
-            format!("attachment {}x{} {}", image.width, image.height, image.path),
+            format!("paste image {}x{} {}", image.width, image.height, image.path),
         );
-        let Some(input) = self.comp.views[view].tree.input_mut(id) else {
-            return Ok(());
-        };
-        let atom_id = input.insert_atom("Image", &image.path);
-        out.push(EngineEvent::Attachment {
+        out.push(EngineEvent::PasteImage {
             view,
             node: id,
             key: self.comp.views[view].tree.key_of(id).map(str::to_string),
-            id: atom_id,
             path: image.path,
             width: image.width,
             height: image.height,
         });
-        self.finish_reply(view, id, InputReply::Edited, ChangeSource::Edit, out)
     }
 
-    fn input_attachments(&self, view: usize, id: NodeId) -> Vec<AttachmentRef> {
+    pub fn insert_input_mark(&mut self, view: usize, id: NodeId, mark: u64) {
+        {
+            let Some(input) = self.comp.views[view].tree.input_mut(id) else {
+                return;
+            };
+            input.insert_mark(mark);
+        }
+        self.comp.views[view].tree.sync_input_text(id);
+        self.reveal = true;
+        let mut events = Vec::new();
+        self.push_change(view, id, ChangeSource::Edit, &mut events);
+        self.pending.append(&mut events);
+    }
+
+    fn input_marks(&self, view: usize, id: NodeId) -> Vec<MarkRef> {
         self.comp.views[view].tree.input(id).map_or(Vec::new(), |input| {
             input
-                .atoms()
+                .marks()
                 .iter()
-                .map(|a| AttachmentRef {
-                    id: a.id,
-                    path: a.src.clone(),
+                .map(|m| MarkRef {
+                    id: m.id,
+                    offset: m.offset,
                 })
                 .collect()
         })
@@ -1486,7 +1537,7 @@ impl Engine {
             node: id,
             key: self.comp.views[view].tree.key_of(id).map(str::to_string),
             text,
-            attachments: self.input_attachments(view, id),
+            marks: self.input_marks(view, id),
         });
         self.comp.views[view]
             .tree
@@ -1513,7 +1564,7 @@ impl Engine {
             node: id,
             key: self.comp.views[view].tree.key_of(id).map(str::to_string),
             text,
-            attachments: self.input_attachments(view, id),
+            marks: self.input_marks(view, id),
             cursor,
             caret,
             source,
@@ -1543,7 +1594,10 @@ impl Engine {
         let geometry = tree.input_geometry(id)?;
         let input = tree.input(id)?;
         let cursor = input.cursor();
-        Some((cursor, geometry.caret_rect(input.text(), cursor, fonts)))
+        Some((
+            cursor,
+            geometry.caret_rect(input.text(), input.marks(), cursor, fonts),
+        ))
     }
 
     fn bar_at(&self, view: usize, point: (f32, f32)) -> Option<NodeId> {
@@ -1752,11 +1806,12 @@ impl Engine {
             return;
         };
         let text = input.text().to_string();
+        let marks = input.marks().to_vec();
         let cursor = input.cursor();
         let Some(px) = tree.resolved_px(focus) else {
             return;
         };
-        let caret = geometry.caret_rect(&text, cursor, &self.fonts);
+        let caret = geometry.caret_rect(&text, &marks, cursor, &self.fonts);
         let margin = px * 1.1;
         let current = tree.scroll_state(scroller).map_or(0.0, |s| s.target);
         if let Some(target) = area.target_to_reveal(caret, current, margin)

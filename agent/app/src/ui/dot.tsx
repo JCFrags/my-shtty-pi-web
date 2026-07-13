@@ -1,9 +1,10 @@
 import { Box } from "pixel-react";
 import type { Rgba } from "pixel-react";
 
-import type { Ctx } from "../theme";
+import { useCtx } from "../theme";
 
-export function Dot({ ctx: { rem }, color }: { ctx: Ctx; color: Rgba }) {
+export function Dot({ color }: { color: Rgba }) {
+  const { rem } = useCtx();
   return (
     <Box
       style={{

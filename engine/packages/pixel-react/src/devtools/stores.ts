@@ -62,9 +62,10 @@ export interface TimeSpan {
   start: number;
   dur: number;
   depth: number;
-  lane: "react" | "bridge" | "engine" | "devtools-engine" | "interaction";
+  lane: "react" | "bridge" | "engine" | "devtools-engine" | "images" | "interaction";
   self?: number;
   arg?: number;
+  label?: string;
 }
 
 export interface CounterSample {

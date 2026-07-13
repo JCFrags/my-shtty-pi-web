@@ -4,10 +4,10 @@ import { Box, HIGHLIGHT_CAPTURES, highlight, Image, Text } from "pixel-react";
 import { parseInline } from "../markdown";
 import type { Item } from "../session";
 import { ToolRow } from "./tool";
-import type { Ctx } from "../theme";
+import { useCtx } from "../theme";
 
-export function Message({ ctx, item }: { ctx: Ctx; item: Item }) {
-  const { theme, rem } = ctx;
+export function Message({ item }: { item: Item }) {
+  const { theme, rem } = useCtx();
   if (item.kind === "user") {
     return (
       <Box
@@ -27,6 +27,7 @@ export function Message({ ctx, item }: { ctx: Ctx; item: Item }) {
                 key={i}
                 src={src}
                 style={{ height: rem * 5, cornerRadius: rem * 0.4 }}
+                placeholder={<Box style={{ background: theme.bgAlt }} />}
               />
             ))}
           </Box>
@@ -36,27 +37,27 @@ export function Message({ ctx, item }: { ctx: Ctx; item: Item }) {
     );
   }
   if (item.kind === "tool") {
-    return <ToolRow ctx={ctx} call={item.call} />;
+    return <ToolRow call={item.call} />;
   }
   const parts = segments(item.text);
   if (parts.length === 1 && !parts[0].code) {
-    return <Prose ctx={ctx} text={parts[0].text} />;
+    return <Prose text={parts[0].text} />;
   }
   return (
     <Box style={{ flexDirection: "column", gap: rem * 0.5 }}>
       {parts.map((part, i) =>
         part.code ? (
-          <CodeBlock key={i} ctx={ctx} language={part.language} code={part.text} />
+          <CodeBlock key={i} language={part.language} code={part.text} />
         ) : (
-          <Prose key={i} ctx={ctx} text={part.text} />
+          <Prose key={i} text={part.text} />
         )
       )}
     </Box>
   );
 }
 
-function Prose({ ctx, text }: { ctx: Ctx; text: string }) {
-  const { theme } = ctx;
+function Prose({ text }: { text: string }) {
+  const { theme } = useCtx();
   const { text: clean, spans } = useMemo(() => parseInline(text), [text]);
   const textSpans = useMemo(
     () =>
@@ -108,8 +109,8 @@ function segments(text: string): Segment[] {
   return out;
 }
 
-function CodeBlock({ ctx, language, code }: { ctx: Ctx; language: string; code: string }) {
-  const { theme, rem } = ctx;
+function CodeBlock({ language, code }: { language: string; code: string }) {
+  const { theme } = useCtx();
   const spans = useMemo(
     () =>
       highlight(code, language).map((s) => ({

@@ -1,15 +1,15 @@
-use pixel_core::{AttachmentRef, Engine, EngineEvent, Key, KeyEvent, NodeId, ProfileData, PxRect};
+use pixel_core::{Engine, EngineEvent, Key, KeyEvent, MarkRef, NodeId, ProfileData, PxRect};
 use serde_json::json;
 
 fn caret_json(caret: &PxRect) -> serde_json::Value {
     json!({ "x": caret.x, "y": caret.y, "w": caret.w, "h": caret.h })
 }
 
-fn attachments_json(attachments: &[AttachmentRef]) -> serde_json::Value {
+fn marks_json(marks: &[MarkRef]) -> serde_json::Value {
     json!(
-        attachments
+        marks
             .iter()
-            .map(|a| json!({ "id": a.id, "path": a.path }))
+            .map(|m| json!({ "id": m.id, "offset": m.offset }))
             .collect::<Vec<_>>()
     )
 }
@@ -69,7 +69,7 @@ pub fn event_json(event: &EngineEvent, engine: &Engine, ids: &[IdMap]) -> Option
             node,
             key,
             text,
-            attachments,
+            marks,
             cursor,
             caret,
             source,
@@ -79,7 +79,7 @@ pub fn event_json(event: &EngineEvent, engine: &Engine, ids: &[IdMap]) -> Option
             "node": ids.get(*view)?.ext(*node)?,
             "key": key,
             "text": text,
-            "attachments": attachments_json(attachments),
+            "marks": marks_json(marks),
             "cursor": cursor,
             "caret": caret_json(caret),
             "source": source.as_str(),
@@ -103,14 +103,14 @@ pub fn event_json(event: &EngineEvent, engine: &Engine, ids: &[IdMap]) -> Option
             node,
             key,
             text,
-            attachments,
+            marks,
         } => json!({
             "type": "submit",
             "view": view,
             "node": ids.get(*view)?.ext(*node)?,
             "key": key,
             "text": text,
-            "attachments": attachments_json(attachments),
+            "marks": marks_json(marks),
         }),
         EngineEvent::Scroll {
             view,
@@ -178,20 +178,18 @@ pub fn event_json(event: &EngineEvent, engine: &Engine, ids: &[IdMap]) -> Option
             "view": view,
             "text": text,
         }),
-        EngineEvent::Attachment {
+        EngineEvent::PasteImage {
             view,
             node,
             key,
-            id,
             path,
             width,
             height,
         } => json!({
-            "type": "attachment",
+            "type": "pasteImage",
             "view": view,
             "node": ids.get(*view)?.ext(*node)?,
             "key": key,
-            "id": id,
             "path": path,
             "width": width,
             "height": height,
@@ -218,6 +216,15 @@ pub fn event_json(event: &EngineEvent, engine: &Engine, ids: &[IdMap]) -> Option
         }),
         EngineEvent::Profile(data) => profile_json(data),
     };
+    // Emit time lets the JS side measure how long the event sat in the node
+    // event loop before its handler ran.
+    let mut value = value;
+    if let Some(obj) = value.as_object_mut() {
+        let at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0.0, |d| d.as_secs_f64() * 1000.0);
+        obj.insert("atMs".into(), serde_json::json!(at_ms));
+    }
     Some(value.to_string())
 }
 
@@ -233,6 +240,7 @@ fn profile_json(data: &ProfileData) -> serde_json::Value {
                 "depth": s.depth,
                 "view": s.view,
                 "arg": s.arg,
+                "label": s.label,
             })
         })
         .collect();

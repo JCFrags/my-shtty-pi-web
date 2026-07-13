@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { extname } from "node:path";
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { AttachmentRef, InputAttachment } from "pixel-react";
+import type { MarkRef, PastedImage } from "pixel-react";
 
 import { appendLog, createSession } from "./db/client";
 import { schedulePersist } from "./db/persist";
@@ -171,7 +171,7 @@ export class Session {
     return text.length > 22 ? `${text.slice(0, 21)}…` : text;
   }
 
-  send(text: string, attachments: AttachmentRef[] = []) {
+  send(text: string, attachments: { path: string }[] = []) {
     const clean = text.replace(/\uFFFC/g, "").trim();
     const images = attachments.flatMap((a) => {
       const media = IMAGE_MEDIA[extname(a.path).toLowerCase()];
@@ -359,8 +359,10 @@ class Store {
   settingsQuery = "";
   composerText = "";
   composerEpoch = 0;
-  composerAttachments: InputAttachment[] = [];
-  private attachmentsSeen = new Map<number, InputAttachment>();
+  composerMarks: MarkRef[] = [];
+  // Image data outlives its mark so undo after a pill delete rehydrates it.
+  private composerImages = new Map<number, PastedImage>();
+  private nextMarkId = 1;
   fontPath: string | null = null;
   fontId = 0;
 
@@ -443,31 +445,33 @@ class Store {
 
   clearComposer() {
     this.composerText = "";
-    this.composerAttachments = [];
-    this.attachmentsSeen.clear();
+    this.composerMarks = [];
+    this.composerImages.clear();
     this.composerEpoch += 1;
     this.notify();
   }
 
-  addComposerAttachment(attachment: InputAttachment) {
-    this.attachmentsSeen.set(attachment.id, attachment);
-    this.composerAttachments = [...this.composerAttachments, attachment];
-    this.notify();
+  addComposerImage(image: PastedImage): number {
+    const id = this.nextMarkId++;
+    this.composerImages.set(id, image);
+    return id;
   }
 
-  /// The engine's attachment list rides every change event; deleting a pill
-  /// in the input (or undoing) is reflected here.
-  syncComposerAttachments(refs: AttachmentRef[]) {
-    const current = this.composerAttachments;
+  composerImage(id: number): PastedImage | undefined {
+    return this.composerImages.get(id);
+  }
+
+  /// The live mark list rides every change event; deleting a pill in the
+  /// input (or undoing) is reflected here.
+  syncComposerMarks(marks: MarkRef[]) {
+    const current = this.composerMarks;
     if (
-      refs.length === current.length &&
-      refs.every((ref, i) => ref.id === current[i].id)
+      marks.length === current.length &&
+      marks.every((mark, i) => mark.id === current[i].id)
     ) {
       return;
     }
-    this.composerAttachments = refs.map(
-      (ref) => this.attachmentsSeen.get(ref.id) ?? { ...ref, width: 0, height: 0 }
-    );
+    this.composerMarks = marks;
     this.notify();
   }
 

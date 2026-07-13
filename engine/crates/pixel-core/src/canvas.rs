@@ -1,3 +1,5 @@
+use crate::text_input::{MARK_CHAR, Mark, mark_advance_at};
+
 type GlyphKey = (usize, char, u32);
 type GlyphCache = std::collections::HashMap<GlyphKey, (fontdue::Metrics, Vec<u8>)>;
 std::thread_local! {
@@ -90,13 +92,28 @@ impl Canvas {
         px: f32,
         color: [u8; 4],
     ) {
+        self.draw_marked(font, text, 0..text.len(), x, baseline, px, color, &[]);
+    }
+
+    // Mark sentinels reserve the anchored widget's width; the widget itself
+    // is a normal tree node painted by its own pass, not a glyph.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_marked(
+        &mut self,
+        font: &fontdue::Font,
+        text: &str,
+        range: std::ops::Range<usize>,
+        x: i32,
+        baseline: i32,
+        px: f32,
+        color: [u8; 4],
+        marks: &[Mark],
+    ) {
         let mut pen_x = x as f32;
         GLYPH_CACHE.with_borrow_mut(|cache| {
-            for ch in text.chars() {
-                if ch == crate::text_input::ATOM_CHAR {
-                    // Atom placeholders reserve pill width; the pill itself is
-                    // painted by the input's paint pass, not as a glyph.
-                    pen_x += crate::text_input::atom_advance(font, px);
+            for (i, ch) in text[range.clone()].char_indices() {
+                if ch == MARK_CHAR {
+                    pen_x += mark_advance_at(marks, range.start + i);
                     continue;
                 }
                 let (metrics, coverage) = cache
@@ -195,68 +212,42 @@ impl Canvas {
         }
     }
 
-    pub fn draw_image(
-        &mut self,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-        radius: [f32; 4],
-        image: tiny_skia::PixmapRef<'_>,
-    ) {
-        if w <= 0.0 || h <= 0.0 || image.width() == 0 || image.height() == 0 {
-            return;
-        }
+    // Source-over blit of an already-scaled premultiplied image (corner
+    // radius baked into its alpha), so per-frame image drawing never runs
+    // tiny-skia's per-pixel pattern shader.
+    pub fn blit_image(&mut self, x: f32, y: f32, image: tiny_skia::PixmapRef<'_>) {
         let (cx1, cy1, cx2, cy2) = self.clip_bounds();
-        if cx1 == cx2 || cy1 == cy2 {
+        let x0 = x.round() as i64;
+        let y0 = y.round() as i64;
+        let x1 = x0.max(cx1 as i64);
+        let y1 = y0.max(cy1 as i64);
+        let x2 = (x0 + i64::from(image.width())).min(cx2 as i64);
+        let y2 = (y0 + i64::from(image.height())).min(cy2 as i64);
+        if x2 <= x1 || y2 <= y1 {
             return;
         }
-        let Some(path) = rounded_rect_path(x, y, w, h, radius) else {
-            return;
-        };
-        let bounds = path.bounds();
-        let inside = self.clip_stack.is_empty()
-            || (bounds.left() >= cx1 as f32
-                && bounds.top() >= cy1 as f32
-                && bounds.right() <= cx2 as f32
-                && bounds.bottom() <= cy2 as f32);
-        let mask = if inside {
-            None
-        } else {
-            self.ensure_clip_mask();
-            self.clip_mask.as_ref().map(|(mask, _)| mask)
-        };
-        let Some(mut pixmap) =
-            tiny_skia::PixmapMut::from_bytes(&mut self.pixels, self.width, self.height)
-        else {
-            return;
-        };
-        let to_rect = tiny_skia::Transform::from_row(
-            w / image.width() as f32,
-            0.0,
-            0.0,
-            h / image.height() as f32,
-            x,
-            y,
-        );
-        let mut paint = tiny_skia::Paint {
-            shader: tiny_skia::Pattern::new(
-                image,
-                tiny_skia::SpreadMode::Pad,
-                tiny_skia::FilterQuality::Bilinear,
-                1.0,
-                to_rect,
-            ),
-            ..tiny_skia::Paint::default()
-        };
-        paint.anti_alias = true;
-        pixmap.fill_path(
-            &path,
-            &paint,
-            tiny_skia::FillRule::Winding,
-            tiny_skia::Transform::identity(),
-            mask,
-        );
+        let src = image.data();
+        let src_stride = image.width() as usize * 4;
+        let col0 = (x1 - x0) as usize * 4;
+        let col1 = (x2 - x0) as usize * 4;
+        for row in y1..y2 {
+            let src_off = (row - y0) as usize * src_stride;
+            let src_row = &src[src_off + col0..src_off + col1];
+            let dst_off = ((row as u32 * self.width + x1 as u32) * 4) as usize;
+            let dst_row = &mut self.pixels[dst_off..dst_off + src_row.len()];
+            for (dst, s) in dst_row.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
+                match s[3] {
+                    255 => dst.copy_from_slice(s),
+                    0 => {}
+                    sa => {
+                        let inv = 255 - u32::from(sa);
+                        for (d, &sv) in dst.iter_mut().zip(s) {
+                            *d = (u32::from(sv) + (u32::from(*d) * inv + 127) / 255).min(255) as u8;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn paint_path(&mut self, path: &tiny_skia::Path, color: [u8; 4], stroke_width: Option<f32>) {
@@ -336,7 +327,13 @@ impl Canvas {
     }
 }
 
-fn rounded_rect_path(x: f32, y: f32, w: f32, h: f32, radius: [f32; 4]) -> Option<tiny_skia::Path> {
+pub(crate) fn rounded_rect_path(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    radius: [f32; 4],
+) -> Option<tiny_skia::Path> {
     if w <= 0.0 || h <= 0.0 {
         return None;
     }
@@ -380,17 +377,45 @@ fn rounded_rect_path(x: f32, y: f32, w: f32, h: f32, radius: [f32; 4]) -> Option
 }
 
 pub fn measure_text(font: &fontdue::Font, text: &str, px: f32) -> f32 {
+    measure_marked(font, text, 0..text.len(), px, &[])
+}
+
+pub(crate) fn measure_marked(
+    font: &fontdue::Font,
+    text: &str,
+    range: std::ops::Range<usize>,
+    px: f32,
+    marks: &[Mark],
+) -> f32 {
     ADVANCE_CACHE.with_borrow_mut(|cache| {
-        text.chars()
-            .map(|ch| {
-                if ch == crate::text_input::ATOM_CHAR {
-                    return crate::text_input::atom_advance(font, px);
+        text[range.clone()]
+            .char_indices()
+            .map(|(i, ch)| {
+                if ch == MARK_CHAR {
+                    return mark_advance_at(marks, range.start + i);
                 }
                 *cache
                     .entry((font.file_hash(), ch, px.to_bits()))
                     .or_insert_with(|| font.metrics(ch, px).advance_width)
             })
             .sum()
+    })
+}
+
+pub(crate) fn char_advance(
+    font: &fontdue::Font,
+    ch: char,
+    offset: usize,
+    px: f32,
+    marks: &[Mark],
+) -> f32 {
+    if ch == MARK_CHAR {
+        return mark_advance_at(marks, offset);
+    }
+    ADVANCE_CACHE.with_borrow_mut(|cache| {
+        *cache
+            .entry((font.file_hash(), ch, px.to_bits()))
+            .or_insert_with(|| font.metrics(ch, px).advance_width)
     })
 }
 
@@ -519,9 +544,35 @@ mod tests {
     }
 
     #[test]
+    fn blit_image_copies_opaque_blends_alpha_and_respects_clip() {
+        let mut source = tiny_skia::Pixmap::new(3, 1).unwrap();
+        source.pixels_mut()[0] = tiny_skia::ColorU8::from_rgba(200, 0, 0, 255).premultiply();
+        source.pixels_mut()[1] = tiny_skia::ColorU8::from_rgba(0, 200, 0, 128).premultiply();
+        source.pixels_mut()[2] = tiny_skia::ColorU8::from_rgba(0, 0, 200, 255).premultiply();
+
+        let mut canvas = Canvas::new(4, 1);
+        canvas.fill([0, 0, 100, 255]);
+        canvas.push_clip(0.0, 0.0, 3.0, 1.0);
+        canvas.blit_image(1.0, 0.0, source.as_ref());
+        canvas.pop_clip();
+
+        assert_eq!(&canvas.pixels[0..4], &[0, 0, 100, 255], "left untouched");
+        assert_eq!(&canvas.pixels[4..8], &[200, 0, 0, 255], "opaque copied");
+        let blended = &canvas.pixels[8..12];
+        assert!(blended[1] > 90, "semi-transparent green blended in");
+        assert!(blended[2] > 40, "background blue survives under alpha");
+        assert_eq!(
+            &canvas.pixels[12..16],
+            &[0, 0, 100, 255],
+            "clip stops the last source pixel"
+        );
+    }
+
+    #[test]
     fn blend_mask_clips_out_of_bounds_positions() {
         let mut canvas = Canvas::new(2, 2);
         canvas.blend_mask(-1, -1, 3, 3, &[255; 9], [10, 20, 30, 255]);
         assert_eq!(&canvas.pixels[0..4], &[10, 20, 30, 255]);
     }
 }
+

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use pixel_core::{
     Align, Border, BorderSide, Color, Dimension, Edges, Engine, FlexDirection, HighlightArea,
     ImageProps, InputProps, Inset, InsetValue, Justify, NodeId, Overflow, Position, Props,
-    ScrollbarStyle, SelectionMode, Style, TextSpan,
+    ScrollbarStyle, SelectionMode, SlotKind, Style, TextSpan,
 };
 use serde::Deserialize;
 
@@ -120,6 +120,10 @@ enum Op {
         end: usize,
         text: String,
     },
+    InsertMark {
+        id: u32,
+        mark: u64,
+    },
 }
 
 fn register_font(engine: &mut Engine, path: &str) -> String {
@@ -164,6 +168,8 @@ struct PropsDto {
     hidden: bool,
     input: Option<InputDto>,
     image: Option<ImageDto>,
+    slot: Option<String>,
+    mark: Option<u64>,
     content_height: Option<f32>,
     scroll_events: bool,
     wheel_events: bool,
@@ -491,6 +497,12 @@ impl PropsDto {
                 }
             }),
             image: self.image.map(|i| ImageProps { src: i.src }),
+            slot: match self.slot.as_deref() {
+                Some("placeholder") => Some(SlotKind::Placeholder),
+                Some("error") => Some(SlotKind::Error),
+                _ => None,
+            },
+            mark: self.mark,
             content_height: self.content_height,
             scroll_events: self.scroll_events,
             wheel_events: self.wheel_events,
@@ -661,6 +673,11 @@ fn apply_op(
         } => {
             if let Some(node) = map.node(id) {
                 engine.splice_input(view, node, start, end, &text);
+            }
+        }
+        Op::InsertMark { id, mark } => {
+            if let Some(node) = map.node(id) {
+                engine.insert_input_mark(view, node, mark);
             }
         }
     }

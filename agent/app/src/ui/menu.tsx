@@ -2,12 +2,12 @@ import { Box, Text } from "pixel-react";
 import type { EngineInfo } from "pixel-react";
 
 import { menus } from "../menu";
-import type { Ctx } from "../theme";
+import { useCtx } from "../theme";
 
 const VISIBLE_ROWS = 8;
 
-export function TriggerMenuOverlay({ ctx, info }: { ctx: Ctx; info: EngineInfo }) {
-  const { theme, rem } = ctx;
+export function TriggerMenuOverlay({ info }: { info: EngineInfo }) {
+  const { theme, rem } = useCtx();
   const view = menus.view();
   if (!view) return null;
 
@@ -49,7 +49,7 @@ export function TriggerMenuOverlay({ ctx, info }: { ctx: Ctx; info: EngineInfo }
           loading…
         </Text>
       )}
-      {above > 0 && <MoreRow ctx={ctx} count={above} />}
+      {above > 0 && <MoreRow count={above} />}
       {rows.map((item, i) => {
         const selected = start + i === view.at;
         return (
@@ -88,12 +88,13 @@ export function TriggerMenuOverlay({ ctx, info }: { ctx: Ctx; info: EngineInfo }
           </Box>
         );
       })}
-      {below > 0 && <MoreRow ctx={ctx} count={below} />}
+      {below > 0 && <MoreRow count={below} />}
     </Box>
   );
 }
 
-function MoreRow({ ctx: { theme, rem }, count }: { ctx: Ctx; count: number }) {
+function MoreRow({ count }: { count: number }) {
+  const { theme, rem } = useCtx();
   return (
     <Text
       style={{

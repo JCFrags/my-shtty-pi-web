@@ -7,6 +7,7 @@ import {
   Container,
   DEVTOOLS_VIEW,
   getBridge,
+  MarkRef,
   reconciler,
 } from "./host-config";
 import type { EngineInfo } from "./native";
@@ -27,6 +28,7 @@ import {
   inspectorStore,
   layoutStore,
   LayoutRect,
+  profilerStore,
   recordSpan,
 } from "./devtools/stores";
 import type { LogLevel } from "./devtools/store";
@@ -38,8 +40,8 @@ export type {
   TextProps,
   TextSpan,
   InputProps,
-  InputAttachment,
-  AttachmentRef,
+  MarkRef,
+  PastedImage,
   CaretInfo,
   ChangeInfo,
   ChangeSource,
@@ -54,8 +56,9 @@ export { HIGHLIGHT_CAPTURES, diff, highlight } from "./native";
 export { openDevtools, closeDevtools, toggleDevtools };
 
 /**
- * While set, these unmodified keys bypass the focused input (including Enter
- * submit) and arrive at onKey instead. Pass [] to restore normal handling.
+ * 
+ * i think this api exists to support capturing a click to focus the input, 
+ * this is dumb we can abstract this with a more cannonical capture/bubble phase
  */
 export function setKeyCapture(keys: string[]): void {
   const bridge = getBridge();
@@ -93,8 +96,12 @@ export interface PixelRoot {
   closeDevtools(): void;
 }
 
+/**
+ * this looks like a really sus data type to me (probably should be a discriminated union over type?)
+ */
 interface EngineEventJson {
   type: string;
+  atMs?: number;
   view?: number;
   node?: number;
   x?: number;
@@ -111,7 +118,6 @@ interface EngineEventJson {
   error?: string | null;
   path?: string;
   id?: number;
-  attachments?: Array<{ id: number; path: string }>;
   cursor?: number;
   caret?: { x: number; y: number; w: number; h: number };
   source?: string;
@@ -134,7 +140,8 @@ interface EngineEventJson {
     arg?: number | null;
   }>;
   counters?: Array<{ name: string; at: number; value: number }>;
-  marks?: Array<{ name: string; label: string; start: number; dur: number; view: number }>;
+  // input mark refs on change/submit; profiler marks on profile
+  marks?: unknown[];
 }
 
 export function createRoot(options: RootOptions = {}): PixelRoot {
@@ -198,10 +205,11 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
       }
       case "change": {
         const props = bridge.propsById[view]?.get(event.node!);
-        props?.onChange?.(event.text!, event.attachments ?? [], {
+        props?.onChange?.(event.text!, {
           cursor: event.cursor ?? 0,
           ...(event.caret ?? { x: 0, y: 0, w: 0, h: 0 }),
           source: (event.source as ChangeSource) ?? "edit",
+          marks: (event.marks as MarkRef[] | undefined) ?? [],
         });
         break;
       }
@@ -215,13 +223,12 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
       }
       case "submit": {
         const props = bridge.propsById[view]?.get(event.node!);
-        props?.onSubmit?.(event.text!, event.attachments ?? []);
+        props?.onSubmit?.(event.text!, (event.marks as MarkRef[] | undefined) ?? []);
         break;
       }
-      case "attachment": {
+      case "pasteImage": {
         const props = bridge.propsById[view]?.get(event.node!);
-        props?.onAttach?.({
-          id: event.id!,
+        props?.onPasteImage?.({
           path: event.path!,
           width: event.width!,
           height: event.height!,
@@ -317,7 +324,13 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
           epochMs: event.epochMs ?? 0,
           spans: event.spans ?? [],
           counters: event.counters ?? [],
-          marks: event.marks ?? [],
+          marks: (event.marks as Array<{
+            name: string;
+            label: string;
+            start: number;
+            dur: number;
+            view: number;
+          }> | undefined) ?? [],
         });
         break;
       case "error":
@@ -350,7 +363,20 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
 
   bridge.engine.start((err, json) => {
     if (err) return;
-    dispatch(JSON.parse(json) as EngineEventJson);
+    const event = JSON.parse(json) as EngineEventJson;
+    dispatch(event);
+    // Spans the whole engine-emit → handler-done window, so time an event
+    // spends queued behind a busy node event loop is visible in the profile.
+    if (event.atMs && event.type !== "profile" && profilerStore.get().recording) {
+      const now = performance.timeOrigin + performance.now();
+      recordSpan({
+        name: `event ${event.type}`,
+        start: event.atMs,
+        dur: Math.max(now - event.atMs, 0.01),
+        depth: 0,
+        lane: "bridge",
+      });
+    }
   });
 
   if (!devtoolsEnabled || options.onRightClick) {

@@ -143,6 +143,39 @@ export function requestLayout() {
   b.flush();
 }
 
+// A heartbeat that misses its slot means the node event loop was blocked by
+// synchronous work; the missed window becomes a span so profile gaps where
+// "nothing ran" get an explanation.
+const STALL_TICK_MS = 25;
+const STALL_REPORT_MS = 60;
+let stallTimer: ReturnType<typeof setInterval> | null = null;
+let lastTick = 0;
+
+function startStallWatch() {
+  lastTick = performance.timeOrigin + performance.now();
+  stallTimer = setInterval(() => {
+    const now = performance.timeOrigin + performance.now();
+    const gap = now - lastTick;
+    if (gap > STALL_REPORT_MS) {
+      pendingSpans.push({
+        name: `js event-loop stall (${Math.round(gap)}ms)`,
+        start: lastTick,
+        dur: gap,
+        depth: 1,
+        lane: "bridge",
+      });
+    }
+    lastTick = now;
+  }, STALL_TICK_MS);
+}
+
+function stopStallWatch() {
+  if (stallTimer) {
+    clearInterval(stallTimer);
+    stallTimer = null;
+  }
+}
+
 export function startRecording() {
   pendingSpans.length = 0;
   profilerStore.set({
@@ -151,15 +184,18 @@ export function startRecording() {
     session: null,
     startedAt: Date.now(),
   });
+  startStallWatch();
   engineOp({ op: "profileStart" });
 }
 
 export function stopRecording() {
+  stopStallWatch();
   profilerStore.update((s) => ({ ...s, recording: false, pendingStop: true }));
   engineOp({ op: "profileStop" });
 }
 
 export function clearRecording() {
+  stopStallWatch();
   pendingSpans.length = 0;
   profilerStore.set({ recording: false, pendingStop: false, session: null, startedAt: 0 });
 }
@@ -173,9 +209,36 @@ interface EngineProfileEvent {
     depth: number;
     view: number;
     arg?: number | null;
+    label?: string | null;
   }>;
   counters?: Array<{ name: string; at: number; value: number }>;
   marks?: Array<{ name: string; label: string; start: number; dur: number; view: number }>;
+}
+
+const IMAGE_LANE_NAMES = new Set(["image.wait", "image.decode"]);
+
+// Waits can overlap (several images in flight), so unlike call-stack lanes
+// their rows are packed here: each wait takes a free row pair, its decode
+// sits on the row below, matched by the shared per-image arg.
+function packImageRows(spans: TimeSpan[]) {
+  const waits = spans.filter((s) => s.lane === "images" && s.name === "image.wait");
+  const rowEnds: number[] = [];
+  const rowByArg = new Map<number, number>();
+  for (const wait of waits) {
+    let row = rowEnds.findIndex((end) => wait.start >= end + 0.1);
+    if (row === -1) {
+      row = rowEnds.length;
+      rowEnds.push(0);
+    }
+    rowEnds[row] = wait.start + wait.dur;
+    wait.depth = row * 2;
+    if (wait.arg != null) rowByArg.set(wait.arg, row * 2);
+  }
+  for (const span of spans) {
+    if (span.lane === "images" && span.name === "image.decode") {
+      span.depth = (span.arg != null ? rowByArg.get(span.arg) ?? 0 : 0) + 1;
+    }
+  }
 }
 
 export function onEngineProfile(data: EngineProfileEvent) {
@@ -184,10 +247,16 @@ export function onEngineProfile(data: EngineProfileEvent) {
     start: data.epochMs + s.start,
     dur: s.dur,
     depth: s.depth,
-    lane: s.view === DEVTOOLS_VIEW ? "devtools-engine" : "engine",
+    lane: IMAGE_LANE_NAMES.has(s.name)
+      ? "images"
+      : s.view === DEVTOOLS_VIEW
+        ? "devtools-engine"
+        : "engine",
     arg: s.arg ?? undefined,
+    label: s.label ?? undefined,
   }));
   const spans = [...pendingSpans, ...engineSpans].sort((a, b) => a.start - b.start);
+  packImageRows(spans);
   pendingSpans.length = 0;
   if (spans.length === 0) {
     profilerStore.update((s) => ({ ...s, pendingStop: false, session: null }));

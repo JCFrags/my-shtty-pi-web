@@ -315,7 +315,7 @@ impl DocSelectionState {
         };
         let font = &fonts[geometry.font.min(fonts.len() - 1)];
         let px = geometry.px;
-        let lines = wrap_lines(text, font, px, geometry.max_width);
+        let lines = wrap_lines(text, font, px, geometry.max_width, &[]);
         let line = line_of_offset(&lines, focus.offset);
         let line_h = line_height(font, px);
         let local_x = measure_text(font, &text[lines[line].start..focus.offset], px);
@@ -333,6 +333,7 @@ impl DocSelectionState {
                     font,
                     px,
                     geometry.max_width,
+                    &[],
                 ),
             })
         } else {
@@ -453,7 +454,7 @@ impl DocSelectionState {
 
 fn offset_at(doc: &impl DocLayout, id: NodeId, point: (f32, f32), fonts: &[fontdue::Font]) -> usize {
     match (doc.text_geometry(id), doc.text_of(id)) {
-        (Some(geometry), Some(text)) => geometry.offset_at(text, point, fonts),
+        (Some(geometry), Some(text)) => geometry.offset_at(text, &[], point, fonts),
         _ => 0,
     }
 }
@@ -531,7 +532,7 @@ fn caret_point(doc: &impl DocLayout, pos: DocPos, fonts: &[fontdue::Font]) -> Op
     let geometry = doc.text_geometry(pos.node)?;
     let text = doc.text_of(pos.node)?;
     let font = &fonts[geometry.font.min(fonts.len() - 1)];
-    let (x, y) = offset_to_point(text, pos.offset, font, geometry.px, geometry.max_width);
+    let (x, y) = offset_to_point(text, pos.offset, font, geometry.px, geometry.max_width, &[]);
     Some((
         geometry.origin.0 + x,
         geometry.origin.1 + y,

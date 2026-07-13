@@ -2,10 +2,10 @@ import { Box, Text } from "pixel-react";
 
 import { PALETTE_ACTIONS } from "../palette";
 import { store } from "../session";
-import type { Ctx } from "../theme";
+import { useCtx } from "../theme";
 
-export function Palette({ ctx }: { ctx: Ctx }) {
-  const { theme, rem } = ctx;
+export function Palette() {
+  const { theme, rem } = useCtx();
   return (
     <Box
       style={{

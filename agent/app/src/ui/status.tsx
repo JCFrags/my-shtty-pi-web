@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { Box, Text } from "pixel-react";
 
 import type { Ask, Session } from "../session";
-import type { Ctx } from "../theme";
+import { useCtx } from "../theme";
 
-export function AskBox({ ctx: { theme, rem }, ask }: { ctx: Ctx; ask: Ask }) {
+export function AskBox({ ask }: { ask: Ask }) {
+  const { theme, rem } = useCtx();
   return (
     <Box
       style={{
@@ -25,8 +26,8 @@ export function AskBox({ ctx: { theme, rem }, ask }: { ctx: Ctx; ask: Ask }) {
   );
 }
 
-export function WorkingStatus({ ctx, session }: { ctx: Ctx; session: Session }) {
-  const { theme, rem } = ctx;
+export function WorkingStatus({ session }: { session: Session }) {
+  const { theme, rem } = useCtx();
   const [frame, setFrame] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setFrame((f) => f + 1), 250);

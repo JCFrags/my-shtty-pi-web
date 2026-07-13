@@ -1,8 +1,10 @@
 use std::ops::Range;
 
-use crate::canvas::measure_text;
+use crate::canvas::{char_advance, measure_marked};
+use crate::text_input::Mark;
 
-// what?
+// Taffy rounds layout to whole pixels, so wrap widths get a hair of slack to
+// keep paint from wrapping a line the layout didn't.
 pub(crate) const WRAP_SLACK: f32 = 1.0;
 
 pub fn wrap_lines(
@@ -10,6 +12,7 @@ pub fn wrap_lines(
     font: &fontdue::Font,
     px: f32,
     max_width: Option<f32>,
+    marks: &[Mark],
 ) -> Vec<Range<usize>> {
     let mut lines = Vec::new();
     let mut start = 0;
@@ -17,7 +20,7 @@ pub fn wrap_lines(
         let end = text[start..].find('\n').map_or(text.len(), |i| start + i);
         match max_width {
             None => lines.push(start..end),
-            Some(width) => wrap_logical_line(text, start..end, font, px, width, &mut lines),
+            Some(width) => wrap_logical_line(text, start..end, font, px, width, marks, &mut lines),
         }
         if end == text.len() {
             break;
@@ -27,12 +30,14 @@ pub fn wrap_lines(
     lines
 }
 
+#[allow(clippy::too_many_arguments)]
 fn wrap_logical_line(
     text: &str,
     line: Range<usize>,
     font: &fontdue::Font,
     px: f32,
     max_width: f32,
+    marks: &[Mark],
     out: &mut Vec<Range<usize>>,
 ) {
     if line.is_empty() {
@@ -49,7 +54,7 @@ fn wrap_logical_line(
             .len()
             .checked_add(cursor)
             .expect("in bounds");
-        let word_w = measure_text(font, &text[cursor..word_end], px);
+        let word_w = measure_marked(font, text, cursor..word_end, px, marks);
         if pen > 0.0 && pen + word_w > max_width {
             out.push(line_start..cursor);
             line_start = cursor;
@@ -63,12 +68,13 @@ fn wrap_logical_line(
                 font,
                 px,
                 max_width,
+                marks,
                 &mut line_start,
                 out,
             );
             continue;
         }
-        pen += measure_text(font, &text[cursor..chunk_end], px);
+        pen += measure_marked(font, text, cursor..chunk_end, px, marks);
         cursor = chunk_end;
     }
     out.push(line_start..line.end);
@@ -97,14 +103,14 @@ fn break_long_word(
     font: &fontdue::Font,
     px: f32,
     max_width: f32,
+    marks: &[Mark],
     line_start: &mut usize,
     out: &mut Vec<Range<usize>>,
 ) -> usize {
     let mut pen = 0.0f32;
     let mut cursor = from;
     for (i, c) in text[from..limit].char_indices() {
-        let mut buf = [0u8; 4];
-        let advance = measure_text(font, c.encode_utf8(&mut buf), px);
+        let advance = char_advance(font, c, from + i, px, marks);
         if pen > 0.0 && pen + advance > max_width {
             out.push(*line_start..from + i);
             *line_start = from + i;
@@ -129,6 +135,7 @@ pub fn line_of_offset(lines: &[Range<usize>], offset: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canvas::measure_text;
 
     static FONT_BYTES: &[u8] =
         include_bytes!("../../../examples/typing/assets/JetBrainsMono-Regular.ttf");
@@ -144,7 +151,7 @@ mod tests {
     #[test]
     fn no_max_width_gives_logical_lines() {
         let f = font();
-        let lines = wrap_lines("one\ntwo\n\nthree", &f, 16.0, None);
+        let lines = wrap_lines("one\ntwo\n\nthree", &f, 16.0, None, &[]);
         assert_eq!(
             parts("one\ntwo\n\nthree", &lines),
             ["one", "two", "", "three"]
@@ -156,7 +163,7 @@ mod tests {
         let f = font();
         let ch = measure_text(&f, "a", 16.0);
         let text = "alpha beta gamma delta";
-        let lines = wrap_lines(text, &f, 16.0, Some(ch * 12.0));
+        let lines = wrap_lines(text, &f, 16.0, Some(ch * 12.0), &[]);
         assert!(lines.len() > 1, "{lines:?}");
         for pair in lines.windows(2) {
             assert_eq!(pair[0].end, pair[1].start, "contiguous coverage");
@@ -179,7 +186,7 @@ mod tests {
         let f = font();
         let ch = measure_text(&f, "a", 16.0);
         let text = "aaaaaaaaaaaaaaaaaaaa";
-        let lines = wrap_lines(text, &f, 16.0, Some(ch * 6.0));
+        let lines = wrap_lines(text, &f, 16.0, Some(ch * 6.0), &[]);
         assert!(lines.len() >= 3, "{lines:?}");
         for line in &lines {
             assert!(line.end - line.start <= 6);
@@ -208,7 +215,7 @@ mod tests {
     #[test]
     fn empty_text_is_one_empty_line() {
         let f = font();
-        let lines = wrap_lines("", &f, 16.0, Some(100.0));
+        let lines = wrap_lines("", &f, 16.0, Some(100.0), &[]);
         assert_eq!(lines, vec![0..0]);
     }
 }

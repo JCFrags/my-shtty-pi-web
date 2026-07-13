@@ -1,15 +1,12 @@
 use std::ops::Range;
 use std::time::Instant;
 
-use crate::canvas::{Canvas, measure_text};
+use crate::canvas::{Canvas, measure_marked, measure_text};
+use crate::image_cache::ImageStatus;
 use crate::style::{Color, Overflow};
-use crate::text_input::{Atom, caret_width, offset_to_point, pill_geometry};
-use crate::tree::{NodeId, PxRect, TextSpan, Tree};
+use crate::text_input::{Mark, caret_width, offset_to_point};
+use crate::tree::{NodeId, PxRect, SlotKind, TextSpan, Tree};
 use crate::wrap::wrap_lines;
-
-const PILL_BG: Color = [38, 79, 155, 255];
-const PILL_BORDER: Color = [98, 145, 220, 200];
-const PILL_LABEL: Color = [219, 234, 254, 255];
 
 #[derive(Default)]
 struct PaintStats {
@@ -164,16 +161,29 @@ fn paint_node(
 
     if let Some(image) = &node.image {
         timed(stats.as_mut().map(|s| &mut s.images), || {
-            crate::image_cache::with_image(&image.src, |pixmap| {
-                canvas.draw_image(
-                    rect.x,
-                    rect.y,
-                    rect.w,
-                    rect.h,
-                    node.style.corner_radius,
-                    pixmap,
-                );
-            });
+            match crate::image_cache::status(&image.src) {
+                ImageStatus::Ready => {
+                    crate::image_cache::with_scaled_image(
+                        &image.src,
+                        rect.w.round().max(0.0) as u32,
+                        rect.h.round().max(0.0) as u32,
+                        node.style.corner_radius,
+                        |pixmap| canvas.blit_image(rect.x, rect.y, pixmap),
+                    );
+                }
+                ImageStatus::Failed => {
+                    let has_error_slot = node.children.iter().any(|&child| {
+                        tree.get(child)
+                            .is_some_and(|n| n.slot == Some(SlotKind::Error))
+                    });
+                    if !has_error_slot {
+                        paint_broken_image(canvas, rect, node.resolved.px, node.resolved.color);
+                    }
+                }
+                // While decoding only the node's own background shows; a
+                // placeholder slot paints as a child below.
+                ImageStatus::Pending => {}
+            }
         });
     }
 
@@ -219,8 +229,12 @@ fn paint_node(
                 .style
                 .wrap
                 .then(|| (rect.w - padding.0 - padding.2).max(0.0) + crate::wrap::WRAP_SLACK);
+            let marks = node
+                .input
+                .as_ref()
+                .map_or(&[][..], |state| state.input.marks());
             let lines = timed(stats.as_mut().map(|s| &mut s.wrap), || {
-                wrap_lines(text, font, px, wrap)
+                wrap_lines(text, font, px, wrap, marks)
             });
             let line_h = line_metrics.new_line_size;
             if node.spans.iter().any(|s| s.background.is_some()) {
@@ -264,7 +278,8 @@ fn paint_node(
             if let Some((selection, color)) = selection {
                 timed(stats.as_mut().map(|s| &mut s.selection), || {
                     paint_selection(
-                        canvas, text, &lines, &selection, origin, font, px, line_h, visible, color,
+                        canvas, text, &lines, &selection, origin, font, px, line_h, visible,
+                        color, marks,
                     )
                 });
             }
@@ -279,7 +294,16 @@ fn paint_node(
                     }
                     let baseline = (top + line_metrics.ascent) as i32;
                     if node.spans.is_empty() {
-                        canvas.draw_text(font, &text[line.clone()], origin.0 as i32, baseline, px, color);
+                        canvas.draw_marked(
+                            font,
+                            text,
+                            line.clone(),
+                            origin.0 as i32,
+                            baseline,
+                            px,
+                            color,
+                            marks,
+                        );
                         continue;
                     }
                     let mut x = origin.0;
@@ -317,21 +341,11 @@ fn paint_node(
                     stats.glyph_count += text[line.clone()].chars().count() as u64;
                 }
             }
-            if let Some(state) = &node.input {
-                for atom in state.input.atoms() {
-                    let (x, y) = offset_to_point(text, atom.offset, font, px, wrap);
-                    let top = origin.1 + y;
-                    if top + line_h < visible.y || top > visible.y + visible.h {
-                        continue;
-                    }
-                    paint_atom_pill(canvas, font, origin.0 + x, top, px, atom);
-                }
-            }
             if let Some(state) = &node.input
                 && state.input.selection().is_none()
                 && tree.focus() == Some(id)
             {
-                let (x, y) = offset_to_point(text, state.input.cursor(), font, px, wrap);
+                let (x, y) = offset_to_point(text, state.input.cursor(), font, px, wrap, marks);
                 canvas.fill_rounded_rect(
                     origin.0 + x,
                     origin.1 + y,
@@ -345,6 +359,11 @@ fn paint_node(
     }
 
     for &child in &node.children {
+        if tree.get(child).is_some_and(|n| {
+            (n.slot.is_some() && !n.slot_visible) || (n.mark.is_some() && !n.mark_visible)
+        }) {
+            continue;
+        }
         paint_node(
             tree,
             child,
@@ -364,42 +383,27 @@ fn paint_node(
     }
 }
 
-fn paint_atom_pill(canvas: &mut Canvas, font: &fontdue::Font, x: f32, y: f32, px: f32, atom: &Atom) {
-    let g = pill_geometry(font, px);
-    let top = y + g.inset;
-    let radius = [(g.h * 0.22).max(2.0); 4];
-    canvas.fill_rounded_rect(x, top, g.w, g.h, radius, PILL_BG);
-    canvas.stroke_rounded_rect(x, top, g.w, g.h, radius, 1.0, PILL_BORDER);
-    let thumb = g.h - 2.0 * g.thumb_pad;
-    let drew_thumb = crate::image_cache::with_image(&atom.src, |pixmap| {
-        canvas.draw_image(
-            x + g.pad,
-            top + g.thumb_pad,
-            thumb,
-            thumb,
-            [thumb * 0.25; 4],
-            pixmap,
-        );
-    })
-    .is_some();
-    let label_x = if drew_thumb {
-        x + g.pad + thumb + g.gap
-    } else {
-        x + (g.w - g.label_w) / 2.0
-    };
-    if let Some(metrics) = font.horizontal_line_metrics(g.label_px) {
-        let baseline = top + (g.h + metrics.ascent + metrics.descent) / 2.0;
-        canvas.push_clip(x, top, g.w, g.h);
-        canvas.draw_text(
-            font,
-            &atom.label,
-            label_x.round() as i32,
-            baseline.round() as i32,
-            g.label_px,
-            PILL_LABEL,
-        );
-        canvas.pop_clip();
+// Browser-style broken-image indicator: a muted outlined frame with a dot,
+// centered and never scaled up. Apps replace it with an Error slot.
+fn paint_broken_image(canvas: &mut Canvas, rect: PxRect, px: f32, color: Color) {
+    let side = (px * 1.5).min(rect.w * 0.6).min(rect.h * 0.6);
+    if side < 4.0 {
+        return;
     }
+    let muted = [color[0], color[1], color[2], 90];
+    let x = rect.x + (rect.w - side) / 2.0;
+    let y = rect.y + (rect.h - side) / 2.0;
+    let stroke = (side / 12.0).max(1.0);
+    canvas.stroke_rounded_rect(x, y, side, side, [side * 0.18; 4], stroke, muted);
+    let dot = side * 0.18;
+    canvas.fill_rounded_rect(
+        x + side * 0.3 - dot / 2.0,
+        y + side * 0.34 - dot / 2.0,
+        dot,
+        dot,
+        [dot; 4],
+        muted,
+    );
 }
 
 fn fill_bands(canvas: &mut Canvas, bands: &[PxRect], clip: PxRect, color: Color) {
@@ -510,6 +514,7 @@ fn paint_selection(
     line_h: f32,
     visible: PxRect,
     color: Color,
+    marks: &[Mark],
 ) {
     let newline_w = measure_text(font, " ", px);
     for (i, line) in lines.iter().enumerate() {
@@ -524,8 +529,8 @@ fn paint_selection(
         if overlaps && top + line_h >= visible.y {
             let from = selection.start.max(line.start);
             let to = selection.end.min(line.end);
-            let x1 = measure_text(font, &text[line.start..from], px);
-            let mut x2 = measure_text(font, &text[line.start..to], px);
+            let x1 = measure_marked(font, text, line.start..from, px, marks);
+            let mut x2 = measure_marked(font, text, line.start..to, px, marks);
             if selection.end > line.end && text[line.end..].starts_with('\n') {
                 x2 += newline_w;
             }
@@ -636,8 +641,17 @@ mod tests {
         tree.flush_layout(std::slice::from_ref(&font), 16.0);
         let node = tree.children(tree.root())[0];
         let rect = tree.rect(node).unwrap();
-        assert_eq!((rect.w, rect.h), (40.0, 20.0), "height follows aspect");
+        assert_eq!(
+            (rect.w, rect.h),
+            (40.0, 20.0),
+            "height follows aspect before the decode lands"
+        );
 
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !crate::image_cache::drain_completed().any {
+            assert!(std::time::Instant::now() < deadline, "decode never landed");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         let mut canvas = Canvas::new(100, 100);
         paint(&tree, &mut canvas, std::slice::from_ref(&font), None);
         let center = &canvas.pixels[((10 * 100 + 20) * 4) as usize..][..4];

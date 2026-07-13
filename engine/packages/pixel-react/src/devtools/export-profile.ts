@@ -27,7 +27,8 @@ const GLOSSARY = {
       "anything else is a React component or host element (<box>/<text>/<input>) render.",
     lane:
       "'react' (React renders and commits, JS side) | 'bridge' (JS->engine mutation " +
-      "batches) | 'engine' (native engine work for the app view) | 'devtools-engine' " +
+      "batches) | 'engine' (native engine work for the app view) | 'images' (async " +
+      "image decode lifecycle; see image.wait/image.decode) | 'devtools-engine' " +
       "(native engine work for the devtools pane itself; usually ignorable).",
     start: "number - ms since session start.",
     dur: "number - total duration in ms, including children.",
@@ -38,12 +39,23 @@ const GLOSSARY = {
     arg:
       "number, optional extra datum. For 'ops flush' and 'ops.apply' it is the batch " +
       "sequence number - matching values link a JS flush to the engine applying it. " +
-      "For paint.* aggregates it is an item count (rects painted, glyphs drawn).",
+      "For paint.* aggregates it is an item count (rects painted, glyphs drawn). For " +
+      "image.* spans it identifies one image load - matching values pair a wait with " +
+      "its decode.",
+    label:
+      "string, optional. For image.* spans: the file name plus outcome " +
+      "(dimensions, or 'failed', or 'still decoding' when the recording stopped first).",
   },
   names: {
     frame: "one engine frame: repaint dirty views, compose, write to the terminal",
     "ops.apply": "engine parses and applies one mutation batch from React (arg = batch seq)",
     "ops flush": "JS serializes and hands a mutation batch to the engine (arg = batch seq)",
+    "event <type>":
+      "one engine event from emit to its JS handler finishing. A long span means the " +
+      "event sat queued behind a busy node event loop, not that the handler was slow.",
+    "js event-loop stall":
+      "the node event loop missed a 25ms heartbeat by this much - synchronous JS/native " +
+      "work blocked the main thread; whatever ran is between this span's start and end.",
     "react mount / react update": "a React commit; self = React's own render duration",
     "canvas.clear": "clearing a view's canvas before repaint",
     "tree.sync": "pushing batched child-list changes into the layout engine",
@@ -57,6 +69,17 @@ const GLOSSARY = {
     "paint.glyphs": "aggregate of glyph blending (arg = glyphs drawn)",
     "paint.selection": "aggregate of input selection highlight fills",
     "paint.scrollbars": "aggregate of overlay scrollbar painting",
+    "image.wait":
+      "one image load from request to visible: enqueued by layout, decoded on the " +
+      "worker thread, drained into the cache at the start of a pump. Paints only block " +
+      "on this if nothing else is dirty; the engine thread never decodes.",
+    "image.decode": "the worker thread's decode of that image, including brief retries while a just-written file appears",
+    "image.sniff": "sync header-only size read on the engine thread so layout is stable before the decode lands",
+    "image.scale":
+      "one-time resample of a decoded image to its on-screen size (corner radius baked " +
+      "in), cached per size; after this, per-frame drawing is a plain row blit",
+    "image.premultiply": "converting an already-decoded bitmap (e.g. a paste) for compositing, on the engine thread",
+    "clipboard.image": "reading a pasted image from the OS clipboard ON THE ENGINE THREAD; its read/downscale/encode children are the usual cause of a paste-triggered stall",
     compose: "blitting view canvases, divider and overlays into the output frame",
     draw: "encoding the frame and writing it to the terminal",
     "kitty.shm": "writing frame pixels into shared memory for the terminal to read",
@@ -143,6 +166,7 @@ function exportSpan(span: TimeSpan, sessionStart: number) {
   };
   if (span.self != null) out.self = round(span.self);
   if (span.arg != null) out.arg = span.arg;
+  if (span.label != null) out.label = span.label;
   return out;
 }
 

@@ -6,7 +6,7 @@ import { useSessionLog } from "../db/hooks";
 import { menus } from "../menu";
 import { store } from "../session";
 import type { Session } from "../session";
-import { makeTheme, type Ctx } from "../theme";
+import { CtxContext, makeTheme, useCtx } from "../theme";
 import { transcript } from "../transcript";
 import { Composer } from "./composer";
 import { TriggerMenuOverlay } from "./menu";
@@ -20,7 +20,7 @@ export function App({ info }: { info: EngineInfo }) {
   useSyncExternalStore(store.subscribe, store.snapshot);
   const theme = useMemo(() => makeTheme(info.colors), [info]);
   const rem = info.basePx;
-  const ctx = { theme, rem };
+  const ctx = useMemo(() => ({ theme, rem }), [theme, rem]);
   const session = store.active();
   const log = useSessionLog(session.dbId);
   const items = transcript(session.dbId, log);
@@ -50,56 +50,58 @@ export function App({ info }: { info: EngineInfo }) {
   }, [session.ask, store.palette, store.settings]);
 
   return (
-    <Box
-      style={{
-        width: "100%",
-        height: "100%",
-        background: theme.bg,
-        color: theme.fg,
-        fontSize: rem,
-        font: store.fontId,
-      }}
-      onClick={() => {
-        if (!session.ask) input.current?.focus();
-      }}
-    >
-      {store.sidebar && <Sidebar ctx={ctx} />}
-      <Box style={{ flexDirection: "column", flexGrow: 1, flexBasis: 0, overflow: "hidden" }}>
-        <Header ctx={ctx} session={session} />
-        <Box
-          ref={list}
-          style={{
-            flexDirection: "column",
-            flexGrow: 1,
-            flexBasis: 0,
-            overflow: "scroll",
-            padding: rem,
-            gap: rem * 0.75,
-            selectionMode: "unified",
-          }}
-          onScroll={(e) => {
-            if (e.offset < lastOffset.current - 1) follow.current = false;
-            if (e.offset >= e.max - 2) follow.current = true;
-            lastOffset.current = e.offset;
-          }}
-        >
-          {items.map((item, i) => (
-            <Message key={i} ctx={ctx} item={item} />
-          ))}
+    <CtxContext.Provider value={ctx}>
+      <Box
+        style={{
+          width: "100%",
+          height: "100%",
+          background: theme.bg,
+          color: theme.fg,
+          fontSize: rem,
+          font: store.fontId,
+        }}
+        onClick={() => {
+          if (!session.ask) input.current?.focus();
+        }}
+      >
+        {store.sidebar && <Sidebar />}
+        <Box style={{ flexDirection: "column", flexGrow: 1, flexBasis: 0, overflow: "hidden" }}>
+          <Header session={session} />
+          <Box
+            ref={list}
+            style={{
+              flexDirection: "column",
+              flexGrow: 1,
+              flexBasis: 0,
+              overflow: "scroll",
+              padding: rem,
+              gap: rem * 0.75,
+              selectionMode: "unified",
+            }}
+            onScroll={(e) => {
+              if (e.offset < lastOffset.current - 1) follow.current = false;
+              if (e.offset >= e.max - 2) follow.current = true;
+              lastOffset.current = e.offset;
+            }}
+          >
+            {items.map((item, i) => (
+              <Message key={i} item={item} />
+            ))}
+          </Box>
+          {session.ask && <AskBox ask={session.ask} />}
+          {session.working && <WorkingStatus session={session} />}
+          <Composer inputRef={input} />
         </Box>
-        {session.ask && <AskBox ctx={ctx} ask={session.ask} />}
-        {session.working && <WorkingStatus ctx={ctx} session={session} />}
-        <Composer ctx={ctx} inputRef={input} />
+        <TriggerMenuOverlay info={info} />
+        {store.palette && <Palette />}
+        {store.settings && <Settings />}
       </Box>
-      <TriggerMenuOverlay ctx={ctx} info={info} />
-      {store.palette && <Palette ctx={ctx} />}
-      {store.settings && <Settings ctx={ctx} />}
-    </Box>
+    </CtxContext.Provider>
   );
 }
 
-function Header({ ctx, session }: { ctx: Ctx; session: Session }) {
-  const { theme, rem } = ctx;
+function Header({ session }: { session: Session }) {
+  const { rem } = useCtx();
   return (
     <Box
       style={{

@@ -1,6 +1,7 @@
 
-use crate::canvas::measure_text;
+use crate::canvas::measure_marked;
 use crate::style::{Align, Dimension, FlexDirection, InsetValue, Justify, Overflow, Position, Style};
+use crate::text_input::Mark;
 use crate::wrap::wrap_lines;
 
 #[derive(PartialEq)]
@@ -10,6 +11,7 @@ pub(crate) enum MeasureCtx {
         px: f32,
         font: usize,
         wrap: bool,
+        marks: Vec<Mark>,
     },
     Image {
         src: String,
@@ -32,7 +34,8 @@ pub(super) fn measure(
             px,
             font,
             wrap,
-        }) => measure_wrapped_text(known, available, text, *px, *font, *wrap, fonts),
+            marks,
+        }) => measure_wrapped_text(known, available, text, *px, *font, *wrap, marks, fonts),
     }
 }
 
@@ -79,6 +82,7 @@ fn measure_wrapped_text(
     px: f32,
     font: usize,
     wrap: bool,
+    marks: &[Mark],
     fonts: &[fontdue::Font],
 ) -> taffy::Size<f32> {
     let font = &fonts[font.min(fonts.len() - 1)];
@@ -95,12 +99,12 @@ fn measure_wrapped_text(
     } else {
         None
     };
-    let lines = wrap_lines(text, font, px, max_width);
+    let lines = wrap_lines(text, font, px, max_width, marks);
     let widest = lines
         .iter()
         .map(|r| {
-            let visible = text[r.clone()].trim_end_matches(' ');
-            measure_text(font, visible, px)
+            let visible_len = text[r.clone()].trim_end_matches(' ').len();
+            measure_marked(font, text, r.start..r.start + visible_len, px, marks)
         })
         .fold(0.0f32, f32::max);
     taffy::Size {

@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::ops::Range;
 use std::time::Instant;
 
-use crate::canvas::measure_text;
+use crate::canvas::{char_advance, measure_marked};
 use crate::selection::{
     ClickGesture, ClickTracker, line_end, line_range_at, line_start, next_char, next_word_boundary,
     prev_char, prev_word_boundary, snap_to_boundary, word_range_at,
@@ -48,7 +48,13 @@ pub struct InputGeometry {
 }
 
 impl InputGeometry {
-    pub fn offset_at(&self, text: &str, point: (f32, f32), fonts: &[fontdue::Font]) -> usize {
+    pub fn offset_at(
+        &self,
+        text: &str,
+        marks: &[Mark],
+        point: (f32, f32),
+        fonts: &[fontdue::Font],
+    ) -> usize {
         let font = &fonts[self.font.min(fonts.len() - 1)];
         point_to_offset(
             text,
@@ -57,12 +63,19 @@ impl InputGeometry {
             font,
             self.px,
             self.max_width,
+            marks,
         )
     }
 
-    pub fn caret_rect(&self, text: &str, cursor: usize, fonts: &[fontdue::Font]) -> PxRect {
+    pub fn caret_rect(
+        &self,
+        text: &str,
+        marks: &[Mark],
+        cursor: usize,
+        fonts: &[fontdue::Font],
+    ) -> PxRect {
         let font = &fonts[self.font.min(fonts.len() - 1)];
-        let (x, y) = offset_to_point(text, cursor, font, self.px, self.max_width);
+        let (x, y) = offset_to_point(text, cursor, font, self.px, self.max_width, marks);
         PxRect {
             x: self.origin.0 + x,
             y: self.origin.1 + y,
@@ -76,77 +89,23 @@ pub(crate) fn caret_width(px: f32) -> f32 {
     (px / 8.0).max(2.0)
 }
 
-/// An inline attachment anchored to one U+FFFC (object replacement) character
-/// in the buffer. Being a single character makes it atomic for cursor motion
-/// and deletion with no extra bookkeeping.
+// A mark anchors an app-owned inline widget to a byte offset. The engine
+// only knows its position and reserved width; what it means and how it
+// renders is the client's business.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Atom {
-    pub offset: usize,
+pub struct Mark {
     pub id: u64,
-    pub label: String,
-    pub src: String,
-}
-
-pub const ATOM_CHAR: char = '\u{FFFC}';
-
-pub(crate) const ATOM_LABEL: &str = "Image";
-
-/// Pill box sized to fit thumbnail + label + padding. All measurement paths
-/// share this so wrapping, caret math, and painting agree; labels are assumed
-/// to be ATOM_LABEL-sized and clipped otherwise.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct PillGeometry {
-    pub w: f32,
-    pub h: f32,
-    pub inset: f32,
-    pub pad: f32,
-    pub gap: f32,
-    pub thumb_pad: f32,
-    pub label_px: f32,
-    pub label_w: f32,
+    pub offset: usize,
     pub advance: f32,
 }
 
-std::thread_local! {
-    static PILL_CACHE: std::cell::RefCell<std::collections::HashMap<(usize, u32), PillGeometry>> =
-        std::cell::RefCell::new(std::collections::HashMap::new());
-}
+pub const MARK_CHAR: char = '\u{FFFC}';
 
-pub(crate) fn pill_geometry(font: &fontdue::Font, px: f32) -> PillGeometry {
-    PILL_CACHE.with_borrow_mut(|cache| {
-        *cache
-            .entry((font.file_hash(), px.to_bits()))
-            .or_insert_with(|| {
-                let line_h = line_height(font, px);
-                let inset = (line_h * 0.08).max(1.0);
-                let h = line_h - 2.0 * inset;
-                let pad = (h * 0.28).max(3.0);
-                let gap = (h * 0.18).max(2.0);
-                let thumb_pad = (h * 0.14).max(2.0);
-                let thumb = h - 2.0 * thumb_pad;
-                let label_px = px * 0.75;
-                let label_w: f32 = ATOM_LABEL
-                    .chars()
-                    .map(|c| font.metrics(c, label_px).advance_width)
-                    .sum();
-                let w = (pad + thumb + gap + label_w + pad).ceil();
-                PillGeometry {
-                    w,
-                    h,
-                    inset,
-                    pad,
-                    gap,
-                    thumb_pad,
-                    label_px,
-                    label_w,
-                    advance: w + (px * 0.25).max(2.0),
-                }
-            })
-    })
-}
-
-pub fn atom_advance(font: &fontdue::Font, px: f32) -> f32 {
-    pill_geometry(font, px).advance
+pub(crate) fn mark_advance_at(marks: &[Mark], offset: usize) -> f32 {
+    marks
+        .binary_search_by_key(&offset, |m| m.offset)
+        .ok()
+        .map_or(0.0, |i| marks[i].advance)
 }
 
 #[derive(Debug, Clone)]
@@ -157,11 +116,8 @@ struct Edit {
     cursor_before: usize,
     anchor_before: Option<usize>,
     kind: EditKind,
-    // Atoms that lived in the removed/inserted text, offsets relative to
-    // `at`. Undo re-adds removed_atoms and stashes into inserted_atoms;
-    // redo does the reverse.
-    removed_atoms: Vec<Atom>,
-    inserted_atoms: Vec<Atom>,
+    removed_marks: Vec<Mark>,
+    inserted_marks: Vec<Mark>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -184,8 +140,7 @@ pub struct TextInput {
     sealed: bool,
     clicks: ClickTracker,
     selecting: bool,
-    atoms: Vec<Atom>,
-    next_atom: u64,
+    marks: Vec<Mark>,
 }
 
 impl TextInput {
@@ -219,13 +174,12 @@ impl TextInput {
     }
 
     pub fn insert(&mut self, s: &str) {
-        // Typed and pasted text must never carry the atom placeholder, or
-        // the placeholder-to-attachment mapping would drift.
-        if s.contains(ATOM_CHAR) {
-            let sanitized: String = s.chars().filter(|&c| c != ATOM_CHAR).collect();
+        // The sentinel may only enter through insert_mark, so text and marks
+        // stay bijective.
+        if s.contains(MARK_CHAR) {
+            let sanitized: String = s.chars().filter(|&c| c != MARK_CHAR).collect();
             return self.insert(&sanitized);
         }
-        // The caret is a zero-width selection: replacing it is insertion.
         let caret = self.cursor..self.cursor;
         let range = self.selection().unwrap_or(caret);
         let kind = if range.is_empty() && s.chars().count() == 1 && s != "\n" {
@@ -236,66 +190,72 @@ impl TextInput {
         self.splice(range, s, kind);
     }
 
-    pub fn atoms(&self) -> &[Atom] {
-        &self.atoms
+    pub fn marks(&self) -> &[Mark] {
+        &self.marks
     }
 
-    pub fn insert_atom(&mut self, label: &str, src: &str) -> u64 {
+    // Mark ids are chosen by the caller so the client can know the id
+    // without waiting on a round trip.
+    pub fn insert_mark(&mut self, id: u64) {
         let caret = self.cursor..self.cursor;
         let range = self.selection().unwrap_or(caret);
         let at = range.start;
         let mut buf = [0u8; 4];
-        self.splice(range, ATOM_CHAR.encode_utf8(&mut buf), EditKind::Other);
-        let id = self.next_atom;
-        self.next_atom += 1;
+        self.splice(range, MARK_CHAR.encode_utf8(&mut buf), EditKind::Other);
         let index = self
-            .atoms
+            .marks
             .iter()
-            .position(|a| a.offset >= at)
-            .unwrap_or(self.atoms.len());
-        self.atoms.insert(
+            .position(|m| m.offset >= at)
+            .unwrap_or(self.marks.len());
+        self.marks.insert(
             index,
-            Atom {
-                offset: at,
+            Mark {
                 id,
-                label: label.to_string(),
-                src: src.to_string(),
+                offset: at,
+                advance: 0.0,
             },
         );
-        id
     }
 
-    /// Splits atoms around a text replacement at `at`: atoms inside the old
-    /// range move into `stash` (offsets made relative to `at`), atoms after
-    /// it shift, and `restore` re-enters at absolute offsets.
-    fn remap_atoms(
+    pub fn set_mark_advance(&mut self, id: u64, advance: f32) -> bool {
+        let Some(mark) = self.marks.iter_mut().find(|m| m.id == id) else {
+            return false;
+        };
+        if (mark.advance - advance).abs() < 0.01 {
+            return false;
+        }
+        mark.advance = advance;
+        true
+    }
+
+    fn remap_marks(
         &mut self,
         at: usize,
         old_len: usize,
         new_len: usize,
-        stash: &mut Vec<Atom>,
-        restore: &mut Vec<Atom>,
+        stash: &mut Vec<Mark>,
+        restore: &mut Vec<Mark>,
     ) {
-        let mut kept = Vec::with_capacity(self.atoms.len() + restore.len());
-        for mut atom in self.atoms.drain(..) {
-            if atom.offset < at {
-                kept.push(atom);
-            } else if atom.offset < at + old_len {
-                atom.offset -= at;
-                stash.push(atom);
+        let mut kept = Vec::with_capacity(self.marks.len() + restore.len());
+        for mut mark in self.marks.drain(..) {
+            if mark.offset < at {
+                kept.push(mark);
+            } else if mark.offset < at + old_len {
+                mark.offset -= at;
+                stash.push(mark);
             } else {
-                atom.offset = atom.offset - old_len + new_len;
-                kept.push(atom);
+                mark.offset = mark.offset - old_len + new_len;
+                kept.push(mark);
             }
         }
-        for atom in restore.drain(..) {
-            kept.push(Atom {
-                offset: at + atom.offset,
-                ..atom
+        for mark in restore.drain(..) {
+            kept.push(Mark {
+                offset: at + mark.offset,
+                ..mark
             });
         }
-        kept.sort_by_key(|a| a.offset);
-        self.atoms = kept;
+        kept.sort_by_key(|m| m.offset);
+        self.marks = kept;
     }
 
     pub fn delete_selection(&mut self) -> bool {
@@ -329,12 +289,12 @@ impl TextInput {
     }
 
     fn splice(&mut self, range: Range<usize>, replacement: &str, kind: EditKind) {
-        let mut removed_atoms = Vec::new();
-        self.remap_atoms(
+        let mut removed_marks = Vec::new();
+        self.remap_marks(
             range.start,
             range.len(),
             replacement.len(),
-            &mut removed_atoms,
+            &mut removed_marks,
             &mut Vec::new(),
         );
         let edit = Edit {
@@ -344,8 +304,8 @@ impl TextInput {
             cursor_before: self.cursor,
             anchor_before: self.anchor,
             kind,
-            removed_atoms,
-            inserted_atoms: Vec::new(),
+            removed_marks,
+            inserted_marks: Vec::new(),
         };
         self.text.replace_range(range.clone(), replacement);
         self.cursor = range.start + replacement.len();
@@ -370,10 +330,10 @@ impl TextInput {
                     if edit.at + edit.removed.len() == prev.at =>
                 {
                     prev.at = edit.at;
-                    for atom in &mut prev.removed_atoms {
-                        atom.offset += edit.removed.len();
+                    for mark in &mut prev.removed_marks {
+                        mark.offset += edit.removed.len();
                     }
-                    prev.removed_atoms.splice(0..0, edit.removed_atoms);
+                    prev.removed_marks.splice(0..0, edit.removed_marks);
                     prev.removed = format!("{}{}", edit.removed, prev.removed);
                     return;
                 }
@@ -401,15 +361,15 @@ impl TextInput {
         self.text
             .replace_range(edit.at..edit.at + edit.inserted.len(), &edit.removed);
         let (mut stash, mut restore) =
-            (std::mem::take(&mut edit.inserted_atoms), std::mem::take(&mut edit.removed_atoms));
-        self.remap_atoms(
+            (std::mem::take(&mut edit.inserted_marks), std::mem::take(&mut edit.removed_marks));
+        self.remap_marks(
             edit.at,
             edit.inserted.len(),
             edit.removed.len(),
             &mut stash,
             &mut restore,
         );
-        edit.inserted_atoms = stash;
+        edit.inserted_marks = stash;
         self.cursor = edit.cursor_before;
         self.anchor = edit.anchor_before;
         self.goal_x = None;
@@ -425,15 +385,15 @@ impl TextInput {
         self.text
             .replace_range(edit.at..edit.at + edit.removed.len(), &edit.inserted);
         let (mut stash, mut restore) =
-            (std::mem::take(&mut edit.removed_atoms), std::mem::take(&mut edit.inserted_atoms));
-        self.remap_atoms(
+            (std::mem::take(&mut edit.removed_marks), std::mem::take(&mut edit.inserted_marks));
+        self.remap_marks(
             edit.at,
             edit.removed.len(),
             edit.inserted.len(),
             &mut stash,
             &mut restore,
         );
-        edit.removed_atoms = stash;
+        edit.removed_marks = stash;
         self.cursor = edit.at + edit.inserted.len();
         self.anchor = None;
         self.goal_x = None;
@@ -486,24 +446,22 @@ impl TextInput {
             self.cursor = if up { range.start } else { range.end };
             self.anchor = None;
         }
-        let lines = wrap_lines(&self.text, font, px, wrap);
+        let lines = wrap_lines(&self.text, font, px, wrap, &self.marks);
         let line = line_of_offset(&lines, self.cursor);
         let range = &lines[line];
-        let x = self
-            .goal_x
-            .unwrap_or_else(|| measure_text(font, &self.text[range.start..self.cursor], px));
+        let x = self.goal_x.unwrap_or_else(|| {
+            measure_marked(font, &self.text, range.start..self.cursor, px, &self.marks)
+        });
         let target = if up {
             if line == 0 {
                 0
             } else {
-                let prev = &lines[line - 1];
-                prev.start + nearest_column(&self.text[prev.clone()], x, font, px)
+                nearest_column(&self.text, lines[line - 1].clone(), x, font, px, &self.marks)
             }
         } else if line + 1 >= lines.len() {
             self.text.len()
         } else {
-            let next = &lines[line + 1];
-            next.start + nearest_column(&self.text[next.clone()], x, font, px)
+            nearest_column(&self.text, lines[line + 1].clone(), x, font, px, &self.marks)
         };
         self.place(target, extend);
         self.goal_x = Some(x);
@@ -764,7 +722,7 @@ impl TextInput {
         let point = (mouse.x as f32, mouse.y as f32);
         match (mouse.kind, mouse.button) {
             (MouseKind::Down, MouseButton::Left) => {
-                let offset = geometry.offset_at(&self.text, point, fonts);
+                let offset = geometry.offset_at(&self.text, &self.marks, point, fonts);
                 match ClickGesture::from_count(self.clicks.register(point, Instant::now())) {
                     ClickGesture::Place => {
                         self.set_cursor(offset, false);
@@ -776,7 +734,7 @@ impl TextInput {
                 InputReply::Selected
             }
             (MouseKind::Move, MouseButton::Left) if self.selecting => {
-                let offset = geometry.offset_at(&self.text, point, fonts);
+                let offset = geometry.offset_at(&self.text, &self.marks, point, fonts);
                 self.set_cursor(offset, true);
                 InputReply::Selected
             }
@@ -800,13 +758,14 @@ pub fn offset_to_point(
     font: &fontdue::Font,
     px: f32,
     wrap: Option<f32>,
+    marks: &[Mark],
 ) -> (f32, f32) {
     let offset = snap_to_boundary(text, offset);
-    let lines = wrap_lines(text, font, px, wrap);
+    let lines = wrap_lines(text, font, px, wrap, marks);
     let line = line_of_offset(&lines, offset);
     let start = lines[line].start;
     (
-        measure_text(font, &text[start..offset.max(start)], px),
+        measure_marked(font, text, start..offset.max(start), px, marks),
         line as f32 * line_height(font, px),
     )
 }
@@ -818,24 +777,30 @@ pub fn point_to_offset(
     font: &fontdue::Font,
     px: f32,
     wrap: Option<f32>,
+    marks: &[Mark],
 ) -> usize {
-    let lines = wrap_lines(text, font, px, wrap);
+    let lines = wrap_lines(text, font, px, wrap, marks);
     let line = ((y / line_height(font, px)).floor().max(0.0) as usize).min(lines.len() - 1);
-    let range = &lines[line];
-    range.start + nearest_column(&text[range.clone()], x, font, px)
+    nearest_column(text, lines[line].clone(), x, font, px, marks)
 }
 
-fn nearest_column(line: &str, x: f32, font: &fontdue::Font, px: f32) -> usize {
+fn nearest_column(
+    text: &str,
+    line: Range<usize>,
+    x: f32,
+    font: &fontdue::Font,
+    px: f32,
+    marks: &[Mark],
+) -> usize {
     let mut pen = 0.0;
-    for (i, c) in line.char_indices() {
-        let mut buf = [0u8; 4];
-        let advance = measure_text(font, c.encode_utf8(&mut buf), px);
+    for (i, c) in text[line.clone()].char_indices() {
+        let advance = char_advance(font, c, line.start + i, px, marks);
         if x < pen + advance / 2.0 {
-            return i;
+            return line.start + i;
         }
         pen += advance;
     }
-    line.len()
+    line.end
 }
 
 #[cfg(test)]
@@ -961,8 +926,8 @@ mod tests {
         i.move_down(false, &f, 16.0, None);
         assert_eq!(i.cursor(), 20, "short line clamps to its end");
         i.move_down(false, &f, 16.0, None);
-        let (x, _) = offset_to_point(i.text(), i.cursor(), &f, 16.0, None);
-        let (goal_x, _) = offset_to_point("a long first line", 12, &f, 16.0, None);
+        let (x, _) = offset_to_point(i.text(), i.cursor(), &f, 16.0, None, &[]);
+        let (goal_x, _) = offset_to_point("a long first line", 12, &f, 16.0, None, &[]);
         assert!(
             (x - goal_x).abs() < 1.0,
             "goal column restored: {x} vs {goal_x}"
@@ -1153,109 +1118,121 @@ mod tests {
     }
 
     #[test]
-    fn atoms_insert_as_one_char_and_track_position() {
+    fn marks_insert_as_one_char_and_track_position() {
         let mut i = input("hello ", 6);
-        let id = i.insert_atom("Image", "/tmp/a.png");
-        assert_eq!(i.text(), format!("hello {ATOM_CHAR}"));
-        assert_eq!(i.atoms().len(), 1);
-        assert_eq!(i.atoms()[0].offset, 6);
-        assert_eq!(i.atoms()[0].id, id);
-        assert_eq!(i.cursor(), 6 + ATOM_CHAR.len_utf8());
+        i.insert_mark(1);
+        assert_eq!(i.text(), format!("hello {MARK_CHAR}"));
+        assert_eq!(i.marks().len(), 1);
+        assert_eq!(i.marks()[0].offset, 6);
+        assert_eq!(i.marks()[0].id, 1);
+        assert_eq!(i.cursor(), 6 + MARK_CHAR.len_utf8());
 
         i.set_cursor(0, false);
         i.insert("x");
-        assert_eq!(i.atoms()[0].offset, 7, "typing before shifts the atom");
+        assert_eq!(i.marks()[0].offset, 7, "typing before shifts the mark");
         i.move_doc_end(false);
         i.insert("y");
-        assert_eq!(i.atoms()[0].offset, 7, "typing after leaves it");
+        assert_eq!(i.marks()[0].offset, 7, "typing after leaves it");
     }
 
     #[test]
-    fn cursor_and_backspace_treat_the_atom_as_a_unit() {
+    fn cursor_and_backspace_treat_the_mark_as_a_unit() {
         let mut i = input("ab", 2);
-        i.insert_atom("Image", "/tmp/a.png");
+        i.insert_mark(1);
         i.insert("cd");
         i.move_left(Granularity::Char, false);
         i.move_left(Granularity::Char, false);
         i.move_left(Granularity::Char, false);
-        assert_eq!(i.cursor(), 2, "one left arrow crosses the whole atom");
+        assert_eq!(i.cursor(), 2, "one left arrow crosses the whole mark");
         i.move_right(Granularity::Char, false);
-        assert_eq!(i.cursor(), 2 + ATOM_CHAR.len_utf8());
+        assert_eq!(i.cursor(), 2 + MARK_CHAR.len_utf8());
         i.delete_backward(Granularity::Char);
         assert_eq!(i.text(), "abcd");
-        assert!(i.atoms().is_empty(), "deleting the char drops the atom");
+        assert!(i.marks().is_empty(), "deleting the char drops the mark");
     }
 
     #[test]
-    fn undo_restores_deleted_atoms_and_redo_removes_them_again() {
+    fn undo_restores_deleted_marks_and_redo_removes_them_again() {
         let mut i = input("", 0);
-        let id = i.insert_atom("Image", "/tmp/a.png");
+        i.insert_mark(7);
+        i.set_mark_advance(7, 24.0);
         i.delete_backward(Granularity::Char);
-        assert!(i.atoms().is_empty());
+        assert!(i.marks().is_empty());
         assert!(i.undo());
-        assert_eq!(i.atoms().len(), 1, "undo restores the attachment");
-        assert_eq!(i.atoms()[0].id, id);
-        assert_eq!(i.atoms()[0].src, "/tmp/a.png");
+        assert_eq!(i.marks().len(), 1, "undo restores the mark");
+        assert_eq!(i.marks()[0].id, 7);
+        assert_eq!(i.marks()[0].advance, 24.0, "the advance survives undo");
         assert!(i.redo());
-        assert!(i.atoms().is_empty());
+        assert!(i.marks().is_empty());
         assert!(i.undo());
-        assert!(i.undo(), "undoing the insert removes the atom");
+        assert!(i.undo(), "undoing the insert removes the mark");
         assert_eq!(i.text(), "");
-        assert!(i.atoms().is_empty());
+        assert!(i.marks().is_empty());
         assert!(i.redo());
-        assert_eq!(i.atoms().len(), 1, "redoing the insert brings it back");
+        assert_eq!(i.marks().len(), 1, "redoing the insert brings it back");
     }
 
     #[test]
-    fn replacing_a_selection_across_an_atom_drops_it() {
+    fn replacing_a_selection_across_a_mark_drops_it() {
         let mut i = input("one ", 4);
-        i.insert_atom("Image", "/tmp/a.png");
+        i.insert_mark(1);
         i.insert(" two");
         i.select_all();
         i.insert("clean");
         assert_eq!(i.text(), "clean");
-        assert!(i.atoms().is_empty());
+        assert!(i.marks().is_empty());
         i.undo();
-        assert_eq!(i.atoms().len(), 1, "undo of the replace restores it");
-        assert_eq!(i.atoms()[0].offset, 4);
+        assert_eq!(i.marks().len(), 1, "undo of the replace restores it");
+        assert_eq!(i.marks()[0].offset, 4);
     }
 
     #[test]
-    fn backspace_runs_across_atoms_restore_in_one_undo() {
+    fn backspace_runs_across_marks_restore_in_one_undo() {
         let mut i = input("", 0);
         i.insert("ab");
-        i.insert_atom("Image", "/tmp/a.png");
+        i.insert_mark(1);
         i.set_cursor(i.text().len(), false);
         i.delete_backward(Granularity::Char);
         i.delete_backward(Granularity::Char);
         i.delete_backward(Granularity::Char);
         assert_eq!(i.text(), "");
-        assert!(i.atoms().is_empty());
+        assert!(i.marks().is_empty());
         i.undo();
-        assert_eq!(i.text(), format!("ab{ATOM_CHAR}"));
-        assert_eq!(i.atoms().len(), 1);
-        assert_eq!(i.atoms()[0].offset, 2);
+        assert_eq!(i.text(), format!("ab{MARK_CHAR}"));
+        assert_eq!(i.marks().len(), 1);
+        assert_eq!(i.marks()[0].offset, 2);
     }
 
     #[test]
-    fn pasted_text_cannot_forge_atom_placeholders() {
+    fn pasted_text_cannot_forge_mark_placeholders() {
         let mut i = input("", 0);
-        i.insert(&format!("a{ATOM_CHAR}b"));
+        i.insert(&format!("a{MARK_CHAR}b"));
         assert_eq!(i.text(), "ab");
-        assert!(i.atoms().is_empty());
+        assert!(i.marks().is_empty());
     }
 
     #[test]
-    fn atom_advance_flows_through_measurement() {
+    fn mark_advance_flows_through_measurement() {
         let f = font();
-        let text = format!("a{ATOM_CHAR}b");
-        let with = measure_text(&f, &text, 16.0);
-        let without = measure_text(&f, "ab", 16.0);
-        assert!((with - without - atom_advance(&f, 16.0)).abs() < 0.01);
-        let (x, _) = offset_to_point(&text, 1 + ATOM_CHAR.len_utf8(), &f, 16.0, None);
+        let mut i = input("ab", 1);
+        i.insert_mark(1);
+        assert!(i.set_mark_advance(1, 40.0));
+        assert!(!i.set_mark_advance(1, 40.0), "unchanged advance reports false");
+        let with = measure_marked(&f, i.text(), 0..i.text().len(), 16.0, i.marks());
+        let without = measure_marked(&f, "ab", 0..2, 16.0, &[]);
+        assert!((with - without - 40.0).abs() < 0.01);
+        let (x, _) = offset_to_point(
+            i.text(),
+            1 + MARK_CHAR.len_utf8(),
+            &f,
+            16.0,
+            None,
+            i.marks(),
+        );
+        let a_w = measure_marked(&f, "a", 0..1, 16.0, &[]);
         assert!(
-            (x - measure_text(&f, "a", 16.0) - atom_advance(&f, 16.0)).abs() < 0.01,
-            "caret after the atom sits past the pill"
+            (x - a_w - 40.0).abs() < 0.01,
+            "caret after the mark sits past the widget"
         );
     }
 
@@ -1332,7 +1309,7 @@ mod tests {
         let text = "hello world";
         let mut i = input(text, 0);
         let event = |kind, button, offset: usize| {
-            let (x, y) = offset_to_point(text, offset, &fonts[0], 16.0, None);
+            let (x, y) = offset_to_point(text, offset, &fonts[0], 16.0, None, &[]);
             Mouse {
                 kind,
                 button,
@@ -1398,8 +1375,8 @@ mod tests {
             px: 16.0,
             max_width: None,
         };
-        let rect = geometry.caret_rect("ab\ncd", 4, &fonts);
-        let (x, y) = offset_to_point("ab\ncd", 4, &fonts[0], 16.0, None);
+        let rect = geometry.caret_rect("ab\ncd", &[], 4, &fonts);
+        let (x, y) = offset_to_point("ab\ncd", 4, &fonts[0], 16.0, None, &[]);
         assert_eq!((rect.x, rect.y), (10.0 + x, 5.0 + y));
         assert!(rect.h > 0.0 && rect.w > 0.0);
     }
@@ -1409,9 +1386,9 @@ mod tests {
         let f = font();
         let text = "first line\nsecond\n\nlast";
         for offset in [0, 5, 10, 11, 17, 18, 19, 23] {
-            let (x, y) = offset_to_point(text, offset, &f, 16.0, None);
+            let (x, y) = offset_to_point(text, offset, &f, 16.0, None, &[]);
             assert_eq!(
-                point_to_offset(text, x + 0.1, y + 1.0, &f, 16.0, None),
+                point_to_offset(text, x + 0.1, y + 1.0, &f, 16.0, None, &[]),
                 offset,
                 "offset {offset}"
             );
@@ -1422,14 +1399,14 @@ mod tests {
     fn points_outside_the_text_clamp() {
         let f = font();
         let text = "short\nlonger line";
-        assert_eq!(point_to_offset(text, -5.0, -10.0, &f, 16.0, None), 0);
+        assert_eq!(point_to_offset(text, -5.0, -10.0, &f, 16.0, None, &[]), 0);
         assert_eq!(
-            point_to_offset(text, 10_000.0, 0.0, &f, 16.0, None),
+            point_to_offset(text, 10_000.0, 0.0, &f, 16.0, None, &[]),
             5,
             "past line end"
         );
         assert_eq!(
-            point_to_offset(text, 10_000.0, 10_000.0, &f, 16.0, None),
+            point_to_offset(text, 10_000.0, 10_000.0, &f, 16.0, None, &[]),
             text.len(),
             "below the last line"
         );
@@ -1438,8 +1415,8 @@ mod tests {
     #[test]
     fn click_right_of_a_glyphs_midpoint_lands_after_it() {
         let f = font();
-        let w = measure_text(&f, "a", 16.0);
-        assert_eq!(point_to_offset("abc", w * 0.4, 0.0, &f, 16.0, None), 0);
-        assert_eq!(point_to_offset("abc", w * 0.6, 0.0, &f, 16.0, None), 1);
+        let w = measure_marked(&f, "a", 0..1, 16.0, &[]);
+        assert_eq!(point_to_offset("abc", w * 0.4, 0.0, &f, 16.0, None, &[]), 0);
+        assert_eq!(point_to_offset("abc", w * 0.6, 0.0, &f, 16.0, None, &[]), 1);
     }
 }

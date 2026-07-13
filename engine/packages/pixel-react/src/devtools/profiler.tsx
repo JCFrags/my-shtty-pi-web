@@ -61,6 +61,7 @@ function laneColor(span: TimeSpan): string {
     bridge: theme.flame.bridge,
     engine: theme.flame.engine,
     "devtools-engine": theme.flame.devtools,
+    images: theme.flame.images,
     interaction: [theme.warn, "#d19a66"],
   } as const;
   const palette = palettes[span.lane];
@@ -141,6 +142,7 @@ function Overview(props: {
 const LANES: Array<{ label: string; match: (span: TimeSpan) => boolean }> = [
   { label: "React", match: (s) => s.lane === "react" || s.lane === "bridge" },
   { label: "Engine", match: (s) => s.lane === "engine" },
+  { label: "Images", match: (s) => s.lane === "images" },
   { label: "Engine (devtools)", match: (s) => s.lane === "devtools-engine" },
 ];
 
@@ -326,7 +328,7 @@ function Lane(props: {
                     wrap: false,
                   }}
                 >
-                  {span.name}
+                  {span.label ?? span.name}
                 </Text>
               )}
             </Box>
@@ -376,6 +378,11 @@ function SpanDetail(props: { span: TimeSpan | null; session: ProfileSession; rem
           <Text style={{ color: theme.text, fontSize: rem * 0.72, font: MONO, wrap: false }}>
             {span.name}
           </Text>
+          {span.label != null && (
+            <Text style={{ color: theme.dim, fontSize: rem * 0.66, font: MONO, wrap: false }}>
+              {span.label}
+            </Text>
+          )}
           <Text style={{ color: theme.dim, fontSize: rem * 0.66, font: MONO, wrap: false }}>
             {`at ${(span.start - session.start).toFixed(2)}ms`}
           </Text>
@@ -389,7 +396,11 @@ function SpanDetail(props: { span: TimeSpan | null; session: ProfileSession; rem
           )}
           {span.arg != null && (
             <Text style={{ color: theme.faint, fontSize: rem * 0.66, font: MONO, wrap: false }}>
-              {span.name.startsWith("paint.") ? `n = ${span.arg}` : `batch #${span.arg}`}
+              {span.name.startsWith("paint.")
+                ? `n = ${span.arg}`
+                : span.name.startsWith("image.")
+                  ? `img #${span.arg}`
+                  : `batch #${span.arg}`}
             </Text>
           )}
         </>

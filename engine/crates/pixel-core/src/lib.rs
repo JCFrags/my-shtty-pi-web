@@ -24,7 +24,7 @@ mod wrap;
 pub use canvas::{Canvas, measure_text};
 pub use desc::Desc;
 pub use engine::{
-    AttachmentRef, ChangeSource, Engine, EngineConfig, EngineEvent, FrameStats, HighlightArea,
+    ChangeSource, Engine, EngineConfig, EngineEvent, FrameStats, HighlightArea, MarkRef,
     px_for_cell_height,
 };
 pub use kitty::kitty_transmit;
@@ -46,13 +46,13 @@ pub use terminal::{
     WindowSize,
 };
 pub use text_input::{
-    ATOM_CHAR, Atom, Granularity, InputAction, InputGeometry, InputReply, TextInput, atom_advance,
-    line_height, offset_to_point, point_to_offset,
+    Granularity, InputAction, InputGeometry, InputReply, MARK_CHAR, Mark, TextInput, line_height,
+    offset_to_point, point_to_offset,
 };
 pub use throttle::CpuThrottle;
 pub use tree::{
-    BoxMetrics, HitTarget, ImageProps, InputProps, NodeId, Props, PxRect, ScrollArea, TextSpan,
-    Tree,
+    BoxMetrics, HitTarget, ImageProps, InputProps, NodeId, Props, PxRect, ScrollArea, SlotKind,
+    TextSpan, Tree,
 };
 pub use wrap::{line_of_offset, wrap_lines};
 

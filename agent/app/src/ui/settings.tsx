@@ -4,10 +4,10 @@ import type { NodeHandle } from "pixel-react";
 
 import { applyFont, fontRows } from "../fonts";
 import { store } from "../session";
-import type { Ctx } from "../theme";
+import { useCtx } from "../theme";
 
-export function Settings({ ctx }: { ctx: Ctx }) {
-  const { theme, rem } = ctx;
+export function Settings() {
+  const { theme, rem } = useCtx();
   const rows = fontRows(store.settingsQuery);
   const list = useRef<NodeHandle | null>(null);
   const rowHeight = rem * 1.85;

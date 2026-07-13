@@ -20,9 +20,6 @@ use serde_json::json;
 use crate::events::event_json;
 use crate::ops::{IdMap, apply_ops};
 
-/**
- * obviously retarded
- */
 static UI_FONT_BYTES: &[u8] = include_bytes!("../../../examples/typing/assets/InterVariable.ttf");
 static MONO_FONT_BYTES: &[u8] =
     include_bytes!("../../../examples/typing/assets/JetBrainsMono-Regular.ttf");
@@ -79,6 +76,7 @@ pub struct PixelEngine {
 impl PixelEngine {
     #[napi(constructor)]
     pub fn new() -> Result<Self> {
+        
         let fonts = vec![
             load_font(SYSTEM_UI_FONTS, UI_FONT_BYTES),
             load_font(SYSTEM_MONO_FONTS, MONO_FONT_BYTES),

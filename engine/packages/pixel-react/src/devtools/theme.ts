@@ -28,6 +28,7 @@ export const theme = {
     bridge: ["#c586c0", "#b06ab0"],
     engine: ["#7dcf85", "#5db06a", "#9ede9a", "#4a9e58"],
     devtools: ["#8a8f98", "#6b7078"],
+    images: ["#5bc4c4", "#3fa3a8"],
   },
 };
 

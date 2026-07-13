@@ -3,10 +3,10 @@ import { Box, Text } from "pixel-react";
 import { store } from "../session";
 import type { Session } from "../session";
 import { Dot } from "./dot";
-import type { Ctx } from "../theme";
+import { useCtx } from "../theme";
 
-export function Sidebar({ ctx }: { ctx: Ctx }) {
-  const { theme, rem } = ctx;
+export function Sidebar() {
+  const { theme, rem } = useCtx();
   const hairlineWidth = Math.max(rem / 16, 1);
   const radius = rem * 0.5;
   const innerRadius = radius - hairlineWidth;
@@ -43,15 +43,15 @@ export function Sidebar({ ctx }: { ctx: Ctx }) {
           + new session
         </Text>
         {store.sessions.map((session, i) => (
-          <SidebarItem key={i} ctx={ctx} session={session} at={i} />
+          <SidebarItem key={i} session={session} at={i} />
         ))}
       </Box>
     </Box>
   );
 }
 
-function SidebarItem({ ctx, session, at }: { ctx: Ctx; session: Session; at: number }) {
-  const { theme, rem } = ctx;
+function SidebarItem({ session, at }: { session: Session; at: number }) {
+  const { theme, rem } = useCtx();
   const active = at === store.at;
   return (
     <Box
@@ -75,7 +75,7 @@ function SidebarItem({ ctx, session, at }: { ctx: Ctx; session: Session; at: num
       >
         {session.title()}
       </Text>
-      {session.working && <Dot ctx={ctx} color={theme.accent} />}
+      {session.working && <Dot color={theme.accent} />}
     </Box>
   );
 }

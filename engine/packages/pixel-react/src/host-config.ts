@@ -56,16 +56,15 @@ export interface TextProps {
   children?: React.ReactNode;
 }
 
-export interface InputAttachment {
+export interface MarkRef {
   id: number;
+  offset: number;
+}
+
+export interface PastedImage {
   path: string;
   width: number;
   height: number;
-}
-
-export interface AttachmentRef {
-  id: number;
-  path: string;
 }
 
 export interface CaretInfo {
@@ -80,6 +79,7 @@ export type ChangeSource = "type" | "paste" | "edit";
 
 export interface ChangeInfo extends CaretInfo {
   source: ChangeSource;
+  marks: MarkRef[];
 }
 
 export interface InputProps {
@@ -90,10 +90,13 @@ export interface InputProps {
   caretColor?: Style["color"];
   selectionColor?: Style["color"];
   autoFocus?: boolean;
-  onChange?: (text: string, attachments: AttachmentRef[], change: ChangeInfo) => void;
+  onChange?: (text: string, change: ChangeInfo) => void;
   onCaret?: (caret: CaretInfo) => void;
-  onSubmit?: (text: string, attachments: AttachmentRef[]) => void;
-  onAttach?: (attachment: InputAttachment) => void;
+  onSubmit?: (text: string, marks: MarkRef[]) => void;
+  /** An image was pasted or dropped while this input was focused. Insert a
+   *  widget via the handle's insertMark if it should become inline content. */
+  onPasteImage?: (image: PastedImage) => void;
+  children?: React.ReactNode;
 }
 
 export interface ImageProps {
@@ -101,9 +104,16 @@ export interface ImageProps {
   id?: string;
   src: string;
   onClick?: (event: ClickEvent) => void;
+  /** Rendered in the image's place while the source decodes. */
+  placeholder?: React.ReactNode;
+  /** Rendered in the image's place when decoding fails; defaults to the engine's broken-image glyph. */
+  error?: React.ReactNode;
 }
 
-export type AnyProps = BoxProps & TextProps & InputProps & Partial<ImageProps>;
+export type AnyProps = BoxProps &
+  TextProps &
+  InputProps &
+  Partial<ImageProps> & { slot?: "placeholder" | "error"; mark?: number };
 
 export interface Instance {
   id: number;
@@ -199,6 +209,8 @@ function serializeProps(
     wheelEvents: !!props.onWheel,
     hoverEvents: !!(props.onMouseEnter || props.onMouseLeave),
     outsideClickEvents: !!props.onClickOutside,
+    slot: props.slot,
+    mark: props.mark,
   };
   if (type === "text") {
     base.text = textOf(props.children);
@@ -472,6 +484,11 @@ const hostConfig = {
       splice: (start: number, end: number, text: string) => {
         const b = getBridge();
         b.push(instance.view, { op: "inputSplice", id: instance.id, start, end, text });
+        b.flush();
+      },
+      insertMark: (mark: number) => {
+        const b = getBridge();
+        b.push(instance.view, { op: "insertMark", id: instance.id, mark });
         b.flush();
       },
     };

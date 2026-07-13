@@ -8,6 +8,7 @@ use taffy::prelude::TaffyMaxContent as _;
 
 use layout::{MeasureCtx, to_taffy};
 
+use crate::image_cache::ImageStatus;
 use crate::scroll::ScrollState;
 use crate::scrollbar::{self, BarState, ScrollbarRects};
 use crate::selection::{DocLayout, DocSelection, DocSelectionState};
@@ -15,7 +16,7 @@ use crate::style::{
     Color, DEFAULT_SELECTION_COLOR, Dimension, Edges, FlexDirection, Overflow, ScrollbarStyle,
     SelectionMode, Style,
 };
-use crate::text_input::{Granularity, InputGeometry, TextInput};
+use crate::text_input::{Granularity, InputGeometry, TextInput, line_height, offset_to_point};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId {
@@ -136,8 +137,15 @@ pub struct ImageProps {
     pub src: String,
 }
 
-/// Byte range of the node's text painted in its own color, optionally over
-/// its own background fill.
+// Slot children of an image node render in its place while the source is
+// still decoding (Placeholder) or after it failed (Error). They are laid out
+// against the image's rect, not as flex children.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotKind {
+    Placeholder,
+    Error,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextSpan {
     pub start: usize,
@@ -156,6 +164,10 @@ pub struct Props {
     pub hidden: bool,
     pub input: Option<InputProps>,
     pub image: Option<ImageProps>,
+    pub slot: Option<SlotKind>,
+    // Anchors this node inline in its input parent's text at the mark with
+    // this id; it is laid out by text flow, not flex.
+    pub mark: Option<u64>,
     pub content_height: Option<f32>,
     pub scroll_events: bool,
     pub wheel_events: bool,
@@ -188,6 +200,10 @@ pub(crate) struct RNode {
     pub hidden: bool,
     pub input: Option<InputState>,
     pub image: Option<ImageProps>,
+    pub slot: Option<SlotKind>,
+    pub slot_visible: bool,
+    pub mark: Option<u64>,
+    pub mark_visible: bool,
     pub parent: Option<NodeId>,
     pub children: Vec<NodeId>,
     pub taffy: taffy::NodeId,
@@ -219,6 +235,8 @@ pub struct Tree {
     pub(crate) taffy: TaffyTree<MeasureCtx>,
     keys: HashMap<String, NodeId>,
     children_dirty: HashSet<NodeId>,
+    image_slot_parents: Vec<NodeId>,
+    mark_parents: Vec<NodeId>,
     paint_order: Vec<NodeId>,
     scrollables: Vec<NodeId>,
     focus: Option<NodeId>,
@@ -249,6 +267,8 @@ impl Tree {
             taffy: TaffyTree::new(),
             keys: HashMap::new(),
             children_dirty: HashSet::new(),
+            image_slot_parents: Vec::new(),
+            mark_parents: Vec::new(),
             paint_order: Vec::new(),
             scrollables: Vec::new(),
             focus: None,
@@ -341,6 +361,10 @@ impl Tree {
                 submit: p.submit,
             }),
             image: props.image,
+            slot: props.slot,
+            slot_visible: false,
+            mark: props.mark,
+            mark_visible: false,
             parent: None,
             children: Vec::new(),
             taffy,
@@ -429,6 +453,10 @@ impl Tree {
                 .node(parent)
                 .children
                 .iter()
+                .filter(|&&c| {
+                    let node = self.node(c);
+                    node.slot.is_none() && node.mark.is_none()
+                })
                 .map(|&c| self.node(c).taffy)
                 .collect();
             self.taffy
@@ -496,12 +524,28 @@ impl Tree {
             changed = true;
             image_changed = true;
         }
+        let slot_changed = node.slot != props.slot;
+        if slot_changed {
+            node.slot = props.slot;
+            changed = true;
+        }
+        let mark_changed = node.mark != props.mark;
+        if mark_changed {
+            node.mark = props.mark;
+            changed = true;
+        }
         if node.content_height != props.content_height {
             node.content_height = props.content_height;
             changed = true;
             self.needs_place = true;
         }
         if image_changed {
+            self.needs_layout = true;
+        }
+        if slot_changed || mark_changed {
+            if let Some(parent) = self.node(id).parent {
+                self.children_dirty.insert(parent);
+            }
             self.needs_layout = true;
         }
         let node = self.node_mut(id);
@@ -717,11 +761,17 @@ impl Tree {
         self.needs_place = true;
     }
 
+    pub(crate) fn mark_layout(&mut self) {
+        self.needs_layout = true;
+    }
+
     pub fn flush_layout(&mut self, fonts: &[fontdue::Font], base_px: f32) {
         assert!(!fonts.is_empty());
         self.base_px = base_px;
         if self.needs_layout {
             crate::profiler::span("tree.sync", || self.sync_dirty_children());
+            self.image_slot_parents.clear();
+            self.mark_parents.clear();
             crate::profiler::span("tree.resolve", || {
                 self.resolve(
                     self.root,
@@ -731,6 +781,7 @@ impl Tree {
                     },
                 )
             });
+            crate::profiler::span("tree.widgets", || self.layout_mark_widgets(fonts));
             let root_taffy = self.node(self.root).taffy;
             crate::profiler::span("tree.layout", || {
                 self.taffy
@@ -743,11 +794,12 @@ impl Tree {
                     )
                     .expect("layout")
             });
+            crate::profiler::span("tree.slots", || self.layout_slots(fonts));
             self.needs_layout = false;
             self.needs_place = true;
         }
         if self.needs_place {
-            crate::profiler::span("tree.place", || self.place());
+            crate::profiler::span("tree.place", || self.place(fonts));
             self.needs_place = false;
             self.needs_paint = true;
         }
@@ -768,19 +820,49 @@ impl Tree {
         node.resolved = resolved;
         let taffy = node.taffy;
         let children = node.children.clone();
-        let want = if !children.is_empty() {
+        let image = node.image.clone();
+        let wrap = node.style.wrap;
+        let is_input = node.input.is_some();
+        let marks = node
+            .input
+            .as_ref()
+            .map(|s| s.input.marks().to_vec())
+            .unwrap_or_default();
+        let node_text = node.text.clone();
+        // Slot and mark children are laid out outside the flex flow (against
+        // the image's rect / at text offsets), so a node whose children are
+        // all slots/marks stays a taffy leaf and keeps its intrinsic measure.
+        let non_flow_only = children.iter().all(|&c| {
+            let child = self.node(c);
+            child.slot.is_some() || child.mark.is_some()
+        });
+        let text = if image.is_none() && non_flow_only {
+            node_text
+        } else {
             None
-        } else if let Some(image) = &node.image {
-            Some(MeasureCtx::Image {
-                src: image.src.clone(),
-                size: crate::image_cache::image_size(&image.src),
-            })
-        } else if let Some(text) = &node.text {
+        };
+        if is_input && children.iter().any(|&c| self.node(c).mark.is_some()) {
+            self.mark_parents.push(id);
+        }
+        let want = if let Some(image) = image {
+            if non_flow_only {
+                if !children.is_empty() {
+                    self.image_slot_parents.push(id);
+                }
+                Some(MeasureCtx::Image {
+                    size: crate::image_cache::image_size(&image.src),
+                    src: image.src,
+                })
+            } else {
+                None
+            }
+        } else if let Some(text) = text {
             Some(MeasureCtx::Text {
-                text: text.clone(),
+                text,
                 px: resolved.px,
                 font: resolved.font,
-                wrap: node.style.wrap,
+                wrap,
+                marks,
             })
         } else {
             None
@@ -796,7 +878,101 @@ impl Tree {
         }
     }
 
-    fn place(&mut self) {
+    // Slot subtrees are their own taffy roots pinned to the image's laid-out
+    // size, so slot content fills the image rect without affecting it.
+    fn layout_slots(&mut self, fonts: &[fontdue::Font]) {
+        use taffy::prelude::length;
+        let parents = self.image_slot_parents.clone();
+        for id in parents {
+            let Some(node) = self.get(id) else { continue };
+            let (image_taffy, children) = (node.taffy, node.children.clone());
+            let size = self.taffy.layout(image_taffy).expect("layout").size;
+            for child in children {
+                let (child_taffy, style, hidden) = {
+                    let child = self.node(child);
+                    (child.taffy, child.style.clone(), child.hidden)
+                };
+                let mut taffy_style = to_taffy(&style, hidden);
+                taffy_style.size = taffy::Size {
+                    width: length(size.width),
+                    height: length(size.height),
+                };
+                self.taffy
+                    .set_style(child_taffy, taffy_style)
+                    .expect("taffy style");
+                self.taffy
+                    .compute_layout_with_measure(
+                        child_taffy,
+                        taffy::Size {
+                            width: taffy::AvailableSpace::Definite(size.width),
+                            height: taffy::AvailableSpace::Definite(size.height),
+                        },
+                        |known, available, _node, context, _style| {
+                            layout::measure(known, available, context.as_deref(), fonts)
+                        },
+                    )
+                    .expect("slot layout");
+            }
+        }
+    }
+
+    // Mark widgets are their own taffy roots measured at max-content before
+    // the main layout, so the input's text measure can reserve their width.
+    fn layout_mark_widgets(&mut self, fonts: &[fontdue::Font]) {
+        let parents = self.mark_parents.clone();
+        for id in parents {
+            let Some(node) = self.get(id) else { continue };
+            let children = node.children.clone();
+            let mut changed = false;
+            for child in children {
+                let (mark_id, child_taffy) = {
+                    let child = self.node(child);
+                    let Some(mark_id) = child.mark else { continue };
+                    (mark_id, child.taffy)
+                };
+                self.taffy
+                    .compute_layout_with_measure(
+                        child_taffy,
+                        taffy::Size::MAX_CONTENT,
+                        |known, available, _node, context, _style| {
+                            layout::measure(known, available, context.as_deref(), fonts)
+                        },
+                    )
+                    .expect("widget layout");
+                let size = self.taffy.layout(child_taffy).expect("layout").size;
+                let Some(state) = self.get_mut(id).and_then(|n| n.input.as_mut()) else {
+                    continue;
+                };
+                changed |= state.input.set_mark_advance(mark_id, size.width);
+            }
+            if changed {
+                self.refresh_input_measure(id);
+            }
+        }
+    }
+
+    // The measure context snapshots mark advances, so it must be rebuilt when
+    // widget sizes land after resolve already ran.
+    fn refresh_input_measure(&mut self, id: NodeId) {
+        let node = self.node(id);
+        let Some(state) = &node.input else { return };
+        let ctx = MeasureCtx::Text {
+            text: node.text.clone().unwrap_or_default(),
+            px: node.resolved.px,
+            font: node.resolved.font,
+            wrap: node.style.wrap,
+            marks: state.input.marks().to_vec(),
+        };
+        let taffy = node.taffy;
+        if self.taffy.get_node_context(taffy) != Some(&ctx) {
+            self.taffy
+                .set_node_context(taffy, Some(ctx))
+                .expect("taffy context");
+            let _ = self.taffy.mark_dirty(taffy);
+        }
+    }
+
+    fn place(&mut self, fonts: &[fontdue::Font]) {
         self.paint_order.clear();
         self.scrollables.clear();
         let layout = self
@@ -809,10 +985,16 @@ impl Tree {
             w: layout.size.width,
             h: layout.size.height,
         };
-        self.place_node(self.root, (0.0, 0.0), Some(window));
+        self.place_node(self.root, (0.0, 0.0), Some(window), fonts);
     }
 
-    fn place_node(&mut self, id: NodeId, origin: (f32, f32), clip: Option<PxRect>) {
+    fn place_node(
+        &mut self,
+        id: NodeId,
+        origin: (f32, f32),
+        clip: Option<PxRect>,
+        fonts: &[fontdue::Font],
+    ) {
         if self.node(id).hidden {
             self.zero_rects(id);
             return;
@@ -855,9 +1037,74 @@ impl Tree {
         } else {
             clip
         };
+        let image_src = node.image.as_ref().map(|i| i.src.clone());
         for child in node.children.clone() {
-            self.place_node(child, child_origin, child_clip);
+            if let Some(mark_id) = self.node(child).mark {
+                match self.mark_child_origin(id, child, mark_id, fonts) {
+                    Some(at) => {
+                        self.node_mut(child).mark_visible = true;
+                        self.place_node(child, at, Some(visible), fonts);
+                    }
+                    None => {
+                        self.node_mut(child).mark_visible = false;
+                        self.zero_rects(child);
+                    }
+                }
+                continue;
+            }
+            match (self.node(child).slot, &image_src) {
+                (Some(kind), Some(src)) => {
+                    let status = crate::image_cache::status(src);
+                    let show = matches!(
+                        (kind, status),
+                        (SlotKind::Placeholder, ImageStatus::Pending)
+                            | (SlotKind::Error, ImageStatus::Failed)
+                    );
+                    self.node_mut(child).slot_visible = show;
+                    if show {
+                        self.place_node(child, (rect.x, rect.y), Some(visible), fonts);
+                    } else {
+                        self.zero_rects(child);
+                    }
+                }
+                (Some(_), None) => {
+                    self.node_mut(child).slot_visible = false;
+                    self.zero_rects(child);
+                }
+                (None, _) => self.place_node(child, child_origin, child_clip, fonts),
+            }
         }
+    }
+
+    // A widget sits at its mark's text position, centered on the line; a
+    // mark child whose sentinel is gone (or whose parent isn't an input)
+    // simply doesn't render.
+    fn mark_child_origin(
+        &self,
+        parent: NodeId,
+        child: NodeId,
+        mark_id: u64,
+        fonts: &[fontdue::Font],
+    ) -> Option<(f32, f32)> {
+        let node = self.get(parent)?;
+        let state = node.input.as_ref()?;
+        let mark = state.input.marks().iter().find(|m| m.id == mark_id)?;
+        let geometry = self.text_geometry(parent)?;
+        let font = &fonts[geometry.font.min(fonts.len() - 1)];
+        let (x, y) = offset_to_point(
+            state.input.text(),
+            mark.offset,
+            font,
+            geometry.px,
+            geometry.max_width,
+            state.input.marks(),
+        );
+        let size = self.taffy.layout(self.get(child)?.taffy).ok()?.size;
+        let line_h = line_height(font, geometry.px);
+        Some((
+            geometry.origin.0 + x,
+            geometry.origin.1 + y + (line_h - size.height) / 2.0,
+        ))
     }
 
     fn zero_rects(&mut self, id: NodeId) {

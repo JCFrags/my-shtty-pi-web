@@ -1,9 +1,18 @@
+import { createContext, useContext } from "react";
 import type { EngineInfo, Rgba } from "pixel-react";
 
 
 export interface Ctx {
   theme: Theme;
   rem: number;
+}
+
+export const CtxContext = createContext<Ctx | null>(null);
+
+export function useCtx(): Ctx {
+  const ctx = useContext(CtxContext);
+  if (!ctx) throw new Error("useCtx called outside CtxContext.Provider");
+  return ctx;
 }
 
 export interface Theme {
