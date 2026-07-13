@@ -279,6 +279,13 @@ impl TextInput {
         };
         self.splice(start..self.cursor, "", kind);
     }
+    /**
+     * we need an understanding of the code from scratch, but i can precache my undersatnding a bit with the image rendering since it was pretty simple
+     * 
+     * read img source, that gets set to the tree prop, then during layout we read the image bytes and dispalyed them
+     * 
+     * but now its a bit more nuanced since its very asyncronous and we refactored even how we pump events and draw, and i suspected that was weird how pump was writte anyways
+     */
 
     pub fn delete_forward(&mut self, granularity: Granularity) {
         if self.delete_selection() {

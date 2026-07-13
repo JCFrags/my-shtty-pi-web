@@ -1502,7 +1502,7 @@ fn placeholder_slot_fills_the_image_rect_until_the_decode_lands() {
     assert_eq!(pixel(&canvas, 20, 10), [50, 50, 50, 255]);
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !crate::image_cache::drain_completed().any {
+    while !crate::image_cache::drain_completed() {
         assert!(std::time::Instant::now() < deadline, "decode never landed");
         std::thread::sleep(std::time::Duration::from_millis(10));
     }

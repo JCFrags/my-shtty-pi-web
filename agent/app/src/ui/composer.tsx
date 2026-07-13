@@ -28,11 +28,17 @@ export function Composer({ inputRef }: { inputRef: React.RefObject<NodeHandle | 
           }}
         >
           {attached.map((attachment) => (
+            /**
+             * 
+             */
             <Image
               key={attachment.id}
               src={attachment.path}
               style={{
                 height: rem * 8,
+                /**
+                 * what the fuck is a corner radius, thats such a werid api??
+                 */
                 cornerRadius: rem * 0.4,
                 border: { width: Math.max(rem / 16, 1), color: theme.hairline },
               }}
@@ -57,6 +63,14 @@ export function Composer({ inputRef }: { inputRef: React.RefObject<NodeHandle | 
           onCaret={(caret) => menus.onCaret(caret)}
           onPasteImage={(image) => {
             const id = store.addComposerImage(image);
+            /**
+             * how does data even flow when we have a ref method exposed?
+             * 
+             * im not 100% sure, but i imagine this correlates to an underlying even that
+             * gets tracked in our UI tree?
+             * 
+             * 
+             */
             inputRef.current?.insertMark(id);
           }}
           onSubmit={(text, marks) => {
@@ -70,6 +84,12 @@ export function Composer({ inputRef }: { inputRef: React.RefObject<NodeHandle | 
             store.active().send(text, paths);
           }}
         >
+          {/* id like to check if this correctly handles increasing line height if the widget grows*/}
+          {/* 
+          
+          
+          so we take in as children "widgets" (is this the right term to introduce here?)
+          */}
           {attached.map((attachment) => (
             <Input.Widget key={attachment.id} markId={attachment.id}>
               <AttachmentPill path={attachment.path} />

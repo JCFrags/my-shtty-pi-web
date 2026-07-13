@@ -158,6 +158,15 @@ fn paint_node(
             }
         });
     }
+    /**
+     * okay im gonna have to start answering questions about this if im gonna make any progress on understanding how the 
+     * image rendering pipeline actually works
+     * 
+     * i don't think its insanely complex it just has some distributed parts that make it a little hard to track, then 
+     * very complex code that will be hard to understand that i would at least like to intuit
+     * 
+     * i want to warm up a little bit more with understanding how the text editing scheme works
+     */
 
     if let Some(image) = &node.image {
         timed(stats.as_mut().map(|s| &mut s.images), || {
@@ -177,11 +186,12 @@ fn paint_node(
                             .is_some_and(|n| n.slot == Some(SlotKind::Error))
                     });
                     if !has_error_slot {
-                        paint_broken_image(canvas, rect, node.resolved.px, node.resolved.color);
+                        paint_broken_image (canvas, rect, node.resolved.px, node.resolved.color);
                     }
                 }
-                // While decoding only the node's own background shows; a
-                // placeholder slot paints as a child below.
+                /**
+                 * the users pending ui can render here in place if they specified one in <Image/>
+                 */
                 ImageStatus::Pending => {}
             }
         });
@@ -383,8 +393,10 @@ fn paint_node(
     }
 }
 
-// Browser-style broken-image indicator: a muted outlined frame with a dot,
-// centered and never scaled up. Apps replace it with an Error slot.
+
+/**
+ * i wish we had an internal UI node that represented this
+ */
 fn paint_broken_image(canvas: &mut Canvas, rect: PxRect, px: f32, color: Color) {
     let side = (px * 1.5).min(rect.w * 0.6).min(rect.h * 0.6);
     if side < 4.0 {
@@ -642,16 +654,23 @@ mod tests {
         let node = tree.children(tree.root())[0];
         let rect = tree.rect(node).unwrap();
         assert_eq!(
-            (rect.w, rect.h),
-            (40.0, 20.0),
-            "height follows aspect before the decode lands"
+            rect.h, 0.0,
+            "without a placeholder the image occupies nothing until decoded"
         );
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while !crate::image_cache::drain_completed().any {
+        while !crate::image_cache::drain_completed() {
             assert!(std::time::Instant::now() < deadline, "decode never landed");
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
+        tree.mark_layout();
+        tree.flush_layout(std::slice::from_ref(&font), 16.0);
+        let rect = tree.rect(node).unwrap();
+        assert_eq!(
+            (rect.w, rect.h),
+            (40.0, 20.0),
+            "height follows aspect once the pixels are ready"
+        );
         let mut canvas = Canvas::new(100, 100);
         paint(&tree, &mut canvas, std::slice::from_ref(&font), None);
         let center = &canvas.pixels[((10 * 100 + 20) * 4) as usize..][..4];

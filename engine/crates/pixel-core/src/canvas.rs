@@ -211,10 +211,6 @@ impl Canvas {
             self.paint_path(&path, color, Some(width));
         }
     }
-
-    // Source-over blit of an already-scaled premultiplied image (corner
-    // radius baked into its alpha), so per-frame image drawing never runs
-    // tiny-skia's per-pixel pattern shader.
     pub fn blit_image(&mut self, x: f32, y: f32, image: tiny_skia::PixmapRef<'_>) {
         let (cx1, cy1, cx2, cy2) = self.clip_bounds();
         let x0 = x.round() as i64;

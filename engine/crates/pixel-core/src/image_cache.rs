@@ -17,7 +17,6 @@ enum State {
     Failed,
 }
 
-// Width, height, and the corner radii baked into the variant's alpha.
 type ScaledKey = (u32, u32, [u32; 4]);
 
 struct Entry {
@@ -102,7 +101,6 @@ fn decode(src: &str) -> Option<tiny_skia::Pixmap> {
     premultiply(&img)
 }
 
-// Reads only the header, so layout can know the size before the decode lands.
 fn sniff_dims(src: &str) -> Option<(u32, u32)> {
     image::ImageReader::open(src)
         .ok()?
@@ -112,8 +110,6 @@ fn sniff_dims(src: &str) -> Option<(u32, u32)> {
         .ok()
 }
 
-// Apps sometimes set src moments before the file finishes writing, so a
-// failed decode retries briefly before the failure sticks.
 const RETRY_DELAYS: [Duration; 3] = [
     Duration::from_millis(100),
     Duration::from_millis(300),
@@ -158,6 +154,11 @@ fn decode_worker(
     }
 }
 
+/**
+ * okay so this creates a thread with a function to run inside it,
+ * 
+ * i wonder really understand the scope of tx vs rx
+ */
 fn jobs_sender(cache: &mut Cache) -> &Sender<Job> {
     if cache.jobs.is_none() {
         let (jobs_tx, jobs_rx) = channel();
@@ -247,7 +248,6 @@ pub(crate) fn image_size(src: &str) -> Option<(u32, u32)> {
     })
 }
 
-// Full-resolution pixels; painting goes through with_scaled_image instead.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn with_image<R>(src: &str, f: impl FnOnce(tiny_skia::PixmapRef<'_>) -> R) -> Option<R> {
     CACHE.with_borrow_mut(|cache| {
@@ -259,8 +259,9 @@ pub(crate) fn with_image<R>(src: &str, f: impl FnOnce(tiny_skia::PixmapRef<'_>) 
     })
 }
 
-// Resample once per (size, radius) so per-frame drawing is a plain blit; the
-// corner radii are baked into the variant's alpha.
+/**
+ * i will need to think about this to understand it
+ */
 fn make_scaled(
     full: tiny_skia::PixmapRef<'_>,
     w: u32,
@@ -363,23 +364,19 @@ pub(crate) fn insert_decoded(src: String, img: &image::RgbaImage) {
     });
 }
 
-// The wake closure runs on the decode worker thread whenever a result is
-// ready; it should interrupt whatever the calling thread blocks on.
+/**
+ *  relevant for waking the thread
+ */
 pub(crate) fn set_waker(wake: impl Fn() + Send + 'static) {
     CACHE.with_borrow_mut(|cache| {
         *cache.waker.lock().unwrap() = Some(Box::new(wake));
     });
 }
 
-#[derive(Default)]
-pub(crate) struct Landed {
-    pub any: bool,
-    pub resized: bool,
-}
-
-pub(crate) fn drain_completed() -> Landed {
+// Returns whether any decode result landed this drain.
+pub(crate) fn drain_completed() -> bool {
     CACHE.with_borrow_mut(|cache| {
-        let mut landed = Landed::default();
+        let mut landed = false;
         let completed: Vec<DecodeResult> = match &cache.results {
             Some(results) => results.try_iter().collect(),
             None => return landed,
@@ -389,19 +386,14 @@ pub(crate) fn drain_completed() -> Landed {
             let Some(entry) = cache.entries.get_mut(&src) else {
                 continue;
             };
-            // insert_decoded can win the race; its pixels are fresher.
             if matches!(entry.state, State::Ready(_)) {
                 continue;
             }
-            landed.any = true;
+            landed = true;
             emit_lifecycle(&result);
             match result.pixmap {
                 Some(pixmap) => {
-                    let dims = (pixmap.width(), pixmap.height());
-                    if entry.dims != Some(dims) {
-                        entry.dims = Some(dims);
-                        landed.resized = true;
-                    }
+                    entry.dims = Some((pixmap.width(), pixmap.height()));
                     cache.bytes += pixmap.data().len();
                     entry.state = State::Ready(pixmap);
                     evict_over_budget(cache, &src);
@@ -413,8 +405,6 @@ pub(crate) fn drain_completed() -> Landed {
     })
 }
 
-// The wait span covers enqueue → visible (this drain); the decode span is the
-// worker's part, including its brief file-appearance retries.
 fn emit_lifecycle(result: &DecodeResult) {
     let Some(now) = crate::profiler::now_ms() else {
         return;
@@ -454,8 +444,6 @@ fn emit_lifecycle(result: &DecodeResult) {
     );
 }
 
-// Called when a recording stops so images still in flight show up as
-// open-ended waits instead of disappearing from the profile.
 pub(crate) fn emit_pending_waits() {
     CACHE.with_borrow(|cache| {
         let Some(now) = crate::profiler::now_ms() else {
@@ -491,12 +479,11 @@ mod tests {
         })
     }
 
-    fn drain_until_landed() -> Landed {
+    fn drain_until_landed() {
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         loop {
-            let landed = drain_completed();
-            if landed.any {
-                return landed;
+            if drain_completed() {
+                return;
             }
             assert!(
                 std::time::Instant::now() < deadline,

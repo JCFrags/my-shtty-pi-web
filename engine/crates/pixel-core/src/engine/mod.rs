@@ -712,13 +712,19 @@ impl Engine {
                 crate::image_cache::set_waker(move || waker.wake());
             }
         }
+        /**
+         * ill need to see how events get sent over the thread
+         * for paste events and how that translates to this drain images stuff
+         * 
+         * 
+         * 
+         * need to get a bit more in to it to have a reasonable chance of understanding
+         * the images flow
+         */
         self.drain_images();
         let mut out = Vec::new();
         out.append(&mut self.pending);
         if !out.is_empty() {
-            // Deliver op-generated events before painting: the caller loops
-            // straight back into pump for the frame, and the embedder's
-            // thread reacts to the events in parallel with it.
             self.drain_logs(&mut out);
             return Ok(out);
         }
@@ -727,9 +733,6 @@ impl Engine {
         let first_wait = if self.animating() {
             Some(FRAME_POLL)
         } else if !out.is_empty() {
-            // Ops applied between pumps (e.g. an input splice) push their
-            // events into `pending`; blocking here would sit on them until
-            // unrelated terminal input arrives, so deliver first.
             Some(Duration::ZERO)
         } else {
             wait
@@ -758,19 +761,14 @@ impl Engine {
         Ok(out)
     }
 
+    // A landed decode always needs layout: placeholder-less images measure
+    // zero until their pixels are ready, so arrival changes their size.
     fn drain_images(&mut self) {
-        let landed = crate::image_cache::drain_completed();
-        if !landed.any {
+        if !crate::image_cache::drain_completed() {
             return;
         }
-        // A decode changes slot visibility (place) and, when the header sniff
-        // missed the size, the image's intrinsic size (layout).
         for view in &mut self.comp.views {
-            if landed.resized {
-                view.tree.mark_layout();
-            } else {
-                view.tree.mark_place();
-            }
+            view.tree.mark_layout();
         }
     }
 
@@ -1851,6 +1849,10 @@ impl Engine {
                     }
                     view.canvas.fill(view.clear_color);
                 });
+                /** 
+                 *  so a resolved node is used for paint
+                 * 
+                */
                 view.tree.flush_layout(fonts, base_px);
                 paint(&view.tree, &mut view.canvas, fonts, cursor);
                 view.tree.clear_paint_flag();

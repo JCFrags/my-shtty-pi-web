@@ -192,6 +192,9 @@ pub(crate) struct Resolved {
     pub selection_color: Color,
 }
 
+/**
+ * react node? how i didn't even know this struct existed kill me
+ */
 pub(crate) struct RNode {
     pub style: Style,
     pub text: Option<String>,
@@ -223,6 +226,9 @@ pub(crate) struct RNode {
     pub order: u32,
 }
 
+/**
+ * huhhh
+ */
 struct Slot {
     generation: u32,
     node: Option<RNode>,
@@ -315,6 +321,12 @@ impl Tree {
         self.get(id).is_some()
     }
 
+    /**
+     * this seems plausible to me so far, there exists some content
+     * that we need to draw that gains no information from the existing
+     * layout system, they get drawn within the context of some other object
+     * (kind of like absolute positioning), hm but then they still affect the outer layout
+     */
     pub(crate) fn get(&self, id: NodeId) -> Option<&RNode> {
         let slot = self.slots.get(id.index as usize)?;
         if slot.generation != id.generation {
@@ -757,6 +769,9 @@ impl Tree {
         self.needs_paint = false;
     }
 
+    /**
+     * wdym needs place?
+     */
     pub(crate) fn mark_place(&mut self) {
         self.needs_place = true;
     }
@@ -805,6 +820,11 @@ impl Tree {
         }
     }
 
+
+    /**
+     * need to circle back on where resolve is getting called
+     * in the context of the rendering
+     */
     fn resolve(&mut self, id: NodeId, inherited: Resolved) {
         let node = self.node_mut(id);
         let resolved = Resolved {
@@ -819,6 +839,10 @@ impl Tree {
         };
         node.resolved = resolved;
         let taffy = node.taffy;
+        /**
+         * the children here is gonna be relevant
+         * for understanding how the widgets flow thorugh
+         */
         let children = node.children.clone();
         let image = node.image.clone();
         let wrap = node.style.wrap;
@@ -829,9 +853,9 @@ impl Tree {
             .map(|s| s.input.marks().to_vec())
             .unwrap_or_default();
         let node_text = node.text.clone();
-        // Slot and mark children are laid out outside the flex flow (against
-        // the image's rect / at text offsets), so a node whose children are
-        // all slots/marks stays a taffy leaf and keeps its intrinsic measure.
+        /**
+         * is slot just a normal child? 
+         */
         let non_flow_only = children.iter().all(|&c| {
             let child = self.node(c);
             child.slot.is_some() || child.mark.is_some()
@@ -849,8 +873,21 @@ impl Tree {
                 if !children.is_empty() {
                     self.image_slot_parents.push(id);
                 }
+                // Without a placeholder, a still-decoding image occupies
+                // nothing: it appears whole when the pixels are ready rather
+                // than as a reserved blank box.
+                let has_placeholder = children
+                    .iter()
+                    .any(|&c| self.node(c).slot == Some(SlotKind::Placeholder));
+                let size = if !has_placeholder
+                    && crate::image_cache::status(&image.src) == ImageStatus::Pending
+                {
+                    None
+                } else {
+                    crate::image_cache::image_size(&image.src)
+                };
                 Some(MeasureCtx::Image {
-                    size: crate::image_cache::image_size(&image.src),
+                    size,
                     src: image.src,
                 })
             } else {
@@ -878,10 +915,11 @@ impl Tree {
         }
     }
 
-    // Slot subtrees are their own taffy roots pinned to the image's laid-out
-    // size, so slot content fills the image rect without affecting it.
     fn layout_slots(&mut self, fonts: &[fontdue::Font]) {
         use taffy::prelude::length;
+            /**
+             *  what the hell is an image slow parents? why are images special cased?
+             */
         let parents = self.image_slot_parents.clone();
         for id in parents {
             let Some(node) = self.get(id) else { continue };
