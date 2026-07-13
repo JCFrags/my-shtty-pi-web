@@ -27,7 +27,7 @@ export function Composer({ ctx: { theme, rem }, inputRef }: { ctx: Ctx; inputRef
               key={attachment.id}
               src={attachment.path}
               style={{
-                height: rem * 4,
+                height: rem * 8,
                 cornerRadius: rem * 0.4,
                 border: { width: Math.max(rem / 16, 1), color: theme.hairline },
               }}
