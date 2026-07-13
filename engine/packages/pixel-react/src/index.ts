@@ -3,6 +3,7 @@ import { ConcurrentRoot } from "react-reconciler/constants";
 
 import {
   APP_VIEW,
+  ChangeSource,
   Container,
   DEVTOOLS_VIEW,
   getBridge,
@@ -39,6 +40,9 @@ export type {
   InputProps,
   InputAttachment,
   AttachmentRef,
+  CaretInfo,
+  ChangeInfo,
+  ChangeSource,
   ImageProps,
   ClickEvent,
   ScrollEvent,
@@ -48,6 +52,16 @@ export type { Color, Edges, InsetEdges, InsetValue, ScrollbarStyle, Style } from
 export type { DiffEmphasis, DiffRow, EngineInfo, HighlightSpan, Rgba } from "./native";
 export { HIGHLIGHT_CAPTURES, diff, highlight } from "./native";
 export { openDevtools, closeDevtools, toggleDevtools };
+
+/**
+ * While set, these unmodified keys bypass the focused input (including Enter
+ * submit) and arrive at onKey instead. Pass [] to restore normal handling.
+ */
+export function setKeyCapture(keys: string[]): void {
+  const bridge = getBridge();
+  bridge.push(APP_VIEW, { op: "setKeyCapture", keys });
+  bridge.flush();
+}
 
 export interface KeyMods {
   shift: boolean;
@@ -98,6 +112,9 @@ interface EngineEventJson {
   path?: string;
   id?: number;
   attachments?: Array<{ id: number; path: string }>;
+  cursor?: number;
+  caret?: { x: number; y: number; w: number; h: number };
+  source?: string;
   font?: number;
   seq?: number;
   epochMs?: number;
@@ -181,7 +198,19 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
       }
       case "change": {
         const props = bridge.propsById[view]?.get(event.node!);
-        props?.onChange?.(event.text!, event.attachments ?? []);
+        props?.onChange?.(event.text!, event.attachments ?? [], {
+          cursor: event.cursor ?? 0,
+          ...(event.caret ?? { x: 0, y: 0, w: 0, h: 0 }),
+          source: (event.source as ChangeSource) ?? "edit",
+        });
+        break;
+      }
+      case "caret": {
+        const props = bridge.propsById[view]?.get(event.node!);
+        props?.onCaret?.({
+          cursor: event.cursor ?? 0,
+          ...(event.caret ?? { x: 0, y: 0, w: 0, h: 0 }),
+        });
         break;
       }
       case "submit": {

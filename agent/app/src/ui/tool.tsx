@@ -20,8 +20,8 @@ export function ToolRow({ ctx, call }: { ctx: Ctx; call: ToolCall }) {
     <Box style={{ flexDirection: "column", gap: rem * 0.25 }}>
       <Box style={{ gap: rem * 0.5, alignItems: "center", overflow: "hidden" }}>
         <Dot ctx={ctx} color={color} />
-        <Text style={{ fontSize: rem * 0.9, flexShrink: 0, wrap: false }}>{call.name}</Text>
-        <Text style={{ color: theme.muted, fontSize: rem * 0.9, wrap: false }}>
+        <Text style={{ flexShrink: 0, wrap: false }}>{call.name}</Text>
+        <Text style={{ color: theme.muted, wrap: false }}>
           {call.detail}
         </Text>
       </Box>

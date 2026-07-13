@@ -20,7 +20,7 @@ export function AskBox({ ctx: { theme, rem }, ask }: { ctx: Ctx; ask: Ask }) {
         <Text style={{ color: theme.accent, flexShrink: 0 }}>{ask.tool}</Text>
         <Text style={{ color: theme.muted, wrap: false }}>{ask.detail}</Text>
       </Box>
-      <Text style={{ color: theme.muted, fontSize: rem * 0.85 }}>enter allow · esc deny</Text>
+      <Text style={{ color: theme.muted }}>enter allow · esc deny</Text>
     </Box>
   );
 }
@@ -46,7 +46,6 @@ export function WorkingStatus({ ctx, session }: { ctx: Ctx; session: Session }) 
       <Text
         style={{
           color: theme.accent,
-          fontSize: rem * 0.85,
           wrap: false,
           flexShrink: 0,
         }}

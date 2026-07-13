@@ -10,7 +10,7 @@ export function Settings({ ctx }: { ctx: Ctx }) {
   const { theme, rem } = ctx;
   const rows = fontRows(store.settingsQuery);
   const list = useRef<NodeHandle | null>(null);
-  const rowHeight = rem * 1.75;
+  const rowHeight = rem * 1.85;
   const listHeight = rem * 16;
 
   useEffect(() => {
@@ -24,7 +24,7 @@ export function Settings({ ctx }: { ctx: Ctx }) {
         inset: { left: 0, right: 0, top: 0, bottom: 0 },
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
+        padding: { top: rem * 4 },
       }}
       onClick={() => store.closeSettings()}
     >
@@ -64,7 +64,7 @@ export function Settings({ ctx }: { ctx: Ctx }) {
           }}
         >
           {rows.length === 0 && (
-            <Text style={{ color: theme.muted, fontSize: rem * 0.9, padding: rem * 0.5 }}>
+            <Text style={{ color: theme.muted, padding: rem * 0.5 }}>
               no fonts match
             </Text>
           )}
@@ -82,7 +82,6 @@ export function Settings({ ctx }: { ctx: Ctx }) {
             >
               <Text
                 style={{
-                  fontSize: rem * 0.9,
                   color: row.path === store.fontPath ? theme.accent : theme.fg,
                   wrap: false,
                 }}

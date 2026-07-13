@@ -3,11 +3,13 @@ import { Box } from "pixel-react";
 import type { EngineInfo, NodeHandle } from "pixel-react";
 
 import { useSessionLog } from "../db/hooks";
+import { menus } from "../menu";
 import { store } from "../session";
 import type { Session } from "../session";
 import { makeTheme, type Ctx } from "../theme";
 import { transcript } from "../transcript";
 import { Composer } from "./composer";
+import { TriggerMenuOverlay } from "./menu";
 import { Message } from "./message";
 import { Palette } from "./palette";
 import { Settings } from "./settings";
@@ -36,8 +38,15 @@ export function App({ info }: { info: EngineInfo }) {
     if (follow.current) list.current?.scrollTo(1e9, true);
   });
   useEffect(() => {
-    if (session.ask || store.palette || store.settings) input.current?.blur();
-    else input.current?.focus();
+    menus.input = input.current;
+  });
+  useEffect(() => {
+    if (session.ask || store.palette || store.settings) {
+      input.current?.blur();
+      menus.reset();
+    } else {
+      input.current?.focus();
+    }
   }, [session.ask, store.palette, store.settings]);
 
   return (
@@ -82,6 +91,7 @@ export function App({ info }: { info: EngineInfo }) {
         {session.working && <WorkingStatus ctx={ctx} session={session} />}
         <Composer ctx={ctx} inputRef={input} />
       </Box>
+      <TriggerMenuOverlay ctx={ctx} info={info} />
       {store.palette && <Palette ctx={ctx} />}
       {store.settings && <Settings ctx={ctx} />}
     </Box>

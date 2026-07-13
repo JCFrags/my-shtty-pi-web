@@ -7,6 +7,8 @@ export interface NodeHandle {
   focus(): void;
   blur(): void;
   scrollTo(offset: number, smooth?: boolean): void;
+  /** Replace the byte range [start, end) of an input's text, leaving the caret after the inserted text. */
+  splice(start: number, end: number, text: string): void;
 }
 
 type Host<P> = ForwardRefExoticComponent<P & RefAttributes<NodeHandle>>;

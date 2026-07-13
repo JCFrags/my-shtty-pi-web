@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use rustix::termios::{self, OptionalActions, Termios};
 
 use crate::canvas::Canvas;
-use crate::kitty::kitty_transmit;
+use crate::kitty::Placement;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
@@ -119,6 +119,9 @@ pub struct Terminal {
     pending: Vec<u8>,
     shm_frames: bool,
     frame_seq: u64,
+    tmux: bool,
+    image_id: u32,
+    placeholders: Option<(u32, u32)>,
     wake_rx: Option<rustix::fd::OwnedFd>,
     waker: Option<Waker>,
 }
@@ -148,6 +151,10 @@ impl Waker {
 
 impl Terminal {
     pub fn new() -> io::Result<Self> {
+        let tmux = crate::tmux::in_tmux();
+        if tmux {
+            crate::tmux::enable_passthrough();
+        }
         let stdin = io::stdin();
         let saved = termios::tcgetattr(&stdin)?;
         let mut raw = saved.clone();
@@ -172,12 +179,20 @@ impl Terminal {
             pending: Vec::new(),
             shm_frames: false,
             frame_seq: 0,
+            tmux,
+            image_id: frame_image_id(tmux),
+            placeholders: None,
             wake_rx: None,
             waker: None,
         };
-        terminal.mouse_pixels = terminal.probe_mouse_pixels()?;
+        // tmux only ever reports cell-based mouse positions, so don't stall on the probe.
+        terminal.mouse_pixels = !tmux && terminal.probe_mouse_pixels()?;
         terminal.shm_frames = terminal.probe_shm_frames()?;
         Ok(terminal)
+    }
+
+    pub fn is_tmux(&self) -> bool {
+        self.tmux
     }
 
     fn probe_shm_frames(&mut self) -> io::Result<bool> {
@@ -186,7 +201,7 @@ impl Terminal {
             return Ok(false);
         }
         self.stdout
-            .write_all(&crate::kitty::kitty_query_shm(SHM_PROBE_ID, &name))?;
+            .write_all(&crate::kitty::kitty_query_shm(SHM_PROBE_ID, &name, self.tmux))?;
         self.stdout.flush()?;
         /**
          * really dislike this
@@ -220,15 +235,23 @@ impl Terminal {
         let mut frame = Vec::new();
         frame.extend_from_slice(b"\x1b[?2026h"); // mode 2026 atomic updates
         if shrank {
-            frame.extend_from_slice(b"\x1b_Ga=d,d=A,q=2\x1b\\\x1b[2J");
+            frame.extend_from_slice(&crate::kitty::kitty_delete(self.image_id, self.tmux));
+            frame.extend_from_slice(b"\x1b[2J");
             if let Ok(ws) = self.size() {
                 let blank_row = " ".repeat(ws.cols as usize);
                 for row in 1..=ws.rows {
                     frame.extend_from_slice(format!("\x1b[{row};1H{blank_row}").as_bytes());
                 }
             }
+            self.placeholders = None;
         }
-        frame.extend_from_slice(b"\x1b[H");
+        let placement = if self.tmux {
+            let (cols, rows) = self.grid_for(canvas);
+            Placement::Cells { cols, rows }
+        } else {
+            frame.extend_from_slice(b"\x1b[H");
+            Placement::Cursor
+        };
         /*
           we eventualy need to be more principled about
           being generic over graphcis protocols to support
@@ -237,18 +260,28 @@ impl Terminal {
         if self.shm_frames {
             let name = crate::profiler::span("kitty.shm", || self.write_shm_frame(&canvas.pixels))?;
             frame.extend_from_slice(&crate::kitty::kitty_transmit_shm(
-                1,
+                self.image_id,
                 canvas.width,
                 canvas.height,
                 &name,
+                placement,
+                self.tmux,
             ));
         } else {
-            frame.extend_from_slice(&kitty_transmit(
-                1,
+            frame.extend_from_slice(&crate::kitty::kitty_transmit_placed(
+                self.image_id,
                 canvas.width,
                 canvas.height,
                 &canvas.pixels,
+                placement,
+                self.tmux,
             ));
+        }
+        if let Placement::Cells { cols, rows } = placement
+            && self.placeholders != Some((cols, rows))
+        {
+            frame.extend_from_slice(&crate::kitty::placeholder_grid(self.image_id, cols, rows));
+            self.placeholders = Some((cols, rows));
         }
         frame.extend_from_slice(b"\x1b[?2026l");
         crate::profiler::span("term.write", || {
@@ -256,6 +289,17 @@ impl Terminal {
             self.stdout.flush()
         })?;
         Ok(frame.len())
+    }
+
+    fn grid_for(&self, canvas: &Canvas) -> (u32, u32) {
+        let (cw, ch) = self
+            .cell
+            .or_else(|| self.size().ok().and_then(|ws| ws.cell_size()))
+            .unwrap_or((16, 32));
+        (
+            canvas.width.div_ceil(cw).max(1),
+            canvas.height.div_ceil(ch).max(1),
+        )
     }
 
     pub fn read_event(&mut self) -> io::Result<Event> {
@@ -393,6 +437,14 @@ impl Terminal {
         if self.cell.is_some() {
             return Ok(self.cell);
         }
+        // tmux derives the pane's pixel size from the client's cell size, so the division
+        // is exact there, and tmux would answer (or swallow) the query itself anyway.
+        if self.tmux {
+            self.cell = self.size()?.cell_size();
+            if self.cell.is_some() {
+                return Ok(self.cell);
+            }
+        }
         // dividing the padded surface size by rows/cols can overestimate the cell, so ask first.
         if !self.cell_query_unsupported {
             self.stdout.write_all(b"\x1b[16t")?;
@@ -505,6 +557,20 @@ impl Terminal {
 
 const SHM_PROBE_ID: u32 = 299;
 
+/// Outside tmux we own the terminal, so a fixed id is fine. Under tmux every pane
+/// shares the outer terminal's image namespace, so derive an id from the pid to keep
+/// two instances from replacing each other's frames. It must fit in 24 bits because
+/// placeholder cells carry the id in an RGB foreground color.
+fn frame_image_id(tmux: bool) -> u32 {
+    if !tmux {
+        return 1;
+    }
+    match std::process::id() & 0xff_ffff {
+        0 | SHM_PROBE_ID => SHM_PROBE_ID + 1,
+        id => id,
+    }
+}
+
 fn parse_probe_reply(buf: &[u8], needle: &[u8]) -> Option<bool> {
     let pos = buf.windows(needle.len()).position(|w| w == needle)?;
     let rest = &buf[pos + needle.len()..];
@@ -542,8 +608,11 @@ impl Drop for Terminal {
         for slot in 0..2 {
             let _ = rustix::shm::unlink(Self::shm_name(slot));
         }
+        let _ = self
+            .stdout
+            .write_all(&crate::kitty::kitty_delete(self.image_id, self.tmux));
         let _ = self.stdout.write_all(
-            b"\x1b_Ga=d,d=A,q=2\x1b\\\x1b[<u\x1b[?2048l\x1b[?2004l\x1b[?1004l\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?25h\x1b[?1049l",
+            b"\x1b[<u\x1b[?2048l\x1b[?2004l\x1b[?1004l\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?25h\x1b[?1049l",
         );
         let _ = self.stdout.flush();
         let _ = termios::tcsetattr(&self.stdin, OptionalActions::Flush, &self.saved);

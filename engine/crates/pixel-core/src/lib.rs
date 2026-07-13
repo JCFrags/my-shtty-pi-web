@@ -17,13 +17,14 @@ mod style;
 mod terminal;
 mod text_input;
 mod throttle;
+mod tmux;
 mod tree;
 mod wrap;
 
 pub use canvas::{Canvas, measure_text};
 pub use desc::Desc;
 pub use engine::{
-    AttachmentRef, Engine, EngineConfig, EngineEvent, FrameStats, HighlightArea,
+    AttachmentRef, ChangeSource, Engine, EngineConfig, EngineEvent, FrameStats, HighlightArea,
     px_for_cell_height,
 };
 pub use kitty::kitty_transmit;

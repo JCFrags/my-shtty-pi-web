@@ -68,6 +68,20 @@ export interface AttachmentRef {
   path: string;
 }
 
+export interface CaretInfo {
+  cursor: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export type ChangeSource = "type" | "paste" | "edit";
+
+export interface ChangeInfo extends CaretInfo {
+  source: ChangeSource;
+}
+
 export interface InputProps {
   style?: Style;
   id?: string;
@@ -76,7 +90,8 @@ export interface InputProps {
   caretColor?: Style["color"];
   selectionColor?: Style["color"];
   autoFocus?: boolean;
-  onChange?: (text: string, attachments: AttachmentRef[]) => void;
+  onChange?: (text: string, attachments: AttachmentRef[], change: ChangeInfo) => void;
+  onCaret?: (caret: CaretInfo) => void;
   onSubmit?: (text: string, attachments: AttachmentRef[]) => void;
   onAttach?: (attachment: InputAttachment) => void;
 }
@@ -452,6 +467,11 @@ const hostConfig = {
       scrollTo: (offset: number, smooth = false) => {
         const b = getBridge();
         b.push(instance.view, { op: "scrollTo", id: instance.id, offset, smooth });
+        b.flush();
+      },
+      splice: (start: number, end: number, text: string) => {
+        const b = getBridge();
+        b.push(instance.view, { op: "inputSplice", id: instance.id, start, end, text });
         b.flush();
       },
     };

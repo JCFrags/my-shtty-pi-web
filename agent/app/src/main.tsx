@@ -5,6 +5,7 @@ import { closeDb } from "./db/client";
 import { flushPersist, hydrateStore } from "./db/persist";
 import { DbProvider } from "./db/react";
 import { applyFont, fontRows, initFonts } from "./fonts";
+import { menus } from "./menu";
 import { PALETTE_ACTIONS } from "./palette";
 import { store } from "./session";
 
@@ -14,6 +15,7 @@ const root = createRoot({
   onKey(event) {
     if (event.mods.ctrl && event.key === "c") {
       if (store.composerText) {
+        menus.reset();
         store.clearComposer();
         return;
       }
@@ -30,6 +32,7 @@ const root = createRoot({
       store.togglePalette();
       return;
     }
+    if (menus.handleKey(event)) return;
     if (store.settings) {
       const rows = fontRows(store.settingsQuery);
       const ctrl = (letter: string) => event.mods.ctrl && event.key === letter;

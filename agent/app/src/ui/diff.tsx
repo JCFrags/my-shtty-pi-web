@@ -148,7 +148,7 @@ export function DiffCard({ ctx, sources }: { ctx: Ctx; sources: DiffSources }) {
           return (
             <Text
               key={i}
-              style={{ color: theme.muted, fontSize: rem * 0.8 }}
+              style={{ color: theme.muted }}
             >
               {`${" ".repeat(gutterWidth + 1)}… ${row.count} unchanged lines`}
             </Text>
@@ -190,14 +190,13 @@ export function DiffCard({ ctx, sources }: { ctx: Ctx; sources: DiffSources }) {
             <Text
               style={{
                 color: removed ? theme.red : added ? theme.green : theme.muted,
-                fontSize: rem * 0.9,
                 flexShrink: 0,
                 wrap: false,
               }}
             >
               {`${String(lineNo ?? "").padStart(gutterWidth)} ${sign} `}
             </Text>
-            <Text style={{ fontSize: rem * 0.9, wrap: false }} spans={spans}>
+            <Text style={{ wrap: false }} spans={spans}>
               {row.text || " "}
             </Text>
           </Box>
@@ -207,7 +206,6 @@ export function DiffCard({ ctx, sources }: { ctx: Ctx; sources: DiffSources }) {
         <Text
           style={{
             color: theme.muted,
-            fontSize: rem * 0.8,
             hoverColor: theme.fg,
           }}
           onClick={() => setExpanded(true)}

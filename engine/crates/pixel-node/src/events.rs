@@ -1,5 +1,9 @@
-use pixel_core::{AttachmentRef, Engine, EngineEvent, Key, KeyEvent, NodeId, ProfileData};
+use pixel_core::{AttachmentRef, Engine, EngineEvent, Key, KeyEvent, NodeId, ProfileData, PxRect};
 use serde_json::json;
+
+fn caret_json(caret: &PxRect) -> serde_json::Value {
+    json!({ "x": caret.x, "y": caret.y, "w": caret.w, "h": caret.h })
+}
 
 fn attachments_json(attachments: &[AttachmentRef]) -> serde_json::Value {
     json!(
@@ -66,6 +70,9 @@ pub fn event_json(event: &EngineEvent, engine: &Engine, ids: &[IdMap]) -> Option
             key,
             text,
             attachments,
+            cursor,
+            caret,
+            source,
         } => json!({
             "type": "change",
             "view": view,
@@ -73,6 +80,23 @@ pub fn event_json(event: &EngineEvent, engine: &Engine, ids: &[IdMap]) -> Option
             "key": key,
             "text": text,
             "attachments": attachments_json(attachments),
+            "cursor": cursor,
+            "caret": caret_json(caret),
+            "source": source.as_str(),
+        }),
+        EngineEvent::Caret {
+            view,
+            node,
+            key,
+            cursor,
+            caret,
+        } => json!({
+            "type": "caret",
+            "view": view,
+            "node": ids.get(*view)?.ext(*node)?,
+            "key": key,
+            "cursor": cursor,
+            "caret": caret_json(caret),
         }),
         EngineEvent::Submit {
             view,

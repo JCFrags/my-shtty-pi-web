@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Box, Image, Input, Text } from "pixel-react";
 import type { NodeHandle, Rgba } from "pixel-react";
 
+import { menus } from "../menu";
 import { PERMISSION_MODES, store, THINKING } from "../session";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import type { Ctx } from "../theme";
@@ -42,12 +43,15 @@ export function Composer({ ctx: { theme, rem }, inputRef }: { ctx: Ctx; inputRef
           caretColor={theme.accent}
           selectionColor={theme.selection}
           autoFocus
-          onChange={(text, attachments) => {
+          onChange={(text, attachments, change) => {
             store.composerText = text;
             store.syncComposerAttachments(attachments);
+            menus.onChange(text, change);
           }}
+          onCaret={(caret) => menus.onCaret(caret)}
           onAttach={(attachment) => store.addComposerAttachment(attachment)}
           onSubmit={(text, attachments) => {
+            menus.reset();
             store.composerText = "";
             store.syncComposerAttachments([]);
             store.active().send(text, attachments);
@@ -118,7 +122,6 @@ function ModelPicker({ ctx }: { ctx: Ctx }) {
               style={{
                 padding: itemPad,
                 color: theme.muted,
-                fontSize: rem * 0.85,
                 wrap: false,
               }}
             >
@@ -133,7 +136,6 @@ function ModelPicker({ ctx }: { ctx: Ctx }) {
                 cornerRadius: rem * 0.25,
                 hoverBackground: theme.itemHover,
                 color: item.value === session.model ? theme.accent : theme.fg,
-                fontSize: rem * 0.85,
                 wrap: false,
               }}
               onClick={() => {
@@ -155,7 +157,6 @@ function ModelPicker({ ctx }: { ctx: Ctx }) {
             style={{
               padding: { left: rem * 0.6, right: rem * 0.6, top: rem * 0.15, bottom: rem * 0.15 },
               color: theme.muted,
-              fontSize: rem * 0.7,
               wrap: false,
             }}
           >
@@ -169,7 +170,6 @@ function ModelPicker({ ctx }: { ctx: Ctx }) {
                 cornerRadius: rem * 0.25,
                 hoverBackground: theme.itemHover,
                 color: i === session.thinking ? theme.accent : theme.fg,
-                fontSize: rem * 0.85,
                 wrap: false,
               }}
               onClick={() => {
@@ -204,7 +204,6 @@ function PickerChip({
         cornerRadius: 999,
         hoverBackground: theme.itemHover,
         color,
-        fontSize: rem * 0.85,
         flexShrink: 0,
         wrap: false,
       }}
@@ -266,7 +265,6 @@ function Picker({
               style={{
                 padding: itemPad,
                 color: theme.muted,
-                fontSize: rem * 0.85,
                 wrap: false,
               }}
             >
@@ -281,7 +279,6 @@ function Picker({
                 cornerRadius: rem * 0.25,
                 hoverBackground: theme.itemHover,
                 color: item.value === selected ? theme.accent : theme.fg,
-                fontSize: rem * 0.85,
                 wrap: false,
               }}
               onClick={() => {

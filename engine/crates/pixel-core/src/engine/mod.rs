@@ -86,6 +86,28 @@ fn is_plain_enter(key: &KeyEvent) -> bool {
         && !key.mods.sup
 }
 
+fn capture_matches(name: &str, key: &KeyEvent) -> bool {
+    use crate::terminal::Key;
+    if key.mods.shift || key.mods.alt || key.mods.ctrl || key.mods.sup {
+        return false;
+    }
+    match key.key {
+        Key::Char(c) => name.chars().eq(std::iter::once(c)),
+        Key::Up => name == "up",
+        Key::Down => name == "down",
+        Key::Left => name == "left",
+        Key::Right => name == "right",
+        Key::Home => name == "home",
+        Key::End => name == "end",
+        Key::Enter => name == "enter",
+        Key::Backspace => name == "backspace",
+        Key::Delete => name == "delete",
+        Key::Escape => name == "escape",
+        Key::Tab => name == "tab",
+        Key::Unknown => false,
+    }
+}
+
 fn window_from(ws: &crate::terminal::WindowSize, cell: (u32, u32)) -> (u32, u32) {
     let cols = if ws.cols > 0 { ws.cols } else { 80 };
     let rows = if ws.rows > 0 { ws.rows } else { 24 };
@@ -117,6 +139,23 @@ pub struct AttachmentRef {
     pub path: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeSource {
+    Type,
+    Paste,
+    Edit,
+}
+
+impl ChangeSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ChangeSource::Type => "type",
+            ChangeSource::Paste => "paste",
+            ChangeSource::Edit => "edit",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum EngineEvent {
     Click {
@@ -144,6 +183,16 @@ pub enum EngineEvent {
         key: Option<String>,
         text: String,
         attachments: Vec<AttachmentRef>,
+        cursor: usize,
+        caret: PxRect,
+        source: ChangeSource,
+    },
+    Caret {
+        view: usize,
+        node: NodeId,
+        key: Option<String>,
+        cursor: usize,
+        caret: PxRect,
     },
     Submit {
         view: usize,
@@ -256,6 +305,7 @@ pub struct Engine {
     bar_hover: Option<(usize, NodeId)>,
     bar_drag: Option<(usize, NodeId, f32)>,
     reveal: bool,
+    key_capture: Vec<String>,
     cpu_throttle: CpuThrottle,
     throttle_registered: bool,
     scroll_burst: u32,
@@ -283,8 +333,17 @@ impl Engine {
         logging::info(
             "engine",
             format!(
-                "started {}x{}px, cell {}x{}, base {base_px:.1}px, native scroll {}",
-                window.0, window.1, cell.0, cell.1, use_native
+                "started {}x{}px, cell {}x{}, base {base_px:.1}px, native scroll {}{}",
+                window.0,
+                window.1,
+                cell.0,
+                cell.1,
+                use_native,
+                if term.is_tmux() {
+                    ", tmux passthrough"
+                } else {
+                    ""
+                }
             ),
         );
         Ok(Self {
@@ -318,6 +377,7 @@ impl Engine {
             bar_hover: None,
             bar_drag: None,
             reveal: false,
+            key_capture: Vec::new(),
             cpu_throttle: CpuThrottle::new(),
             throttle_registered: false,
             scroll_burst: 0,
@@ -570,6 +630,39 @@ impl Engine {
             .map(|id| (self.focus_view, id))
     }
 
+    /// While set, focused-input handling skips these unmodified keys and they
+    /// surface as Key events instead — the app owns them (e.g. an open menu).
+    pub fn set_key_capture(&mut self, keys: Vec<String>) {
+        self.key_capture = keys;
+    }
+
+    pub fn splice_input(&mut self, view: usize, id: NodeId, start: usize, end: usize, text: &str) {
+        fn char_floor(text: &str, mut at: usize) -> usize {
+            while at > 0 && !text.is_char_boundary(at) {
+                at -= 1;
+            }
+            at
+        }
+        {
+            let Some(input) = self.comp.views[view].tree.input_mut(id) else {
+                return;
+            };
+            let len = input.text().len();
+            let start = char_floor(input.text(), start.min(len));
+            let end = char_floor(input.text(), end.min(len)).max(start);
+            input.set_cursor(start, false);
+            if end > start {
+                input.set_cursor(end, true);
+            }
+            input.insert(text);
+        }
+        self.comp.views[view].tree.sync_input_text(id);
+        self.reveal = true;
+        let mut events = Vec::new();
+        self.push_change(view, id, ChangeSource::Edit, &mut events);
+        self.pending.append(&mut events);
+    }
+
     pub fn apply_input_action(
         &mut self,
         action: InputAction,
@@ -585,7 +678,7 @@ impl Engine {
         if reply == InputReply::None {
             return self.apply_doc_action(action);
         }
-        self.finish_reply(view, focus, reply, out)
+        self.finish_reply(view, focus, reply, ChangeSource::Edit, out)
     }
 
     fn apply_doc_action(&mut self, action: InputAction) -> io::Result<()> {
@@ -737,7 +830,7 @@ impl Engine {
                         self.push_attachment(view, focus, image, out)?;
                     } else if let Some(input) = self.comp.views[view].tree.input_mut(focus) {
                         input.insert(&text);
-                        self.finish_reply(view, focus, InputReply::Edited, out)?;
+                        self.finish_reply(view, focus, InputReply::Edited, ChangeSource::Paste, out)?;
                     }
                 } else {
                     out.push(EngineEvent::Paste {
@@ -767,6 +860,13 @@ impl Engine {
                 return Ok(());
             }
         }
+        if self.key_capture.iter().any(|name| capture_matches(name, &key)) {
+            out.push(EngineEvent::Key {
+                view: self.active_view,
+                event: key,
+            });
+            return Ok(());
+        }
         let focused = self.focused().and_then(|(view, id)| {
             self.comp.views[view]
                 .tree
@@ -787,6 +887,15 @@ impl Engine {
                     .tree
                     .input_mut(focus)
                     .expect("checked above");
+                let typed = matches!(key.key, crate::terminal::Key::Char(_))
+                    && !key.mods.ctrl
+                    && !key.mods.sup
+                    && !key.mods.alt;
+                let source = if typed {
+                    ChangeSource::Type
+                } else {
+                    ChangeSource::Edit
+                };
                 let reply = input.handle_key(key, font, resolved.px, wrap);
                 if reply == InputReply::None {
                     if !self.handle_doc_key(&key)? {
@@ -796,7 +905,7 @@ impl Engine {
                         });
                     }
                 } else {
-                    self.finish_reply(view, focus, reply, out)?;
+                    self.finish_reply(view, focus, reply, source, out)?;
                 }
             }
             None => {
@@ -1275,7 +1384,7 @@ impl Engine {
         };
         let reply = input.handle_mouse(mouse, geometry, fonts);
         if reply != InputReply::None {
-            self.finish_reply(view, id, reply, out)?;
+            self.finish_reply(view, id, reply, ChangeSource::Edit, out)?;
         }
         Ok(())
     }
@@ -1285,26 +1394,31 @@ impl Engine {
         view: usize,
         id: NodeId,
         reply: InputReply,
+        source: ChangeSource,
         out: &mut Vec<EngineEvent>,
     ) -> io::Result<()> {
         match reply {
             InputReply::None => {}
-            InputReply::Selected => self.comp.views[view].tree.mark_paint(),
+            InputReply::Selected => {
+                self.comp.views[view].tree.mark_paint();
+                self.push_caret(view, id, out);
+            }
             InputReply::Moved => {
                 self.reveal = true;
                 self.comp.views[view].tree.mark_paint();
+                self.push_caret(view, id, out);
             }
             InputReply::Edited => {
                 self.comp.views[view].tree.sync_input_text(id);
                 self.reveal = true;
-                self.push_change(view, id, out);
+                self.push_change(view, id, source, out);
             }
             InputReply::Copy(text) => self.term.set_clipboard(&text)?,
             InputReply::Cut(text) => {
                 self.term.set_clipboard(&text)?;
                 self.comp.views[view].tree.sync_input_text(id);
                 self.reveal = true;
-                self.push_change(view, id, out);
+                self.push_change(view, id, source, out);
             }
             InputReply::RequestPaste => {
                 match crate::clipboard_image::read_clipboard_image() {
@@ -1340,7 +1454,7 @@ impl Engine {
             width: image.width,
             height: image.height,
         });
-        self.finish_reply(view, id, InputReply::Edited, out)
+        self.finish_reply(view, id, InputReply::Edited, ChangeSource::Edit, out)
     }
 
     fn input_attachments(&self, view: usize, id: NodeId) -> Vec<AttachmentRef> {
@@ -1377,10 +1491,19 @@ impl Engine {
         self.comp.views[view]
             .tree
             .edit_input(id, |input| input.replace_all(""));
-        self.finish_reply(view, id, InputReply::Edited, out)
+        self.finish_reply(view, id, InputReply::Edited, ChangeSource::Edit, out)
     }
 
-    fn push_change(&mut self, view: usize, id: NodeId, out: &mut Vec<EngineEvent>) {
+    fn push_change(
+        &mut self,
+        view: usize,
+        id: NodeId,
+        source: ChangeSource,
+        out: &mut Vec<EngineEvent>,
+    ) {
+        let Some((cursor, caret)) = self.caret_state(view, id) else {
+            return;
+        };
         let Some(text) = self.comp.views[view].tree.input_text(id) else {
             return;
         };
@@ -1391,7 +1514,36 @@ impl Engine {
             key: self.comp.views[view].tree.key_of(id).map(str::to_string),
             text,
             attachments: self.input_attachments(view, id),
+            cursor,
+            caret,
+            source,
         });
+    }
+
+    fn push_caret(&mut self, view: usize, id: NodeId, out: &mut Vec<EngineEvent>) {
+        let Some((cursor, caret)) = self.caret_state(view, id) else {
+            return;
+        };
+        out.push(EngineEvent::Caret {
+            view,
+            node: id,
+            key: self.comp.views[view].tree.key_of(id).map(str::to_string),
+            cursor,
+            caret,
+        });
+    }
+
+    /// Caret geometry is only correct after layout settles; an edit that adds
+    /// a wrap line moves the input's origin within the same pump.
+    fn caret_state(&mut self, view: usize, id: NodeId) -> Option<(usize, PxRect)> {
+        let fonts = &self.fonts;
+        let base_px = self.base_px;
+        self.comp.views[view].tree.flush_layout(fonts, base_px);
+        let tree = &self.comp.views[view].tree;
+        let geometry = tree.input_geometry(id)?;
+        let input = tree.input(id)?;
+        let cursor = input.cursor();
+        Some((cursor, geometry.caret_rect(input.text(), cursor, fonts)))
     }
 
     fn bar_at(&self, view: usize, point: (f32, f32)) -> Option<NodeId> {

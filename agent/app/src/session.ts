@@ -14,6 +14,7 @@ import type {
   Query,
   SDKMessage,
   SDKUserMessage,
+  SlashCommand,
 } from "@anthropic-ai/claude-agent-sdk";
 
 export interface ToolCall {
@@ -51,6 +52,7 @@ export const THINKING = [
 ];
 
 let availableModels: ModelInfo[] = [];
+let availableCommands: SlashCommand[] | null = null;
 
 const IMAGE_MEDIA: Record<string, string> = {
   ".png": "image/png",
@@ -157,6 +159,10 @@ export class Session {
       availableModels = models;
       this.notify();
     });
+    void q.supportedCommands().then((commands) => {
+      availableCommands = commands;
+      this.notify();
+    });
   }
 
   title(): string {
@@ -236,6 +242,14 @@ export class Session {
 
   loadModels() {
     if (availableModels.length === 0) this.connect();
+  }
+
+  commands(): SlashCommand[] | null {
+    return availableCommands;
+  }
+
+  loadCommands() {
+    if (availableCommands === null) this.connect();
   }
 
   setModel(value: string) {

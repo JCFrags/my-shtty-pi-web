@@ -111,6 +111,15 @@ enum Op {
     RegisterFont {
         path: String,
     },
+    SetKeyCapture {
+        keys: Vec<String>,
+    },
+    InputSplice {
+        id: u32,
+        start: usize,
+        end: usize,
+        text: String,
+    },
 }
 
 fn register_font(engine: &mut Engine, path: &str) -> String {
@@ -643,6 +652,17 @@ fn apply_op(
         Op::ProfileStop {} => engine.profile_stop(),
         Op::SetCpuThrottle { rate } => engine.set_cpu_throttle(rate),
         Op::RegisterFont { .. } => unreachable!("handled before the per-view bindings"),
+        Op::SetKeyCapture { keys } => engine.set_key_capture(keys),
+        Op::InputSplice {
+            id,
+            start,
+            end,
+            text,
+        } => {
+            if let Some(node) = map.node(id) {
+                engine.splice_input(view, node, start, end, &text);
+            }
+        }
     }
 }
 

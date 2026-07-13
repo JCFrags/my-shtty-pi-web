@@ -122,7 +122,7 @@ function CodeBlock({ ctx, language, code }: { ctx: Ctx; language: string; code: 
   return (
     <Box
       style={{ overflow: "hidden" }}>
-      <Text style={{ fontSize: rem * 0.9, wrap: false }} spans={spans}>
+      <Text style={{ wrap: false }} spans={spans}>
         {code}
       </Text>
     </Box>

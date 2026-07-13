@@ -188,6 +188,7 @@ fn main() -> std::io::Result<()> {
                     }
                 }
                 EngineEvent::Paste { .. }
+                | EngineEvent::Caret { .. }
                 | EngineEvent::Attachment { .. }
                 | EngineEvent::HoverEnter { .. }
                 | EngineEvent::HoverLeave { .. }
