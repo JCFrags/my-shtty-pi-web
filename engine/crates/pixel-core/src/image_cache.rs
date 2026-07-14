@@ -13,7 +13,7 @@ pub(crate) enum ImageStatus {
 
 enum State {
     Pending { queued: Instant, seq: u64 },
-    Ready(tiny_skia::Pixmap),
+    Ready(Arc<tiny_skia::Pixmap>),
     Failed,
 }
 
@@ -22,16 +22,28 @@ type ScaledKey = (u32, u32, [u32; 4]);
 struct Entry {
     dims: Option<(u32, u32)>,
     state: State,
-    scaled: HashMap<ScaledKey, tiny_skia::Pixmap>,
+    scaled: HashMap<ScaledKey, Arc<tiny_skia::Pixmap>>,
     last_use: u64,
 }
 
 type WakerFn = Box<dyn Fn() + Send>;
 
-struct Job {
-    src: String,
-    queued: Instant,
-    seq: u64,
+enum Job {
+    Decode {
+        src: String,
+        queued: Instant,
+        seq: u64,
+    },
+    Clipboard {
+        queued: Instant,
+        seq: u64,
+    },
+    Bytes {
+        data: Vec<u8>,
+        ext: &'static str,
+        queued: Instant,
+        seq: u64,
+    },
 }
 
 struct DecodeResult {
@@ -44,13 +56,29 @@ struct DecodeResult {
     seq: u64,
 }
 
+enum Done {
+    Pixels(DecodeResult),
+    Clipboard {
+        seq: u64,
+        queued: Instant,
+        pasted: Option<crate::clipboard_image::PastedImage>,
+        has_pixels: bool,
+    },
+    Encoded {
+        src: String,
+        seq: u64,
+        started: Instant,
+        finished: Instant,
+    },
+}
+
 struct Cache {
     entries: HashMap<String, Entry>,
     tick: u64,
     bytes: usize,
     next_seq: u64,
     jobs: Option<Sender<Job>>,
-    results: Option<Receiver<DecodeResult>>,
+    results: Option<Receiver<Done>>,
     waker: Arc<Mutex<Option<WakerFn>>>,
 }
 
@@ -74,11 +102,6 @@ fn basename(src: &str) -> &str {
 
 fn premultiply(img: &image::RgbaImage) -> Option<tiny_skia::Pixmap> {
     let (w, h) = img.dimensions();
-    /*
-      oh more tiny skia things, whats apixel map?
-
-
-     */
     let mut pixmap = tiny_skia::Pixmap::new(w, h)?;
     for (dst, src) in pixmap.pixels_mut().iter_mut().zip(img.pixels()) {
         let [r, g, b, a] = src.0;
@@ -90,9 +113,6 @@ fn premultiply(img: &image::RgbaImage) -> Option<tiny_skia::Pixmap> {
 fn decode(src: &str) -> Option<tiny_skia::Pixmap> {
     let img = image::ImageReader::open(src)
         .ok()?
-        /*
-          fine actually, i wonder if this is ever an expensive traversal vs sniffing metadata
-         */
         .with_guessed_format()
         .ok()?
         .decode()
@@ -128,37 +148,139 @@ fn decode_with_retries(src: &str) -> (Option<tiny_skia::Pixmap>, u32) {
     (decode(src), attempts + 1)
 }
 
-fn decode_worker(
-    jobs: Receiver<Job>,
-    results: Sender<DecodeResult>,
-    waker: Arc<Mutex<Option<WakerFn>>>,
-) {
-    for job in jobs {
-        let started = Instant::now();
-        let (pixmap, attempts) = decode_with_retries(&job.src);
-        let result = DecodeResult {
-            src: job.src,
-            pixmap,
-            queued: job.queued,
-            started,
-            finished: Instant::now(),
-            attempts,
-            seq: job.seq,
-        };
-        if results.send(result).is_err() {
-            return;
-        }
+fn decode_worker(jobs: Receiver<Job>, results: Sender<Done>, waker: Arc<Mutex<Option<WakerFn>>>) {
+    let wake = |waker: &Arc<Mutex<Option<WakerFn>>>| {
         if let Some(wake) = waker.lock().unwrap().as_ref() {
             wake();
+        }
+    };
+    let send = |done: Done| results.send(done).is_ok();
+    for job in jobs {
+        match job {
+            Job::Decode { src, queued, seq } => {
+                let started = Instant::now();
+                let (pixmap, attempts) = decode_with_retries(&src);
+                let sent = send(Done::Pixels(DecodeResult {
+                    src,
+                    pixmap,
+                    queued,
+                    started,
+                    finished: Instant::now(),
+                    attempts,
+                    seq,
+                }));
+                if !sent {
+                    return;
+                }
+                wake(&waker);
+            }
+            Job::Clipboard { queued, seq } => {
+                use crate::clipboard_image::WorkerPaste;
+                let started = Instant::now();
+                let read = crate::clipboard_image::read_for_worker();
+                let pasted = match &read {
+                    Some(WorkerPaste::File(pasted)) => Some(pasted.clone()),
+                    Some(WorkerPaste::Bitmap { pasted, .. }) => Some(pasted.clone()),
+                    None => None,
+                };
+                let clipboard = Done::Clipboard {
+                    seq,
+                    queued,
+                    pasted,
+                    has_pixels: matches!(&read, Some(WorkerPaste::Bitmap { .. })),
+                };
+                if !send(clipboard) {
+                    return;
+                }
+                if let Some(WorkerPaste::Bitmap { pasted, rgba }) = read {
+                    let pixmap = premultiply(&rgba);
+                    let sent = send(Done::Pixels(DecodeResult {
+                        src: pasted.path.clone(),
+                        pixmap,
+                        queued,
+                        started,
+                        finished: Instant::now(),
+                        attempts: 1,
+                        seq,
+                    }));
+                    if !sent {
+                        return;
+                    }
+                    wake(&waker);
+                    let enc_started = Instant::now();
+                    let _ = rgba.save(&pasted.path);
+                    let sent = send(Done::Encoded {
+                        src: pasted.path,
+                        seq,
+                        started: enc_started,
+                        finished: Instant::now(),
+                    });
+                    if !sent {
+                        return;
+                    }
+                }
+                wake(&waker);
+            }
+            Job::Bytes {
+                data,
+                ext,
+                queued,
+                seq,
+            } => {
+                let started = Instant::now();
+                let rgba = image::load_from_memory(&data).ok().map(|i| i.into_rgba8());
+                let pasted = rgba.as_ref().map(|rgba| {
+                    let (width, height) = rgba.dimensions();
+                    crate::clipboard_image::PastedImage {
+                        path: crate::clipboard_image::temp_path(ext)
+                            .to_string_lossy()
+                            .into_owned(),
+                        width,
+                        height,
+                    }
+                });
+                let clipboard = Done::Clipboard {
+                    seq,
+                    queued,
+                    pasted: pasted.clone(),
+                    has_pixels: pasted.is_some(),
+                };
+                if !send(clipboard) {
+                    return;
+                }
+                if let (Some(rgba), Some(pasted)) = (rgba, pasted) {
+                    let pixmap = premultiply(&rgba);
+                    let sent = send(Done::Pixels(DecodeResult {
+                        src: pasted.path.clone(),
+                        pixmap,
+                        queued,
+                        started,
+                        finished: Instant::now(),
+                        attempts: 1,
+                        seq,
+                    }));
+                    if !sent {
+                        return;
+                    }
+                    wake(&waker);
+                    let enc_started = Instant::now();
+                    let _ = std::fs::write(&pasted.path, &data);
+                    let sent = send(Done::Encoded {
+                        src: pasted.path,
+                        seq,
+                        started: enc_started,
+                        finished: Instant::now(),
+                    });
+                    if !sent {
+                        return;
+                    }
+                }
+                wake(&waker);
+            }
         }
     }
 }
 
-/**
- * okay so this creates a thread with a function to run inside it,
- * 
- * i wonder really understand the scope of tx vs rx
- */
 fn jobs_sender(cache: &mut Cache) -> &Sender<Job> {
     if cache.jobs.is_none() {
         let (jobs_tx, jobs_rx) = channel();
@@ -174,11 +296,29 @@ fn jobs_sender(cache: &mut Cache) -> &Sender<Job> {
     cache.jobs.as_ref().expect("jobs sender just created")
 }
 
-fn ensure(cache: &mut Cache, src: &str) {
+fn ensure(cache: &mut Cache, src: &str, equal_to: &[String]) {
     cache.tick += 1;
     let tick = cache.tick;
     if let Some(entry) = cache.entries.get_mut(src) {
         entry.last_use = tick;
+        return;
+    }
+    for alias in equal_to {
+        let Some(entry) = cache.entries.get(alias.as_str()) else {
+            continue;
+        };
+        let State::Ready(pixmap) = &entry.state else {
+            continue;
+        };
+        let seeded = Entry {
+            dims: entry.dims,
+            state: State::Ready(Arc::clone(pixmap)),
+            scaled: entry.scaled.clone(),
+            last_use: tick,
+        };
+        cache.bytes += entry_bytes(&seeded);
+        cache.entries.insert(src.to_string(), seeded);
+        evict_over_budget(cache, src);
         return;
     }
     let dims = crate::profiler::span_labeled(
@@ -189,7 +329,7 @@ fn ensure(cache: &mut Cache, src: &str) {
     let queued = Instant::now();
     cache.next_seq += 1;
     let seq = cache.next_seq;
-    let _ = jobs_sender(cache).send(Job {
+    let _ = jobs_sender(cache).send(Job::Decode {
         src: src.to_string(),
         queued,
         seq,
@@ -203,6 +343,32 @@ fn ensure(cache: &mut Cache, src: &str) {
             last_use: tick,
         },
     );
+}
+
+pub(crate) fn queue_clipboard_read() -> u64 {
+    CACHE.with_borrow_mut(|cache| {
+        cache.next_seq += 1;
+        let seq = cache.next_seq;
+        let _ = jobs_sender(cache).send(Job::Clipboard {
+            queued: Instant::now(),
+            seq,
+        });
+        seq
+    })
+}
+
+pub(crate) fn queue_pasted_bytes(data: Vec<u8>, ext: &'static str) -> u64 {
+    CACHE.with_borrow_mut(|cache| {
+        cache.next_seq += 1;
+        let seq = cache.next_seq;
+        let _ = jobs_sender(cache).send(Job::Bytes {
+            data,
+            ext,
+            queued: Instant::now(),
+            seq,
+        });
+        seq
+    })
 }
 
 fn entry_bytes(entry: &Entry) -> usize {
@@ -230,9 +396,9 @@ fn evict_over_budget(cache: &mut Cache, keep: &str) {
     }
 }
 
-pub(crate) fn status(src: &str) -> ImageStatus {
+pub(crate) fn status(src: &str, equal_to: &[String]) -> ImageStatus {
     CACHE.with_borrow_mut(|cache| {
-        ensure(cache, src);
+        ensure(cache, src, equal_to);
         match cache.entries[src].state {
             State::Pending { .. } => ImageStatus::Pending,
             State::Ready(_) => ImageStatus::Ready,
@@ -241,9 +407,9 @@ pub(crate) fn status(src: &str) -> ImageStatus {
     })
 }
 
-pub(crate) fn image_size(src: &str) -> Option<(u32, u32)> {
+pub(crate) fn image_size(src: &str, equal_to: &[String]) -> Option<(u32, u32)> {
     CACHE.with_borrow_mut(|cache| {
-        ensure(cache, src);
+        ensure(cache, src, equal_to);
         cache.entries[src].dims
     })
 }
@@ -251,17 +417,14 @@ pub(crate) fn image_size(src: &str) -> Option<(u32, u32)> {
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn with_image<R>(src: &str, f: impl FnOnce(tiny_skia::PixmapRef<'_>) -> R) -> Option<R> {
     CACHE.with_borrow_mut(|cache| {
-        ensure(cache, src);
+        ensure(cache, src, &[]);
         match &cache.entries[src].state {
-            State::Ready(pixmap) => Some(f(pixmap.as_ref())),
+            State::Ready(pixmap) => Some(f((**pixmap).as_ref())),
             _ => None,
         }
     })
 }
 
-/**
- * i will need to think about this to understand it
- */
 fn make_scaled(
     full: tiny_skia::PixmapRef<'_>,
     w: u32,
@@ -304,13 +467,14 @@ pub(crate) fn with_scaled_image<R>(
     w: u32,
     h: u32,
     radius: [f32; 4],
+    equal_to: &[String],
     f: impl FnOnce(tiny_skia::PixmapRef<'_>) -> R,
 ) -> Option<R> {
     if w == 0 || h == 0 {
         return None;
     }
     CACHE.with_borrow_mut(|cache| {
-        ensure(cache, src);
+        ensure(cache, src, equal_to);
         let key = (w, h, radius.map(f32::to_bits));
         let entry = cache.entries.get(src)?;
         if !matches!(entry.state, State::Ready(_)) {
@@ -324,18 +488,23 @@ pub(crate) fn with_scaled_image<R>(
                 crate::profiler::span_labeled(
                     "image.scale",
                     || format!("{} → {w}×{h}", basename(src)),
-                    || make_scaled(full.as_ref(), w, h, radius),
+                    || make_scaled((**full).as_ref(), w, h, radius),
                 )?
             };
             cache.bytes += scaled.data().len();
-            cache.entries.get_mut(src)?.scaled.insert(key, scaled);
+            cache
+                .entries
+                .get_mut(src)?
+                .scaled
+                .insert(key, Arc::new(scaled));
             evict_over_budget(cache, src);
         }
         let entry = cache.entries.get(src)?;
-        Some(f(entry.scaled[&key].as_ref()))
+        Some(f((*entry.scaled[&key]).as_ref()))
     })
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn insert_decoded(src: String, img: &image::RgbaImage) {
     let Some(pixmap) = crate::profiler::span_labeled(
         "image.premultiply",
@@ -355,7 +524,7 @@ pub(crate) fn insert_decoded(src: String, img: &image::RgbaImage) {
             src.clone(),
             Entry {
                 dims: Some((pixmap.width(), pixmap.height())),
-                state: State::Ready(pixmap),
+                state: State::Ready(Arc::new(pixmap)),
                 scaled: HashMap::new(),
                 last_use: tick,
             },
@@ -364,44 +533,91 @@ pub(crate) fn insert_decoded(src: String, img: &image::RgbaImage) {
     });
 }
 
-/**
- *  relevant for waking the thread
- */
 pub(crate) fn set_waker(wake: impl Fn() + Send + 'static) {
     CACHE.with_borrow_mut(|cache| {
         *cache.waker.lock().unwrap() = Some(Box::new(wake));
     });
 }
 
-// Returns whether any decode result landed this drain.
-pub(crate) fn drain_completed() -> bool {
+#[derive(Default)]
+pub(crate) struct Drained {
+    pub landed: bool,
+    // queued pastes
+    pub pastes: Vec<(u64, Option<crate::clipboard_image::PastedImage>)>,
+}
+
+pub(crate) fn drain_completed() -> Drained {
     CACHE.with_borrow_mut(|cache| {
-        let mut landed = false;
-        let completed: Vec<DecodeResult> = match &cache.results {
+        let mut drained = Drained::default();
+        let completed: Vec<Done> = match &cache.results {
             Some(results) => results.try_iter().collect(),
-            None => return landed,
+            None => return drained,
         };
-        for result in completed {
-            let src = result.src.clone();
-            let Some(entry) = cache.entries.get_mut(&src) else {
-                continue;
-            };
-            if matches!(entry.state, State::Ready(_)) {
-                continue;
-            }
-            landed = true;
-            emit_lifecycle(&result);
-            match result.pixmap {
-                Some(pixmap) => {
-                    entry.dims = Some((pixmap.width(), pixmap.height()));
-                    cache.bytes += pixmap.data().len();
-                    entry.state = State::Ready(pixmap);
-                    evict_over_budget(cache, &src);
+        for done in completed {
+            match done {
+                Done::Pixels(result) => {
+                    let src = result.src.clone();
+                    let Some(entry) = cache.entries.get_mut(&src) else {
+                        continue;
+                    };
+                    if matches!(entry.state, State::Ready(_)) {
+                        continue;
+                    }
+                    drained.landed = true;
+                    emit_lifecycle(&result);
+                    match result.pixmap {
+                        Some(pixmap) => {
+                            entry.dims = Some((pixmap.width(), pixmap.height()));
+                            cache.bytes += pixmap.data().len();
+                            entry.state = State::Ready(Arc::new(pixmap));
+                            evict_over_budget(cache, &src);
+                        }
+                        None => entry.state = State::Failed,
+                    }
                 }
-                None => entry.state = State::Failed,
+                Done::Clipboard {
+                    seq,
+                    queued,
+                    pasted,
+                    has_pixels,
+                } => {
+                    if has_pixels && let Some(pasted) = &pasted {
+                        cache.tick += 1;
+                        let tick = cache.tick;
+                        cache.entries.insert(
+                            pasted.path.clone(),
+                            Entry {
+                                dims: Some((pasted.width, pasted.height)),
+                                state: State::Pending { queued, seq },
+                                scaled: HashMap::new(),
+                                last_use: tick,
+                            },
+                        );
+                    }
+                    drained.pastes.push((seq, pasted));
+                }
+                Done::Encoded {
+                    src,
+                    seq,
+                    started,
+                    finished,
+                } => {
+                    if let Some(start_ms) = crate::profiler::ms_of(started) {
+                        let dur =
+                            finished.saturating_duration_since(started).as_secs_f64() * 1000.0;
+                        crate::profiler::emit_span(
+                            "image.encode",
+                            start_ms,
+                            dur,
+                            1,
+                            Some(seq),
+                            Some(basename(&src).to_string()),
+                        );
+                    }
+                }
             }
         }
-        landed
+        drained
     })
 }
 
@@ -482,7 +698,7 @@ mod tests {
     fn drain_until_landed() {
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         loop {
-            if drain_completed() {
+            if drain_completed().landed {
                 return;
             }
             assert!(
@@ -500,12 +716,12 @@ mod tests {
         let path = dir.join("checker.png");
         checker(4, 2).save(&path).unwrap();
         let src = path.to_string_lossy().to_string();
-        assert_eq!(image_size(&src), Some((4, 2)));
+        assert_eq!(image_size(&src, &[]), Some((4, 2)));
         drain_until_landed();
         std::fs::remove_file(&path).unwrap();
         // Still cached after the file is gone.
-        assert_eq!(image_size(&src), Some((4, 2)));
-        assert_eq!(status(&src), ImageStatus::Ready);
+        assert_eq!(image_size(&src, &[]), Some((4, 2)));
+        assert_eq!(status(&src, &[]), ImageStatus::Ready);
     }
 
     #[test]
@@ -515,10 +731,10 @@ mod tests {
         let path = dir.join("async.png");
         checker(3, 3).save(&path).unwrap();
         let src = path.to_string_lossy().to_string();
-        assert_eq!(status(&src), ImageStatus::Pending);
+        assert_eq!(status(&src, &[]), ImageStatus::Pending);
         assert!(with_image(&src, |_| ()).is_none());
         drain_until_landed();
-        assert_eq!(status(&src), ImageStatus::Ready);
+        assert_eq!(status(&src, &[]), ImageStatus::Ready);
         let alpha_seen = with_image(&src, |p| p.pixels().iter().any(|px| px.alpha() < 255));
         assert_eq!(alpha_seen, Some(true));
         std::fs::remove_file(&path).unwrap();
@@ -527,11 +743,11 @@ mod tests {
     #[test]
     fn missing_file_fails_after_retries() {
         let src = "/nonexistent/nope.png";
-        assert_eq!(image_size(src), None);
-        assert_eq!(status(src), ImageStatus::Pending);
+        assert_eq!(image_size(src, &[]), None);
+        assert_eq!(status(src, &[]), ImageStatus::Pending);
         drain_until_landed();
-        assert_eq!(status(src), ImageStatus::Failed);
-        assert_eq!(image_size(src), None);
+        assert_eq!(status(src, &[]), ImageStatus::Failed);
+        assert_eq!(image_size(src, &[]), None);
     }
 
     #[test]
@@ -542,7 +758,7 @@ mod tests {
         checker(5, 4).save(&path).unwrap();
         let src = path.to_string_lossy().to_string();
         crate::profiler::start();
-        assert_eq!(status(&src), ImageStatus::Pending);
+        assert_eq!(status(&src, &[]), ImageStatus::Pending);
         drain_until_landed();
         emit_pending_waits();
         let data = crate::profiler::stop().unwrap();
@@ -572,7 +788,7 @@ mod tests {
     fn stopping_a_recording_reports_in_flight_images() {
         let src = "/nonexistent/slow.png";
         crate::profiler::start();
-        assert_eq!(status(src), ImageStatus::Pending);
+        assert_eq!(status(src, &[]), ImageStatus::Pending);
         emit_pending_waits();
         let data = crate::profiler::stop().unwrap();
         let wait = data
@@ -591,23 +807,40 @@ mod tests {
     fn scaled_variants_serve_at_the_requested_size() {
         let img = image::RgbaImage::from_pixel(8, 4, image::Rgba([10, 220, 30, 255]));
         insert_decoded("mem://scaled".into(), &img);
-        let size = with_scaled_image("mem://scaled", 4, 2, [0.0; 4], |p| {
+        let size = with_scaled_image("mem://scaled", 4, 2, [0.0; 4], &[], |p| {
             (p.width(), p.height(), p.pixels()[0].green())
         });
         assert_eq!(size, Some((4, 2, 220)));
         // Radius is baked into the variant's corner alpha.
-        let corner = with_scaled_image("mem://scaled", 8, 8, [4.0; 4], |p| p.pixels()[0].alpha());
+        let corner = with_scaled_image("mem://scaled", 8, 8, [4.0; 4], &[], |p| p.pixels()[0].alpha());
         assert_eq!(corner, Some(0));
-        assert!(with_scaled_image("mem://scaled", 0, 2, [0.0; 4], |_| ()).is_none());
-        assert!(with_scaled_image("mem://missing-entirely", 4, 2, [0.0; 4], |_| ()).is_none());
+        assert!(with_scaled_image("mem://scaled", 0, 2, [0.0; 4], &[], |_| ()).is_none());
+        assert!(with_scaled_image("mem://missing-entirely", 4, 2, [0.0; 4], &[], |_| ()).is_none());
+    }
+
+    #[test]
+    fn confirmed_equal_srcs_share_pixels_without_a_decode() {
+        let img = checker(6, 2);
+        insert_decoded("mem://original".into(), &img);
+        // The aliased src has no file behind it, so Ready pixels prove the
+        // entry was seeded from the alias rather than decoded.
+        let aliases = vec!["mem://original".to_string()];
+        let src = "/nonexistent/persisted.png";
+        assert_eq!(status(src, &aliases), ImageStatus::Ready);
+        assert_eq!(image_size(src, &aliases), Some((6, 2)));
+        let scaled = with_scaled_image(src, 3, 1, [0.0; 4], &aliases, |p| (p.width(), p.height()));
+        assert_eq!(scaled, Some((3, 1)));
+        // Unknown aliases fall through to the ordinary pending path.
+        let missing = vec!["mem://never-existed".to_string()];
+        assert_eq!(status("/nonexistent/other.png", &missing), ImageStatus::Pending);
     }
 
     #[test]
     fn insert_decoded_serves_without_a_file() {
         let img = checker(3, 3);
         insert_decoded("mem://test".into(), &img);
-        assert_eq!(image_size("mem://test"), Some((3, 3)));
-        assert_eq!(status("mem://test"), ImageStatus::Ready);
+        assert_eq!(image_size("mem://test", &[]), Some((3, 3)));
+        assert_eq!(status("mem://test", &[]), ImageStatus::Ready);
         let alpha_seen = with_image("mem://test", |p| p.pixels().iter().any(|px| px.alpha() < 255));
         assert_eq!(alpha_seen, Some(true));
     }

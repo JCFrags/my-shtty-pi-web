@@ -8,7 +8,7 @@ import {
   getBridge,
   Instance,
   reconciler,
-} from "../host-config";
+} from "../reconciler-config";
 import { DevtoolsApp } from "./app";
 import {
   devtoolsStore,
@@ -215,7 +215,7 @@ interface EngineProfileEvent {
   marks?: Array<{ name: string; label: string; start: number; dur: number; view: number }>;
 }
 
-const IMAGE_LANE_NAMES = new Set(["image.wait", "image.decode"]);
+const IMAGE_LANE_NAMES = new Set(["image.wait", "image.decode", "image.encode"]);
 
 // Waits can overlap (several images in flight), so unlike call-stack lanes
 // their rows are packed here: each wait takes a free row pair, its decode
@@ -235,7 +235,7 @@ function packImageRows(spans: TimeSpan[]) {
     if (wait.arg != null) rowByArg.set(wait.arg, row * 2);
   }
   for (const span of spans) {
-    if (span.lane === "images" && span.name === "image.decode") {
+    if (span.lane === "images" && span.name !== "image.wait") {
       span.depth = (span.arg != null ? rowByArg.get(span.arg) ?? 0 : 0) + 1;
     }
   }

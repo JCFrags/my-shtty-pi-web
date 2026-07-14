@@ -9,7 +9,7 @@ fn marks_json(marks: &[MarkRef]) -> serde_json::Value {
     json!(
         marks
             .iter()
-            .map(|m| json!({ "id": m.id, "offset": m.offset }))
+            .map(|m| json!({ "id": m.id, "offset": m.offset, "data": m.data }))
             .collect::<Vec<_>>()
     )
 }
@@ -214,10 +214,24 @@ pub fn event_json(event: &EngineEvent, engine: &Engine, ids: &[IdMap]) -> Option
             "target": entry.target,
             "message": entry.message,
         }),
+        EngineEvent::SerializeMarks { view, token, marks } => json!({
+            "type": "serializeMarks",
+            "view": view,
+            "token": token,
+            "marks": marks
+                .iter()
+                .enumerate()
+                .filter_map(|(index, (node, id, _))| {
+                    Some(json!({
+                        "node": ids.get(*view)?.ext(*node)?,
+                        "id": id,
+                        "index": index,
+                    }))
+                })
+                .collect::<Vec<_>>(),
+        }),
         EngineEvent::Profile(data) => profile_json(data),
     };
-    // Emit time lets the JS side measure how long the event sat in the node
-    // event loop before its handler ran.
     let mut value = value;
     if let Some(obj) = value.as_object_mut() {
         let at_ms = std::time::SystemTime::now()

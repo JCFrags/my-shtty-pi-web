@@ -10,11 +10,11 @@ pub struct PastedImage {
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
-fn temp_path() -> PathBuf {
+pub(crate) fn temp_path(ext: &str) -> PathBuf {
     let dir = std::env::temp_dir().join("pixel-attachments");
     let _ = std::fs::create_dir_all(&dir);
     let n = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    dir.join(format!("paste-{}-{n}.png", std::process::id()))
+    dir.join(format!("paste-{}-{n}.{ext}", std::process::id()))
 }
 
 fn dims(path: &Path) -> Option<(u32, u32)> {
@@ -35,57 +35,39 @@ fn from_file(path: &Path) -> Option<PastedImage> {
     })
 }
 
-/// Copying in Finder puts file paths on the clipboard; browsers and
-/// screenshot tools put bitmap data. Prefer files, fall back to bitmap.
-/// Runs on the engine thread: the read/downscale/encode spans are what a
-/// paste-triggered frame stall looks like in a profile.
-pub fn read_clipboard_image() -> Option<PastedImage> {
+pub(crate) enum WorkerPaste {
+    File(PastedImage),
+    Bitmap {
+        pasted: PastedImage,
+        rgba: image::RgbaImage,
+    },
+}
+
+pub(crate) fn read_for_worker() -> Option<WorkerPaste> {
     let mut clipboard = arboard::Clipboard::new().ok()?;
     if let Ok(files) = clipboard.get().file_list()
         && let Some(pasted) = files.iter().find_map(|f| from_file(f))
     {
-        return Some(pasted);
+        return Some(WorkerPaste::File(pasted));
     }
-    let img = crate::profiler::span("clipboard.image.read", || clipboard.get_image()).ok()?;
+    let img = clipboard.get_image().ok()?;
     let rgba = image::RgbaImage::from_raw(
         img.width as u32,
         img.height as u32,
         img.bytes.into_owned(),
     )?;
-    let rgba = crate::profiler::span("clipboard.image.downscale", || downscale(rgba));
     let (width, height) = rgba.dimensions();
-    let path = temp_path();
-    crate::profiler::span("clipboard.image.encode", || rgba.save(&path)).ok()?;
-    let src = path.to_string_lossy().into_owned();
-    crate::image_cache::insert_decoded(src.clone(), &rgba);
-    Some(PastedImage {
-        path: src,
+    let pasted = PastedImage {
+        /**
+         * why are we putting it in a tmp file anyways?
+         */
+        path: temp_path("png").to_string_lossy().into_owned(),
         width,
         height,
-    })
+    };
+    Some(WorkerPaste::Bitmap { pasted, rgba })
 }
 
-// Retina screenshots easily exceed model input limits and cost tokens for
-// detail vision models discard anyway.
-const MAX_EDGE: u32 = 2000;
-
-fn downscale(rgba: image::RgbaImage) -> image::RgbaImage {
-    let (w, h) = rgba.dimensions();
-    let edge = w.max(h);
-    if edge <= MAX_EDGE {
-        return rgba;
-    }
-    let scale = MAX_EDGE as f32 / edge as f32;
-    image::imageops::resize(
-        &rgba,
-        ((w as f32 * scale) as u32).max(1),
-        ((h as f32 * scale) as u32).max(1),
-        image::imageops::FilterType::Triangle,
-    )
-}
-
-/// Dropping a file on the terminal pastes its path as text, shell-escaped or
-/// quoted or as a file:// URL depending on the terminal.
 pub fn image_path_from_paste(text: &str) -> Option<PastedImage> {
     let trimmed = text.trim();
     if trimmed.is_empty() || trimmed.contains('\n') {

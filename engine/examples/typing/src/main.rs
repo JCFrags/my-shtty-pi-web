@@ -41,6 +41,9 @@ const GHOSTTY_KEYBINDS: &[&str] = &[
 
 fn main() -> std::io::Result<()> {
     if std::env::args().any(|arg| arg == "--keys") {
+        /**
+         * what the fuck is the purpose of this??
+         */
         return key_dump();
     }
     if std::env::args().any(|arg| arg == "--setup-ghostty") {
@@ -108,6 +111,7 @@ fn main() -> std::io::Result<()> {
         let mut queue: VecDeque<EngineEvent> = events.into();
         while let Some(event) = queue.pop_front() {
             match event {
+                EngineEvent::SerializeMarks { .. } => {}
                 EngineEvent::Key { event: key, .. } => {
                     let menu_was_open = app.context_menu.take().is_some();
                     if menu_was_open && key.key == Key::Escape {
@@ -132,6 +136,7 @@ fn main() -> std::io::Result<()> {
                         continue;
                     };
                     if menu_was_open {
+                        /** I SAID NO */
                         if let Some((_, action)) = MENU_ACTIONS.iter().find(|(k, _)| *k == key) {
                             let mut replies = Vec::new();
                             engine.apply_input_action(*action, &mut replies)?;

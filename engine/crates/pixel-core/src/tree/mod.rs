@@ -113,6 +113,8 @@ impl ScrollArea {
 pub struct InputProps {
     pub initial: String,
     pub value: Option<String>,
+    // Mount-time marks claiming sentinels already present in `initial`.
+    pub marks: Vec<(u64, usize)>,
     pub caret_color: Color,
     pub selection_color: Color,
     pub auto_focus: bool,
@@ -124,6 +126,7 @@ impl Default for InputProps {
         Self {
             initial: String::new(),
             value: None,
+            marks: Vec::new(),
             caret_color: [255, 255, 255, 255],
             selection_color: [90, 90, 140, 255],
             auto_focus: false,
@@ -135,6 +138,10 @@ impl Default for InputProps {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageProps {
     pub src: String,
+    // App-asserted (never verified): these srcs hold identical content, so a
+    // cached one may serve this src's pixels — lets an app swap a temp path
+    // for its persisted copy without a reload.
+    pub equal_to: Vec<String>,
 }
 
 // Slot children of an image node render in its place while the source is
@@ -168,6 +175,9 @@ pub struct Props {
     // Anchors this node inline in its input parent's text at the mark with
     // this id; it is laid out by text flow, not flex.
     pub mark: Option<u64>,
+    // For static text: marks claiming sentinels already present in `text`,
+    // as (id, offset). Inputs get theirs from InputProps instead.
+    pub marks: Vec<(u64, usize)>,
     pub content_height: Option<f32>,
     pub scroll_events: bool,
     pub wheel_events: bool,
@@ -207,6 +217,7 @@ pub(crate) struct RNode {
     pub slot_visible: bool,
     pub mark: Option<u64>,
     pub mark_visible: bool,
+    pub static_marks: Vec<crate::text_input::Mark>,
     pub parent: Option<NodeId>,
     pub children: Vec<NodeId>,
     pub taffy: taffy::NodeId,
@@ -232,6 +243,15 @@ pub(crate) struct RNode {
 struct Slot {
     generation: u32,
     node: Option<RNode>,
+}
+
+impl RNode {
+    pub(crate) fn marks(&self) -> &[crate::text_input::Mark] {
+        match &self.input {
+            Some(state) => state.input.marks(),
+            None => &self.static_marks,
+        }
+    }
 }
 
 pub struct Tree {
@@ -356,9 +376,13 @@ impl Tree {
             .taffy
             .new_leaf(to_taffy(&props.style, props.hidden))
             .expect("taffy leaf");
-        let text = match (&props.input, props.text) {
-            (Some(input), _) => Some(input.initial.clone()),
-            (None, text) => text,
+        let (text, static_marks) = match (&props.input, props.text) {
+            (Some(input), _) => (Some(input.initial.clone()), Vec::new()),
+            (None, Some(text)) if !props.marks.is_empty() => {
+                let (text, marks) = crate::text_input::claim_marks(&text, &props.marks);
+                (Some(text), marks)
+            }
+            (None, text) => (text, Vec::new()),
         };
         let node = RNode {
             style: props.style,
@@ -367,7 +391,7 @@ impl Tree {
             clickable: props.clickable,
             hidden: props.hidden,
             input: props.input.as_ref().map(|p| InputState {
-                input: TextInput::new(p.initial.clone()),
+                input: TextInput::with_marks(p.initial.clone(), &p.marks),
                 caret_color: p.caret_color,
                 selection_color: p.selection_color,
                 submit: p.submit,
@@ -377,6 +401,7 @@ impl Tree {
             slot_visible: false,
             mark: props.mark,
             mark_visible: false,
+            static_marks,
             parent: None,
             children: Vec::new(),
             taffy,
@@ -577,7 +602,7 @@ impl Tree {
             }
             (state @ None, Some(p)) => {
                 *state = Some(InputState {
-                    input: TextInput::new(p.initial.clone()),
+                    input: TextInput::with_marks(p.initial.clone(), &p.marks),
                     caret_color: p.caret_color,
                     selection_color: p.selection_color,
                     submit: p.submit,
@@ -593,9 +618,36 @@ impl Tree {
         }
         let node = self.node_mut(id);
         let mut text_changed = false;
-        if node.input.is_none() && node.text != props.text {
-            node.text = props.text;
-            text_changed = true;
+        if node.input.is_none() {
+            let (text, mut static_marks) = match props.text {
+                Some(text) if !props.marks.is_empty() => {
+                    let (text, marks) = crate::text_input::claim_marks(&text, &props.marks);
+                    (Some(text), marks)
+                }
+                text => (text, Vec::new()),
+            };
+            if node.text != text {
+                node.text = text;
+                text_changed = true;
+            }
+            let same_marks = node.static_marks.len() == static_marks.len()
+                && node
+                    .static_marks
+                    .iter()
+                    .zip(&static_marks)
+                    .all(|(a, b)| a.id == b.id && a.offset == b.offset);
+            if !same_marks {
+                // Keep measured advances for surviving ids so an unrelated
+                // prop update doesn't force a widget re-measure flicker.
+                for mark in &mut static_marks {
+                    if let Some(old) = node.static_marks.iter().find(|o| o.id == mark.id) {
+                        mark.advance = old.advance;
+                    }
+                }
+                node.static_marks = static_marks;
+                changed = true;
+                text_changed = true;
+            }
         }
         let old_key = node.key.clone();
         if text_changed {
@@ -797,6 +849,8 @@ impl Tree {
                 )
             });
             crate::profiler::span("tree.widgets", || self.layout_mark_widgets(fonts));
+            
+
             let root_taffy = self.node(self.root).taffy;
             crate::profiler::span("tree.layout", || {
                 self.taffy
@@ -821,10 +875,6 @@ impl Tree {
     }
 
 
-    /**
-     * need to circle back on where resolve is getting called
-     * in the context of the rendering
-     */
     fn resolve(&mut self, id: NodeId, inherited: Resolved) {
         let node = self.node_mut(id);
         let resolved = Resolved {
@@ -839,23 +889,12 @@ impl Tree {
         };
         node.resolved = resolved;
         let taffy = node.taffy;
-        /**
-         * the children here is gonna be relevant
-         * for understanding how the widgets flow thorugh
-         */
         let children = node.children.clone();
         let image = node.image.clone();
         let wrap = node.style.wrap;
         let is_input = node.input.is_some();
-        let marks = node
-            .input
-            .as_ref()
-            .map(|s| s.input.marks().to_vec())
-            .unwrap_or_default();
+        let marks = node.marks().to_vec();
         let node_text = node.text.clone();
-        /**
-         * is slot just a normal child? 
-         */
         let non_flow_only = children.iter().all(|&c| {
             let child = self.node(c);
             child.slot.is_some() || child.mark.is_some()
@@ -865,7 +904,9 @@ impl Tree {
         } else {
             None
         };
-        if is_input && children.iter().any(|&c| self.node(c).mark.is_some()) {
+        if (is_input || !marks.is_empty())
+            && children.iter().any(|&c| self.node(c).mark.is_some())
+        {
             self.mark_parents.push(id);
         }
         let want = if let Some(image) = image {
@@ -873,18 +914,15 @@ impl Tree {
                 if !children.is_empty() {
                     self.image_slot_parents.push(id);
                 }
-                // Without a placeholder, a still-decoding image occupies
-                // nothing: it appears whole when the pixels are ready rather
-                // than as a reserved blank box.
                 let has_placeholder = children
                     .iter()
                     .any(|&c| self.node(c).slot == Some(SlotKind::Placeholder));
-                let size = if !has_placeholder
-                    && crate::image_cache::status(&image.src) == ImageStatus::Pending
-                {
+                let status = crate::image_cache::status(&image.src, &image.equal_to);
+                let size = if !has_placeholder && status == ImageStatus::Pending {
                     None
                 } else {
-                    crate::image_cache::image_size(&image.src)
+                    crate::image_cache::image_size(&image.src, &image.equal_to)
+                        .or((status == ImageStatus::Failed).then_some((32, 32)))
                 };
                 Some(MeasureCtx::Image {
                     size,
@@ -917,9 +955,6 @@ impl Tree {
 
     fn layout_slots(&mut self, fonts: &[fontdue::Font]) {
         use taffy::prelude::length;
-            /**
-             *  what the hell is an image slow parents? why are images special cased?
-             */
         let parents = self.image_slot_parents.clone();
         for id in parents {
             let Some(node) = self.get(id) else { continue };
@@ -954,8 +989,6 @@ impl Tree {
         }
     }
 
-    // Mark widgets are their own taffy roots measured at max-content before
-    // the main layout, so the input's text measure can reserve their width.
     fn layout_mark_widgets(&mut self, fonts: &[fontdue::Font]) {
         let parents = self.mark_parents.clone();
         for id in parents {
@@ -978,10 +1011,19 @@ impl Tree {
                     )
                     .expect("widget layout");
                 let size = self.taffy.layout(child_taffy).expect("layout").size;
-                let Some(state) = self.get_mut(id).and_then(|n| n.input.as_mut()) else {
+                let Some(node) = self.get_mut(id) else {
                     continue;
                 };
-                changed |= state.input.set_mark_advance(mark_id, size.width);
+                changed |= match &mut node.input {
+                    Some(state) => state.input.set_mark_advance(mark_id, size.width),
+                    None => match node.static_marks.iter_mut().find(|m| m.id == mark_id) {
+                        Some(mark) if (mark.advance - size.width).abs() >= 0.01 => {
+                            mark.advance = size.width;
+                            true
+                        }
+                        _ => false,
+                    },
+                };
             }
             if changed {
                 self.refresh_input_measure(id);
@@ -989,17 +1031,14 @@ impl Tree {
         }
     }
 
-    // The measure context snapshots mark advances, so it must be rebuilt when
-    // widget sizes land after resolve already ran.
     fn refresh_input_measure(&mut self, id: NodeId) {
         let node = self.node(id);
-        let Some(state) = &node.input else { return };
         let ctx = MeasureCtx::Text {
             text: node.text.clone().unwrap_or_default(),
             px: node.resolved.px,
             font: node.resolved.font,
             wrap: node.style.wrap,
-            marks: state.input.marks().to_vec(),
+            marks: node.marks().to_vec(),
         };
         let taffy = node.taffy;
         if self.taffy.get_node_context(taffy) != Some(&ctx) {
@@ -1075,7 +1114,7 @@ impl Tree {
         } else {
             clip
         };
-        let image_src = node.image.as_ref().map(|i| i.src.clone());
+        let image_src = node.image.clone();
         for child in node.children.clone() {
             if let Some(mark_id) = self.node(child).mark {
                 match self.mark_child_origin(id, child, mark_id, fonts) {
@@ -1091,8 +1130,8 @@ impl Tree {
                 continue;
             }
             match (self.node(child).slot, &image_src) {
-                (Some(kind), Some(src)) => {
-                    let status = crate::image_cache::status(src);
+                (Some(kind), Some(image)) => {
+                    let status = crate::image_cache::status(&image.src, &image.equal_to);
                     let show = matches!(
                         (kind, status),
                         (SlotKind::Placeholder, ImageStatus::Pending)
@@ -1114,9 +1153,6 @@ impl Tree {
         }
     }
 
-    // A widget sits at its mark's text position, centered on the line; a
-    // mark child whose sentinel is gone (or whose parent isn't an input)
-    // simply doesn't render.
     fn mark_child_origin(
         &self,
         parent: NodeId,
@@ -1125,17 +1161,17 @@ impl Tree {
         fonts: &[fontdue::Font],
     ) -> Option<(f32, f32)> {
         let node = self.get(parent)?;
-        let state = node.input.as_ref()?;
-        let mark = state.input.marks().iter().find(|m| m.id == mark_id)?;
+        let text = node.text.as_deref()?;
+        let mark = node.marks().iter().find(|m| m.id == mark_id)?;
         let geometry = self.text_geometry(parent)?;
         let font = &fonts[geometry.font.min(fonts.len() - 1)];
         let (x, y) = offset_to_point(
-            state.input.text(),
+            text,
             mark.offset,
             font,
             geometry.px,
             geometry.max_width,
-            state.input.marks(),
+            node.marks(),
         );
         let size = self.taffy.layout(self.get(child)?.taffy).ok()?.size;
         let line_h = line_height(font, geometry.px);
@@ -1257,7 +1293,10 @@ impl Tree {
             return false;
         };
         node.text.is_some()
-            && node.children.is_empty()
+            && node
+                .children
+                .iter()
+                .all(|&c| self.get(c).is_some_and(|n| n.mark.is_some() || n.slot.is_some()))
             && node.input.is_none()
             && !node.hidden
             && node.resolved.selectable
@@ -1412,6 +1451,10 @@ impl Tree {
         self.doc.selected_text(self)
     }
 
+    pub(crate) fn doc_selected_rich(&self) -> Option<crate::selection::RichSelection> {
+        self.doc.selected_rich(self)
+    }
+
     pub fn doc_selection_blocks(
         &self,
         fonts: &[fontdue::Font],
@@ -1494,6 +1537,10 @@ impl Tree {
 }
 
 impl DocLayout for Tree {
+    fn marks_of(&self, id: NodeId) -> &[crate::text_input::Mark] {
+        self.get(id).map_or(&[], |node| node.marks())
+    }
+
     fn paint_order(&self) -> &[NodeId] {
         &self.paint_order
     }

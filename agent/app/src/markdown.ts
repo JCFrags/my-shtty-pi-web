@@ -10,8 +10,7 @@ export interface InlineMarkdown {
   spans: InlineSpan[];
 }
 
-// Span offsets are UTF-8 byte positions because the engine slices text by byte
-// range, so every pushed chunk advances by its byte length, not string length.
+// a little hacky but fine for now
 export function parseInline(source: string): InlineMarkdown {
   let text = "";
   let bytes = 0;

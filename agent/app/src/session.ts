@@ -5,6 +5,7 @@ import { extname } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { MarkRef, PastedImage } from "pixel-react";
 
+import { attachmentsDir, persistAttachment } from "./attachments";
 import { appendLog, createSession } from "./db/client";
 import { schedulePersist } from "./db/persist";
 import { detail } from "./transcript";
@@ -27,8 +28,19 @@ export interface ToolCall {
   kids: ToolCall[];
 }
 
+export interface ComposerAttachment {
+  image: PastedImage;
+  durable: string | null;
+  persisted: Promise<string | null>;
+}
+
+export interface RichMark {
+  offset: number;
+  data: string;
+}
+
 export type Item =
-  | { kind: "user"; text: string; images?: string[] }
+  | { kind: "user"; text: string; images?: string[]; marks?: RichMark[] }
   | { kind: "assistant"; text: string }
   | { kind: "tool"; call: ToolCall };
 
@@ -93,6 +105,7 @@ export class Session {
 
   private q: Query | null = null;
   private queue: SDKUserMessage[] = [];
+  private sendChain: Promise<void> = Promise.resolve();
   private wake: (() => void) | null = null;
 
   constructor(private notify: () => void, restored?: RestoredSession) {
@@ -107,8 +120,6 @@ export class Session {
     } else {
       this.dbId = randomUUID();
       this.createdAt = Date.now();
-      // the session row must exist before the first log insert satisfies its foreign key;
-      // the debounced persist would land it too late
       createSession({ id: this.dbId, createdAt: this.createdAt });
       this.connect();
     }
@@ -171,17 +182,30 @@ export class Session {
     return text.length > 22 ? `${text.slice(0, 21)}…` : text;
   }
 
-  send(text: string, attachments: { path: string }[] = []) {
+  send(text: string, marks: MarkRef[] = []) {
     const clean = text.replace(/\uFFFC/g, "").trim();
-    const images = attachments.flatMap((a) => {
-      const media = IMAGE_MEDIA[extname(a.path).toLowerCase()];
-      if (!media) return [];
+    if (!clean && marks.length === 0) return;
+    this.sendChain = this.sendChain
+      .then(() => this.sendNow(text, clean, marks))
+      .catch(() => {});
+  }
+
+  private async sendNow(raw: string, clean: string, marks: MarkRef[]) {
+    const images: { path: string; media: string; data: string }[] = [];
+    const rich: RichMark[] = [];
+    for (const mark of marks) {
+      const attachment = store.composerImage(mark.id);
+      if (!attachment) continue;
+      const path = (await attachment.persisted) ?? attachment.image.path;
+      rich.push({ offset: mark.offset, data: JSON.stringify({ kind: "image", path }) });
+      const media = IMAGE_MEDIA[extname(path).toLowerCase()];
+      if (!media) continue;
       try {
-        return [{ path: a.path, media, data: readFileSync(a.path).toString("base64") }];
+        images.push({ path, media, data: readFileSync(path).toString("base64") });
       } catch {
-        return [];
+        continue;
       }
-    });
+    }
     if (!clean && images.length === 0) return;
     this.connect();
     this.firstUserText ||= clean || "image";
@@ -202,19 +226,14 @@ export class Session {
       parent_tool_use_id: null,
       message: { role: "user", content } as SDKUserMessage["message"],
     };
-    // Log with image bytes swapped for paths so transcripts stay small and
-    // renderable; the full base64 goes only to the model.
     const logged =
-      images.length === 0
+      rich.length === 0
         ? message
         : {
             ...message,
             message: {
               role: "user",
-              content: [
-                ...images.map((a) => ({ type: "image_path", path: a.path })),
-                ...(clean ? [{ type: "text", text: clean }] : []),
-              ],
+              content: [{ type: "rich_text", text: raw, marks: rich }],
             },
           };
     this.log(logged);
@@ -360,8 +379,7 @@ class Store {
   composerText = "";
   composerEpoch = 0;
   composerMarks: MarkRef[] = [];
-  // Image data outlives its mark so undo after a pill delete rehydrates it.
-  private composerImages = new Map<number, PastedImage>();
+  private composerImages = new Map<number, ComposerAttachment>();
   private nextMarkId = 1;
   fontPath: string | null = null;
   fontId = 0;
@@ -453,17 +471,66 @@ class Store {
 
   addComposerImage(image: PastedImage): number {
     const id = this.nextMarkId++;
-    this.composerImages.set(id, image);
+    const attachment: ComposerAttachment = {
+      image,
+      durable: null,
+      persisted: persistAttachment(image.path).then((durable) => {
+        if (durable && this.composerImages.get(id) === attachment) {
+          attachment.durable = durable;
+          this.registerAttachmentAlias(durable, image.path);
+          this.notify();
+        }
+        return durable;
+      }),
+    };
+    this.composerImages.set(id, attachment);
     return id;
   }
 
-  composerImage(id: number): PastedImage | undefined {
+  private tmpByDurable = new Map<string, string>();
+
+  registerAttachmentAlias(durable: string, tmp: string) {
+    this.tmpByDurable.set(durable, tmp);
+  }
+
+  attachmentAliases(src: string): string[] | undefined {
+    const tmp = this.tmpByDurable.get(src);
+    return tmp ? [tmp] : undefined;
+  }
+
+  composerImage(id: number): ComposerAttachment | undefined {
     return this.composerImages.get(id);
   }
 
-  /// The live mark list rides every change event; deleting a pill in the
-  /// input (or undoing) is reflected here.
   syncComposerMarks(marks: MarkRef[]) {
+    for (const mark of marks) {
+      if (!mark.data || this.composerImages.has(mark.id)) continue;
+      let parsed: { kind?: string; path?: string };
+      try {
+        parsed = JSON.parse(mark.data);
+      } catch {
+        continue;
+      }
+      if (parsed.kind !== "image" || !parsed.path) continue;
+      const path = parsed.path;
+      const durable = path.startsWith(attachmentsDir) ? path : null;
+      const attachment: ComposerAttachment = {
+        image: { path, width: 0, height: 0 },
+        durable,
+        persisted: Promise.resolve(durable),
+      };
+      if (!durable) {
+        attachment.persisted = persistAttachment(path).then((d) => {
+          if (d && this.composerImages.get(mark.id) === attachment) {
+            attachment.durable = d;
+            this.registerAttachmentAlias(d, path);
+            this.notify();
+          }
+          return d;
+        });
+      }
+      this.composerImages.set(mark.id, attachment);
+    }
     const current = this.composerMarks;
     if (
       marks.length === current.length &&

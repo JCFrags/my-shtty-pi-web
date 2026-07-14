@@ -95,8 +95,6 @@ impl Canvas {
         self.draw_marked(font, text, 0..text.len(), x, baseline, px, color, &[]);
     }
 
-    // Mark sentinels reserve the anchored widget's width; the widget itself
-    // is a normal tree node painted by its own pass, not a glyph.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_marked(
         &mut self,

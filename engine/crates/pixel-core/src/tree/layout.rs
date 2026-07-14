@@ -15,7 +15,6 @@ pub(crate) enum MeasureCtx {
     },
     Image {
         src: String,
-        // Natural pixel size; None while the source fails to decode.
         size: Option<(u32, u32)>,
     },
 }
@@ -108,8 +107,6 @@ fn measure_wrapped_text(
         })
         .fold(0.0f32, f32::max);
     taffy::Size {
-        // Ceil so taffy's whole-pixel rounding never under-allocates the
-        // text width.
         width: widest.ceil(),
         height: line * lines.len() as f32,
     }

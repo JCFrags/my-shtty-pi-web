@@ -3,13 +3,21 @@ import {
   createElement,
   forwardRef,
   isValidElement,
+  useState,
   type ForwardRefExoticComponent,
   type ReactElement,
   type ReactNode,
   type RefAttributes,
 } from "react";
 
-import type { BoxProps, ImageProps, InputProps, TextProps } from "./host-config";
+import type {
+  BoxProps,
+  ImageProps,
+  InputProps,
+  MarkedTextProps,
+  MarkRef,
+  TextProps,
+} from "./reconciler-config";
 
 export interface NodeHandle {
   id: number;
@@ -17,9 +25,8 @@ export interface NodeHandle {
   blur(): void;
   scrollTo(offset: number, smooth?: boolean): void;
   splice(start: number, end: number, text: string): void;
-  /** Splice a widget-anchor sentinel at the caret. The caller picks the mark
-   *  id and renders matching Input.Widget children keyed by it. */
-  insertMark(mark: number): void;
+  addMark(mark: number, offset?: number): void;
+  removeMark(mark: number): void;
 }
 
 type Host<P> = ForwardRefExoticComponent<P & RefAttributes<NodeHandle>>;
@@ -27,24 +34,49 @@ type Host<P> = ForwardRefExoticComponent<P & RefAttributes<NodeHandle>>;
 export const Box = "box" as unknown as Host<BoxProps>;
 export const Text = "text" as unknown as Host<TextProps>;
 
-// A widget renders inline in the input's text at its mark's offset; the box
-// wrapper shrink-wraps whatever the app puts inside.
-function Widget({ markId, children }: { markId: number; children?: ReactNode }): ReactElement {
-  return createElement("box", { mark: markId }, children);
+function markWidgets(
+  marks: readonly MarkRef[],
+  renderMark: ((id: number) => ReactNode) | undefined
+): ReactNode {
+  if (!renderMark) return null;
+  return marks.map((mark) =>
+    createElement("box", { key: mark.id, mark: mark.id }, renderMark(mark.id))
+  );
 }
 
 const InputHost = "input" as unknown as Host<InputProps>;
 
-export const Input = Object.assign(
-  forwardRef<NodeHandle, InputProps>(function Input(props, ref) {
-    return createElement(InputHost, { ...props, ref });
-  }),
-  { Widget }
-);
+export const Input = forwardRef<NodeHandle, InputProps>(function Input(props, ref) {
+  const { renderMark, onChange, ...rest } = props;
+  const [marks, setMarks] = useState<MarkRef[]>(props.defaultMarks ?? []);
+  return createElement(
+    InputHost,
+    {
+      ...rest,
+      ref,
+      onChange: (text, change) => {
+        setMarks(change.marks);
+        onChange?.(text, change)
+      },
+    },
+    markWidgets(marks, renderMark)
+  );
+});
 
-// The engine stretches a slot root to the image's rect, so tagging the app's
-// own element keeps e.g. its background full-bleed; non-host content gets a
-// box wrapper and sizes itself.
+const MarkedTextHost = "marked-text" as unknown as Host<MarkedTextProps>;
+
+export const MarkedText = forwardRef<NodeHandle, MarkedTextProps>(function MarkedText(
+  props,
+  ref
+) {
+  const { renderMark, ...rest } = props;
+  return createElement(
+    MarkedTextHost,
+    { ...rest, ref },
+    markWidgets(props.marks, renderMark)
+  );
+});
+
 function slotted(kind: "placeholder" | "error", content: ReactNode): ReactElement | null {
   if (content == null || typeof content === "boolean") return null;
   if (isValidElement(content) && typeof content.type === "string") {

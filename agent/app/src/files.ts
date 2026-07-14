@@ -18,7 +18,6 @@ const MAX_ENTRIES = 8000;
 let entries: string[] | null = null;
 let walking = false;
 
-/** Relative paths under cwd; directories carry a trailing "/". Null until the first walk lands. */
 export function fileEntries(): string[] | null {
   return entries;
 }
@@ -36,7 +35,6 @@ export function refreshFiles(onDone: () => void) {
     });
 }
 
-// Breadth-first so shallow paths survive the cap when the tree is huge.
 async function walk(): Promise<string[]> {
   const out: string[] = [];
   const queue: string[] = ["."];

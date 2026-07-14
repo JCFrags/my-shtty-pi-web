@@ -28,14 +28,14 @@ pub enum InputAction {
     SelectAll,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum InputReply {
     None,
     Edited,
     Moved,
     Selected,
-    Copy(String),
-    Cut(String),
+    Copy(String, Vec<Mark>),
+    Cut(String, Vec<Mark>),
     RequestPaste,
 }
 
@@ -89,17 +89,40 @@ pub(crate) fn caret_width(px: f32) -> f32 {
     (px / 8.0).max(2.0)
 }
 
-// A mark anchors an app-owned inline widget to a byte offset. The engine
-// only knows its position and reserved width; what it means and how it
-// renders is the client's business.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Mark {
     pub id: u64,
     pub offset: usize,
     pub advance: f32,
+    pub data: Option<String>,
 }
 
 pub const MARK_CHAR: char = '\u{FFFC}';
+
+pub(crate) fn claim_marks(text: &str, marks: &[(u64, usize)]) -> (String, Vec<Mark>) {
+    let mut claimed = std::collections::HashMap::new();
+    for &(id, offset) in marks {
+        claimed.entry(offset).or_insert(id);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut kept = Vec::new();
+    for (i, ch) in text.char_indices() {
+        if ch == MARK_CHAR {
+            if let Some(&id) = claimed.get(&i) {
+                kept.push(Mark {
+                    id,
+                    offset: out.len(),
+                    advance: 0.0,
+                    data: None,
+                });
+                out.push(MARK_CHAR);
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    (out, kept)
+}
 
 pub(crate) fn mark_advance_at(marks: &[Mark], offset: usize) -> f32 {
     marks
@@ -174,8 +197,6 @@ impl TextInput {
     }
 
     pub fn insert(&mut self, s: &str) {
-        // The sentinel may only enter through insert_mark, so text and marks
-        // stay bijective.
         if s.contains(MARK_CHAR) {
             let sanitized: String = s.chars().filter(|&c| c != MARK_CHAR).collect();
             return self.insert(&sanitized);
@@ -194,11 +215,31 @@ impl TextInput {
         &self.marks
     }
 
-    // Mark ids are chosen by the caller so the client can know the id
-    // without waiting on a round trip.
-    pub fn insert_mark(&mut self, id: u64) {
-        let caret = self.cursor..self.cursor;
-        let range = self.selection().unwrap_or(caret);
+    pub fn with_marks(text: String, marks: &[(u64, usize)]) -> Self {
+        let (text, marks) = claim_marks(&text, marks);
+        let cursor = text.len();
+        Self {
+            text,
+            cursor,
+            marks,
+            ..Self::default()
+        }
+    }
+
+    pub fn insert_mark(&mut self, id: u64, offset: Option<usize>) {
+        if self.marks.iter().any(|m| m.id == id) {
+            return;
+        }
+        let range = match offset {
+            Some(at) => {
+                let at = self.snap_to_boundary(at);
+                at..at
+            }
+            None => {
+                let caret = self.cursor..self.cursor;
+                self.selection().unwrap_or(caret)
+            }
+        };
         let at = range.start;
         let mut buf = [0u8; 4];
         self.splice(range, MARK_CHAR.encode_utf8(&mut buf), EditKind::Other);
@@ -213,8 +254,63 @@ impl TextInput {
                 id,
                 offset: at,
                 advance: 0.0,
+                data: None,
             },
         );
+    }
+
+    pub fn remove_mark(&mut self, id: u64) {
+        let Some(mark) = self.marks.iter().find(|m| m.id == id) else {
+            return;
+        };
+        let start = mark.offset;
+        self.splice(start..start + MARK_CHAR.len_utf8(), "", EditKind::Other);
+    }
+
+    fn selection_marks(&self) -> Vec<Mark> {
+        let Some(range) = self.selection() else {
+            return Vec::new();
+        };
+        self.marks
+            .iter()
+            .filter(|m| m.offset >= range.start && m.offset < range.end)
+            .map(|m| Mark {
+                offset: m.offset - range.start,
+                ..m.clone()
+            })
+            .collect()
+    }
+
+    pub fn insert_rich(&mut self, text: &str, marks: &[(usize, String)], first_id: u64) {
+        let caret = self.cursor..self.cursor;
+        let range = self.selection().unwrap_or(caret);
+        let at = range.start;
+        self.splice(range, text, EditKind::Other);
+        for (i, (rel, data)) in marks.iter().enumerate() {
+            let offset = at + rel;
+            let index = self
+                .marks
+                .iter()
+                .position(|m| m.offset >= offset)
+                .unwrap_or(self.marks.len());
+            self.marks.insert(
+                index,
+                Mark {
+                    id: first_id + i as u64,
+                    offset,
+                    advance: 0.0,
+                    data: Some(data.clone()),
+                },
+            );
+        }
+    }
+
+    fn snap_to_boundary(&self, offset: usize) -> usize {
+        let mut at = offset.min(self.text.len());
+        while at > 0 && !self.text.is_char_boundary(at) {
+            at -= 1;
+        }
+        at
     }
 
     pub fn set_mark_advance(&mut self, id: u64, advance: f32) -> bool {
@@ -279,13 +375,6 @@ impl TextInput {
         };
         self.splice(start..self.cursor, "", kind);
     }
-    /**
-     * we need an understanding of the code from scratch, but i can precache my undersatnding a bit with the image rendering since it was pretty simple
-     * 
-     * read img source, that gets set to the tree prop, then during layout we read the image bytes and dispalyed them
-     * 
-     * but now its a bit more nuanced since its very asyncronous and we refactored even how we pump events and draw, and i suspected that was weird how pump was writte anyways
-     */
 
     pub fn delete_forward(&mut self, granularity: Granularity) {
         if self.delete_selection() {
@@ -574,13 +663,14 @@ impl TextInput {
                 }
             }
             InputAction::Copy => match self.selected_text() {
-                Some(text) => InputReply::Copy(text.to_string()),
+                Some(text) => InputReply::Copy(text.to_string(), self.selection_marks()),
                 None => InputReply::None,
             },
             InputAction::Cut => match self.selected_text().map(str::to_string) {
                 Some(text) => {
+                    let marks = self.selection_marks();
                     self.delete_selection();
-                    InputReply::Cut(text)
+                    InputReply::Cut(text, marks)
                 }
                 None => InputReply::None,
             },
@@ -618,7 +708,8 @@ impl TextInput {
             }),
             Key::Char('c') if combo => self.apply(InputAction::Copy),
             Key::Char('x') if combo => self.apply(InputAction::Cut),
-            Key::Char('v') if combo => self.apply(InputAction::Paste),
+
+            Key::Char('v') if combo => self.apply(InputAction::Paste), // so this gets conerted to request paste
             Key::Left => {
                 self.move_left(horizontal, m.shift);
                 InputReply::Moved
@@ -1127,7 +1218,7 @@ mod tests {
     #[test]
     fn marks_insert_as_one_char_and_track_position() {
         let mut i = input("hello ", 6);
-        i.insert_mark(1);
+        i.insert_mark(1, None);
         assert_eq!(i.text(), format!("hello {MARK_CHAR}"));
         assert_eq!(i.marks().len(), 1);
         assert_eq!(i.marks()[0].offset, 6);
@@ -1145,7 +1236,7 @@ mod tests {
     #[test]
     fn cursor_and_backspace_treat_the_mark_as_a_unit() {
         let mut i = input("ab", 2);
-        i.insert_mark(1);
+        i.insert_mark(1, None);
         i.insert("cd");
         i.move_left(Granularity::Char, false);
         i.move_left(Granularity::Char, false);
@@ -1161,7 +1252,7 @@ mod tests {
     #[test]
     fn undo_restores_deleted_marks_and_redo_removes_them_again() {
         let mut i = input("", 0);
-        i.insert_mark(7);
+        i.insert_mark(7, None);
         i.set_mark_advance(7, 24.0);
         i.delete_backward(Granularity::Char);
         assert!(i.marks().is_empty());
@@ -1182,7 +1273,7 @@ mod tests {
     #[test]
     fn replacing_a_selection_across_a_mark_drops_it() {
         let mut i = input("one ", 4);
-        i.insert_mark(1);
+        i.insert_mark(1, None);
         i.insert(" two");
         i.select_all();
         i.insert("clean");
@@ -1197,7 +1288,7 @@ mod tests {
     fn backspace_runs_across_marks_restore_in_one_undo() {
         let mut i = input("", 0);
         i.insert("ab");
-        i.insert_mark(1);
+        i.insert_mark(1, None);
         i.set_cursor(i.text().len(), false);
         i.delete_backward(Granularity::Char);
         i.delete_backward(Granularity::Char);
@@ -1222,7 +1313,7 @@ mod tests {
     fn mark_advance_flows_through_measurement() {
         let f = font();
         let mut i = input("ab", 1);
-        i.insert_mark(1);
+        i.insert_mark(1, None);
         assert!(i.set_mark_advance(1, 40.0));
         assert!(!i.set_mark_advance(1, 40.0), "unchanged advance reports false");
         let with = measure_marked(&f, i.text(), 0..i.text().len(), 16.0, i.marks());
@@ -1282,11 +1373,11 @@ mod tests {
         );
         assert_eq!(
             i.handle_key(key(Key::Char('c'), SUPER), &f, 16.0, None),
-            InputReply::Copy("one two".into())
+            InputReply::Copy("one two".into(), Vec::new())
         );
         assert_eq!(
             i.handle_key(key(Key::Char('x'), SUPER), &f, 16.0, None),
-            InputReply::Cut("one two".into())
+            InputReply::Cut("one two".into(), Vec::new())
         );
         assert_eq!(i.text(), "");
         assert_eq!(
@@ -1425,5 +1516,59 @@ mod tests {
         let w = measure_marked(&f, "a", 0..1, 16.0, &[]);
         assert_eq!(point_to_offset("abc", w * 0.4, 0.0, &f, 16.0, None, &[]), 0);
         assert_eq!(point_to_offset("abc", w * 0.6, 0.0, &f, 16.0, None, &[]), 1);
+    }
+
+    #[test]
+    fn with_marks_claims_sentinels_and_strips_strays() {
+        let text = format!("a{m}b{m}c", m = MARK_CHAR);
+        // Claim only the first sentinel (offset 1); the second is a stray.
+        let input = TextInput::with_marks(text, &[(7, 1), (9, 99)]);
+        assert_eq!(input.text(), format!("a{}bc", MARK_CHAR));
+        assert_eq!(input.marks().len(), 1);
+        assert_eq!((input.marks()[0].id, input.marks()[0].offset), (7, 1));
+    }
+
+    #[test]
+    fn insert_mark_at_offset_and_remove_round_trip() {
+        let mut input = TextInput::new("hello".into());
+        input.insert_mark(1, Some(2));
+        assert_eq!(input.text(), format!("he{}llo", MARK_CHAR));
+        assert_eq!(input.marks()[0].offset, 2);
+        // Duplicate ids are ignored.
+        input.insert_mark(1, Some(0));
+        assert_eq!(input.marks().len(), 1);
+        input.remove_mark(1);
+        assert_eq!(input.text(), "hello");
+        assert!(input.marks().is_empty());
+        // Offsets clamp to the text.
+        input.insert_mark(2, Some(999));
+        assert_eq!(input.marks()[0].offset, 5);
+    }
+
+    #[test]
+    fn selection_marks_rebase_and_cut_carries_them() {
+        let mut input = TextInput::new("hello".into());
+        input.insert_mark(7, Some(2));
+        input.set_cursor(1, false);
+        input.set_cursor(5, true); // select "e␟ll" covering the sentinel
+        let marks = input.selection_marks();
+        assert_eq!(marks.len(), 1);
+        assert_eq!((marks[0].id, marks[0].offset), (7, 1));
+    }
+
+    #[test]
+    fn insert_rich_registers_marks_with_data() {
+        let mut input = TextInput::new("xy".into());
+        input.set_cursor(1, false);
+        let text = format!("a{m}b{m}c", m = MARK_CHAR);
+        input.insert_rich(&text, &[(1, "one".into()), (5, "two".into())], 1 << 48);
+        assert_eq!(input.text(), format!("xa{m}b{m}cy", m = MARK_CHAR));
+        let marks = input.marks();
+        assert_eq!(marks.len(), 2);
+        assert_eq!(marks[0].id, 1 << 48);
+        assert_eq!(marks[0].offset, 2);
+        assert_eq!(marks[0].data.as_deref(), Some("one"));
+        assert_eq!(marks[1].id, (1 << 48) + 1);
+        assert_eq!(marks[1].data.as_deref(), Some("two"));
     }
 }

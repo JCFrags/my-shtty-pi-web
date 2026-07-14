@@ -1,8 +1,10 @@
 import { useMemo } from "react";
-import { Box, HIGHLIGHT_CAPTURES, highlight, Image, Text } from "pixel-react";
+import { Box, HIGHLIGHT_CAPTURES, highlight, Image, MarkedText, Text } from "pixel-react";
 
 import { parseInline } from "../markdown";
-import type { Item } from "../session";
+import { store } from "../session";
+import type { Item, RichMark } from "../session";
+import { AttachmentPill } from "./composer";
 import { ToolRow } from "./tool";
 import { useCtx } from "../theme";
 
@@ -28,11 +30,16 @@ export function Message({ item }: { item: Item }) {
                 src={src}
                 style={{ height: rem * 5, cornerRadius: rem * 0.4 }}
                 placeholder={<Box style={{ background: theme.bgAlt }} />}
+                advanced={{ confirmedEqualTo: store.attachmentAliases(src) }}
               />
             ))}
           </Box>
         )}
-        {(item.text || !item.images) && <Text>&gt; {item.text}</Text>}
+        {item.marks?.length ? (
+          <UserRichText text={item.text} marks={item.marks} />
+        ) : (
+          (item.text || !item.images) && <Text>&gt; {item.text}</Text>
+        )}
       </Box>
     );
   }
@@ -53,6 +60,30 @@ export function Message({ item }: { item: Item }) {
         )
       )}
     </Box>
+  );
+}
+
+function UserRichText({ text, marks }: { text: string; marks: RichMark[] }) {
+  const prefix = "> ";
+  return (
+    <MarkedText
+      text={prefix + text}
+      marks={marks.map((mark, i) => ({ id: i, offset: mark.offset + prefix.length }))}
+      serializeMark={(id) => marks[id]?.data}
+      renderMark={(id) => {
+        const mark = marks[id];
+        if (!mark) return null;
+        try {
+          const data = JSON.parse(mark.data) as { kind: string; path?: string };
+          if (data.kind === "image" && data.path) {
+            return <AttachmentPill src={data.path} equalTo={store.attachmentAliases(data.path)} />;
+          }
+        } catch {
+          return null;
+        }
+        return null;
+      }}
+    />
   );
 }
 

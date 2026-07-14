@@ -59,6 +59,11 @@ export interface TextProps {
 export interface MarkRef {
   id: number;
   offset: number;
+  /**
+   * in the case the engine creates the mark (a paste event where it deserializes the bespoke paste format)
+   * the application needs to know about the deserialized data to start internally tracking it
+   */
+  data?: string;
 }
 
 export interface PastedImage {
@@ -87,16 +92,30 @@ export interface InputProps {
   id?: string;
   defaultValue?: string;
   value?: string;
+  defaultMarks?: MarkRef[];
+  renderMark?: (id: number) => React.ReactNode;
+  serializeMark?: (id: number) => string | undefined;
   caretColor?: Style["color"];
   selectionColor?: Style["color"];
   autoFocus?: boolean;
   onChange?: (text: string, change: ChangeInfo) => void;
   onCaret?: (caret: CaretInfo) => void;
   onSubmit?: (text: string, marks: MarkRef[]) => void;
-  /** An image was pasted or dropped while this input was focused. Insert a
-   *  widget via the handle's insertMark if it should become inline content. */
   onPasteImage?: (image: PastedImage) => void;
-  children?: React.ReactNode;
+}
+
+export interface MarkedTextProps {
+  style?: Style;
+  id?: string;
+  text: string;
+  marks: MarkRef[];
+  renderMark?: (id: number) => React.ReactNode;
+  serializeMark?: (id: number) => string | undefined;
+  onClick?: (event: ClickEvent) => void;
+}
+
+export interface ImageAdvancedProps {
+  confirmedEqualTo?: string[];
 }
 
 export interface ImageProps {
@@ -104,16 +123,19 @@ export interface ImageProps {
   id?: string;
   src: string;
   onClick?: (event: ClickEvent) => void;
-  /** Rendered in the image's place while the source decodes. */
   placeholder?: React.ReactNode;
-  /** Rendered in the image's place when decoding fails; defaults to the engine's broken-image glyph. */
   error?: React.ReactNode;
+  advanced?: ImageAdvancedProps;
 }
 
 export type AnyProps = BoxProps &
   TextProps &
   InputProps &
-  Partial<ImageProps> & { slot?: "placeholder" | "error"; mark?: number };
+  Partial<ImageProps> &
+  Partial<Omit<MarkedTextProps, "style" | "id" | "onClick">> & {
+    slot?: "placeholder" | "error";
+    mark?: number;
+  };
 
 export interface Instance {
   id: number;
@@ -168,6 +190,7 @@ export class Bridge {
       const seq = ++this.seq;
       const payload = JSON.stringify({ view, seq, ops });
       const start = performance.timeOrigin + performance.now();
+      // aha pussy
       this.engine.applyOps(payload);
       if (this.onFlush) {
         const dur = performance.timeOrigin + performance.now() - start;
@@ -223,6 +246,9 @@ function serializeProps(
         bold: s.bold,
       }));
     }
+  } else if (type === "marked-text") {
+    base.text = props.text ?? "";
+    base.marks = props.marks;
   } else if (type === "image") {
     base.image = { src: props.src ?? "" };
   } else if (type === "input") {
@@ -230,6 +256,7 @@ function serializeProps(
     base.input = {
       initial: props.defaultValue ?? props.value ?? "",
       value: valueChanged ? props.value : undefined,
+      marks: props.defaultMarks,
       caretColor: parseColor(props.caretColor),
       selectionColor: parseColor(props.selectionColor),
       autoFocus: !!props.autoFocus,
@@ -243,16 +270,10 @@ function mutated(view: number) {
   getBridge().onTreeMutation?.(view);
 }
 
-/**
- * minor optimization so we can serialize/deserialize less data
- */
 function pushPropsIfChanged(
   instance: Instance,
   serialized: Record<string, unknown>
 ): boolean {
-  /**
-   * todo: we shouldn't need to send user props to rust, need to make sure we aren't
-   */
   const json = JSON.stringify(serialized);
   if (json === instance.lastSent) return false;
   instance.lastSent = json;
@@ -464,31 +485,43 @@ const hostConfig = {
   },
 
   getPublicInstance(instance: Instance) {
+    const type = instance.type;
     return {
       id: instance.id,
       focus: () => {
+        if (type !== "input") return;
         const b = getBridge();
         b.push(instance.view, { op: "focus", id: instance.id });
         b.flush();
       },
       blur: () => {
+        if (type !== "input") return;
         const b = getBridge();
         b.push(instance.view, { op: "focus", id: null });
         b.flush();
       },
       scrollTo: (offset: number, smooth = false) => {
+        if (type !== "input") return;
         const b = getBridge();
         b.push(instance.view, { op: "scrollTo", id: instance.id, offset, smooth });
         b.flush();
       },
       splice: (start: number, end: number, text: string) => {
+        if (type !== "input") return;
         const b = getBridge();
         b.push(instance.view, { op: "inputSplice", id: instance.id, start, end, text });
         b.flush();
       },
-      insertMark: (mark: number) => {
+      addMark: (mark: number, offset?: number) => {
+        if (type !== "input") return;
         const b = getBridge();
-        b.push(instance.view, { op: "insertMark", id: instance.id, mark });
+        b.push(instance.view, { op: "insertMark", id: instance.id, mark, offset });
+        b.flush();
+      },
+      removeMark: (mark: number) => {
+        if (type !== "input") return;
+        const b = getBridge();
+        b.push(instance.view, { op: "removeMark", id: instance.id, mark });
         b.flush();
       },
     };

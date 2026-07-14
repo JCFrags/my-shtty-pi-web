@@ -3,12 +3,6 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 
 const KITTY_CHUNK_SIZE: usize = 4096;
 
-/// How a transmitted frame reaches the screen. `Cursor` displays at the current
-/// cursor position, which assumes we own the whole terminal. `Cells` creates a
-/// virtual placement rendered wherever matching placeholder characters sit in
-/// the grid; multiplexers like tmux treat those placeholders as ordinary text,
-/// so pane position, clipping, and redraws all work without us knowing where
-/// our pane is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Placement {
     Cursor,
@@ -105,10 +99,8 @@ pub(crate) fn kitty_transmit_placed(
     }
     out
 }
-
+// verify this is needed later
 pub(crate) fn kitty_delete(image_id: u32, tmux: bool) -> Vec<u8> {
-    // d=A wipes every image on the terminal, which under tmux would also kill
-    // other panes' images, so scope the delete to our image id there.
     if tmux {
         crate::tmux::passthrough(format!("\x1b_Ga=d,d=I,i={image_id},q=2\x1b\\").as_bytes())
     } else {
@@ -118,7 +110,7 @@ pub(crate) fn kitty_delete(image_id: u32, tmux: bool) -> Vec<u8> {
 
 const PLACEHOLDER: char = '\u{10EEEE}';
 
-/// Diacritics that encode row/column indices on placeholder cells, from
+/// diacritics that encode row/column indices on placeholder cells, from
 /// https://sw.kovidgoyal.net/kitty/_downloads/f0a0de9ec8d9ff4456206db8e0814937/rowcolumn-diacritics.txt
 const ROW_COLUMN_DIACRITICS: [char; 297] = [
     '\u{0305}', '\u{030D}', '\u{030E}', '\u{0310}', '\u{0312}', '\u{033D}', '\u{033E}', '\u{033F}', '\u{0346}', '\u{034A}',
@@ -153,15 +145,8 @@ const ROW_COLUMN_DIACRITICS: [char; 297] = [
     '\u{1D1AA}', '\u{1D1AB}', '\u{1D1AC}', '\u{1D1AD}', '\u{1D242}', '\u{1D243}', '\u{1D244}',
 ];
 
-/// The maximum grid a virtual placement can address; the protocol has no
-/// diacritics for rows or columns beyond this.
 pub(crate) const MAX_PLACEHOLDER_CELLS: u32 = ROW_COLUMN_DIACRITICS.len() as u32;
 
-/// Lays down the placeholder cells a virtual placement renders into. Each cell
-/// is the placeholder codepoint carrying its row and column as combining
-/// diacritics, with the image id encoded in the 24-bit foreground color. Cells
-/// persist in the multiplexer's grid, so this only needs re-emitting when the
-/// grid size changes.
 pub(crate) fn placeholder_grid(image_id: u32, cols: u32, rows: u32) -> Vec<u8> {
     let cols = cols.min(MAX_PLACEHOLDER_CELLS);
     let rows = rows.min(MAX_PLACEHOLDER_CELLS);

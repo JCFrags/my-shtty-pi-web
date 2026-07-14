@@ -1,20 +1,26 @@
 use std::ops::Range;
 use std::time::Instant;
 
-use crate::canvas::measure_text;
+use crate::canvas::measure_marked;
 use crate::selection::{
     ClickGesture, ClickTracker, DocPos, DocSelection, line_end, line_range_at, line_start,
     next_char, next_word_boundary, prev_char, prev_word_boundary, word_range_at,
 };
 use crate::style::Color;
 use crate::text_input::{
-    Granularity, InputGeometry, line_height, offset_to_point, point_to_offset,
+    Granularity, InputGeometry, MARK_CHAR, Mark, line_height, offset_to_point, point_to_offset,
 };
 use crate::tree::{NodeId, PxRect};
 use crate::wrap::{line_of_offset, wrap_lines};
 
+pub(crate) struct RichSelection {
+    pub text: String,
+    pub marks: Vec<(NodeId, u64, usize, Option<String>)>,
+}
+
 pub(crate) trait DocLayout {
     fn paint_order(&self) -> &[NodeId];
+    fn marks_of(&self, id: NodeId) -> &[Mark];
     fn is_text_leaf(&self, id: NodeId) -> bool;
     fn text_of(&self, id: NodeId) -> Option<&str>;
     fn text_geometry(&self, id: NodeId) -> Option<InputGeometry>;
@@ -73,8 +79,18 @@ impl DocSelectionState {
     }
 
     pub(crate) fn selected_text(&self, doc: &impl DocLayout) -> Option<String> {
+        self.selected_rich(doc).map(|rich| {
+            rich.text
+                .chars()
+                .filter(|&c| c != MARK_CHAR)
+                .collect::<String>()
+        })
+    }
+
+    pub(crate) fn selected_rich(&self, doc: &impl DocLayout) -> Option<RichSelection> {
         self.range(doc)?;
-        let mut out = String::new();
+        let mut text = String::new();
+        let mut marks = Vec::new();
         let mut prev: Option<PxRect> = None;
         for &id in doc.paint_order() {
             let Some(range) = self.selection_range(doc, id) else {
@@ -86,14 +102,20 @@ impl DocSelectionState {
             if let Some(prev) = prev {
                 let same_row = rect.y < prev.y + prev.h && rect.y + rect.h > prev.y;
                 if !same_row {
-                    out.push('\n');
+                    text.push('\n');
                 }
             }
-            let text = doc.text_of(id).unwrap_or_default();
-            out.push_str(&text[range]);
+            let base = text.len();
+            let node_text = doc.text_of(id).unwrap_or_default();
+            text.push_str(&node_text[range.clone()]);
+            for mark in doc.marks_of(id) {
+                if mark.offset >= range.start && mark.offset < range.end {
+                    marks.push((id, mark.id, base + mark.offset - range.start, mark.data.clone()));
+                }
+            }
             prev = Some(rect);
         }
-        (!out.is_empty()).then_some(out)
+        (!text.is_empty()).then_some(RichSelection { text, marks })
     }
 
     pub(crate) fn select_down(
@@ -315,10 +337,11 @@ impl DocSelectionState {
         };
         let font = &fonts[geometry.font.min(fonts.len() - 1)];
         let px = geometry.px;
-        let lines = wrap_lines(text, font, px, geometry.max_width, &[]);
+        let marks = doc.marks_of(focus.node);
+        let lines = wrap_lines(text, font, px, geometry.max_width, marks);
         let line = line_of_offset(&lines, focus.offset);
         let line_h = line_height(font, px);
-        let local_x = measure_text(font, &text[lines[line].start..focus.offset], px);
+        let local_x = measure_marked(font, text, lines[line].start..focus.offset, px, marks);
         let goal_x = self.goal_x.unwrap_or(geometry.origin.0 + local_x);
         let within = if up { line > 0 } else { line + 1 < lines.len() };
         let target = if within {
@@ -333,7 +356,7 @@ impl DocSelectionState {
                     font,
                     px,
                     geometry.max_width,
-                    &[],
+                    marks,
                 ),
             })
         } else {
@@ -454,7 +477,7 @@ impl DocSelectionState {
 
 fn offset_at(doc: &impl DocLayout, id: NodeId, point: (f32, f32), fonts: &[fontdue::Font]) -> usize {
     match (doc.text_geometry(id), doc.text_of(id)) {
-        (Some(geometry), Some(text)) => geometry.offset_at(text, &[], point, fonts),
+        (Some(geometry), Some(text)) => geometry.offset_at(text, doc.marks_of(id), point, fonts),
         _ => 0,
     }
 }
@@ -532,7 +555,14 @@ fn caret_point(doc: &impl DocLayout, pos: DocPos, fonts: &[fontdue::Font]) -> Op
     let geometry = doc.text_geometry(pos.node)?;
     let text = doc.text_of(pos.node)?;
     let font = &fonts[geometry.font.min(fonts.len() - 1)];
-    let (x, y) = offset_to_point(text, pos.offset, font, geometry.px, geometry.max_width, &[]);
+    let (x, y) = offset_to_point(
+        text,
+        pos.offset,
+        font,
+        geometry.px,
+        geometry.max_width,
+        doc.marks_of(pos.node),
+    );
     Some((
         geometry.origin.0 + x,
         geometry.origin.1 + y,

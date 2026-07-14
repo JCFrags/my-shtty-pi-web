@@ -28,6 +28,7 @@ impl Desc {
             image: self.image.clone(),
             slot: self.slot,
             mark: None,
+            marks: Vec::new(),
             content_height: self.content_height,
             scroll_events: self.scroll_events,
             wheel_events: self.wheel_events,

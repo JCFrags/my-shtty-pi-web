@@ -24,6 +24,91 @@ use crate::tree::{HitTarget, NodeId, PxRect, Tree};
 const FALLBACK_CELL: (u32, u32) = (16, 32);
 const FRAME_POLL: Duration = Duration::from_millis(6);
 
+/**
+ * meh this is not great, the mime type we prefer in the clipboard
+ */
+const PASTE_IMAGE_MIMES: [(&str, &str); 4] = [
+    ("image/png", "png"),
+    ("image/jpeg", "jpg"),
+    ("image/gif", "gif"),
+    ("image/webp", "webp"),
+];
+
+struct OscPaste {
+    view: usize,
+    node: NodeId,
+    stage: OscPasteStage,
+    deadline: Instant,
+}
+
+enum OscPasteStage {
+    Types,
+    Data { ext: &'static str },
+}
+
+struct RichClip {
+    token: u64,
+    text: String,
+    slots: Vec<RichSlot>,
+}
+
+pub const MARK_TOKEN_OPEN: char = '⟦';
+pub const MARK_TOKEN_CLOSE: char = '⟧';
+
+fn enrich_clipboard_text(text: &str, slots: &[RichSlot]) -> Option<String> {
+    if !slots.iter().any(|s| s.data.is_some()) {
+        return None;
+    }
+    let mut out = String::with_capacity(text.len() * 2);
+    for (i, ch) in text.char_indices() {
+        if ch == crate::text_input::MARK_CHAR {
+            let data = slots
+                .iter()
+                .find(|s| s.offset == i)
+                .and_then(|s| s.data.as_deref());
+            if let Some(data) = data {
+                out.push(MARK_TOKEN_OPEN);
+                out.push_str(data);
+                out.push(MARK_TOKEN_CLOSE);
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    Some(out)
+}
+
+fn parse_rich_paste(text: &str) -> Option<(String, Vec<(usize, String)>)> {
+    if !text.contains(MARK_TOKEN_OPEN) {
+        return None;
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut marks = Vec::new();
+    let mut rest = text;
+    loop {
+        let Some(open) = rest.find(MARK_TOKEN_OPEN) else {
+            out.push_str(rest);
+            break;
+        };
+        let after = &rest[open + MARK_TOKEN_OPEN.len_utf8()..];
+        let Some(close) = after.find(MARK_TOKEN_CLOSE) else {
+            out.push_str(&rest[..open + MARK_TOKEN_OPEN.len_utf8()]);
+            rest = after;
+            continue;
+        };
+        out.push_str(&rest[..open]);
+        marks.push((out.len(), after[..close].to_string()));
+        out.push(crate::text_input::MARK_CHAR);
+        rest = &after[close + MARK_TOKEN_CLOSE.len_utf8()..];
+    }
+    (!marks.is_empty()).then_some((out, marks))
+}
+
+struct RichSlot {
+    offset: usize,
+    data: Option<String>,
+}
+
 const CONTENT_FILL: Color = [111, 168, 220, 150];
 const PADDING_FILL: Color = [147, 196, 125, 140];
 const BORDER_FILL: Color = [255, 229, 153, 150];
@@ -137,6 +222,7 @@ pub struct EngineConfig {
 pub struct MarkRef {
     pub id: u64,
     pub offset: usize,
+    pub data: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -229,8 +315,6 @@ pub enum EngineEvent {
         view: usize,
         text: String,
     },
-    // An image landed on a focused input via paste or drag-drop. The engine
-    // only reports it; whether it becomes an inline widget is app policy.
     PasteImage {
         view: usize,
         node: NodeId,
@@ -238,6 +322,11 @@ pub enum EngineEvent {
         path: String,
         width: u32,
         height: u32,
+    },
+    SerializeMarks {
+        view: usize,
+        token: u64,
+        marks: Vec<(NodeId, u64, usize)>,
     },
     Wheel {
         view: usize,
@@ -311,6 +400,11 @@ pub struct Engine {
     throttle_registered: bool,
     scroll_burst: u32,
     last_scroll_mark: Option<Instant>,
+    pending_pastes: Vec<(u64, usize, NodeId)>,
+    osc_paste: Option<OscPaste>,
+    rich_clipboard: Option<RichClip>,
+    rich_token: u64,
+    next_pasted_mark: u64,
     pending: Vec<EngineEvent>,
     last_step: Instant,
     last_frame: Instant,
@@ -383,6 +477,11 @@ impl Engine {
             throttle_registered: false,
             scroll_burst: 0,
             last_scroll_mark: None,
+            pending_pastes: Vec::new(),
+            osc_paste: None,
+            rich_clipboard: None,
+            rich_token: 0,
+            next_pasted_mark: 1 << 48,
             pending: Vec::new(),
             last_step: Instant::now(),
             last_frame: Instant::now(),
@@ -637,8 +736,6 @@ impl Engine {
             .map(|id| (self.focus_view, id))
     }
 
-    /// While set, focused-input handling skips these unmodified keys and they
-    /// surface as Key events instead — the app owns them (e.g. an open menu).
     pub fn set_key_capture(&mut self, keys: Vec<String>) {
         self.key_capture = keys;
     }
@@ -712,15 +809,7 @@ impl Engine {
                 crate::image_cache::set_waker(move || waker.wake());
             }
         }
-        /**
-         * ill need to see how events get sent over the thread
-         * for paste events and how that translates to this drain images stuff
-         * 
-         * 
-         * 
-         * need to get a bit more in to it to have a reasonable chance of understanding
-         * the images flow
-         */
+
         self.drain_images();
         let mut out = Vec::new();
         out.append(&mut self.pending);
@@ -736,6 +825,13 @@ impl Engine {
             Some(Duration::ZERO)
         } else {
             wait
+        };
+        let first_wait = match &self.osc_paste {
+            Some(paste) => {
+                let remaining = paste.deadline.saturating_duration_since(Instant::now());
+                Some(first_wait.map_or(remaining, |w| w.min(remaining)))
+            }
+            None => first_wait,
         };
         let mut event = self.term.poll_event(first_wait)?;
         while let Some(current) = event {
@@ -761,14 +857,97 @@ impl Engine {
         Ok(out)
     }
 
-    // A landed decode always needs layout: placeholder-less images measure
-    // zero until their pixels are ready, so arrival changes their size.
     fn drain_images(&mut self) {
-        if !crate::image_cache::drain_completed() {
+        let drained = crate::image_cache::drain_completed();
+        if drained.landed {
+            for view in &mut self.comp.views {
+                view.tree.mark_layout();
+            }
+        }
+        for (seq, pasted) in drained.pastes {
+            let Some(i) = self.pending_pastes.iter().position(|(s, ..)| *s == seq) else {
+                continue;
+            };
+            let (_, view, node) = self.pending_pastes.remove(i);
+            match pasted {
+                Some(image) => {
+                    let mut out = std::mem::take(&mut self.pending);
+                    self.push_paste_image(view, node, image, &mut out);
+                    self.pending = out;
+                }
+                None => {
+                    if self.osc_paste.is_none()
+                        && self.term.clipboard_data_supported()
+                        && self.term.request_clipboard_types().is_ok()
+                    {
+                        self.osc_paste = Some(OscPaste {
+                            view,
+                            node,
+                            stage: OscPasteStage::Types,
+                            deadline: Instant::now() + Duration::from_secs(3),
+                        });
+                    } else {
+                        self.request_text_clipboard();
+                    }
+                }
+            }
+        }
+        if let Some(paste) = &self.osc_paste
+            && Instant::now() > paste.deadline
+        {
+            self.osc_paste = None;
+            self.request_text_clipboard();
+        }
+    }
+
+    fn request_text_clipboard(&mut self) {
+        if let Err(error) = self.term.request_clipboard() {
+            logging::warn("engine", format!("clipboard request failed: {error}"));
+        }
+    }
+
+    fn handle_clipboard_data(&mut self, items: Vec<(String, Vec<u8>)>, ok: bool) {
+        let Some(paste) = self.osc_paste.take() else {
+            return;
+        };
+        if !ok {
+            self.request_text_clipboard();
             return;
         }
-        for view in &mut self.comp.views {
-            view.tree.mark_layout();
+        match paste.stage {
+            OscPasteStage::Types => {
+                let offered = items
+                    .iter()
+                    .find(|(mime, _)| mime == "." || mime.is_empty())
+                    .map(|(_, data)| String::from_utf8_lossy(data).into_owned())
+                    .unwrap_or_default();
+                let pick = PASTE_IMAGE_MIMES
+                    .iter()
+                    .find(|(mime, _)| offered.split_whitespace().any(|o| o == *mime));
+                match pick {
+                    Some(&(mime, ext)) if self.term.request_clipboard_data(mime).is_ok() => {
+                        self.osc_paste = Some(OscPaste {
+                            stage: OscPasteStage::Data { ext },
+                            deadline: Instant::now() + Duration::from_secs(20),
+                            ..paste
+                        });
+                    }
+                    _ => self.request_text_clipboard(),
+                }
+            }
+            OscPasteStage::Data { ext } => {
+                let data = items
+                    .into_iter()
+                    .find(|(mime, data)| mime.starts_with("image/") && !data.is_empty())
+                    .map(|(_, data)| data);
+                match data {
+                    Some(data) => {
+                        let seq = crate::image_cache::queue_pasted_bytes(data, ext);
+                        self.pending_pastes.push((seq, paste.view, paste.node));
+                    }
+                    None => self.request_text_clipboard(),
+                }
+            }
         }
     }
 
@@ -866,9 +1045,21 @@ impl Engine {
                 if let Some((view, focus)) = self.focused() {
                     if let Some(image) = crate::clipboard_image::image_path_from_paste(&text) {
                         self.push_paste_image(view, focus, image, out);
-                    } else if let Some(input) = self.comp.views[view].tree.input_mut(focus) {
-                        input.insert(&text);
-                        self.finish_reply(view, focus, InputReply::Edited, ChangeSource::Paste, out)?;
+                    } else {
+                        let rich = self.rich_paste_payload(&text);
+                        if let Some((_, marks)) = &rich {
+                            self.next_pasted_mark += marks.len() as u64;
+                        }
+                        let first_id = self.next_pasted_mark - rich.as_ref().map_or(0, |(_, m)| m.len() as u64);
+                        if let Some(input) = self.comp.views[view].tree.input_mut(focus) {
+                            match rich {
+                                Some((rich_text, marks)) => {
+                                    input.insert_rich(&rich_text, &marks, first_id)
+                                }
+                                None => input.insert(&text),
+                            }
+                            self.finish_reply(view, focus, InputReply::Edited, ChangeSource::Paste, out)?;
+                        }
                     }
                 } else {
                     out.push(EngineEvent::Paste {
@@ -880,6 +1071,7 @@ impl Engine {
             Event::Focus(focused) => self.term_focused = focused,
             Event::WindowSize(ws) => self.apply_window(&ws)?,
             Event::Mouse(mouse) => self.handle_mouse(mouse, out)?,
+            Event::ClipboardData { items, ok } => self.handle_clipboard_data(items, ok),
         }
         Ok(())
     }
@@ -935,6 +1127,7 @@ impl Engine {
                     ChangeSource::Edit
                 };
                 let reply = input.handle_key(key, font, resolved.px, wrap);
+
                 if reply == InputReply::None {
                     if !self.handle_doc_key(&key)? {
                         out.push(EngineEvent::Key {
@@ -972,9 +1165,24 @@ impl Engine {
         };
         let handled = match key.key {
             crate::terminal::Key::Char('c') if combo => {
-                match self.comp.views[view].tree.doc_selected_text() {
-                    Some(text) => {
-                        self.term.set_clipboard(&text)?;
+                match self.comp.views[view].tree.doc_selected_rich() {
+                    Some(rich) => {
+                        let marks = rich
+                            .marks
+                            .into_iter()
+                            .map(|(node, id, offset, data)| {
+                                (
+                                    node,
+                                    crate::text_input::Mark {
+                                        id,
+                                        offset,
+                                        advance: 0.0,
+                                        data,
+                                    },
+                                )
+                            })
+                            .collect();
+                        self.begin_rich_capture(view, rich.text, marks)?;
                         true
                     }
                     None => false,
@@ -1451,21 +1659,20 @@ impl Engine {
                 self.reveal = true;
                 self.push_change(view, id, source, out);
             }
-            InputReply::Copy(text) => self.term.set_clipboard(&text)?,
-            InputReply::Cut(text) => {
-                self.term.set_clipboard(&text)?;
+            InputReply::Copy(text, marks) => {
+                let marks = marks.iter().map(|m| (id, m.clone())).collect();
+                self.begin_rich_capture(view, text, marks)?;
+            }
+            InputReply::Cut(text, marks) => {
+                let marks = marks.iter().map(|m| (id, m.clone())).collect();
+                self.begin_rich_capture(view, text, marks)?;
                 self.comp.views[view].tree.sync_input_text(id);
                 self.reveal = true;
                 self.push_change(view, id, source, out);
             }
             InputReply::RequestPaste => {
-                let image = crate::profiler::span("clipboard.image", || {
-                    crate::clipboard_image::read_clipboard_image()
-                });
-                match image {
-                    Some(image) => self.push_paste_image(view, id, image, out),
-                    None => self.term.request_clipboard()?,
-                }
+                let seq = crate::image_cache::queue_clipboard_read();
+                self.pending_pastes.push((seq, view, id));
             }
         }
         Ok(())
@@ -1492,18 +1699,94 @@ impl Engine {
         });
     }
 
-    pub fn insert_input_mark(&mut self, view: usize, id: NodeId, mark: u64) {
+    pub fn insert_input_mark(&mut self, view: usize, id: NodeId, mark: u64, offset: Option<usize>) {
         {
             let Some(input) = self.comp.views[view].tree.input_mut(id) else {
                 return;
             };
-            input.insert_mark(mark);
+            input.insert_mark(mark, offset);
         }
         self.comp.views[view].tree.sync_input_text(id);
         self.reveal = true;
         let mut events = Vec::new();
         self.push_change(view, id, ChangeSource::Edit, &mut events);
         self.pending.append(&mut events);
+    }
+
+    pub fn remove_input_mark(&mut self, view: usize, id: NodeId, mark: u64) {
+        {
+            let Some(input) = self.comp.views[view].tree.input_mut(id) else {
+                return;
+            };
+            input.remove_mark(mark);
+        }
+        self.comp.views[view].tree.sync_input_text(id);
+        let mut events = Vec::new();
+        self.push_change(view, id, ChangeSource::Edit, &mut events);
+        self.pending.append(&mut events);
+    }
+
+    fn begin_rich_capture(
+        &mut self,
+        view: usize,
+        text: String,
+        marks: Vec<(NodeId, crate::text_input::Mark)>,
+    ) -> io::Result<()> {
+        let projection: String = text
+            .chars()
+            .filter(|&c| c != crate::text_input::MARK_CHAR)
+            .collect();
+        self.term.set_clipboard(&projection)?;
+        if marks.is_empty() {
+            self.rich_clipboard = None;
+            return Ok(());
+        }
+        self.rich_token += 1;
+        let slots = marks
+            .iter()
+            .map(|(_, m)| RichSlot {
+                offset: m.offset,
+                data: m.data.clone(),
+            })
+            .collect();
+        let request = marks
+            .iter()
+            .enumerate()
+            .map(|(index, (node, m))| (*node, m.id, index))
+            .collect();
+        self.rich_clipboard = Some(RichClip {
+            token: self.rich_token,
+            text,
+            slots,
+        });
+        self.pending.push(EngineEvent::SerializeMarks {
+            view,
+            token: self.rich_token,
+            marks: request,
+        });
+        Ok(())
+    }
+
+
+    pub fn attach_rich_clipboard(&mut self, token: u64, marks: Vec<(usize, String)>) {
+        let Some(rich) = self.rich_clipboard.as_mut().filter(|r| r.token == token) else {
+            return;
+        };
+        for (index, data) in marks {
+            if let Some(slot) = rich.slots.get_mut(index) {
+                slot.data = Some(data);
+            }
+        }
+        let rich = self.rich_clipboard.take().expect("checked above");
+        if let Some(enriched) = enrich_clipboard_text(&rich.text, &rich.slots) {
+            if let Err(error) = self.term.set_clipboard(&enriched) {
+                logging::warn("engine", format!("clipboard write failed: {error}"));
+            }
+        }
+    }
+
+    fn rich_paste_payload(&self, text: &str) -> Option<(String, Vec<(usize, String)>)> {
+        parse_rich_paste(text)
     }
 
     fn input_marks(&self, view: usize, id: NodeId) -> Vec<MarkRef> {
@@ -1514,6 +1797,7 @@ impl Engine {
                 .map(|m| MarkRef {
                     id: m.id,
                     offset: m.offset,
+                    data: m.data.clone(),
                 })
                 .collect()
         })
@@ -1582,8 +1866,6 @@ impl Engine {
         });
     }
 
-    /// Caret geometry is only correct after layout settles; an edit that adds
-    /// a wrap line moves the input's origin within the same pump.
     fn caret_state(&mut self, view: usize, id: NodeId) -> Option<(usize, PxRect)> {
         let fonts = &self.fonts;
         let base_px = self.base_px;
@@ -1849,10 +2131,6 @@ impl Engine {
                     }
                     view.canvas.fill(view.clear_color);
                 });
-                /** 
-                 *  so a resolved node is used for paint
-                 * 
-                */
                 view.tree.flush_layout(fonts, base_px);
                 paint(&view.tree, &mut view.canvas, fonts, cursor);
                 view.tree.clear_paint_flag();
@@ -2079,5 +2357,48 @@ mod tests {
             height_px: 800,
         };
         assert_eq!(window_from(&ws, (11, 21)), (1045, 798));
+    }
+}
+
+#[cfg(test)]
+mod rich_clip_tests {
+    use super::*;
+
+    #[test]
+    fn enrich_inlines_data_and_strips_dataless_sentinels() {
+        let m = crate::text_input::MARK_CHAR;
+        let text = format!("a{m}b{m}c");
+        let slots = vec![
+            RichSlot {
+                offset: 1,
+                data: Some("one".into()),
+            },
+            RichSlot {
+                offset: 1 + m.len_utf8() + 1,
+                data: None,
+            },
+        ];
+        assert_eq!(
+            enrich_clipboard_text(&text, &slots).unwrap(),
+            format!("a{MARK_TOKEN_OPEN}one{MARK_TOKEN_CLOSE}bc")
+        );
+        let none = vec![RichSlot {
+            offset: 1,
+            data: None,
+        }];
+        assert!(enrich_clipboard_text(&text, &none).is_none());
+    }
+
+    #[test]
+    fn parse_round_trips_and_tolerates_unmatched_delimiters() {
+        let m = crate::text_input::MARK_CHAR;
+        let pasted = format!("x{MARK_TOKEN_OPEN}one{MARK_TOKEN_CLOSE}y{MARK_TOKEN_OPEN}two{MARK_TOKEN_CLOSE}");
+        let (text, marks) = parse_rich_paste(&pasted).unwrap();
+        assert_eq!(text, format!("x{m}y{m}"));
+        assert_eq!(marks, vec![(1, "one".into()), (2 + m.len_utf8(), "two".into())]);
+
+        assert!(parse_rich_paste("plain text").is_none());
+        let unmatched = format!("a{MARK_TOKEN_OPEN}never closed");
+        assert!(parse_rich_paste(&unmatched).is_none(), "unmatched keeps text plain");
     }
 }

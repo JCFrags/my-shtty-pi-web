@@ -1468,6 +1468,7 @@ fn placeholder_slot_fills_the_image_rect_until_the_decode_lands() {
                 },
                 image: Some(ImageProps {
                     src: path.to_string_lossy().to_string(),
+                    equal_to: Vec::new(),
                 }),
                 key: Some("img".into()),
                 children: vec![Desc {
@@ -1502,7 +1503,7 @@ fn placeholder_slot_fills_the_image_rect_until_the_decode_lands() {
     assert_eq!(pixel(&canvas, 20, 10), [50, 50, 50, 255]);
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !crate::image_cache::drain_completed() {
+    while !crate::image_cache::drain_completed().landed {
         assert!(std::time::Instant::now() < deadline, "decode never landed");
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
@@ -1530,7 +1531,7 @@ fn mark_widgets_reserve_width_and_place_inline() {
     tree.append(tree.root(), input);
     tree.edit_input(input, |i| {
         i.set_cursor(1, false);
-        i.insert_mark(5);
+        i.insert_mark(5, None);
     });
     let widget = tree.create(Props {
         style: Style {
@@ -1587,5 +1588,111 @@ fn mark_widgets_reserve_width_and_place_inline() {
         tree.rect(widget).map(|r| r.w),
         Some(40.0),
         "undo restores the mark and the widget comes back"
+    );
+}
+
+#[test]
+fn static_text_marks_place_widgets_like_inputs() {
+    let fonts = [font()];
+    let mut tree = Tree::new((400.0, 100.0));
+    let sentinel = crate::text_input::MARK_CHAR;
+    let text = tree.create(Props {
+        style: Style {
+            width: Dimension::Px(300.0),
+            ..Style::default()
+        },
+        text: Some(format!("a{sentinel}b{sentinel}c")),
+        // Claim only the first sentinel; the stray second one is stripped.
+        marks: vec![(9, 1)],
+        ..Props::default()
+    });
+    tree.append(tree.root(), text);
+    let widget = tree.create(Props {
+        style: Style {
+            width: Dimension::Px(40.0),
+            height: Dimension::Px(10.0),
+            ..Style::default()
+        },
+        mark: Some(9),
+        ..Props::default()
+    });
+    tree.append(text, widget);
+    tree.flush_layout(&fonts, 16.0);
+
+    assert_eq!(
+        tree.text_of(text).unwrap(),
+        format!("a{sentinel}bc"),
+        "unclaimed sentinel stripped"
+    );
+    let rect = tree.rect(widget).unwrap();
+    assert_eq!((rect.w, rect.h), (40.0, 10.0));
+    assert!(rect.x > 0.0, "widget placed inline");
+
+    // The node stays a selectable doc-text leaf despite its widget child.
+    assert!(tree.selectable_text_leaf(text));
+
+    // Painting draws the widget background at its inline position.
+    let mut painted_tree = tree;
+    let widget_bg = painted_tree.find("w");
+    let _ = widget_bg;
+    painted_tree.update(
+        widget,
+        Props {
+            style: Style {
+                width: Dimension::Px(40.0),
+                height: Dimension::Px(10.0),
+                background: Some([200, 30, 30, 255]),
+                ..Style::default()
+            },
+            mark: Some(9),
+            ..Props::default()
+        },
+    );
+    let canvas = painted(&mut painted_tree, (400, 100), None);
+    let rect = painted_tree.rect(widget).unwrap();
+    assert_eq!(
+        pixel(&canvas, (rect.x + 5.0) as u32, (rect.y + 5.0) as u32),
+        [200, 30, 30, 255]
+    );
+}
+
+#[test]
+fn failed_image_with_unknown_dims_occupies_a_square() {
+    let fonts = [font()];
+    let mut tree = Tree::new((300.0, 200.0));
+    let row = tree.create(Props {
+        style: Style {
+            align_items: Some(Align::Start),
+            ..Style::default()
+        },
+        ..Props::default()
+    });
+    tree.append(tree.root(), row);
+    let image = tree.create(Props {
+        style: Style {
+            height: Dimension::Px(40.0),
+            ..Style::default()
+        },
+        image: Some(ImageProps {
+            src: "/nonexistent/never.png".into(),
+            equal_to: Vec::new(),
+        }),
+        ..Props::default()
+    });
+    tree.append(row, image);
+    tree.flush_layout(&fonts, 16.0);
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !crate::image_cache::drain_completed().landed {
+        assert!(std::time::Instant::now() < deadline, "decode never settled");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    tree.mark_layout();
+    tree.flush_layout(&fonts, 16.0);
+    let rect = tree.rect(image).unwrap();
+    assert_eq!(
+        (rect.w, rect.h),
+        (40.0, 40.0),
+        "failed image squares off its known dimension so the glyph shows"
     );
 }

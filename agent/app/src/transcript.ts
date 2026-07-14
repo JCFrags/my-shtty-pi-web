@@ -10,6 +10,7 @@ interface Block {
   tool_use_id?: string;
   is_error?: boolean;
   path?: string;
+  marks?: { offset: number; data: string }[];
 }
 
 export function detail(input: Record<string, unknown>): string {
@@ -102,9 +103,22 @@ function apply(state: FoldState, message: any) {
       if (!Array.isArray(content)) break;
       const texts: string[] = [];
       const images: string[] = [];
+      let marks: { offset: number; data: string }[] | undefined;
       for (const block of content as Block[]) {
         if (block.type === "text" && block.text) texts.push(block.text);
         if (block.type === "image_path" && block.path) images.push(block.path);
+        if (block.type === "rich_text" && typeof block.text === "string") {
+          texts.push(block.text);
+          marks = block.marks;
+          for (const mark of block.marks ?? []) {
+            try {
+              const data = JSON.parse(mark.data);
+              if (data.kind === "image" && data.path) images.push(data.path);
+            } catch {
+              continue;
+            }
+          }
+        }
         if (block.type !== "tool_result" || !block.tool_use_id) continue;
         const call = state.tools.get(block.tool_use_id);
         if (call) {
@@ -117,6 +131,7 @@ function apply(state: FoldState, message: any) {
           kind: "user",
           text: texts.join("\n"),
           images: images.length ? images : undefined,
+          marks,
         });
       }
       break;

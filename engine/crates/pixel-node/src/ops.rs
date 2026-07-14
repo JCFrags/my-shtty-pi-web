@@ -123,7 +123,24 @@ enum Op {
     InsertMark {
         id: u32,
         mark: u64,
+        #[serde(default)]
+        offset: Option<usize>,
     },
+    RemoveMark {
+        id: u32,
+        mark: u64,
+    },
+    RichClipboard {
+        token: u64,
+        marks: Vec<RichClipMarkDto>,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RichClipMarkDto {
+    index: usize,
+    data: String,
 }
 
 fn register_font(engine: &mut Engine, path: &str) -> String {
@@ -170,6 +187,7 @@ struct PropsDto {
     image: Option<ImageDto>,
     slot: Option<String>,
     mark: Option<u64>,
+    marks: Vec<MarkInitDto>,
     content_height: Option<f32>,
     scroll_events: bool,
     wheel_events: bool,
@@ -194,6 +212,8 @@ struct SpanDto {
 #[serde(rename_all = "camelCase")]
 struct ImageDto {
     src: String,
+    #[serde(default)]
+    confirmed_equal_to: Vec<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -201,10 +221,18 @@ struct ImageDto {
 struct InputDto {
     initial: String,
     value: Option<String>,
+    marks: Vec<MarkInitDto>,
     caret_color: Option<Color>,
     selection_color: Option<Color>,
     auto_focus: bool,
     submit: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MarkInitDto {
+    id: u64,
+    offset: usize,
 }
 
 #[derive(Deserialize)]
@@ -490,19 +518,24 @@ impl PropsDto {
                 InputProps {
                     initial: i.initial,
                     value: i.value,
+                    marks: i.marks.iter().map(|m| (m.id, m.offset)).collect(),
                     caret_color: i.caret_color.unwrap_or(defaults.caret_color),
                     selection_color: i.selection_color.unwrap_or(defaults.selection_color),
                     auto_focus: i.auto_focus,
                     submit: i.submit,
                 }
             }),
-            image: self.image.map(|i| ImageProps { src: i.src }),
+            image: self.image.map(|i| ImageProps {
+                src: i.src,
+                equal_to: i.confirmed_equal_to,
+            }),
             slot: match self.slot.as_deref() {
                 Some("placeholder") => Some(SlotKind::Placeholder),
                 Some("error") => Some(SlotKind::Error),
                 _ => None,
             },
             mark: self.mark,
+            marks: self.marks.iter().map(|m| (m.id, m.offset)).collect(),
             content_height: self.content_height,
             scroll_events: self.scroll_events,
             wheel_events: self.wheel_events,
@@ -665,6 +698,9 @@ fn apply_op(
         Op::SetCpuThrottle { rate } => engine.set_cpu_throttle(rate),
         Op::RegisterFont { .. } => unreachable!("handled before the per-view bindings"),
         Op::SetKeyCapture { keys } => engine.set_key_capture(keys),
+        /**
+         * so ops, but where do they get sent from
+         */
         Op::InputSplice {
             id,
             start,
@@ -675,10 +711,21 @@ fn apply_op(
                 engine.splice_input(view, node, start, end, &text);
             }
         }
-        Op::InsertMark { id, mark } => {
+        Op::InsertMark { id, mark, offset } => {
             if let Some(node) = map.node(id) {
-                engine.insert_input_mark(view, node, mark);
+                engine.insert_input_mark(view, node, mark, offset);
             }
+        }
+        Op::RemoveMark { id, mark } => {
+            if let Some(node) = map.node(id) {
+                engine.remove_input_mark(view, node, mark);
+            }
+        }
+        Op::RichClipboard { token, marks } => {
+            engine.attach_rich_clipboard(
+                token,
+                marks.into_iter().map(|m| (m.index, m.data)).collect(),
+            );
         }
     }
 }

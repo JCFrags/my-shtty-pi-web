@@ -1,6 +1,7 @@
 import { createRoot } from "pixel-react";
 
 import { App } from "./ui/app";
+import { sweepAttachments } from "./attachments";
 import { closeDb } from "./db/client";
 import { flushPersist, hydrateStore } from "./db/persist";
 import { DbProvider } from "./db/react";
@@ -10,6 +11,7 @@ import { PALETTE_ACTIONS } from "./palette";
 import { store } from "./session";
 
 hydrateStore();
+sweepAttachments();
 
 const root = createRoot({
   onKey(event) {
@@ -72,9 +74,6 @@ const root = createRoot({
     if (event.mods.ctrl && event.key === "t") session.cycleThinking();
   },
   onResize() {
-    /**
-     * this should not be needed
-     */
     render();
   },
 });

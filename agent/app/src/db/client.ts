@@ -31,7 +31,7 @@ function packageRoot(): string {
   return dir;
 }
 
-const dataDir = process.env.AGENT_DATA_DIR ?? path.join(packageRoot(), ".data");
+export const dataDir = process.env.AGENT_DATA_DIR ?? path.join(packageRoot(), ".data");
 const connection = openDb(path.join(dataDir, "agent.db"));
 
 export const db = connection.db;
@@ -43,6 +43,13 @@ export function closeDb(): void {
 export function createSession(row: { id: string; createdAt: number }): void {
   db.insert(schema.sessions).values(row).onConflictDoNothing().run();
   touched("sessions");
+}
+
+export function logMessagesContaining(needle: string): string[] {
+  const rows = connection.sqlite
+    .prepare("SELECT message FROM logs WHERE message LIKE ?")
+    .all(`%${needle}%`) as Array<{ message: string }>;
+  return rows.map((row) => row.message);
 }
 
 export function appendLog(sessionId: string, entry: LogEntry): void {

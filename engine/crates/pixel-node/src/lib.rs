@@ -117,6 +117,9 @@ impl PixelEngine {
         self.info.clone()
     }
 
+    /*
+    this is the function node calls to send data to rust 
+     */
     #[napi]
     pub fn apply_ops(&self, ops: String) -> Result<()> {
         let _ = self.tx.send(ops);
@@ -126,7 +129,7 @@ impl PixelEngine {
 
     #[napi]
     pub fn start(&mut self, callback: JsFunction) -> Result<()> {
-        let tsfn: ThreadsafeFunction<String> = callback
+        let dispatch_to_node: ThreadsafeFunction<String> = callback
             .create_threadsafe_function(0, |ctx: ThreadSafeCallContext<String>| {
                 Ok(vec![ctx.value])
             })?;
@@ -161,25 +164,26 @@ impl PixelEngine {
                     if let Some(message) = outcome.error {
                         pixel_core::logging::error("bridge", message.clone());
                         let error = json!({ "type": "error", "message": message });
-                        tsfn.call(
+                        dispatch_to_node.call(
                             Ok(error.to_string()),
                             ThreadsafeFunctionCallMode::NonBlocking,
                         );
                     }
                     for reply in outcome.replies {
-                        tsfn.call(Ok(reply), ThreadsafeFunctionCallMode::NonBlocking);
+                        dispatch_to_node.call(Ok(reply), ThreadsafeFunctionCallMode::NonBlocking);
                     }
                 }
                 for event in &events {
                     if let Some(json) = event_json(event, &engine, &ids) {
-                        tsfn.call(Ok(json), ThreadsafeFunctionCallMode::NonBlocking);
+                        dispatch_to_node.call(Ok(json), ThreadsafeFunctionCallMode::NonBlocking);
                     }
                 }
+
             };
             drop(engine);
             if !stop.load(Ordering::Relaxed) {
                 let exit = json!({ "type": "exit", "error": exit_error });
-                tsfn.call(
+                dispatch_to_node.call(
                     Ok(exit.to_string()),
                     ThreadsafeFunctionCallMode::NonBlocking,
                 );

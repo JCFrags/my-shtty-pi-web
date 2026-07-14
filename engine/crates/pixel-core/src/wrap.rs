@@ -3,8 +3,6 @@ use std::ops::Range;
 use crate::canvas::{char_advance, measure_marked};
 use crate::text_input::Mark;
 
-// Taffy rounds layout to whole pixels, so wrap widths get a hair of slack to
-// keep paint from wrapping a line the layout didn't.
 pub(crate) const WRAP_SLACK: f32 = 1.0;
 
 pub fn wrap_lines(

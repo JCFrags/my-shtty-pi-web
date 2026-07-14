@@ -9,7 +9,7 @@ import {
   getBridge,
   MarkRef,
   reconciler,
-} from "./host-config";
+} from "./reconciler-config";
 import type { EngineInfo } from "./native";
 import { handleDevtoolsKey } from "./devtools/app";
 import { installConsoleCapture } from "./devtools/console-capture";
@@ -33,7 +33,7 @@ import {
 } from "./devtools/stores";
 import type { LogLevel } from "./devtools/store";
 
-export { Box, Text, Input, Image } from "./components";
+export { Box, Text, Input, Image, MarkedText } from "./components";
 export type { NodeHandle } from "./components";
 export type {
   BoxProps,
@@ -46,10 +46,12 @@ export type {
   ChangeInfo,
   ChangeSource,
   ImageProps,
+  ImageAdvancedProps,
+  MarkedTextProps,
   ClickEvent,
   ScrollEvent,
   WheelEvent,
-} from "./host-config";
+} from "./reconciler-config";
 export type { Color, Edges, InsetEdges, InsetValue, ScrollbarStyle, Style } from "./styles";
 export type { DiffEmphasis, DiffRow, EngineInfo, HighlightSpan, Rgba } from "./native";
 export { HIGHLIGHT_CAPTURES, diff, highlight } from "./native";
@@ -123,6 +125,7 @@ interface EngineEventJson {
   source?: string;
   font?: number;
   seq?: number;
+  token?: number;
   epochMs?: number;
   deltaX?: number;
   deltaY?: number;
@@ -226,6 +229,22 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
         props?.onSubmit?.(event.text!, (event.marks as MarkRef[] | undefined) ?? []);
         break;
       }
+      case "serializeMarks": {
+        const request = (event.marks ?? []) as unknown as Array<{
+          node: number;
+          id: number;
+          index: number;
+        }>;
+        const replies: Array<{ index: number; data: string }> = [];
+        for (const entry of request) {
+          const props = bridge.propsById[view]?.get(entry.node);
+          const data = props?.serializeMark?.(entry.id);
+          if (typeof data === "string") replies.push({ index: entry.index, data });
+        }
+        bridge.push(view, { op: "richClipboard", token: event.token as number, marks: replies });
+        bridge.flush();
+        break;
+      }
       case "pasteImage": {
         const props = bridge.propsById[view]?.get(event.node!);
         props?.onPasteImage?.({
@@ -281,6 +300,9 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
         if (view === DEVTOOLS_VIEW) {
           handleDevtoolsKey(event.key!);
         } else {
+          /**
+           * wait i dont get whats going on here when is onchange called?  f
+           */
           options.onKey?.({ key: event.key!, mods: event.mods! });
         }
         break;
@@ -365,8 +387,6 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
     if (err) return;
     const event = JSON.parse(json) as EngineEventJson;
     dispatch(event);
-    // Spans the whole engine-emit → handler-done window, so time an event
-    // spends queued behind a busy node event loop is visible in the profile.
     if (event.atMs && event.type !== "profile" && profilerStore.get().recording) {
       const now = performance.timeOrigin + performance.now();
       recordSpan({

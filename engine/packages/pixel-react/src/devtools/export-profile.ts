@@ -73,13 +73,17 @@ const GLOSSARY = {
       "one image load from request to visible: enqueued by layout, decoded on the " +
       "worker thread, drained into the cache at the start of a pump. Paints only block " +
       "on this if nothing else is dirty; the engine thread never decodes.",
-    "image.decode": "the worker thread's decode of that image, including brief retries while a just-written file appears",
+    "image.decode":
+      "the worker thread's part of that load: file decode (with brief retries while a " +
+      "just-written file appears) or, for a bitmap paste, the clipboard read + pixel " +
+      "conversion. Never runs on the engine thread.",
     "image.sniff": "sync header-only size read on the engine thread so layout is stable before the decode lands",
     "image.scale":
       "one-time resample of a decoded image to its on-screen size (corner radius baked " +
       "in), cached per size; after this, per-frame drawing is a plain row blit",
-    "image.premultiply": "converting an already-decoded bitmap (e.g. a paste) for compositing, on the engine thread",
-    "clipboard.image": "reading a pasted image from the OS clipboard ON THE ENGINE THREAD; its read/downscale/encode children are the usual cause of a paste-triggered stall",
+    "image.encode":
+      "worker thread writing a pasted bitmap to its temp PNG, after its pixels are " +
+      "already on screen from the cache; only later re-reads of the path need the file",
     compose: "blitting view canvases, divider and overlays into the output frame",
     draw: "encoding the frame and writing it to the terminal",
     "kitty.shm": "writing frame pixels into shared memory for the terminal to read",

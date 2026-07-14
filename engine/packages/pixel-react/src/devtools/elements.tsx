@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo } from "react";
 
 import { Box, Text } from "../components";
-import { APP_VIEW, getBridge, Instance } from "../host-config";
+import { APP_VIEW, getBridge, Instance } from "../reconciler-config";
 import {
   findInstance,
   HighlightArea,

@@ -73,6 +73,16 @@ pub fn input_key(index: usize) -> String {
     format!("editor-input:{index}")
 }
 
+/**
+ * ehh? okay this is one case paste can come through
+ * 
+ * eh??????????????
+ * 
+ * 
+ * why the fuck does an image paste on right click
+ * not trigger a fucking dialog?? that makes no sense to me
+ * we should be able to read the text buffer then??
+ */
 pub const MENU_ACTIONS: [(&str, InputAction); 6] = [
     ("menu:undo", InputAction::Undo),
     ("menu:redo", InputAction::Redo),

@@ -189,7 +189,7 @@ pub struct Style {
     pub justify_content: Option<Justify>,
     pub align_items: Option<Align>,
     pub background: Option<Color>,
-    pub corner_radius: [f32; 4], // top-left, top-right, bottom-right, bottom-left
+    pub corner_radius: [f32; 4], // i dont love this, maybe deconstruct into sepearte api's
     pub border: Option<Border>,
     pub color: Option<Color>,
     pub font_size: Option<f32>,

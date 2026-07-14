@@ -1,4 +1,4 @@
-import type { Container } from "../host-config";
+import type { Container } from "../reconciler-config";
 import { profilerStore, recordSpan } from "./stores";
 
 const PERFORMED_WORK = 0b1;

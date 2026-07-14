@@ -188,4 +188,4 @@ pub(crate) fn line_range_at(text: &str, offset: usize) -> Range<usize> {
 
 mod doc;
 
-pub(crate) use doc::{DocLayout, DocSelectionState};
+pub(crate) use doc::{DocLayout, DocSelectionState, RichSelection};

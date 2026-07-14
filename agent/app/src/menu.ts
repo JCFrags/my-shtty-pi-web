@@ -19,20 +19,14 @@ export interface TriggerSource {
   items(query: string): TriggerItem[];
 }
 
-// While a menu is open these plain keys skip the input (Enter must not
-// submit); ctrl+n / ctrl+p already pass through the input unhandled.
 const CAPTURED_KEYS = ["up", "down", "enter", "tab", "escape"];
 
 const MAX_ITEMS = 50;
 
-// `start` is the caret position right after the trigger char, in UTF-16
-// units (engine offsets are UTF-8 bytes and get converted on arrival).
 type MenuState =
   | { kind: "idle" }
   | { kind: "active"; source: TriggerSource; start: number; query: string; at: number }
-  // Query has no matches; quietly keeps tracking so backspacing a typo reopens.
   | { kind: "hidden"; source: TriggerSource; start: number }
-  // Escape; stays closed until the caret leaves the trigger region.
   | { kind: "dismissed"; source: TriggerSource; start: number };
 
 function toCharIndex(text: string, byte: number): number {
@@ -152,7 +146,6 @@ export class TriggerMenus {
     store.notify();
   }
 
-  /** Returns true when the key drove the menu and must not reach anything else. */
   handleKey(event: EngineKeyEvent): boolean {
     if (this.state.kind !== "active") return false;
     const ctrl = (letter: string) =>

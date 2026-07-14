@@ -1,3 +1,12 @@
+/**
+ * 
+ * my goals still are:
+ * 
+ * - understand the tmux change
+ * - verify the ssh case using the kitty keyboard protocol
+ * - check where we are persiting images
+ * - profit?
+ */
 use std::io::{self, Write as _};
 use std::time::{Duration, Instant};
 
@@ -13,6 +22,7 @@ pub enum Event {
     Paste(String),
     Focus(bool),
     WindowSize(WindowSize),
+    ClipboardData { items: Vec<(String, Vec<u8>)>, ok: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,7 +134,19 @@ pub struct Terminal {
     placeholders: Option<(u32, u32)>,
     wake_rx: Option<rustix::fd::OwnedFd>,
     waker: Option<Waker>,
+    // does the terminal support https://sw.kovidgoyal.net/kitty/clipboard/ 
+    clipboard_data: bool,
+    clip_read: Option<ClipRead>,
 }
+
+#[derive(Default)]
+struct ClipRead {
+    items: Vec<(String, Vec<u8>)>,
+    total: usize,
+    overflow: bool,
+}
+
+const CLIP_READ_MAX_BYTES: usize = 64 * 1024 * 1024;
 
 static RESIZE_WAKE_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
 
@@ -143,8 +165,32 @@ pub struct Waker {
     fd: std::sync::Arc<rustix::fd::OwnedFd>,
 }
 
+/**
+ * fd fd fd fd fd fd
+ * 
+ * this is the fd i was lookign for maybe in the future useful?
+ */
 impl Waker {
     pub fn wake(&self) {
+        /*
+          the question is where the fuck are we listening for this?
+          
+          and tx is not sending that there
+          
+           are we writing to that in some other way
+          
+          what was that thing where we had a cannel from a pipe
+          
+          how does that work?
+          
+          i have no fucking idea
+          
+          is there any way a channel end could be available somewehre else in the program 
+          
+          okay global variable, is that what was happening?
+         
+         no it seemedl iek it was making a channel using a unix pipe forsomething idfferent right?
+         */
         let _ = rustix::io::write(&*self.fd, &[1]);
     }
 }
@@ -184,9 +230,11 @@ impl Terminal {
             placeholders: None,
             wake_rx: None,
             waker: None,
+            clipboard_data: false,
+            clip_read: None,
         };
-        // tmux only ever reports cell-based mouse positions, so don't stall on the probe.
         terminal.mouse_pixels = !tmux && terminal.probe_mouse_pixels()?;
+        terminal.clipboard_data = !tmux && terminal.probe_clipboard_data()?;
         terminal.shm_frames = terminal.probe_shm_frames()?;
         Ok(terminal)
     }
@@ -314,6 +362,8 @@ impl Terminal {
         loop {
             if let Some((raw, used)) = parse_event(&self.pending) {
                 self.pending.drain(..used);
+
+           
                 return Ok(Some(match raw {
                     RawEvent::Key(key) => Event::Key(key),
                     RawEvent::Paste(text) => Event::Paste(text),
@@ -323,6 +373,10 @@ impl Terminal {
                         let (x, y) = self.mouse_position_px(x, y);
                         Event::Mouse(Mouse { kind, button, x, y })
                     }
+                    RawEvent::Clip(packet) => match self.apply_clip_packet(packet) {
+                        Some(event) => event,
+                        None => continue,
+                    },
                 }));
             }
             let wait = deadline.map(|d| d.saturating_duration_since(Instant::now()));
@@ -332,7 +386,6 @@ impl Terminal {
             let mut chunk = [0u8; 256];
             let n = rustix::io::read(&self.stdin, &mut chunk)?;
             if n == 0 {
-                // stdin EOF: poll would report readable forever.
                 return Err(io::ErrorKind::UnexpectedEof.into());
             }
             self.pending.extend_from_slice(&chunk[..n]);
@@ -437,15 +490,12 @@ impl Terminal {
         if self.cell.is_some() {
             return Ok(self.cell);
         }
-        // tmux derives the pane's pixel size from the client's cell size, so the division
-        // is exact there, and tmux would answer (or swallow) the query itself anyway.
         if self.tmux {
             self.cell = self.size()?.cell_size();
             if self.cell.is_some() {
                 return Ok(self.cell);
             }
         }
-        // dividing the padded surface size by rows/cols can overestimate the cell, so ask first.
         if !self.cell_query_unsupported {
             self.stdout.write_all(b"\x1b[16t")?;
             self.stdout.flush()?;
@@ -513,6 +563,12 @@ impl Terminal {
         Ok(self.read_report(150, parse_decrqm_1016)?.unwrap_or(false))
     }
 
+    fn probe_clipboard_data(&mut self) -> io::Result<bool> {
+        self.stdout.write_all(b"\x1b[?5522$p")?;
+        self.stdout.flush()?;
+        Ok(self.read_report(150, parse_decrqm_5522)?.unwrap_or(false))
+    }
+
     fn read_report<T>(
         &mut self,
         timeout_ms: u64,
@@ -553,14 +609,71 @@ impl Terminal {
         self.stdout.write_all(b"\x1b]52;c;?\x1b\\")?;
         self.stdout.flush()
     }
+
+    pub fn clipboard_data_supported(&self) -> bool {
+        self.clipboard_data
+    }
+
+    pub fn request_clipboard_types(&mut self) -> io::Result<()> {
+        self.request_clipboard_mimes(".")
+    }
+
+    pub fn request_clipboard_data(&mut self, mime: &str) -> io::Result<()> {
+        self.request_clipboard_mimes(mime)
+    }
+
+    fn request_clipboard_mimes(&mut self, mimes: &str) -> io::Result<()> {
+        use base64::Engine as _;
+        self.clip_read = None;
+        let payload = base64::engine::general_purpose::STANDARD.encode(mimes);
+        self.stdout
+            .write_all(format!("\x1b]5522;type=read;{payload}\x1b\\").as_bytes())?;
+        self.stdout.flush()
+    }
+
+    fn apply_clip_packet(&mut self, packet: ClipPacket) -> Option<Event> {
+        match packet.status {
+            ClipStatus::Ok => {
+                self.clip_read = Some(ClipRead::default());
+                None
+            }
+            ClipStatus::Data => {
+                let read = self.clip_read.get_or_insert_with(ClipRead::default);
+                if read.total + packet.payload.len() > CLIP_READ_MAX_BYTES {
+                    read.overflow = true;
+                    return None;
+                }
+                read.total += packet.payload.len();
+                let mime = packet.mime.unwrap_or_default();
+                match read.items.last_mut() {
+                    Some((last, data)) if *last == mime => data.extend_from_slice(&packet.payload),
+                    _ => read.items.push((mime, packet.payload)),
+                }
+                None
+            }
+            ClipStatus::Done => {
+                let read = self.clip_read.take().unwrap_or_default();
+                Some(Event::ClipboardData {
+                    items: read.items,
+                    ok: !read.overflow,
+                })
+            }
+            ClipStatus::Error => {
+                self.clip_read = None;
+                Some(Event::ClipboardData {
+                    items: Vec::new(),
+                    ok: false,
+                })
+            }
+        }
+    }
 }
 
 const SHM_PROBE_ID: u32 = 299;
 
-/// Outside tmux we own the terminal, so a fixed id is fine. Under tmux every pane
-/// shares the outer terminal's image namespace, so derive an id from the pid to keep
-/// two instances from replacing each other's frames. It must fit in 24 bits because
-/// placeholder cells carry the id in an RGB foreground color.
+/**
+ * need to think about this case harder 
+ */
 fn frame_image_id(tmux: bool) -> u32 {
     if !tmux {
         return 1;
@@ -626,6 +739,72 @@ enum RawEvent {
     Paste(String),
     Focus(bool),
     WindowSize(WindowSize),
+    Clip(ClipPacket),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ClipStatus {
+    Ok,
+    Data,
+    Done,
+    Error,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ClipPacket {
+    status: ClipStatus,
+    mime: Option<String>,
+    payload: Vec<u8>,
+}
+
+fn decode_b64(payload: &[u8]) -> Option<Vec<u8>> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(payload)
+        .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(payload))
+        .ok()
+}
+
+fn parse_clip_packet(seq: &[u8]) -> Option<ClipPacket> {
+    let body = seq.strip_prefix(b"\x1b]5522;")?;
+    let end = body
+        .iter()
+        .position(|&b| b == 0x07 || b == 0x1b)
+        .unwrap_or(body.len());
+    let body = &body[..end];
+    let (meta, payload) = match body.iter().position(|&b| b == b';') {
+        Some(semi) => (&body[..semi], &body[semi + 1..]),
+        None => (body, &b""[..]),
+    };
+    let mut status = None;
+    let mut mime = None;
+    for field in meta.split(|&b| b == b':') {
+        let eq = field.iter().position(|&b| b == b'=')?;
+        let (key, value) = (&field[..eq], &field[eq + 1..]);
+        match key {
+            b"status" => {
+                status = Some(match value {
+                    b"OK" => ClipStatus::Ok,
+                    b"DATA" => ClipStatus::Data,
+                    b"DONE" => ClipStatus::Done,
+                    _ => ClipStatus::Error,
+                })
+            }
+            b"mime" => {
+                mime = decode_b64(value).map(|m| String::from_utf8_lossy(&m).into_owned());
+            }
+            _ => {}
+        }
+    }
+    Some(ClipPacket {
+        status: status?,
+        mime,
+        payload: if payload.is_empty() {
+            Vec::new()
+        } else {
+            decode_b64(payload)?
+        },
+    })
 }
 
 fn parse_event(buf: &[u8]) -> Option<(RawEvent, usize)> {
@@ -636,6 +815,11 @@ fn parse_event(buf: &[u8]) -> Option<(RawEvent, usize)> {
     match *buf.get(1)? {
         b'[' => parse_csi(buf),
         b'_' | b']' | b'P' | b'X' | b'^' => {
+            if let Some(end) = consume_string_sequence(buf)
+                && let Some(packet) = parse_clip_packet(&buf[..end])
+            {
+                return Some((RawEvent::Clip(packet), end));
+            }
             consume_string_sequence(buf).map(|end| match parse_osc52_reply(&buf[..end]) {
                 Some(text) => (RawEvent::Paste(text), end),
                 None => (RawEvent::Key(KeyEvent::plain(Key::Unknown)), end),
@@ -870,7 +1054,7 @@ fn decode_mods(param: u32) -> Mods {
         shift: bits & 1 != 0,
         alt: bits & 2 != 0,
         ctrl: bits & 4 != 0,
-        sup: bits & 8 != 0,
+        sup: bits & 8 != 0, // interesting
     }
 }
 
@@ -891,7 +1075,7 @@ fn consume_string_sequence(buf: &[u8]) -> Option<usize> {
                 }
                 i += 1;
             }
-            _ if i > 4096 => return Some(i),
+            _ if i > 16384 => return Some(i),
             _ => i += 1,
         }
     }
@@ -935,6 +1119,12 @@ fn parse_decrqm_1016(buf: &[u8]) -> Option<bool> {
     let start = buf.windows(8).position(|w| w == b"\x1b[?1016;")? + 8;
     let ps = *buf.get(start)?;
     Some(ps == b'1' || ps == b'3')
+}
+
+fn parse_decrqm_5522(buf: &[u8]) -> Option<bool> {
+    let start = buf.windows(8).position(|w| w == b"\x1b[?5522;")? + 8;
+    let ps = *buf.get(start)?;
+    Some(ps == b'1' || ps == b'2' || ps == b'3')
 }
 
 fn parse_osc_color(buf: &[u8], selector: &str) -> Option<[u8; 4]> {
@@ -1034,13 +1224,10 @@ mod tests {
             })
         );
         assert_eq!(used, 21);
-        // Colon subparameters only count their leading number.
         let (event, _) = parse_event(b"\x1b[48;30:1;100;630;1000t").unwrap();
         assert!(matches!(event, RawEvent::WindowSize(ws) if ws.rows == 30 && ws.cols == 100));
-        // Pixel-incapable terminals report zeros; rows/cols still land.
         let (event, _) = parse_event(b"\x1b[48;30;100;0;0t").unwrap();
         assert!(matches!(event, RawEvent::WindowSize(ws) if ws.cell_size().is_none()));
-        // Other `t` reports are not resizes.
         let (event, _) = parse_event(b"\x1b[6;21;10t").unwrap();
         assert!(!matches!(event, RawEvent::WindowSize(_)));
     }
@@ -1320,5 +1507,60 @@ mod tests {
         assert_eq!(parse_decrqm_1016(b"\x1b[?1016;2$y"), Some(false));
         assert_eq!(parse_decrqm_1016(b"\x1b[?1016;0$y"), Some(false));
         assert_eq!(parse_decrqm_1016(b"\x1b[?1015;1$y"), None);
+    }
+
+    #[test]
+    fn clip_packets_parse_status_mime_and_chunk() {
+        use base64::Engine as _;
+        let b64 = |v: &[u8]| base64::engine::general_purpose::STANDARD.encode(v);
+        let ok = parse_clip_packet(b"\x1b]5522;type=read:status=OK\x1b\\").unwrap();
+        assert_eq!(ok.status, ClipStatus::Ok);
+
+        let seq = format!(
+            "\x1b]5522;type=read:status=DATA:mime={};{}\x1b\\",
+            b64(b"image/png"),
+            b64(b"chunk-bytes")
+        );
+        let data = parse_clip_packet(seq.as_bytes()).unwrap();
+        assert_eq!(data.status, ClipStatus::Data);
+        assert_eq!(data.mime.as_deref(), Some("image/png"));
+        assert_eq!(data.payload, b"chunk-bytes");
+
+        let done = parse_clip_packet(b"\x1b]5522;type=read:status=DONE\x1b\\").unwrap();
+        assert_eq!(done.status, ClipStatus::Done);
+        let denied = parse_clip_packet(b"\x1b]5522;type=read:status=EPERM\x1b\\").unwrap();
+        assert_eq!(denied.status, ClipStatus::Error);
+        assert!(parse_clip_packet(b"\x1b]52;c;?\x1b\\").is_none(), "osc52 untouched");
+    }
+
+    #[test]
+    fn decrqm_5522_reports_support() {
+        assert_eq!(parse_decrqm_5522(b"\x1b[?5522;2$y"), Some(true));
+        assert_eq!(parse_decrqm_5522(b"\x1b[?5522;1$y"), Some(true));
+        assert_eq!(parse_decrqm_5522(b"\x1b[?5522;0$y"), Some(false));
+        assert_eq!(parse_decrqm_5522(b"\x1b[?5522;4$y"), Some(false));
+        assert_eq!(parse_decrqm_5522(b"\x1b[?1016;1$y"), None);
+    }
+
+    #[test]
+    fn clip_data_chunks_of_one_mime_concatenate() {
+        use base64::Engine as _;
+        let b64 = |v: &[u8]| base64::engine::general_purpose::STANDARD.encode(v);
+        let packet = |body: String| parse_clip_packet(body.as_bytes()).unwrap();
+        let mut read = ClipRead::default();
+        for chunk in [b"first-".as_slice(), b"second".as_slice()] {
+            let p = packet(format!(
+                "\x1b]5522;type=read:status=DATA:mime={};{}\x1b\\",
+                b64(b"image/png"),
+                b64(chunk)
+            ));
+            let mime = p.mime.unwrap();
+            match read.items.last_mut() {
+                Some((last, data)) if *last == mime => data.extend_from_slice(&p.payload),
+                _ => read.items.push((mime, p.payload)),
+            }
+        }
+        assert_eq!(read.items.len(), 1);
+        assert_eq!(read.items[0].1, b"first-second");
     }
 }

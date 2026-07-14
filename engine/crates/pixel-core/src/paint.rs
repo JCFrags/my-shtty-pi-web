@@ -158,25 +158,16 @@ fn paint_node(
             }
         });
     }
-    /**
-     * okay im gonna have to start answering questions about this if im gonna make any progress on understanding how the 
-     * image rendering pipeline actually works
-     * 
-     * i don't think its insanely complex it just has some distributed parts that make it a little hard to track, then 
-     * very complex code that will be hard to understand that i would at least like to intuit
-     * 
-     * i want to warm up a little bit more with understanding how the text editing scheme works
-     */
-
     if let Some(image) = &node.image {
         timed(stats.as_mut().map(|s| &mut s.images), || {
-            match crate::image_cache::status(&image.src) {
+            match crate::image_cache::status(&image.src, &image.equal_to) {
                 ImageStatus::Ready => {
                     crate::image_cache::with_scaled_image(
                         &image.src,
                         rect.w.round().max(0.0) as u32,
                         rect.h.round().max(0.0) as u32,
                         node.style.corner_radius,
+                        &image.equal_to,
                         |pixmap| canvas.blit_image(rect.x, rect.y, pixmap),
                     );
                 }
@@ -239,10 +230,7 @@ fn paint_node(
                 .style
                 .wrap
                 .then(|| (rect.w - padding.0 - padding.2).max(0.0) + crate::wrap::WRAP_SLACK);
-            let marks = node
-                .input
-                .as_ref()
-                .map_or(&[][..], |state| state.input.marks());
+            let marks = node.marks();
             let lines = timed(stats.as_mut().map(|s| &mut s.wrap), || {
                 wrap_lines(text, font, px, wrap, marks)
             });
@@ -645,6 +633,7 @@ mod tests {
                 },
                 image: Some(crate::tree::ImageProps {
                     src: path.to_string_lossy().to_string(),
+                    equal_to: Vec::new(),
                 }),
                 ..Desc::default()
             }],
@@ -659,7 +648,7 @@ mod tests {
         );
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while !crate::image_cache::drain_completed() {
+        while !crate::image_cache::drain_completed().landed {
             assert!(std::time::Instant::now() < deadline, "decode never landed");
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
