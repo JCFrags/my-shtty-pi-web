@@ -10,6 +10,8 @@ export const DEVTOOLS_VIEW = 1;
 export interface ClickEvent {
   x: number;
   y: number;
+  /** byte offset into the node's text at the click point, when the node has text */
+  offset?: number;
 }
 
 export interface ScrollEvent {
@@ -25,6 +27,30 @@ export interface WheelEvent {
   precise: boolean;
 }
 
+export interface DragEvent {
+  phase: "start" | "move" | "end";
+  x: number;
+  y: number;
+}
+
+export interface SelectionPart {
+  /** the id prop of the text node this slice of the selection covers */
+  key: string;
+  start: number;
+  end: number;
+}
+
+/** empty text and parts mean the selection was cleared */
+export interface ContainerSelection {
+  text: string;
+  /** bounding rect of the selection, relative to this container */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  parts: SelectionPart[];
+}
+
 export interface BoxProps {
   style?: Style;
   id?: string;
@@ -34,6 +60,11 @@ export interface BoxProps {
   onWheel?: (event: WheelEvent) => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
+  /** Left-button drag on this node: start on press, move while held, end on release.
+   * Coordinates are view-local pixels. A dragging node opts out of click and text selection. */
+  onDrag?: (event: DragEvent) => void;
+  /** document-selection changes whose scope is this scrollable container */
+  onSelection?: (selection: ContainerSelection) => void;
   contentHeight?: number;
   children?: React.ReactNode;
 }
@@ -44,6 +75,9 @@ export interface TextSpan {
   color: Color;
   background?: Color;
   bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
 }
 
 export interface TextProps {
@@ -232,6 +266,8 @@ function serializeProps(
     wheelEvents: !!props.onWheel,
     hoverEvents: !!(props.onMouseEnter || props.onMouseLeave),
     outsideClickEvents: !!props.onClickOutside,
+    dragEvents: !!props.onDrag,
+    selectionEvents: !!props.onSelection,
     slot: props.slot,
     mark: props.mark,
   };
@@ -244,6 +280,9 @@ function serializeProps(
         color: parseColor(s.color),
         background: s.background && parseColor(s.background),
         bold: s.bold,
+        italic: s.italic,
+        underline: s.underline,
+        strikethrough: s.strikethrough,
       }));
     }
   } else if (type === "marked-text") {
@@ -501,9 +540,13 @@ const hostConfig = {
         b.flush();
       },
       scrollTo: (offset: number, smooth = false) => {
-        if (type !== "input") return;
         const b = getBridge();
         b.push(instance.view, { op: "scrollTo", id: instance.id, offset, smooth });
+        b.flush();
+      },
+      scrollIntoView: (smooth = false) => {
+        const b = getBridge();
+        b.push(instance.view, { op: "scrollIntoView", id: instance.id, smooth });
         b.flush();
       },
       splice: (start: number, end: number, text: string) => {

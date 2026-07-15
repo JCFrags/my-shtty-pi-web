@@ -208,6 +208,8 @@ fn main() -> std::io::Result<()> {
                 | EngineEvent::Resize { .. }
                 | EngineEvent::Inspect { .. }
                 | EngineEvent::Wheel { .. }
+                | EngineEvent::Drag { .. }
+                | EngineEvent::Selection { .. }
                 | EngineEvent::Log(_)
                 | EngineEvent::Profile(_) => {}
             }

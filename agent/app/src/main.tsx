@@ -30,6 +30,14 @@ const root = createRoot({
       store.toggleSidebar();
       return;
     }
+    if (event.mods.super && event.key === "l") {
+      const id = store.addPanelSelectionToChat();
+      if (id != null) {
+        menus.input?.addMark(id);
+        menus.input?.focus();
+      }
+      return;
+    }
     if (event.mods.super && event.key === "p") {
       store.togglePalette();
       return;

@@ -553,7 +553,7 @@ fn spans_color_glyph_runs_within_one_text_node() {
             end: 1,
             color: [255, 0, 0, 255],
             background: None,
-            bold: false,
+            ..TextSpan::default()
         }],
         ..Props::default()
     });
@@ -587,7 +587,7 @@ fn span_background_fills_behind_the_byte_range_only() {
             end: 1,
             color: [255, 255, 255, 255],
             background: Some([0, 0, 255, 255]),
-            bold: false,
+            ..TextSpan::default()
         }],
         ..Props::default()
     });
@@ -1191,6 +1191,69 @@ fn an_outside_click_dismisses_the_selection_and_repaints() {
     assert!(tree.doc_select_down_near((rect.x, rect.y + 150.0), &fonts));
     assert_eq!(tree.doc_selected_text(), None);
     assert!(tree.dirty(), "the stale highlight must repaint away");
+}
+
+#[test]
+fn selection_stays_inside_the_scroll_container_it_started_in() {
+    let fonts = [font()];
+    let column = |key: &str, text_a: &str, text_b: &str| Desc {
+        key: Some(key.into()),
+        style: Style {
+            flex_direction: FlexDirection::Column,
+            flex_grow: 1.0,
+            flex_basis: Dimension::Px(0.0),
+            overflow: crate::style::Overflow::Scroll,
+            align_items: Some(Align::Start),
+            ..Style::default()
+        },
+        children: vec![
+            Desc {
+                key: Some(format!("{key}-a")),
+                text: Some(text_a.into()),
+                ..Desc::default()
+            },
+            Desc {
+                key: Some(format!("{key}-b")),
+                text: Some(text_b.into()),
+                ..Desc::default()
+            },
+        ],
+        ..Desc::default()
+    };
+    let mut tree = tree_of(
+        (400.0, 200.0),
+        vec![
+            column("left", "chat message", "another"),
+            column("right", "panel title", "panel body"),
+        ],
+    );
+    let right_a = tree.find("right-a").unwrap();
+    let left_a = tree.find("left-a").unwrap();
+    tree.doc_select_down(point_at(&tree, right_a, 2, &fonts), &fonts);
+    // drag to a point over the LEFT column; the selection must not follow
+    let left_rect = tree.rect(left_a).unwrap();
+    tree.doc_select_drag((left_rect.x + 2.0, left_rect.y + left_rect.h + 30.0), &fonts);
+    let selected = tree.doc_selected_text().unwrap_or_default();
+    assert!(
+        !selected.contains("chat") && !selected.contains("another"),
+        "selection leaked into the other scroll container: {selected:?}"
+    );
+    assert!(selected.contains("nel"), "selection extends within its own container: {selected:?}");
+
+    // clicking empty space in the LEFT column must not adopt right-column text,
+    // even when a right-column node is geometrically nearer
+    tree.doc_collapse();
+    let left_rect = tree.rect(left_a).unwrap();
+    let empty = (left_rect.x + left_rect.w + 20.0, left_rect.y + 2.0);
+    if !tree.doc_select_down(empty, &fonts) {
+        tree.doc_select_down_near(empty, &fonts);
+    }
+    tree.doc_select_drag((left_rect.x, left_rect.y + 60.0), &fonts);
+    let selected = tree.doc_selected_text().unwrap_or_default();
+    assert!(
+        !selected.contains("panel"),
+        "empty-space click adopted the other container: {selected:?}"
+    );
 }
 
 #[test]

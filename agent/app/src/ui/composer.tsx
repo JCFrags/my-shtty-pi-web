@@ -3,7 +3,8 @@ import { Box, Image, Input, Text } from "pixel-react";
 import type { NodeHandle, Rgba } from "pixel-react";
 
 import { menus } from "../menu";
-import { PERMISSION_MODES, store, THINKING } from "../session";
+import { PERMISSION_MODES, selectionMarkdown, store, THINKING } from "../session";
+import type { SelectionRef } from "../session";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { useCtx } from "../theme";
 
@@ -116,6 +117,8 @@ export function Composer({ inputRef }: { inputRef: React.RefObject<NodeHandle | 
           autoFocus
           renderMark={renderComposerMark}
           serializeMark={(id) => {
+            const selection = store.composerSelection(id);
+            if (selection) return JSON.stringify({ v: 1, kind: "selection", ...selection });
             const attachment = store.composerImage(id);
             if (!attachment) return undefined;
             return JSON.stringify({
@@ -198,6 +201,8 @@ export function Composer({ inputRef }: { inputRef: React.RefObject<NodeHandle | 
 }
 
 export function renderComposerMark(id: number): React.ReactNode {
+  const selection = store.composerSelection(id);
+  if (selection) return <SelectionPill refData={selection} />;
   const attachment = store.composerImage(id);
   if (!attachment) return null;
   return (
@@ -205,6 +210,30 @@ export function renderComposerMark(id: number): React.ReactNode {
       src={attachment.durable ?? attachment.image.path}
       equalTo={attachment.durable ? [attachment.image.path] : undefined}
     />
+  );
+}
+
+export function SelectionPill({ refData }: { refData: SelectionRef }) {
+  const { theme, rem } = useCtx();
+  const snippet = selectionMarkdown(refData).replace(/\s+/g, " ");
+  const label = snippet.length > 26 ? `${snippet.slice(0, 25)}…` : snippet;
+  return (
+    <Box
+      style={{
+        alignItems: "center",
+        gap: rem * 0.3,
+        padding: { left: rem * 0.4, right: rem * 0.45, top: rem * 0.1, bottom: rem * 0.1 },
+        margin: { left: rem * 0.1, right: rem * 0.25 },
+        background: theme.chipBg,
+        hoverBackground: theme.itemHover,
+        border: { width: Math.max(rem / 16, 1), color: theme.hairline },
+        cornerRadius: rem * 0.3,
+      }}
+      onClick={() => store.revealSelection(refData)}
+    >
+      <Text style={{ color: theme.accent, fontSize: rem * 0.75, wrap: false }}>“</Text>
+      <Text style={{ color: theme.muted, fontSize: rem * 0.75, wrap: false }}>{label}</Text>
+    </Box>
   );
 }
 

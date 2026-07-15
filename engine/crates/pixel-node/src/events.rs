@@ -36,6 +36,7 @@ pub fn event_json(event: &EngineEvent, engine: &Engine, ids: &[IdMap]) -> Option
             key,
             x,
             y,
+            offset,
         } => json!({
             "type": "click",
             "view": view,
@@ -43,6 +44,7 @@ pub fn event_json(event: &EngineEvent, engine: &Engine, ids: &[IdMap]) -> Option
             "key": key,
             "x": x,
             "y": y,
+            "offset": offset,
         }),
         EngineEvent::ClickOutside {
             view,
@@ -205,6 +207,48 @@ pub fn event_json(event: &EngineEvent, engine: &Engine, ids: &[IdMap]) -> Option
             "view": view,
             "node": ids.get(*view)?.ext(*node)?,
             "key": key,
+        }),
+        EngineEvent::Drag {
+            view,
+            node,
+            key,
+            phase,
+            x,
+            y,
+        } => json!({
+            "type": "drag",
+            "view": view,
+            "node": ids.get(*view)?.ext(*node)?,
+            "key": key,
+            "phase": match phase {
+                pixel_core::DragPhase::Start => "start",
+                pixel_core::DragPhase::Move => "move",
+                pixel_core::DragPhase::End => "end",
+            },
+            "x": x,
+            "y": y,
+        }),
+        EngineEvent::Selection {
+            view,
+            node,
+            key,
+            text,
+            rect,
+            parts,
+        } => json!({
+            "type": "selection",
+            "view": view,
+            "node": ids.get(*view)?.ext(*node)?,
+            "key": key,
+            "text": text,
+            "x": rect.x,
+            "y": rect.y,
+            "w": rect.w,
+            "h": rect.h,
+            "parts": parts
+                .iter()
+                .map(|(key, start, end)| json!({ "key": key, "start": start, "end": end }))
+                .collect::<Vec<_>>(),
         }),
         EngineEvent::Log(entry) => json!({
             "type": "log",

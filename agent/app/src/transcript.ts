@@ -60,7 +60,13 @@ function apply(state: FoldState, message: any) {
       }
       if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
         const last = state.items[state.items.length - 1];
-        if (last?.kind === "assistant") last.text += event.delta.text ?? "";
+        if (last?.kind === "assistant") {
+          // fresh object so memoized message rows see the change by identity
+          state.items[state.items.length - 1] = {
+            ...last,
+            text: last.text + (event.delta.text ?? ""),
+          };
+        }
       }
       break;
     }

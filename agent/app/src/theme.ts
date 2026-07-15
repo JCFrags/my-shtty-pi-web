@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { EngineInfo, Rgba } from "pixel-react";
+import type { EngineInfo, MarkdownTheme, Rgba } from "pixel-react";
 
 
 export interface Ctx {
@@ -37,6 +37,18 @@ export interface Theme {
   diffRemovedBg: Rgba;
   diffAddedEmphasisBg: Rgba;
   diffRemovedEmphasisBg: Rgba;
+}
+
+export function markdownTheme(theme: Theme): MarkdownTheme {
+  return {
+    fg: theme.fg,
+    muted: theme.muted,
+    link: theme.accent,
+    inlineCode: theme.accent,
+    codeBg: theme.bgAlt,
+    separator: theme.separator,
+    syntax: theme.syntax,
+  };
 }
 
 function mix(base: Rgba, toward: Rgba, t: number): Rgba {

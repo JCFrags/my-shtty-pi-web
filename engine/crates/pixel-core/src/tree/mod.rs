@@ -83,6 +83,13 @@ pub enum HitTarget {
     Text(NodeId),
 }
 
+pub struct SelectionSnapshot {
+    pub scope: NodeId,
+    pub text: String,
+    pub rect: PxRect,
+    pub parts: Vec<(String, std::ops::Range<usize>)>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ScrollArea {
     pub node: NodeId,
@@ -153,13 +160,16 @@ pub enum SlotKind {
     Error,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct TextSpan {
     pub start: usize,
     pub end: usize,
     pub color: Color,
     pub background: Option<Color>,
     pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -183,6 +193,8 @@ pub struct Props {
     pub wheel_events: bool,
     pub hover_events: bool,
     pub outside_click_events: bool,
+    pub drag_events: bool,
+    pub selection_events: bool,
     pub spans: Vec<TextSpan>,
 }
 
@@ -228,6 +240,8 @@ pub(crate) struct RNode {
     pub wheel_events: bool,
     pub hover_events: bool,
     pub outside_click_events: bool,
+    pub drag_events: bool,
+    pub selection_events: bool,
     pub spans: Vec<TextSpan>,
     pub last_scroll_emit: f32,
     pub bar: BarState,
@@ -412,6 +426,8 @@ impl Tree {
             wheel_events: props.wheel_events,
             hover_events: props.hover_events,
             outside_click_events: props.outside_click_events,
+            drag_events: props.drag_events,
+            selection_events: props.selection_events,
             spans: props.spans,
             last_scroll_emit: 0.0,
             bar: BarState::default(),
@@ -551,6 +567,8 @@ impl Tree {
         node.wheel_events = props.wheel_events;
         node.hover_events = props.hover_events;
         node.outside_click_events = props.outside_click_events;
+        node.drag_events = props.drag_events;
+        node.selection_events = props.selection_events;
         if node.spans != props.spans {
             node.spans = props.spans;
             changed = true;
@@ -1205,6 +1223,13 @@ impl Tree {
         })
     }
 
+    pub fn hit_drag(&self, x: f32, y: f32) -> Option<NodeId> {
+        self.paint_order.iter().rev().copied().find(|&id| {
+            self.get(id)
+                .is_some_and(|node| node.drag_events && node.visible.contains(x, y))
+        })
+    }
+
     pub fn hit_hover(&self, x: f32, y: f32) -> Option<NodeId> {
         self.paint_order.iter().rev().copied().find(|&id| {
             self.get(id)
@@ -1439,8 +1464,93 @@ impl Tree {
         })
     }
 
+    // Maps an absolute point to a byte offset in this node's text, so click
+    // handlers can tell which styled span was hit (e.g. an inline link).
+    pub fn offset_at_point(
+        &self,
+        id: NodeId,
+        point: (f32, f32),
+        fonts: &[fontdue::Font],
+    ) -> Option<usize> {
+        let text = Tree::text_of(self, id)?;
+        let geometry = self.text_geometry(id)?;
+        let font = fonts.get(geometry.font).or_else(|| fonts.first())?;
+        let marks = self.get(id)?.marks();
+        Some(crate::text_input::point_to_offset(
+            text,
+            point.0 - geometry.origin.0,
+            point.1 - geometry.origin.1,
+            font,
+            geometry.px,
+            geometry.max_width,
+            marks,
+        ))
+    }
+
     pub fn doc_selection(&self) -> Option<DocSelection> {
         self.doc.selection(self)
+    }
+
+    pub fn selection_events(&self, id: NodeId) -> bool {
+        self.get(id).is_some_and(|node| node.selection_events)
+    }
+
+    pub fn doc_scope(&self) -> Option<NodeId> {
+        self.doc.scope()
+    }
+
+    // Everything an app needs to mirror the current selection: the covered
+    // keyed nodes with their byte ranges, and a bounding rect for anchoring UI.
+    pub fn doc_selection_snapshot(&self, fonts: &[fontdue::Font]) -> Option<SelectionSnapshot> {
+        let sel = self.doc_selection()?;
+        if sel.is_collapsed() {
+            return None;
+        }
+        let scope = self.doc.scope()?;
+        let union = |a: Option<PxRect>, b: PxRect| {
+            Some(match a {
+                None => b,
+                Some(a) => {
+                    let x = a.x.min(b.x);
+                    let y = a.y.min(b.y);
+                    PxRect {
+                        x,
+                        y,
+                        w: (a.x + a.w).max(b.x + b.w) - x,
+                        h: (a.y + a.h).max(b.y + b.h) - y,
+                    }
+                }
+            })
+        };
+        let mut parts = Vec::new();
+        let mut rect: Option<PxRect> = None;
+        for &id in &self.paint_order {
+            let Some(range) = self.doc_selection_range(id) else {
+                continue;
+            };
+            if let Some(v) = self.visible_rect(id)
+                && v.w > 0.0
+                && v.h > 0.0
+            {
+                rect = union(rect, v);
+            }
+            if let Some(key) = self.key_of(id) {
+                parts.push((key.to_string(), range));
+            }
+        }
+        // unified bands hug the actual selected lines; prefer them when present
+        let mut bands: Option<PxRect> = None;
+        for (_, group, _) in self.doc_selection_blocks(fonts) {
+            for band in group {
+                bands = union(bands, band);
+            }
+        }
+        Some(SelectionSnapshot {
+            scope,
+            text: self.doc_selected_text().unwrap_or_default(),
+            rect: bands.or(rect)?,
+            parts,
+        })
     }
 
     pub fn doc_selection_range(&self, id: NodeId) -> Option<std::ops::Range<usize>> {
@@ -1579,6 +1689,32 @@ impl DocLayout for Tree {
             current = node.parent;
         }
         None
+    }
+
+    fn selection_scope(&self, id: NodeId) -> Option<NodeId> {
+        let mut current = Some(id);
+        while let Some(cur) = current {
+            let node = self.get(cur)?;
+            if node.style.overflow == Overflow::Scroll {
+                return Some(cur);
+            }
+            current = node.parent;
+        }
+        Some(self.root())
+    }
+
+    fn scope_at(&self, point: (f32, f32)) -> Option<NodeId> {
+        self.paint_order
+            .iter()
+            .rev()
+            .copied()
+            .find(|&id| {
+                self.get(id).is_some_and(|node| {
+                    node.style.overflow == Overflow::Scroll
+                        && node.visible.contains(point.0, point.1)
+                })
+            })
+            .or_else(|| Some(self.root()))
     }
 
     fn selection_color_of(&self, id: NodeId) -> Option<Color> {

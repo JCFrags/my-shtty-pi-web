@@ -24,7 +24,7 @@ mod wrap;
 pub use canvas::{Canvas, measure_text};
 pub use desc::Desc;
 pub use engine::{
-    ChangeSource, Engine, EngineConfig, EngineEvent, FrameStats, HighlightArea, MarkRef,
+    ChangeSource, DragPhase, Engine, EngineConfig, EngineEvent, FrameStats, HighlightArea, MarkRef,
     px_for_cell_height,
 };
 pub use kitty::kitty_transmit;

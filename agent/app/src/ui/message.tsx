@@ -1,15 +1,23 @@
-import { useMemo } from "react";
-import { Box, HIGHLIGHT_CAPTURES, highlight, Image, MarkedText, Text } from "pixel-react";
+import { memo, useMemo } from "react";
+import { Box, Image, Markdown, MarkedText, Text } from "pixel-react";
 
-import { parseInline } from "../markdown";
+import { openLink } from "../links";
 import { store } from "../session";
 import type { Item, RichMark } from "../session";
-import { AttachmentPill } from "./composer";
+import { AttachmentPill, SelectionPill } from "./composer";
 import { ToolRow } from "./tool";
-import { useCtx } from "../theme";
+import { markdownTheme, useCtx } from "../theme";
 
-export function Message({ item }: { item: Item }) {
+// Assistant items are replaced (never mutated) by the transcript fold, so
+// identity comparison is safe; tool calls mutate in place and must re-render.
+export const Message = memo(
+  MessageImpl,
+  (a, b) => a.item.kind === "assistant" && a.item === b.item && a.streaming === b.streaming
+);
+
+function MessageImpl({ item, streaming = false }: { item: Item; streaming?: boolean }) {
   const { theme, rem } = useCtx();
+  const md = useMemo(() => markdownTheme(theme), [theme]);
   if (item.kind === "user") {
     return (
       <Box
@@ -46,20 +54,8 @@ export function Message({ item }: { item: Item }) {
   if (item.kind === "tool") {
     return <ToolRow call={item.call} />;
   }
-  const parts = segments(item.text);
-  if (parts.length === 1 && !parts[0].code) {
-    return <Prose text={parts[0].text} />;
-  }
   return (
-    <Box style={{ flexDirection: "column", gap: rem * 0.5 }}>
-      {parts.map((part, i) =>
-        part.code ? (
-          <CodeBlock key={i} language={part.language} code={part.text} />
-        ) : (
-          <Prose key={i} text={part.text} />
-        )
-      )}
-    </Box>
+    <Markdown text={item.text} streaming={streaming} theme={md} rem={rem} onLinkClick={openLink} />
   );
 }
 
@@ -74,9 +70,29 @@ function UserRichText({ text, marks }: { text: string; marks: RichMark[] }) {
         const mark = marks[id];
         if (!mark) return null;
         try {
-          const data = JSON.parse(mark.data) as { kind: string; path?: string };
+          const data = JSON.parse(mark.data) as {
+            kind: string;
+            path?: string;
+            title?: string;
+            doc?: string;
+            start?: number;
+            end?: number;
+          };
           if (data.kind === "image" && data.path) {
             return <AttachmentPill src={data.path} equalTo={store.attachmentAliases(data.path)} />;
+          }
+          if (
+            data.kind === "selection" &&
+            typeof data.doc === "string" &&
+            typeof data.title === "string" &&
+            typeof data.start === "number" &&
+            typeof data.end === "number"
+          ) {
+            return (
+              <SelectionPill
+                refData={{ title: data.title, doc: data.doc, start: data.start, end: data.end }}
+              />
+            );
           }
         } catch {
           return null;
@@ -87,76 +103,3 @@ function UserRichText({ text, marks }: { text: string; marks: RichMark[] }) {
   );
 }
 
-function Prose({ text }: { text: string }) {
-  const { theme } = useCtx();
-  const { text: clean, spans } = useMemo(() => parseInline(text), [text]);
-  const textSpans = useMemo(
-    () =>
-      spans.map((s) => ({
-        start: s.start,
-        end: s.end,
-        color: s.code ? theme.accent : theme.fg,
-        bold: s.bold,
-      })),
-    [spans, theme]
-  );
-  if (textSpans.length === 0) return <Text>{clean}</Text>;
-  return <Text spans={textSpans}>{clean}</Text>;
-}
-
-interface Segment {
-  code: boolean;
-  language: string;
-  text: string;
-}
-
-function segments(text: string): Segment[] {
-  const out: Segment[] = [];
-  let plain: string[] = [];
-  let code: string[] | null = null;
-  let language = "";
-  const flushPlain = () => {
-    const joined = plain.join("\n").trim();
-    if (joined) out.push({ code: false, language: "", text: joined });
-    plain = [];
-  };
-  for (const line of text.split("\n")) {
-    const fence = /^\s{0,3}```(.*)$/.exec(line);
-    if (fence && code === null) {
-      flushPlain();
-      code = [];
-      language = fence[1].trim();
-    } else if (fence && code !== null) {
-      out.push({ code: true, language, text: code.join("\n") });
-      code = null;
-    } else if (code !== null) {
-      code.push(line);
-    } else {
-      plain.push(line);
-    }
-  }
-  if (code !== null) out.push({ code: true, language, text: code.join("\n") });
-  else flushPlain();
-  return out;
-}
-
-function CodeBlock({ language, code }: { language: string; code: string }) {
-  const { theme } = useCtx();
-  const spans = useMemo(
-    () =>
-      highlight(code, language).map((s) => ({
-        start: s.start,
-        end: s.end,
-        color: theme.syntax[HIGHLIGHT_CAPTURES[s.capture]] ?? theme.fg,
-      })),
-    [code, language, theme]
-  );
-  return (
-    <Box
-      style={{ overflow: "hidden" }}>
-      <Text style={{ wrap: false }} spans={spans}>
-        {code}
-      </Text>
-    </Box>
-  );
-}

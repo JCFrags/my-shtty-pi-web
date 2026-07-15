@@ -3,10 +3,12 @@ import { readFileSync } from "node:fs";
 import { extname } from "node:path";
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { MarkRef, PastedImage } from "pixel-react";
+import { parseMarkdown } from "pixel-react";
+import type { ContainerSelection, MarkRef, PastedImage } from "pixel-react";
 
 import { attachmentsDir, persistAttachment } from "./attachments";
 import { appendLog, createSession } from "./db/client";
+import { MARKDOWN_TOOL, pixelMcpServer } from "./markdown-tool";
 import { schedulePersist } from "./db/persist";
 import { detail } from "./transcript";
 import type {
@@ -37,6 +39,17 @@ export interface ComposerAttachment {
 export interface RichMark {
   offset: number;
   data: string;
+}
+
+export interface SelectionRef {
+  title: string;
+  doc: string;
+  start: number;
+  end: number;
+}
+
+export function selectionMarkdown(ref: SelectionRef): string {
+  return Buffer.from(ref.doc, "utf8").subarray(ref.start, ref.end).toString("utf8").trim();
 }
 
 export type Item =
@@ -142,6 +155,8 @@ export class Session {
         systemPrompt: { type: "preset", preset: "claude_code" },
         permissionMode: this.mode,
         includePartialMessages: true,
+        mcpServers: { pixel: pixelMcpServer },
+        allowedTools: [MARKDOWN_TOOL],
         ...(this.model ? { model: this.model } : {}),
         ...(thinkingTokens != null ? { maxThinkingTokens: thinkingTokens } : {}),
         ...(this.sdkSessionId ? { resume: this.sdkSessionId } : {}),
@@ -185,15 +200,36 @@ export class Session {
   send(text: string, marks: MarkRef[] = []) {
     const clean = text.replace(/\uFFFC/g, "").trim();
     if (!clean && marks.length === 0) return;
-    this.sendChain = this.sendChain
-      .then(() => this.sendNow(text, clean, marks))
-      .catch(() => {});
+    this.sendChain = this.sendChain.then(() => this.sendNow(text, marks)).catch(() => {});
   }
 
-  private async sendNow(raw: string, clean: string, marks: MarkRef[]) {
+  // selection-reference sentinels become inline markdown excerpts the model can read
+  private inlineSelections(raw: string, marks: MarkRef[]): string {
+    const bytes = Buffer.from(raw, "utf8");
+    const sentinel = Buffer.byteLength("\uFFFC", "utf8");
+    let out = "";
+    let at = 0;
+    for (const mark of [...marks].sort((a, b) => a.offset - b.offset)) {
+      const ref = store.composerSelection(mark.id);
+      if (!ref) continue;
+      out += bytes.subarray(at, mark.offset).toString("utf8");
+      out += `\n<user-selection doc="${ref.title}">\n${selectionMarkdown(ref)}\n</user-selection>\n`;
+      at = mark.offset + sentinel;
+    }
+    out += bytes.subarray(at).toString("utf8");
+    return out;
+  }
+
+  private async sendNow(raw: string, marks: MarkRef[]) {
+    const clean = this.inlineSelections(raw, marks).replace(/\uFFFC/g, "").trim();
     const images: { path: string; media: string; data: string }[] = [];
     const rich: RichMark[] = [];
     for (const mark of marks) {
+      const ref = store.composerSelection(mark.id);
+      if (ref) {
+        rich.push({ offset: mark.offset, data: JSON.stringify({ kind: "selection", ...ref }) });
+        continue;
+      }
       const attachment = store.composerImage(mark.id);
       if (!attachment) continue;
       const path = (await attachment.persisted) ?? attachment.image.path;
@@ -379,6 +415,11 @@ class Store {
   composerText = "";
   composerEpoch = 0;
   composerMarks: MarkRef[] = [];
+  markdownDoc: { title: string; text: string; highlight?: { start: number; end: number } } | null =
+    null;
+  panelFraction = 0.45;
+  panelSelection: ContainerSelection | null = null;
+  private composerSelections = new Map<number, SelectionRef>();
   private composerImages = new Map<number, ComposerAttachment>();
   private nextMarkId = 1;
   fontPath: string | null = null;
@@ -417,6 +458,63 @@ class Store {
 
   toggleSidebar() {
     this.sidebar = !this.sidebar;
+    this.notify();
+  }
+
+  openMarkdown(title: string, text: string, highlight?: { start: number; end: number }) {
+    this.markdownDoc = { title, text, highlight };
+    this.notify();
+  }
+
+  setPanelSelection(selection: ContainerSelection | null) {
+    this.panelSelection = selection;
+    this.notify();
+  }
+
+  composerSelection(id: number): SelectionRef | undefined {
+    return this.composerSelections.get(id);
+  }
+
+  // turns the panel selection into a composer mark referencing the source
+  // markdown behind the selected blocks; returns the mark id to insert
+  addPanelSelectionToChat(): number | null {
+    const doc = this.markdownDoc;
+    const selection = this.panelSelection;
+    if (!doc || !selection) return null;
+    const indices = selection.parts
+      .map((part) => /^md:(\d+)$/.exec(part.key)?.[1])
+      .filter((v): v is string => v != null)
+      .map(Number);
+    if (indices.length === 0) return null;
+    const blocks = parseMarkdown(doc.text);
+    const covered = indices.map((i) => blocks[i]).filter(Boolean);
+    if (covered.length === 0) return null;
+    const bytes = Buffer.from(doc.text, "utf8");
+    let start = Math.min(...covered.map((b) => b.sourceStart));
+    let end = Math.max(...covered.map((b) => b.sourceEnd));
+    // whole lines, so list bullets and quote markers survive
+    while (start > 0 && bytes[start - 1] !== 0x0a) start--;
+    while (end < bytes.length && bytes[end] !== 0x0a) end++;
+    const id = this.nextMarkId++;
+    this.composerSelections.set(id, { title: doc.title, doc: doc.text, start, end });
+    this.panelSelection = null;
+    this.notify();
+    return id;
+  }
+
+  revealSelection(ref: SelectionRef) {
+    this.openMarkdown(ref.title, ref.doc, { start: ref.start, end: ref.end });
+  }
+
+  closeMarkdown() {
+    this.markdownDoc = null;
+    this.notify();
+  }
+
+  setPanelFraction(fraction: number) {
+    const next = Math.min(0.85, Math.max(0.15, fraction));
+    if (next === this.panelFraction) return;
+    this.panelFraction = next;
     this.notify();
   }
 
@@ -465,6 +563,7 @@ class Store {
     this.composerText = "";
     this.composerMarks = [];
     this.composerImages.clear();
+    this.composerSelections.clear();
     this.composerEpoch += 1;
     this.notify();
   }
@@ -505,10 +604,26 @@ class Store {
   syncComposerMarks(marks: MarkRef[]) {
     for (const mark of marks) {
       if (!mark.data || this.composerImages.has(mark.id)) continue;
-      let parsed: { kind?: string; path?: string };
+      if (this.composerSelections.has(mark.id)) continue;
+      let parsed: { kind?: string; path?: string } & Partial<SelectionRef>;
       try {
         parsed = JSON.parse(mark.data);
       } catch {
+        continue;
+      }
+      if (
+        parsed.kind === "selection" &&
+        typeof parsed.doc === "string" &&
+        typeof parsed.title === "string" &&
+        typeof parsed.start === "number" &&
+        typeof parsed.end === "number"
+      ) {
+        this.composerSelections.set(mark.id, {
+          title: parsed.title,
+          doc: parsed.doc,
+          start: parsed.start,
+          end: parsed.end,
+        });
         continue;
       }
       if (parsed.kind !== "image" || !parsed.path) continue;

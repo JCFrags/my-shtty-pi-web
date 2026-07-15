@@ -70,6 +70,11 @@ enum Op {
     Focus {
         id: Option<u32>,
     },
+    ScrollIntoView {
+        id: u32,
+        #[serde(default)]
+        smooth: bool,
+    },
     ScrollTo {
         id: u32,
         offset: f32,
@@ -193,6 +198,8 @@ struct PropsDto {
     wheel_events: bool,
     hover_events: bool,
     outside_click_events: bool,
+    drag_events: bool,
+    selection_events: bool,
     spans: Vec<SpanDto>,
 }
 
@@ -206,6 +213,12 @@ struct SpanDto {
     background: Option<Color>,
     #[serde(default)]
     bold: bool,
+    #[serde(default)]
+    italic: bool,
+    #[serde(default)]
+    underline: bool,
+    #[serde(default)]
+    strikethrough: bool,
 }
 
 #[derive(Deserialize)]
@@ -541,6 +554,8 @@ impl PropsDto {
             wheel_events: self.wheel_events,
             hover_events: self.hover_events,
             outside_click_events: self.outside_click_events,
+            drag_events: self.drag_events,
+            selection_events: self.selection_events,
             spans: self
                 .spans
                 .into_iter()
@@ -550,6 +565,9 @@ impl PropsDto {
                     color: s.color,
                     background: s.background,
                     bold: s.bold,
+                    italic: s.italic,
+                    underline: s.underline,
+                    strikethrough: s.strikethrough,
                 })
                 .collect(),
         }
@@ -659,6 +677,11 @@ fn apply_op(
         Op::ScrollTo { id, offset, smooth } => {
             if let Some(node) = map.node(id) {
                 engine.scroll_to(view, node, offset, smooth);
+            }
+        }
+        Op::ScrollIntoView { id, smooth } => {
+            if let Some(node) = map.node(id) {
+                engine.scroll_into_view(view, node, smooth);
             }
         }
         Op::SetClearColor { color } => engine.set_clear_color(view, color),

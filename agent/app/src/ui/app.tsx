@@ -9,6 +9,7 @@ import type { Session } from "../session";
 import { CtxContext, makeTheme, useCtx } from "../theme";
 import { transcript } from "../transcript";
 import { Composer } from "./composer";
+import { MarkdownPanel } from "./markdown-panel";
 import { TriggerMenuOverlay } from "./menu";
 import { Message } from "./message";
 import { Palette } from "./palette";
@@ -85,13 +86,18 @@ export function App({ info }: { info: EngineInfo }) {
             }}
           >
             {items.map((item, i) => (
-              <Message key={i} item={item} />
+              <Message
+                key={i}
+                item={item}
+                streaming={session.working && i === items.length - 1}
+              />
             ))}
           </Box>
           {session.ask && <AskBox ask={session.ask} />}
           {session.working && <WorkingStatus session={session} />}
           <Composer inputRef={input} />
         </Box>
+        {store.markdownDoc && <MarkdownPanel totalWidth={info.width} />}
         <TriggerMenuOverlay info={info} />
         {store.palette && <Palette />}
         {store.settings && <Settings />}

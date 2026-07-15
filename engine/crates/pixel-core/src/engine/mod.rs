@@ -13,6 +13,7 @@ use crate::paint::paint;
 use crate::profiler::{ProfileData, Profiler};
 use crate::scroll::ScrollProfile;
 use crate::scroll::profiles::Smooth;
+use crate::selection::DocSelection;
 use crate::style::{Color, Edges};
 use crate::terminal::{
     Event, KeyEvent, Mouse, MouseButton, MouseKind, Terminal, TerminalColors, Waker,
@@ -250,6 +251,8 @@ pub enum EngineEvent {
         key: Option<String>,
         x: f32,
         y: f32,
+        // byte offset into the node's text at the click point, when it has text
+        offset: Option<usize>,
     },
     ClickOutside {
         view: usize,
@@ -348,6 +351,24 @@ pub enum EngineEvent {
         node: NodeId,
         key: Option<String>,
     },
+    Drag {
+        view: usize,
+        node: NodeId,
+        key: Option<String>,
+        phase: DragPhase,
+        x: f32,
+        y: f32,
+    },
+    // the document selection inside a subscribed container changed; empty
+    // text and parts mean it was cleared. rect is container-relative.
+    Selection {
+        view: usize,
+        node: NodeId,
+        key: Option<String>,
+        text: String,
+        rect: PxRect,
+        parts: Vec<(String, usize, usize)>,
+    },
     Log(logging::LogEntry),
     Profile(ProfileData),
 }
@@ -359,9 +380,17 @@ pub struct FrameStats {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DragPhase {
+    Start,
+    Move,
+    End,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DragTarget {
     Input(NodeId),
     Text,
+    Node(NodeId),
 }
 
 pub struct Engine {
@@ -392,6 +421,7 @@ pub struct Engine {
     emit_logs: bool,
     log_cursor: u64,
     drag: Option<(usize, DragTarget)>,
+    last_selection: Option<(usize, NodeId, crate::selection::DocPos, crate::selection::DocPos, u32)>,
     bar_hover: Option<(usize, NodeId)>,
     bar_drag: Option<(usize, NodeId, f32)>,
     reveal: bool,
@@ -469,6 +499,7 @@ impl Engine {
             emit_logs: false,
             log_cursor: 0,
             drag: None,
+            last_selection: None,
             bar_hover: None,
             bar_drag: None,
             reveal: false,
@@ -1073,7 +1104,90 @@ impl Engine {
             Event::Mouse(mouse) => self.handle_mouse(mouse, out)?,
             Event::ClipboardData { items, ok } => self.handle_clipboard_data(items, ok),
         }
+        self.emit_selection_change(out);
         Ok(())
+    }
+
+    fn emit_selection_change(&mut self, out: &mut Vec<EngineEvent>) {
+        let mut current: Option<(usize, NodeId, DocSelection, u32)> = None;
+        for view in 0..self.comp.views.len() {
+            let tree = &self.comp.views[view].tree;
+            let Some(sel) = tree.doc_selection() else {
+                continue;
+            };
+            if sel.is_collapsed() {
+                continue;
+            }
+            let Some(scope) = tree.doc_scope() else {
+                continue;
+            };
+            let scroll = tree.scroll_state(scope).map_or(0, |s| s.position.to_bits());
+            current = Some((view, scope, sel, scroll));
+            break;
+        }
+        let sig = current
+            .as_ref()
+            .map(|&(view, scope, sel, scroll)| (view, scope, sel.anchor, sel.focus, scroll));
+        if sig == self.last_selection {
+            return;
+        }
+        if let Some((view, container, ..)) = self.last_selection
+            && current.map(|c| (c.0, c.1)) != Some((view, container))
+            && view < self.comp.views.len()
+            && self.comp.views[view].tree.selection_events(container)
+        {
+            out.push(EngineEvent::Selection {
+                view,
+                node: container,
+                key: self.comp.views[view]
+                    .tree
+                    .key_of(container)
+                    .map(str::to_string),
+                text: String::new(),
+                rect: PxRect::ZERO,
+                parts: Vec::new(),
+            });
+        }
+        self.last_selection = sig;
+        let Some((view, scope, ..)) = current else {
+            return;
+        };
+        let tree = &self.comp.views[view].tree;
+        if !tree.selection_events(scope) {
+            return;
+        }
+        let key = tree.key_of(scope).map(str::to_string);
+        // a selection scrolled fully out of view has no snapshot; report it
+        // as cleared so subscribers don't anchor UI to a stale rect
+        let Some(snapshot) = tree.doc_selection_snapshot(&self.fonts) else {
+            out.push(EngineEvent::Selection {
+                view,
+                node: scope,
+                key,
+                text: String::new(),
+                rect: PxRect::ZERO,
+                parts: Vec::new(),
+            });
+            return;
+        };
+        let origin = tree.rect(scope).unwrap_or(PxRect::ZERO);
+        out.push(EngineEvent::Selection {
+            view,
+            node: scope,
+            key,
+            text: snapshot.text,
+            rect: PxRect {
+                x: snapshot.rect.x - origin.x,
+                y: snapshot.rect.y - origin.y,
+                w: snapshot.rect.w,
+                h: snapshot.rect.h,
+            },
+            parts: snapshot
+                .parts
+                .into_iter()
+                .map(|(key, range)| (key, range.start, range.end))
+                .collect(),
+        });
     }
 
     fn handle_key(&mut self, key: KeyEvent, out: &mut Vec<EngineEvent>) -> io::Result<()> {
@@ -1283,6 +1397,18 @@ impl Engine {
                 if self.begin_bar_drag(view, local) {
                     return Ok(());
                 }
+                if let Some(id) = self.comp.views[view].tree.hit_drag(local.0, local.1) {
+                    self.drag = Some((view, DragTarget::Node(id)));
+                    out.push(EngineEvent::Drag {
+                        view,
+                        node: id,
+                        key: self.comp.views[view].tree.key_of(id).map(str::to_string),
+                        phase: DragPhase::Start,
+                        x: local.0,
+                        y: local.1,
+                    });
+                    return Ok(());
+                }
                 let node = match self.comp.views[view].tree.hit_target(local.0, local.1) {
                     Some(HitTarget::Input(id)) => {
                         self.clear_doc_selections(None);
@@ -1311,6 +1437,9 @@ impl Engine {
                         key: self.comp.views[view].tree.key_of(node).map(str::to_string),
                         x: local.0,
                         y: local.1,
+                        offset: self.comp.views[view]
+                            .tree
+                            .offset_at_point(node, local, &self.fonts),
                     });
                 }
             }
@@ -1421,6 +1550,16 @@ impl Engine {
                                 self.comp.views[focus_view].tree.set_focus(None);
                             }
                         }
+                        DragTarget::Node(id) => {
+                            out.push(EngineEvent::Drag {
+                                view,
+                                node: id,
+                                key: self.comp.views[view].tree.key_of(id).map(str::to_string),
+                                phase: DragPhase::Move,
+                                x: local.0,
+                                y: local.1,
+                            });
+                        }
                     }
                 }
             }
@@ -1439,6 +1578,17 @@ impl Engine {
                             self.forward_mouse(view, id, &translated, out)?;
                         }
                         DragTarget::Text => self.comp.views[view].tree.doc_select_up(),
+                        DragTarget::Node(id) => {
+                            let local = self.comp.to_local(view, point);
+                            out.push(EngineEvent::Drag {
+                                view,
+                                node: id,
+                                key: self.comp.views[view].tree.key_of(id).map(str::to_string),
+                                phase: DragPhase::End,
+                                x: local.0,
+                                y: local.1,
+                            });
+                        }
                     }
                 }
             }
@@ -1967,6 +2117,34 @@ impl Engine {
                     max,
                 });
             }
+        }
+    }
+
+    // Scrolls the nearest scrollable ancestor so `id` lands at its top edge.
+    pub fn scroll_into_view(&mut self, view: usize, id: NodeId, smooth: bool) {
+        if view >= self.comp.views.len() {
+            return;
+        }
+        let fonts = &self.fonts;
+        let base_px = self.base_px;
+        self.comp.views[view].tree.flush_layout(fonts, base_px);
+        let tree = &self.comp.views[view].tree;
+        let Some(child) = tree.rect(id) else {
+            return;
+        };
+        let mut current = tree.parent(id);
+        while let Some(ancestor) = current {
+            current = tree.parent(ancestor);
+            let (Some(rect), Some(scroll)) = (tree.rect(ancestor), tree.scroll_state(ancestor))
+            else {
+                continue;
+            };
+            if tree.scroll_max(ancestor) <= 0.0 {
+                continue;
+            }
+            let offset = scroll.position + child.y - rect.y - base_px * 0.5;
+            self.scroll_to(view, ancestor, offset, smooth);
+            return;
         }
     }
 

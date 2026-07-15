@@ -10,6 +10,7 @@ import {
   MarkRef,
   reconciler,
 } from "./reconciler-config";
+import type { SelectionPart } from "./reconciler-config";
 import type { EngineInfo } from "./native";
 import { handleDevtoolsKey } from "./devtools/app";
 import { installConsoleCapture } from "./devtools/console-capture";
@@ -49,12 +50,27 @@ export type {
   ImageAdvancedProps,
   MarkedTextProps,
   ClickEvent,
+  ContainerSelection,
+  DragEvent,
   ScrollEvent,
+  SelectionPart,
   WheelEvent,
 } from "./reconciler-config";
 export type { Color, Edges, InsetEdges, InsetValue, ScrollbarStyle, Style } from "./styles";
-export type { DiffEmphasis, DiffRow, EngineInfo, HighlightSpan, Rgba } from "./native";
-export { HIGHLIGHT_CAPTURES, diff, highlight } from "./native";
+export type {
+  DiffEmphasis,
+  DiffRow,
+  EngineInfo,
+  HighlightSpan,
+  MarkdownBlock,
+  MarkdownCell,
+  MarkdownRow,
+  MarkdownSpan,
+  Rgba,
+} from "./native";
+export { HIGHLIGHT_CAPTURES, diff, highlight, parseMarkdown } from "./native";
+export { Markdown } from "./markdown";
+export type { MarkdownProps, MarkdownTheme } from "./markdown";
 export { openDevtools, closeDevtools, toggleDevtools };
 
 /**
@@ -111,7 +127,7 @@ interface EngineEventJson {
   text?: string;
   key?: string;
   mods?: KeyMods;
-  offset?: number;
+  offset?: number | null;
   max?: number;
   width?: number;
   height?: number;
@@ -130,6 +146,10 @@ interface EngineEventJson {
   deltaX?: number;
   deltaY?: number;
   precise?: boolean;
+  phase?: string;
+  w?: number;
+  h?: number;
+  parts?: unknown[];
   level?: string;
   target?: string;
   stats?: { frameMs: number; fps: number };
@@ -198,7 +218,7 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
     switch (event.type) {
       case "click": {
         const props = bridge.propsById[view]?.get(event.node!);
-        props?.onClick?.({ x: event.x!, y: event.y! });
+        props?.onClick?.({ x: event.x!, y: event.y!, offset: event.offset ?? undefined });
         break;
       }
       case "clickOutside": {
@@ -257,6 +277,27 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
       case "scroll": {
         const props = bridge.propsById[view]?.get(event.node!);
         props?.onScroll?.({ offset: event.offset!, max: event.max! });
+        break;
+      }
+      case "selection": {
+        const props = bridge.propsById[view]?.get(event.node!);
+        props?.onSelection?.({
+          text: event.text ?? "",
+          x: event.x ?? 0,
+          y: event.y ?? 0,
+          w: event.w ?? 0,
+          h: event.h ?? 0,
+          parts: (event.parts ?? []) as SelectionPart[],
+        });
+        break;
+      }
+      case "drag": {
+        const props = bridge.propsById[view]?.get(event.node!);
+        props?.onDrag?.({
+          phase: event.phase as "start" | "move" | "end",
+          x: event.x!,
+          y: event.y!,
+        });
         break;
       }
       case "hoverEnter": {

@@ -29,6 +29,46 @@ export interface HighlightSpan {
   capture: number;
 }
 
+export interface MarkdownSpan {
+  start: number;
+  end: number;
+  bold: boolean;
+  italic: boolean;
+  strikethrough: boolean;
+  code: boolean;
+  link?: string;
+  incompleteLink: boolean;
+}
+
+export interface MarkdownCell {
+  text: string;
+  spans: MarkdownSpan[];
+}
+
+export interface MarkdownRow {
+  cells: MarkdownCell[];
+}
+
+export interface MarkdownBlock {
+  kind: "paragraph" | "heading" | "code" | "rule" | "image" | "table";
+  text: string;
+  spans: MarkdownSpan[];
+  level: number;
+  language: string;
+  closed: boolean;
+  quote: number;
+  listDepth?: number;
+  ordinal?: number;
+  task?: boolean;
+  itemStart: boolean;
+  src: string;
+  rows: MarkdownRow[];
+  aligns: ("left" | "center" | "right" | "none")[];
+  /** byte range of this block in the parsed source */
+  sourceStart: number;
+  sourceEnd: number;
+}
+
 export interface DiffEmphasis {
   start: number;
   end: number;
@@ -50,6 +90,7 @@ const binding = require("../native/pixel.node") as {
   highlight(source: string, language: string): HighlightSpan[];
   highlightCaptures(): string[];
   diff(oldSource: string, newSource: string, contextLines?: number): DiffRow[];
+  parseMarkdown(source: string, streaming?: boolean): MarkdownBlock[];
 };
 
 export function createNativeEngine(): NativeEngine {
@@ -64,4 +105,8 @@ export const HIGHLIGHT_CAPTURES: readonly string[] = binding.highlightCaptures()
 
 export function diff(oldSource: string, newSource: string, contextLines?: number): DiffRow[] {
   return binding.diff(oldSource, newSource, contextLines);
+}
+
+export function parseMarkdown(source: string, streaming?: boolean): MarkdownBlock[] {
+  return binding.parseMarkdown(source, streaming);
 }

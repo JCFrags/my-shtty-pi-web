@@ -34,6 +34,8 @@ impl Desc {
             wheel_events: self.wheel_events,
             hover_events: false,
             outside_click_events: false,
+            drag_events: false,
+            selection_events: false,
             spans: Vec::new(),
         }
     }

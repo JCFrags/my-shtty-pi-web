@@ -1,6 +1,8 @@
 mod diff;
 mod events;
 mod highlight;
+mod markdown;
+mod mend;
 mod ops;
 
 use std::sync::Arc;

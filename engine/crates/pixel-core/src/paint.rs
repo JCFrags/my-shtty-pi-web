@@ -305,25 +305,49 @@ fn paint_node(
                         continue;
                     }
                     let mut x = origin.0;
-                    for (range, segment_color, bold) in
-                        split_by_spans(line.clone(), &node.spans, color)
-                    {
+                    for (range, span) in split_by_spans(line.clone(), &node.spans, color) {
                         let Some(segment) = text.get(range) else {
                             continue;
                         };
-                        canvas.draw_text(font, segment, x as i32, baseline, px, segment_color);
-                        if bold {
+                        let shear = if span.italic { ITALIC_SHEAR } else { 0.0 };
+                        canvas.draw_text_sheared(
+                            font, segment, x as i32, baseline, px, span.color, shear,
+                        );
+                        if span.bold {
                             let offset = (px / 24.0).max(1.0) as i32;
-                            canvas.draw_text(
+                            canvas.draw_text_sheared(
                                 font,
                                 segment,
                                 x as i32 + offset,
                                 baseline,
                                 px,
-                                segment_color,
+                                span.color,
+                                shear,
                             );
                         }
-                        x += measure_text(font, segment, px);
+                        let width = measure_text(font, segment, px);
+                        let thickness = (px / 14.0).max(1.0);
+                        if span.underline {
+                            canvas.fill_rounded_rect(
+                                x,
+                                top + line_metrics.ascent + thickness,
+                                width,
+                                thickness,
+                                [0.0; 4],
+                                span.color,
+                            );
+                        }
+                        if span.strikethrough {
+                            canvas.fill_rounded_rect(
+                                x,
+                                top + line_metrics.ascent - px * 0.28,
+                                width,
+                                thickness,
+                                [0.0; 4],
+                                span.color,
+                            );
+                        }
+                        x += width;
                     }
                 }
             });
@@ -415,11 +439,17 @@ fn fill_bands(canvas: &mut Canvas, bands: &[PxRect], clip: PxRect, color: Color)
     }
 }
 
+const ITALIC_SHEAR: f32 = 0.22;
+
 fn split_by_spans(
     line: Range<usize>,
     spans: &[TextSpan],
     fallback: Color,
-) -> Vec<(Range<usize>, Color, bool)> {
+) -> Vec<(Range<usize>, TextSpan)> {
+    let plain = |color| TextSpan {
+        color,
+        ..TextSpan::default()
+    };
     let mut out = Vec::new();
     let mut at = line.start;
     for span in spans {
@@ -432,13 +462,13 @@ fn split_by_spans(
             continue;
         }
         if start > at {
-            out.push((at..start, fallback, false));
+            out.push((at..start, plain(fallback)));
         }
-        out.push((start..end, span.color, span.bold));
+        out.push((start..end, *span));
         at = end;
     }
     if at < line.end {
-        out.push((at..line.end, fallback, false));
+        out.push((at..line.end, plain(fallback)));
     }
     out
 }
@@ -556,28 +586,31 @@ mod tests {
             start,
             end,
             color: RED,
-            background: None,
-            bold: false,
+            ..TextSpan::default()
         }
+    }
+
+    fn colors(out: &[(Range<usize>, TextSpan)]) -> Vec<(Range<usize>, Color)> {
+        out.iter().map(|(r, s)| (r.clone(), s.color)).collect()
     }
 
     #[test]
     fn no_spans_yields_the_whole_line_in_the_fallback_color() {
         let out = split_by_spans(0..10, &[], FALLBACK);
-        assert_eq!(out, vec![(0..10, FALLBACK, false)]);
+        assert_eq!(colors(&out), vec![(0..10, FALLBACK)]);
     }
 
     #[test]
     fn spans_split_a_line_with_fallback_gaps() {
         let out = split_by_spans(0..10, &[span(2, 4), span(6, 8)], FALLBACK);
         assert_eq!(
-            out,
+            colors(&out),
             vec![
-                (0..2, FALLBACK, false),
-                (2..4, RED, false),
-                (4..6, FALLBACK, false),
-                (6..8, RED, false),
-                (8..10, FALLBACK, false),
+                (0..2, FALLBACK),
+                (2..4, RED),
+                (4..6, FALLBACK),
+                (6..8, RED),
+                (8..10, FALLBACK),
             ]
         );
     }
@@ -586,8 +619,8 @@ mod tests {
     fn spans_clamp_to_the_line_and_ignore_outside_ranges() {
         let out = split_by_spans(5..10, &[span(0, 3), span(4, 7), span(9, 20)], FALLBACK);
         assert_eq!(
-            out,
-            vec![(5..7, RED, false), (7..9, FALLBACK, false), (9..10, RED, false)]
+            colors(&out),
+            vec![(5..7, RED), (7..9, FALLBACK), (9..10, RED)]
         );
     }
 
@@ -595,19 +628,25 @@ mod tests {
     fn overlapping_spans_keep_earlier_coverage() {
         let out = split_by_spans(0..10, &[span(0, 5), span(3, 8)], FALLBACK);
         assert_eq!(
-            out,
-            vec![(0..5, RED, false), (5..8, RED, false), (8..10, FALLBACK, false)]
+            colors(&out),
+            vec![(0..5, RED), (5..8, RED), (8..10, FALLBACK)]
         );
     }
 
     #[test]
-    fn bold_spans_carry_their_flag_through_the_split() {
-        let bold = TextSpan { bold: true, ..span(2, 4) };
-        let out = split_by_spans(0..6, &[bold], FALLBACK);
-        assert_eq!(
-            out,
-            vec![(0..2, FALLBACK, false), (2..4, RED, true), (4..6, FALLBACK, false)]
-        );
+    fn styled_spans_carry_their_flags_through_the_split() {
+        let styled = TextSpan {
+            bold: true,
+            italic: true,
+            underline: true,
+            ..span(2, 4)
+        };
+        let out = split_by_spans(0..6, &[styled], FALLBACK);
+        assert_eq!(out.len(), 3);
+        assert!(!out[0].1.bold && !out[0].1.italic);
+        assert_eq!(out[1].0, 2..4);
+        assert!(out[1].1.bold && out[1].1.italic && out[1].1.underline);
+        assert!(!out[2].1.bold && !out[2].1.underline);
     }
 
     #[test]

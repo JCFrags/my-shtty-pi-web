@@ -28,6 +28,10 @@ pub(crate) trait DocLayout {
     fn visible_rect(&self, id: NodeId) -> Option<PxRect>;
     fn order_of(&self, id: NodeId) -> Option<u32>;
     fn unified_ancestor(&self, id: NodeId) -> Option<NodeId>;
+    // the region a selection stays inside: the nearest scrollable ancestor
+    fn selection_scope(&self, id: NodeId) -> Option<NodeId>;
+    // the scope under a point, from the deepest scrollable containing it
+    fn scope_at(&self, point: (f32, f32)) -> Option<NodeId>;
     fn selection_color_of(&self, id: NodeId) -> Option<Color>;
 }
 
@@ -37,9 +41,14 @@ pub(crate) struct DocSelectionState {
     clicks: ClickTracker,
     selecting: bool,
     goal_x: Option<f32>,
+    scope: Option<NodeId>,
 }
 
 impl DocSelectionState {
+    pub(crate) fn scope(&self) -> Option<NodeId> {
+        self.scope
+    }
+
     pub(crate) fn selection(&self, doc: &impl DocLayout) -> Option<DocSelection> {
         let sel = self.selection?;
         let valid = |pos: DocPos| doc.text_of(pos.node).is_some_and(|t| pos.offset <= t.len());
@@ -67,6 +76,9 @@ impl DocSelectionState {
             return None;
         }
         if id != start.node && id != end.node && !doc.is_text_leaf(id) {
+            return None;
+        }
+        if self.scope.is_some() && doc.selection_scope(id) != self.scope {
             return None;
         }
         let from = if id == start.node { start.offset } else { 0 };
@@ -124,9 +136,11 @@ impl DocSelectionState {
         point: (f32, f32),
         fonts: &[fontdue::Font],
     ) -> bool {
-        let Some(pos) = pos_hit(doc, point, fonts) else {
+        let scope = doc.scope_at(point);
+        let Some(pos) = pos_hit(doc, point, fonts, scope) else {
             return false;
         };
+        self.scope = scope;
         let gesture = ClickGesture::from_count(self.clicks.register(point, Instant::now()));
         let range = {
             let text = doc.text_of(pos.node).unwrap_or_default();
@@ -160,9 +174,11 @@ impl DocSelectionState {
         point: (f32, f32),
         fonts: &[fontdue::Font],
     ) -> bool {
-        let Some(pos) = pos_near(doc, point, fonts, true) else {
+        let scope = doc.scope_at(point);
+        let Some(pos) = pos_near(doc, point, fonts, true, scope) else {
             return false;
         };
+        self.scope = scope;
         self.clicks.register(point, Instant::now());
         self.selection = Some(DocSelection::collapsed(pos));
         self.selecting = true;
@@ -179,7 +195,7 @@ impl DocSelectionState {
         if !self.selecting {
             return false;
         }
-        let Some(pos) = pos_near(doc, point, fonts, true) else {
+        let Some(pos) = pos_near(doc, point, fonts, true, self.scope) else {
             return false;
         };
         if let Some(sel) = &mut self.selection
@@ -217,6 +233,7 @@ impl DocSelectionState {
             },
         });
         self.goal_x = None;
+        self.scope = None;
         true
     }
 
@@ -225,6 +242,7 @@ impl DocSelectionState {
         let changed = self.selection.take().is_some();
         self.selecting = false;
         self.goal_x = None;
+        self.scope = None;
         (had, changed)
     }
 
@@ -368,7 +386,7 @@ impl DocSelectionState {
             } else {
                 rect.y + rect.h + line_h * 0.5
             };
-            match pos_near(doc, (goal_x, y), fonts, false) {
+            match pos_near(doc, (goal_x, y), fonts, false, self.scope) {
                 Some(pos) if pos.node != focus.node => Some(pos),
                 _ => Some(DocPos {
                     node: focus.node,
@@ -482,9 +500,15 @@ fn offset_at(doc: &impl DocLayout, id: NodeId, point: (f32, f32), fonts: &[fontd
     }
 }
 
-fn pos_hit(doc: &impl DocLayout, point: (f32, f32), fonts: &[fontdue::Font]) -> Option<DocPos> {
+fn pos_hit(
+    doc: &impl DocLayout,
+    point: (f32, f32),
+    fonts: &[fontdue::Font],
+    scope: Option<NodeId>,
+) -> Option<DocPos> {
     let id = doc.paint_order().iter().rev().copied().find(|&id| {
         doc.is_text_leaf(id)
+            && (scope.is_none() || doc.selection_scope(id) == scope)
             && doc
                 .visible_rect(id)
                 .is_some_and(|v| v.contains(point.0, point.1))
@@ -500,13 +524,17 @@ fn pos_near(
     point: (f32, f32),
     fonts: &[fontdue::Font],
     clamp_to_ends: bool,
+    scope: Option<NodeId>,
 ) -> Option<DocPos> {
-    if let Some(pos) = pos_hit(doc, point, fonts) {
+    if let Some(pos) = pos_hit(doc, point, fonts, scope) {
         return Some(pos);
     }
     let mut best: Option<(f32, f32, NodeId)> = None;
     for &id in doc.paint_order() {
         if !doc.is_text_leaf(id) {
+            continue;
+        }
+        if scope.is_some() && doc.selection_scope(id) != scope {
             continue;
         }
         let Some(v) = doc.visible_rect(id) else {

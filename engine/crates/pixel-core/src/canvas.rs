@@ -92,7 +92,24 @@ impl Canvas {
         px: f32,
         color: [u8; 4],
     ) {
-        self.draw_marked(font, text, 0..text.len(), x, baseline, px, color, &[]);
+        self.draw_text_sheared(font, text, x, baseline, px, color, 0.0);
+    }
+
+    // Slants glyphs by shifting each pixel row right proportionally to its
+    // height above the baseline — a synthetic oblique, since we only load
+    // regular font faces.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_text_sheared(
+        &mut self,
+        font: &fontdue::Font,
+        text: &str,
+        x: i32,
+        baseline: i32,
+        px: f32,
+        color: [u8; 4],
+        shear: f32,
+    ) {
+        self.draw_marked_sheared(font, text, 0..text.len(), x, baseline, px, color, &[], shear);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -106,6 +123,22 @@ impl Canvas {
         px: f32,
         color: [u8; 4],
         marks: &[Mark],
+    ) {
+        self.draw_marked_sheared(font, text, range, x, baseline, px, color, marks, 0.0);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_marked_sheared(
+        &mut self,
+        font: &fontdue::Font,
+        text: &str,
+        range: std::ops::Range<usize>,
+        x: i32,
+        baseline: i32,
+        px: f32,
+        color: [u8; 4],
+        marks: &[Mark],
+        shear: f32,
     ) {
         let mut pen_x = x as f32;
         GLYPH_CACHE.with_borrow_mut(|cache| {
@@ -128,13 +161,48 @@ impl Canvas {
                     metrics.height,
                     coverage,
                     color,
+                    baseline,
+                    shear,
                 );
                 pen_x += metrics.advance_width;
             }
         });
     }
 
-    fn blend_mask(&mut self, x: i32, y: i32, w: usize, h: usize, mask: &[u8], color: [u8; 4]) {
+    #[allow(clippy::too_many_arguments)]
+    fn blend_mask(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: usize,
+        h: usize,
+        mask: &[u8],
+        color: [u8; 4],
+        baseline: i32,
+        shear: f32,
+    ) {
+        if shear == 0.0 {
+            self.blend_rows(x, y, w, h, mask, color);
+            return;
+        }
+        // Distribute each row's coverage across the two pixels its fractional
+        // offset lands on, so the slant is anti-aliased instead of stepped.
+        let mut sheared = vec![0u8; w + 1];
+        for row in 0..h {
+            let py = y + row as i32;
+            let offset = (baseline - py) as f32 * shear;
+            let whole = offset.floor();
+            let frac = offset - whole;
+            for (i, out) in sheared.iter_mut().enumerate() {
+                let right = if i < w { f32::from(mask[row * w + i]) * (1.0 - frac) } else { 0.0 };
+                let left = if i > 0 { f32::from(mask[row * w + i - 1]) * frac } else { 0.0 };
+                *out = (right + left).round() as u8;
+            }
+            self.blend_rows(x + whole as i32, py, w + 1, 1, &sheared, color);
+        }
+    }
+
+    fn blend_rows(&mut self, x: i32, y: i32, w: usize, h: usize, mask: &[u8], color: [u8; 4]) {
         let (cx1, cy1, cx2, cy2) = self.clip_bounds();
         for row in 0..h {
             let py = y + row as i32;
@@ -429,7 +497,7 @@ mod tests {
     fn blend_mask_full_coverage_replaces_half_blends() {
         let mut canvas = Canvas::new(2, 1);
         canvas.fill([0, 0, 0, 255]);
-        canvas.blend_mask(0, 0, 2, 1, &[255, 128], [200, 100, 50, 255]);
+        canvas.blend_mask(0, 0, 2, 1, &[255, 128], [200, 100, 50, 255], 0, 0.0);
         assert_eq!(&canvas.pixels[0..4], &[200, 100, 50, 255]);
         let half = &canvas.pixels[4..8];
         assert_eq!(half[0], (200 * 128 / 255) as u8);
@@ -441,7 +509,7 @@ mod tests {
         let mut canvas = Canvas::new(4, 1);
         canvas.push_clip(1.0, 0.0, 2.0, 1.0);
         canvas.fill_rect(0, 0, 4, 1, [7, 7, 7, 255]);
-        canvas.blend_mask(0, 0, 4, 1, &[255; 4], [9, 9, 9, 255]);
+        canvas.blend_mask(0, 0, 4, 1, &[255; 4], [9, 9, 9, 255], 0, 0.0);
         assert_eq!(
             &canvas.pixels[0..4],
             &[0, 0, 0, 0],
@@ -565,7 +633,7 @@ mod tests {
     #[test]
     fn blend_mask_clips_out_of_bounds_positions() {
         let mut canvas = Canvas::new(2, 2);
-        canvas.blend_mask(-1, -1, 3, 3, &[255; 9], [10, 20, 30, 255]);
+        canvas.blend_mask(-1, -1, 3, 3, &[255; 9], [10, 20, 30, 255], 0, 0.0);
         assert_eq!(&canvas.pixels[0..4], &[10, 20, 30, 255]);
     }
 }
