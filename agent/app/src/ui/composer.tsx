@@ -36,24 +36,12 @@ export function Composer({ inputRef }: { inputRef: React.RefObject<NodeHandle | 
           }}
         >
           {attached.map((attachment) => (
-            /**
-             * my goal here is to be able to describe the entire life cycle
-             * of attachments
-             * 
-             * when you paste an image what happens?
-             * 
-             * there's a paste event yes?
-             * 
-             * i don't even know the library! we should start there, then we get into attachments, we haven't started at the beginnign
-             */
+
             <Image
               key={attachment.id}
               src={attachment.src}
               style={{
                 height: rem * 8,
-                /**
-                 * what the fuck is a corner radius, thats such a werid api??
-                 */
                 cornerRadius: rem * 0.4,
                 border: { width: Math.max(rem / 16, 1), color: theme.hairline },
               }}
@@ -64,50 +52,7 @@ export function Composer({ inputRef }: { inputRef: React.RefObject<NodeHandle | 
         </Box>
       )}
       <Box style={{ alignItems: "start", padding: rem * 0.75 }}>
-        {/* 
-        
-         
-            okay id like to understand how this works with the new api
-            
-            i don't think its very different, but some new things 
-            are we need to understand where the mapping happens fro the render mark
 
-            and do i understand how the functions get passed through? i think i do but i don't
-            remember the file
-
-            well they are just reacting to an event from the engine
-
-            so it makes sense its the dispatch of where the engine is created which is when the root is created
-
-            i guess if i had a mental model of the initialization this should be trivial to answer
-
-
-            what is my mental model of how the components get defined?
-
-            we have some exported compoennt, and they access a global reference to access the bridge to do things
-
-            and the refs are teh same thing its a definition of the reconciler, which i guess should be part of the root?
-
-            makes sense we just export it from host config
-
-            id rather call it reconciler config
-
-            so right now we're looking for:
-            
-
-            wait no, its probably ops? wait
-
-            okay the input wants to do something, which is render mark, acutally i dont know how this would work its sort of a round trip
-
-            is it? wait no its not even part of the engine its just the components definition 
-
-            makes sense its the same thing as before
-
-
-          the on change is the same but i never actually looked into hte code for hte sync composer marks
-          
-        
-        */}
         <Input
           key={store.composerEpoch}
           ref={inputRef as React.Ref<NodeHandle>}
@@ -118,11 +63,10 @@ export function Composer({ inputRef }: { inputRef: React.RefObject<NodeHandle | 
           renderMark={renderComposerMark}
           serializeMark={(id) => {
             const selection = store.composerSelection(id);
-            if (selection) return JSON.stringify({ v: 1, kind: "selection", ...selection });
+            if (selection) return JSON.stringify({ kind: "selection", ...selection });
             const attachment = store.composerImage(id);
             if (!attachment) return undefined;
             return JSON.stringify({
-              v: 1,
               kind: "image",
               path: attachment.durable ?? attachment.image.path,
             });
@@ -132,40 +76,9 @@ export function Composer({ inputRef }: { inputRef: React.RefObject<NodeHandle | 
             store.syncComposerMarks(change.marks);
             menus.onChange(text, change);
           }}
-          // this seems like a silly api, i think we'd rather want to read the state?
           onCaret={(caret) => menus.onCaret(caret)}
-          /**
-           * on paste image,
-           * 
-           * well when does this event fire, that's quite important
-           * 
-           * if i had to wager in terminal.ts? but i think we use a library? paste.r? 
-           * 
-           * damn had good intuition, it was clipboard image.rs
-           * 
-           * er okay then i guess the paste there is different
-           * 
-           * id like to understand the constraitns and prior art here
-           * why would the terminal give u string data and not the
-           * fucking image data? that seems very odd to me 
-           * 
-           */
           onPasteImage={(image) => {
             const id = store.addComposerImage(image);
-            /**
-             * how does data even flow when we have a ref method exposed?
-             * 
-             * im not 100% sure, but i imagine this correlates to an underlying even that
-             * gets tracked in our UI tree?
-             * 
-             * 
-             * 
-             * still need to understand how the marks work
-             * 
-             * so theres some way ref methods go over the boundary
-             * 
-             * da question is how
-             */
             inputRef.current?.addMark(id);
           }}
           onSubmit={(text, marks) => {

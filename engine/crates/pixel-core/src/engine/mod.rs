@@ -359,8 +359,6 @@ pub enum EngineEvent {
         x: f32,
         y: f32,
     },
-    // the document selection inside a subscribed container changed; empty
-    // text and parts mean it was cleared. rect is container-relative.
     Selection {
         view: usize,
         node: NodeId,

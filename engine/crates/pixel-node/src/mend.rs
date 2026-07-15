@@ -1,9 +1,3 @@
-// Repairs markdown that is still streaming in, so half-typed constructs
-// render as their eventual form instead of flashing literal markers:
-// "**bol" -> "**bol**", "`cod" -> "`cod`", "[text](url" -> a placeholder
-// link. Only the tail of the document (after the last blank line outside
-// code fences) is touched — earlier blocks are already complete, and an
-// unmatched marker there is the author's literal text.
 
 pub const INCOMPLETE_LINK: &str = "#__incomplete__";
 
@@ -11,9 +5,6 @@ pub fn fence_open(source: &str) -> bool {
     scan_lines(source, |_, _| {}).is_some()
 }
 
-// Walks lines tracking fence state, calling `visit(range, in_fence)` per
-// line (fence delimiter lines count as in_fence). Returns the still-open
-// fence at EOF, if any.
 fn scan_lines(
     source: &str,
     mut visit: impl FnMut(std::ops::Range<usize>, bool),
@@ -109,8 +100,6 @@ fn close_inline_code(text: &mut String, mask: &mut Vec<bool>, tail_start: usize)
     for (pos, len) in runs {
         match open {
             None => open = Some((pos, len)),
-            // an opener is only closed by a run of the same length; other
-            // runs are literal content inside the pending code span
             Some((opener, opener_len)) if len == opener_len => {
                 mask[opener..pos + len].fill(true);
                 open = None;
@@ -120,7 +109,6 @@ fn close_inline_code(text: &mut String, mask: &mut Vec<bool>, tail_start: usize)
     }
     if let Some((opener, opener_len)) = open {
         if text[opener + opener_len..].trim().is_empty() {
-            // opener with no content after it yet — hide it this frame
             truncate_trim(text, mask, opener);
         } else {
             mask[opener..].fill(true);
@@ -204,8 +192,6 @@ fn repair_emphasis(text: &mut String, mask: &mut Vec<bool>, tail_start: usize) {
                 if can_open {
                     stack.push((unit, offset, offset + width));
                 } else if next.is_none() {
-                    // a marker run at EOF that neither closes nor opens is a
-                    // delimiter still being typed — hide it this frame
                     strip_at.get_or_insert(offset);
                 }
             }
@@ -220,7 +206,6 @@ fn repair_emphasis(text: &mut String, mask: &mut Vec<bool>, tail_start: usize) {
     let mut closers = String::new();
     while let Some((unit, start, end)) = stack.pop() {
         if closers.is_empty() && text[end.min(text.len())..].trim().is_empty() {
-            // opener with no content after it yet — hide it this frame
             truncate_trim(text, mask, start.min(text.len()));
         } else {
             closers.push_str(&unit);

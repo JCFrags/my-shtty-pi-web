@@ -2,9 +2,9 @@ import { useRef } from "react";
 import { Box, Markdown, Text } from "pixel-react";
 
 import { openLink } from "../links";
-import { menus } from "../menu";
 import { store } from "../session";
 import { markdownTheme, useCtx } from "../theme";
+import { useComposer } from "../hooks/use-composer";
 
 const FONT_MONO = 1;
 
@@ -110,6 +110,7 @@ export function MarkdownPanel({ totalWidth }: { totalWidth: number }) {
 function AddToChat({ panelWidth }: { panelWidth: number }) {
   const { theme, rem } = useCtx();
   const selection = store.panelSelection;
+  const composer = useComposer();
   if (!selection) return null;
   const left = Math.min(Math.max(selection.x, rem * 0.5), Math.max(panelWidth - rem * 11, 0));
   const top = Math.max(selection.y - rem * 2.1, rem * 0.25);
@@ -129,8 +130,8 @@ function AddToChat({ panelWidth }: { panelWidth: number }) {
       onClick={() => {
         const id = store.addPanelSelectionToChat();
         if (id == null) return;
-        menus.input?.addMark(id);
-        menus.input?.focus();
+        composer.current?.addMark(id);
+        composer.current?.focus();
       }}
     >
       <Text style={{ wrap: false }}>Add to chat</Text>

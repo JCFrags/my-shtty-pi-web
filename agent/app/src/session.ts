@@ -475,8 +475,6 @@ class Store {
     return this.composerSelections.get(id);
   }
 
-  // turns the panel selection into a composer mark referencing the source
-  // markdown behind the selected blocks; returns the mark id to insert
   addPanelSelectionToChat(): number | null {
     const doc = this.markdownDoc;
     const selection = this.panelSelection;
@@ -492,7 +490,6 @@ class Store {
     const bytes = Buffer.from(doc.text, "utf8");
     let start = Math.min(...covered.map((b) => b.sourceStart));
     let end = Math.max(...covered.map((b) => b.sourceEnd));
-    // whole lines, so list bullets and quote markers survive
     while (start > 0 && bytes[start - 1] !== 0x0a) start--;
     while (end < bytes.length && bytes[end] !== 0x0a) end++;
     const id = this.nextMarkId++;

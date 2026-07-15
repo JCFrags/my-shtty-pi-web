@@ -3,8 +3,6 @@ use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Par
 
 use crate::mend::{INCOMPLETE_LINK, fence_open, mend};
 
-// Block text is the rendered form of the markdown (markers stripped, escapes
-// resolved), so span offsets index into `text`, not the source.
 #[napi(object)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct MarkdownSpan {
@@ -15,7 +13,6 @@ pub struct MarkdownSpan {
     pub strikethrough: bool,
     pub code: bool,
     pub link: Option<String>,
-    // the link's url is still streaming in: style it, but don't navigate
     pub incomplete_link: bool,
 }
 
@@ -38,19 +35,17 @@ pub struct MarkdownBlock {
     pub kind: String, // paragraph | heading | code | rule | image | table
     pub text: String,
     pub spans: Vec<MarkdownSpan>,
-    pub level: u32,       // heading level, 0 otherwise
-    pub language: String, // code fence info string
-    pub closed: bool,     // false only for a code fence still streaming in
-    pub quote: u32,       // blockquote nesting depth
+    pub level: u32,       
+    pub language: String, 
+    pub closed: bool,     
+    pub quote: u32,       
     pub list_depth: Option<u32>,
-    pub ordinal: Option<u32>, // 1-based number for ordered list items
-    pub task: Option<bool>,   // task list checkbox state
-    pub item_start: bool,     // first block of its list item (owns the marker)
-    pub src: String,          // image source
-    pub rows: Vec<MarkdownRow>, // table rows; the first is the header
-    pub aligns: Vec<String>,    // per-column: left | center | right | none
-    // byte range of this block in the parsed source (the repaired source
-    // when streaming), for mapping rendered blocks back to raw markdown
+    pub ordinal: Option<u32>, 
+    pub task: Option<bool>,   
+    pub item_start: bool,     
+    pub src: String,          
+    pub rows: Vec<MarkdownRow>, 
+    pub aligns: Vec<String>,    
     pub source_start: u32,
     pub source_end: u32,
 }

@@ -16,6 +16,7 @@ import { Palette } from "./palette";
 import { Settings } from "./settings";
 import { Sidebar } from "./sidebar";
 import { AskBox, WorkingStatus } from "./status";
+import { ComposerContext } from "../hooks/use-composer";
 
 export function App({ info }: { info: EngineInfo }) {
   useSyncExternalStore(store.subscribe, store.snapshot);
@@ -66,38 +67,40 @@ export function App({ info }: { info: EngineInfo }) {
         }}
       >
         {store.sidebar && <Sidebar />}
-        <Box style={{ flexDirection: "column", flexGrow: 1, flexBasis: 0, overflow: "hidden" }}>
-          <Header session={session} />
-          <Box
-            ref={list}
-            style={{
-              flexDirection: "column",
-              flexGrow: 1,
-              flexBasis: 0,
-              overflow: "scroll",
-              padding: rem,
-              gap: rem * 0.75,
-              selectionMode: "unified",
-            }}
-            onScroll={(e) => {
-              if (e.offset < lastOffset.current - 1) follow.current = false;
-              if (e.offset >= e.max - 2) follow.current = true;
-              lastOffset.current = e.offset;
-            }}
-          >
-            {items.map((item, i) => (
-              <Message
-                key={i}
-                item={item}
-                streaming={session.working && i === items.length - 1}
-              />
-            ))}
+        <ComposerContext.Provider value={input}>
+          <Box style={{ flexDirection: "column", flexGrow: 1, flexBasis: 0, overflow: "hidden" }}>
+            <Header session={session} />
+            <Box
+              ref={list}
+              style={{
+                flexDirection: "column",
+                flexGrow: 1,
+                flexBasis: 0,
+                overflow: "scroll",
+                padding: rem,
+                gap: rem * 0.75,
+                selectionMode: "unified",
+              }}
+              onScroll={(e) => {
+                if (e.offset < lastOffset.current - 1) follow.current = false;
+                if (e.offset >= e.max - 2) follow.current = true;
+                lastOffset.current = e.offset;
+              }}
+            >
+              {items.map((item, i) => (
+                <Message
+                  key={i}
+                  item={item}
+                  streaming={session.working && i === items.length - 1}
+                />
+              ))}
+            </Box>
+            {session.ask && <AskBox ask={session.ask} />}
+            {session.working && <WorkingStatus session={session} />}
+            <Composer inputRef={input} />
           </Box>
-          {session.ask && <AskBox ask={session.ask} />}
-          {session.working && <WorkingStatus session={session} />}
-          <Composer inputRef={input} />
-        </Box>
-        {store.markdownDoc && <MarkdownPanel totalWidth={info.width} />}
+          {store.markdownDoc && <MarkdownPanel totalWidth={info.width} />}
+        </ComposerContext.Provider>
         <TriggerMenuOverlay info={info} />
         {store.palette && <Palette />}
         {store.settings && <Settings />}

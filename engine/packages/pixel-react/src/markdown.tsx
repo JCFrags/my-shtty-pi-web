@@ -26,14 +26,10 @@ export interface MarkdownProps {
   text: string;
   theme: MarkdownTheme;
   rem: number;
-  /** run the incomplete-markdown repair pass so a half-streamed document renders stably */
   streaming?: boolean;
   monoFont?: number;
-  /** called for clicked links that are not #heading anchors (those scroll internally) */
   onLinkClick?: (href: string) => void;
-  /** tint the blocks covering this source byte range and scroll the first into view */
   highlight?: { start: number; end: number } | null;
-  /** background used for highlighted blocks */
   highlightBg?: Color;
 }
 
@@ -66,7 +62,7 @@ export function Markdown({
     anchors,
     follow: (href) => {
       if (href.startsWith("#")) {
-        anchors.current.get(href.slice(1))?.scrollIntoView(true);
+        anchors.current.get(href.slice(1))?.scrollIntoView(true); // bad api
       } else {
         external.current?.(href);
       }
@@ -78,7 +74,6 @@ export function Markdown({
   useEffect(() => {
     if (highlight != null) firstHighlighted.current?.scrollIntoView(true);
   }, [highlight?.start, highlight?.end, text]);
-  // the first highlighted block per render carries the ref the effect scrolls to
   let highlightSeen = false;
   const blockProps = (block: MarkdownBlock, index: number) => {
     const hit = highlighted(block);
@@ -172,8 +167,6 @@ interface BlockProps {
   highlightRef?: MutableRefObject<NodeHandle | null>;
 }
 
-// `nav` is intentionally excluded from the comparison: Markdown passes a
-// ref-stable object for the life of the component.
 const Block = memo(
   function Block({
     block,
@@ -295,8 +288,6 @@ function spansEqual(a: MarkdownSpan[], b: MarkdownSpan[]): boolean {
   );
 }
 
-// text nodes carry their block index as an id so selection events can be
-// mapped back to blocks (and through sourceStart/sourceEnd to raw markdown)
 function blockId(index: number | undefined): string | undefined {
   return index != null ? `md:${index}` : undefined;
 }
@@ -351,7 +342,6 @@ function BlockBody({ block, theme, rem, monoFont, slug, nav, index }: BlockProps
   }
 }
 
-// resolves a click to the styled span under it; only link spans matter
 function linkClick(spans: MarkdownSpan[], nav?: Nav) {
   if (!nav || !spans.some((s) => s.link)) return undefined;
   return (event: ClickEvent) => {
@@ -381,7 +371,6 @@ function styledSpans(
     strikethrough: s.strikethrough,
   }));
   if (!opts.cover) return styled;
-  // fill gaps so the base style (e.g. heading bold) covers unstyled text too
   const bytes = Buffer.byteLength(text);
   const covered: TextSpan[] = [];
   let at = 0;
@@ -398,7 +387,6 @@ const CELL_JUSTIFY = { left: "start", center: "center", right: "end", none: "sta
 
 function Table({ block, theme, rem, nav, index }: BlockProps) {
   const columns = block.rows[0]?.cells.length ?? 0;
-  // proportional column widths from content length; cells wrap, so rough is fine
   const weights = Array.from({ length: columns }, (_, c) =>
     Math.min(
       42,
