@@ -691,6 +691,7 @@ impl TextInput {
     ) -> InputReply {
         use Granularity::{Char, Line, Word};
         let m = key.mods;
+        let associated = key.text.as_deref();
         let combo = m.ctrl || m.sup;
         let horizontal = if m.alt {
             Word
@@ -804,7 +805,14 @@ impl TextInput {
                 InputReply::Edited
             }
             Key::Char(c) if !m.ctrl && !m.sup && !m.alt && !c.is_control() => {
-                self.insert(c.encode_utf8(&mut [0u8; 4]));
+                match associated {
+                    Some(text) => self.insert(text),
+                    None => self.insert(c.encode_utf8(&mut [0u8; 4])),
+                }
+                InputReply::Edited
+            }
+            Key::Unknown if !m.ctrl && !m.sup && !m.alt && associated.is_some() => {
+                self.insert(associated.unwrap());
                 InputReply::Edited
             }
             _ => InputReply::None,
@@ -1337,7 +1345,12 @@ mod tests {
     use crate::terminal::Mods;
 
     fn key(k: Key, mods: Mods) -> KeyEvent {
-        KeyEvent { key: k, mods }
+        KeyEvent {
+            key: k,
+            mods,
+            kind: crate::terminal::KeyKind::Press,
+            text: None,
+        }
     }
 
     const CTRL: Mods = Mods {
@@ -1411,6 +1424,7 @@ mod tests {
             Mouse {
                 kind,
                 button,
+                mods: Mods::default(),
                 x: (10.0 + x + 0.5) as u32,
                 y: (5.0 + y + 1.0) as u32,
             }

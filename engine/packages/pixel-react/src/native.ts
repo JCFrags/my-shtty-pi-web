@@ -1,6 +1,15 @@
+/**
+ * who implements you
+ */
 export interface NativeEngine {
   info(): string;
   applyOps(ops: string): void;
+  // id is relevant here
+  updateSurface(id: number, bgra: Buffer, width: number, height: number): void;
+  updateSurfaceTexture?(id: number, handle: Buffer): void;
+  removeSurface(id: number): void;
+  surfaceStats(): string;
+  setKeyEventTypes(enabled: boolean): void;
   start(callback: (err: unknown, event: string) => void): void;
   stop(): void;
 }
@@ -86,15 +95,23 @@ export interface DiffRow {
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const binding = require("../native/pixel.node") as {
-  PixelEngine: new () => NativeEngine;
+  PixelEngine: new (tty?: string) => NativeEngine; // we are we callign this native engine wut
   highlight(source: string, language: string): HighlightSpan[];
   highlightCaptures(): string[];
   diff(oldSource: string, newSource: string, contextLines?: number): DiffRow[];
   parseMarkdown(source: string, streaming?: boolean): MarkdownBlock[];
 };
 
-export function createNativeEngine(): NativeEngine {
-  return new binding.PixelEngine();
+export function createNativeEngine(tty?: string): NativeEngine {
+  /**
+   * hm, this feels kinda new
+   * 
+   * why are we passing a tty?
+   * 
+   * wait im looking at the wrong place
+   */
+  const pixelEngine =  new binding.PixelEngine(tty);
+  return pixelEngine
 }
 
 export function highlight(source: string, language: string): HighlightSpan[] {

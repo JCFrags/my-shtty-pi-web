@@ -16,6 +16,8 @@ import type {
   InputProps,
   MarkedTextProps,
   MarkRef,
+  PathProps,
+  SceneProps,
   TextProps,
 } from "./reconciler-config";
 
@@ -26,6 +28,7 @@ export interface NodeHandle {
   scrollTo(offset: number, smooth?: boolean): void;
   scrollIntoView(smooth?: boolean): void;
   splice(start: number, end: number, text: string): void;
+  selectAll(): void;
   addMark(mark: number, offset?: number): void;
   removeMark(mark: number): void;
 }
@@ -34,6 +37,8 @@ type Host<P> = ForwardRefExoticComponent<P & RefAttributes<NodeHandle>>;
 
 export const Box = "box" as unknown as Host<BoxProps>;
 export const Text = "text" as unknown as Host<TextProps>;
+export const Scene = "scene" as unknown as Host<SceneProps>;
+export const Path = "shape-path" as unknown as Host<PathProps>;
 
 function markWidgets(
   marks: readonly MarkRef[],
