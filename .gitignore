@@ -44,3 +44,4 @@ browser/dist/
 cli/dist/
 terminals/dist/
 .claude/worktrees/
+tools/

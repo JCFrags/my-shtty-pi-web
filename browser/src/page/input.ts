@@ -263,6 +263,13 @@ const EDITING_KEY_INFO: Record<string, { key: string; code: string; keyCode: num
   up: { key: "ArrowUp", code: "ArrowUp", keyCode: 38 },
   down: { key: "ArrowDown", code: "ArrowDown", keyCode: 40 },
   a: { key: "a", code: "KeyA", keyCode: 65 },
+  b: { key: "b", code: "KeyB", keyCode: 66 },
+  d: { key: "d", code: "KeyD", keyCode: 68 },
+  e: { key: "e", code: "KeyE", keyCode: 69 },
+  f: { key: "f", code: "KeyF", keyCode: 70 },
+  k: { key: "k", code: "KeyK", keyCode: 75 },
+  u: { key: "u", code: "KeyU", keyCode: 85 },
+  w: { key: "w", code: "KeyW", keyCode: 87 },
   z: { key: "z", code: "KeyZ", keyCode: 90 },
 };
 
@@ -270,13 +277,15 @@ const EDITING_KEY_INFO: Record<string, { key: string; code: string; keyCode: num
  * when the combo is not an editing shortcut and should use the normal path */
 function editingCommands(event: EngineKeyEvent): string[] | null {
   const { key, mods } = event;
-  if (mods.ctrl) return null;
+  if (mods.ctrl) return controlEditingCommands(event);
   const select = mods.shift ? "AndModifySelection" : "";
   if (key === "backspace") {
     if (mods.super) return ["deleteToBeginningOfLine"];
     if (mods.alt) return ["deleteWordBackward"];
     return null;
   }
+  if (key === "b" && mods.alt && !mods.super) return [`moveWordLeft${select}`];
+  if (key === "f" && mods.alt && !mods.super) return [`moveWordRight${select}`];
   if (key === "left" || key === "right") {
     const end = key === "left" ? "moveToLeftEndOfLine" : "moveToRightEndOfLine";
     const word = key === "left" ? "moveWordLeft" : "moveWordRight";
@@ -292,6 +301,36 @@ function editingCommands(event: EngineKeyEvent): string[] | null {
   if (mods.super && !mods.alt && !mods.shift && key === "a") return ["selectAll"];
   if (mods.super && !mods.alt && key === "z") return [mods.shift ? "redo" : "undo"];
   return null;
+}
+
+// Ghostty's default keybinds rewrite cmd+backspace into ctrl+u, cmd+left/right
+// into ctrl+a/ctrl+e, and option+arrows into esc b/f before the engine sees
+// them, so the mac editing combos arrive here as these control keys (mirrors
+// the engine's own text input handling)
+function controlEditingCommands(event: EngineKeyEvent): string[] | null {
+  const { key, mods } = event;
+  if (mods.super || mods.alt) return null;
+  const select = mods.shift ? "AndModifySelection" : "";
+  switch (key) {
+    case "a":
+      return [`moveToLeftEndOfLine${select}`];
+    case "e":
+      return [`moveToRightEndOfLine${select}`];
+    case "b":
+      return [`moveLeft${select}`];
+    case "f":
+      return [`moveRight${select}`];
+    case "d":
+      return ["deleteForward"];
+    case "k":
+      return ["deleteToEndOfLine"];
+    case "w":
+      return ["deleteWordBackward"];
+    case "u":
+      return ["deleteToBeginningOfLine"];
+    default:
+      return null;
+  }
 }
 
 export function electronKey(key: string) {

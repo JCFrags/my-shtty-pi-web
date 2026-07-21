@@ -1,14 +1,12 @@
 import fs from "node:fs";
 import net from "node:net";
-import os from "node:os";
 import path from "node:path";
 
 import { app } from "electron";
 
-import { createSession } from "./session";
-import type { SessionHandle } from "./session";
-
-export const DAEMON_SOCKET = path.join(os.homedir(), ".pixel-browser", "daemon.sock");
+import { DAEMON_SOCKET } from "./paths";
+import { createSession } from "./session/session";
+import type { SessionHandle } from "./session/session";
 
 // how long an empty daemon lingers so quickly reopening a pane skips the
 // electron cold start

@@ -1,12 +1,10 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
-import os from "node:os";
 import path from "node:path";
 
-import type { BrowserState } from "./chrome";
-
-export const REGISTRY_DIR = path.join(os.homedir(), ".pixel-browser", "instances");
+import type { BrowserState } from "./page/types";
+import { INSTANCES_DIR } from "./paths";
 
 export interface InstanceRecord extends BrowserState {
   tabs?: unknown;
@@ -67,9 +65,9 @@ export class Registry {
   constructor(host: ControlHost) {
     this.host = host;
     this.tty = host.tty ?? ownTty();
-    this.file = path.join(REGISTRY_DIR, `${host.key}.json`);
-    this.socketPath = path.join(REGISTRY_DIR, `${host.key}.sock`);
-    fs.mkdirSync(REGISTRY_DIR, { recursive: true });
+    this.file = path.join(INSTANCES_DIR, `${host.key}.json`);
+    this.socketPath = path.join(INSTANCES_DIR, `${host.key}.sock`);
+    fs.mkdirSync(INSTANCES_DIR, { recursive: true });
     fs.rmSync(this.socketPath, { force: true });
     this.server = net.createServer((connection) => this.serve(connection));
     this.server.on("error", () => {});

@@ -1,9 +1,4 @@
-import crypto from "node:crypto";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-
-import { BrowserWindow, net, nativeImage, screen } from "electron";
+import { BrowserWindow, screen } from "electron";
 import type { OffscreenSharedTexture } from "electron";
 import type {
   EngineKeyEvent,
@@ -11,24 +6,18 @@ import type {
   Surface,
   WheelEvent,
 } from "pixel-react";
-import type { BrowserState } from "./chrome";
+import { normalizeUrl, urlHost } from "../url";
+import { FaviconCache } from "./favicon";
 import { PageInput } from "./input";
 import { PopupWindow } from "./popup";
+import { initialBrowserState } from "./types";
+import type { BrowserState, BrowserSurfaceLayout, DeviceSpec } from "./types";
+import { stepZoom } from "./zoom";
+import type { ZoomDirection } from "./zoom";
 
-export interface BrowserSurfaceLayout {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  scale: number;
-}
-
-export interface DeviceSpec {
-  width: number;
-  height: number;
-  userAgent: string;
-}
-
+/** One offscreen chromium window rendering a page into an engine surface:
+ * frames arrive via shared textures, input goes in through PageInput, and
+ * navigation/title/favicon changes come back out as BrowserState updates. */
 export class BrowserController {
   private readonly surface: Surface;
   private readonly popupSurface: Surface;
@@ -43,6 +32,7 @@ export class BrowserController {
   private readonly partition: string | null;
   private pendingPopupSize: { width: number; height: number } | null = null;
   private findText = "";
+  private readonly favicons = new FaviconCache();
   private faviconSeq = 0;
   private cdpAttached = false;
   private emitHandlers = new Map<string, (data: unknown) => void>();
@@ -66,12 +56,9 @@ export class BrowserController {
     initialUrl: string,
     background: string,
     visible: boolean,
-    /**
-     * eh? why are we saying this here, its no longer the case since we have
-     * the reusable daemon (and how is this being used) 
-     */
-    // tools like `pixel code` isolate their page storage from other panes;
-    // chromium hangs IndexedDB opens when sessions share a partition
+    // clients like `pixel code` pass --partition to isolate their page
+    // storage from other panes; chromium hangs IndexedDB opens when separate
+    // sessions share a partition
     partition: string | null,
     onState: (state: BrowserState) => void,
   ) {
@@ -81,22 +68,8 @@ export class BrowserController {
     this.visible = visible;
     this.layout = layout;
     this.onState = onState;
-    /**
-     * what do we mean by scale? how does this change how the browser rasterizes etc
-     * and the operations we do upstream
-     * 
-     * ah this is the flag we pass suka suka
-     */
     this.renderScale = browserRenderScale(layout);
-    this.state = {
-      url: initialUrl,
-      title: "",
-      favicon: null,
-      loading: true,
-      canGoBack: false,
-      canGoForward: false,
-      findMatches: null,
-    };
+    this.state = initialBrowserState(initialUrl);
     const size = this.contentSize(layout);
     this.window = new BrowserWindow({
       width: size.width,
@@ -124,7 +97,6 @@ export class BrowserController {
         backgroundThrottling: false,
       },
     });
-    // interesting
     this.input = new PageInput({
       contents: () => this.window.webContents,
       scale: () => this.layout.scale,
@@ -138,15 +110,9 @@ export class BrowserController {
     // when monitors change, re-apply the rate: chromium rebinds the
     // window's vsync display inside setFrameRate (our electron patch) and
     // frameRate() re-reads the new fastest display
-    /**
-     * interesting api, nice
-     */
     screen.on("display-added", this.onDisplayChange);
     screen.on("display-removed", this.onDisplayChange);
     screen.on("display-metrics-changed", this.onDisplayChange);
-    /**
-     * we will need to change this to pretend to be chromium... potentially...
-     */
     this.defaultUserAgent = this.window.webContents.getUserAgent();
     this.window.webContents.on("paint", (event) => {
       const texture = event.texture;
@@ -157,16 +123,6 @@ export class BrowserController {
       }
       this.submitTexture(texture);
     });
-    /**
-     * i need to be able to answer a question or im kinda just skimming
-     * which isn't interesting
-     * 
-     * there are some unknown unknowns understood by just tracing
-     * 
-     * the napi struct is interesting i think
-     * 
-     * 
-     */
     this.window.webContents.on("did-start-loading", () => this.updateState({ loading: true }));
     this.window.webContents.on("did-stop-loading", () => this.updateNavigation(false));
     this.window.webContents.on("did-navigate", (_event, url) => {
@@ -271,6 +227,12 @@ export class BrowserController {
   reload() {
     if (this.state.loading) this.window.webContents.stop();
     else this.window.webContents.reload();
+  }
+
+  zoom(direction: ZoomDirection): number {
+    const factor = stepZoom(this.window.webContents, direction);
+    this.updateState({ zoom: factor });
+    return factor;
   }
 
   osPid(): number {
@@ -431,50 +393,20 @@ export class BrowserController {
   private submitTexture(texture: OffscreenSharedTexture) {
     try {
       const info = texture.textureInfo;
-      /**
-       * interesting that its lcoal to the current process, i guess thats fine and makes sense, but the way macos unified memory works is unclear to me, and it seems this doens't scale to windows or linux?
-       */
       const handle = info.handle.ioSurface;
       if (info.widgetType !== "frame" || info.pixelFormat !== "bgra" || !handle) return;
-      /**
-       * present?
-       * 
-       * okay we own this, and its napi
-       */
       this.surface.present({ ioSurface: handle });
     } finally {
       texture.release();
     }
   }
 
-  /** Fetch the page's favicon into a local file the engine can decode. The
-   * bytes go through nativeImage when possible (png output); formats it can't
-   * read (ico, svg) are written raw for the engine's decoder to try. */
+  // the seq guard keeps a slow fetch for a previous page from clobbering the
+  // current page's favicon
   private async loadFavicon(urls: string[]) {
-    const url = urls.find((u) => /\.(png|jpe?g|webp)(\?|$)/i.test(u)) ?? urls[0];
-    if (!url) return;
     const seq = ++this.faviconSeq;
-    const dir = path.join(os.homedir(), ".pixel-browser", "favicons");
-    const stem = path.join(dir, crypto.createHash("sha1").update(url).digest("hex").slice(0, 16));
-    try {
-      const cached = [`${stem}.png`, `${stem}.ico`].find((file) => fs.existsSync(file));
-      if (cached) {
-        if (seq === this.faviconSeq) this.updateState({ favicon: cached });
-        return;
-      }
-      const response = await net.fetch(url);
-      if (!response.ok) return;
-      const data = Buffer.from(await response.arrayBuffer());
-      if (data.length === 0) return;
-      fs.mkdirSync(dir, { recursive: true });
-      const decoded = nativeImage.createFromBuffer(data);
-      const file = decoded.isEmpty() ? `${stem}.ico` : `${stem}.png`;
-      await fs.promises.writeFile(
-        file,
-        decoded.isEmpty() ? data : decoded.resize({ width: 32, height: 32 }).toPNG(),
-      );
-      if (seq === this.faviconSeq) this.updateState({ favicon: file });
-    } catch {}
+    const file = await this.favicons.resolve(urls).catch(() => null);
+    if (file && seq === this.faviconSeq) this.updateState({ favicon: file });
   }
 
   private updateNavigation(loading: boolean, url = this.window.webContents.getURL()) {
@@ -483,6 +415,9 @@ export class BrowserController {
       loading,
       canGoBack: this.window.webContents.navigationHistory.canGoBack(),
       canGoForward: this.window.webContents.navigationHistory.canGoForward(),
+      // chromium applies the host's saved zoom on navigation by itself;
+      // reading it back keeps the chrome's zoom chip honest
+      zoom: this.window.webContents.getZoomFactor(),
     });
   }
 
@@ -538,7 +473,6 @@ function frameRate() {
   }
   const fastest = Math.max(
     0,
-    // intersting api i suppose
     ...screen.getAllDisplays().map((display) => display.displayFrequency),
   );
   return fastest > 0 ? Math.min(240, Math.round(fastest)) : 60;
@@ -575,26 +509,4 @@ function cursorShapeFor(type: string): string {
   if (type.endsWith("-panning")) return "all-scroll";
   // pointer, custom, none, null, …
   return "default";
-}
-
-function urlHost(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-}
-
-function normalizeUrl(value: string) {
-  const input = value.trim();
-  if (!input) return "about:blank";
-  try {
-    return new URL(input).toString();
-  } catch {}
-  if (/^[\w.-]+(?::\d+)?(?:\/.*)?$/.test(input)) {
-    const host = input.split(/[:/]/)[0].toLowerCase();
-    const scheme = host === "localhost" || host === "127.0.0.1" ? "http" : "https";
-    return new URL(`${scheme}://${input}`).toString();
-  }
-  return `https://www.google.com/search?q=${encodeURIComponent(input)}`;
 }

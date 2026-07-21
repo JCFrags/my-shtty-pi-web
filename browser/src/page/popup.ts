@@ -2,6 +2,8 @@ import { nativeImage } from "electron";
 import type { BrowserWindow } from "electron";
 import type { Surface } from "pixel-react";
 import { PageInput } from "./input";
+import { stepZoom } from "./zoom";
+import type { ZoomDirection } from "./zoom";
 
 export interface PopupState {
   url: string;
@@ -85,6 +87,10 @@ export class PopupWindow {
 
   close() {
     if (!this.destroyed) this.window.destroy();
+  }
+
+  zoom(direction: ZoomDirection): number {
+    return stepZoom(this.window.webContents, direction);
   }
 
   setVisible(visible: boolean) {
