@@ -11,7 +11,6 @@ export const DEVTOOLS_VIEW = 1;
 export interface ClickEvent {
   x: number;
   y: number;
-  /** byte offset into the node's text at the click point, when the node has text */
   offset?: number;
 }
 
@@ -56,23 +55,19 @@ export interface DragEvent {
   mods: EventMods;
 }
 
-/** Mouse movement over a subscribed node, buttons up or down. View-local pixels. */
 export interface MouseMoveEvent {
   x: number;
   y: number;
 }
 
 export interface SelectionPart {
-  /** the id prop of the text node this slice of the selection covers */
   key: string;
   start: number;
   end: number;
 }
 
-/** empty text and parts mean the selection was cleared */
 export interface ContainerSelection {
   text: string;
-  /** bounding rect of the selection, relative to this container */
   x: number;
   y: number;
   w: number;
@@ -91,14 +86,9 @@ export interface BoxProps {
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
   onMouseMove?: (event: MouseMoveEvent) => void;
-  /** Left-button drag on this node: start on press, move while held, end on release.
-   * Coordinates are view-local pixels. A dragging node opts out of click and text selection. */
   onDrag?: (event: DragEvent) => void;
-  /** document-selection changes whose scope is this scrollable container */
   onSelection?: (selection: ContainerSelection) => void;
   contentHeight?: number;
-  /** paints the latest frame presented to this surface (see
-   * PixelRoot.createSurface) scaled into this node's rect */
   surface?: Surface;
   children?: React.ReactNode;
 }
@@ -114,16 +104,12 @@ export interface PathProps {
   style?: Style;
   id?: string;
   hidden?: boolean;
-  /** absolute-coordinate SVG path data: M, L, Q, C, Z */
   d: string;
   stroke: ShapeStroke;
-  /** path coordinates span this many units per side of the node's box
-   * (an SVG viewBox); omit when coordinates are already pixels */
   viewBox?: number;
   onClick?: (event: ClickEvent) => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
-  /** Left-button drag on this shape, in view-local pixels. */
   onDrag?: (event: DragEvent) => void;
 }
 
@@ -158,9 +144,6 @@ export interface MarkRef {
   data?: string;
 }
 
-/** `clipboard` — the OS clipboard still holds this content; `osc` — bytes came
- * from the terminal over OSC 52 and exist only at `path`; `file` — the paste
- * was text naming an image file on disk. */
 export type PasteSource = "clipboard" | "osc" | "file";
 
 export interface PastedImage {
@@ -201,11 +184,8 @@ export interface InputProps {
   caretColor?: Style["color"];
   selectionColor?: Style["color"];
   autoFocus?: boolean;
-  /** per-range styling over the input's text, e.g. syntax highlighting */
   spans?: TextSpan[];
-  /** wrap-aware line numbers painted right-aligned in the left padding */
   gutter?: InputGutter;
-  /** fills the caret's logical line across the node's full width */
   activeLine?: Color;
   onChange?: (text: string, change: ChangeInfo) => void;
   onCaret?: (caret: CaretInfo) => void;
@@ -307,7 +287,6 @@ export class Bridge {
       const seq = ++this.seq;
       const payload = JSON.stringify({ view, seq, ops });
       const start = performance.timeOrigin + performance.now();
-      // aha pussy
       this.engine.applyOps(payload);
       if (this.onFlush) {
         const dur = performance.timeOrigin + performance.now() - start;
@@ -319,9 +298,6 @@ export class Bridge {
 
 let defaultBridge: Bridge | null = null;
 
-/** The first bridge created in this process. Multi-root processes (the
- * browser daemon) must use per-root/per-instance bridges; this exists for
- * single-root apps and the devtools overlay. */
 export function getBridge(): Bridge {
   if (!defaultBridge) defaultBridge = new Bridge();
   return defaultBridge;

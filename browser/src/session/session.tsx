@@ -27,9 +27,7 @@ import { fetchSuggestions } from "./suggest";
 import { TabManager } from "./tabs";
 
 export interface SessionContext {
-  /** tty path to render on; undefined drives this process's own stdio */
   tty?: string;
-  /** unique per pane: the pid for dedicated processes, pid-N for daemon sessions */
   key: string;
   argv: string[];
   env: NodeJS.ProcessEnv;
@@ -67,7 +65,6 @@ const FONT_CANDIDATES = [
 interface NewTabState {
   query: string;
   suggestions: string[];
-  /** -1 targets the typed query; 0.. target a suggestion */
   index: number;
   seq: number;
   timer: ReturnType<typeof setTimeout> | null;
@@ -82,7 +79,6 @@ class Session {
   private readonly paletteBinding: KeyBinding | null;
   private readonly findBinding: KeyBinding | null;
   private readonly tabs: TabManager;
-  /** rendered until the first tab reports state */
   private readonly fallbackState: BrowserState;
 
   private root: PixelRoot | null = null;
@@ -122,7 +118,6 @@ class Session {
     this.fallbackState = initialBrowserState(this.initialUrl());
     this.tabs = new TabManager(
       {
-        // oh nice
         createController: (url, visible, onState) =>
           new BrowserController(
             this.pageSurface!,
@@ -183,11 +178,6 @@ class Session {
     if (!this.root.sharedTextures) {
       throw new Error("pixel-browser requires the patched Electron with shared texture support");
     }
-    /**
-     * okay so on start we create a surface... which does what?
-     * 
-     * 
-     */
     this.pageSurface = this.root.createSurface();
     this.popupSurface = this.root.createSurface();
     this.recalculateLayout();
@@ -443,9 +433,6 @@ class Session {
       return;
     }
     if (this.browserFocused) {
-      // cmd+v arriving as a key means the terminal had no text to paste
-      // (text pastes come in through onPaste); ask the engine to read the
-      // clipboard for an image, which lands in onPasteImage
       if (isPasteKey(event)) this.root?.requestClipboardImage();
       browser?.key(event);
     }
@@ -465,11 +452,6 @@ class Session {
     this.render();
   }
 
-  /**
-   * why doesn't this work in vscode? can i answer that?
-   */
-  /** mirror the page's css cursor onto the terminal pointer while the mouse is
-   * over the page surface; anywhere else in the chrome shows a plain arrow */
   private syncCursor() {
     const shape = this.pageHover
       ? (this.tabs.activeController?.cursorShape ?? "default")
@@ -728,11 +710,6 @@ class Session {
       .catch(() => { });
   }
   // stupid
-
-  // Pane pixel sizes come from the host terminal, which native terminals
-  // report in device pixels but web-based ones (e.g. localterm) report in CSS
-  // pixels. The override lets those hosts force scale 1 so the page isn't
-  // zoomed 2x.
   private hostDisplayScale() {
     const explicit = Number(this.ctx.env.PIXEL_BROWSER_DISPLAY_SCALE);
     if (Number.isFinite(explicit) && explicit > 0) return explicit;

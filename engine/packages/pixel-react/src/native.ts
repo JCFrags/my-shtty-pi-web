@@ -1,10 +1,6 @@
-/**
- * who implements you
- */
 export interface NativeEngine {
   info(): string;
   applyOps(ops: string): void;
-  // id is relevant here
   updateSurface(id: number, bgra: Buffer, width: number, height: number): void;
   updateSurfaceTexture?(id: number, handle: Buffer): void;
   removeSurface(id: number): void;
@@ -103,13 +99,6 @@ const binding = require("../native/pixel.node") as {
 };
 
 export function createNativeEngine(tty?: string): NativeEngine {
-  /**
-   * hm, this feels kinda new
-   * 
-   * why are we passing a tty?
-   * 
-   * wait im looking at the wrong place
-   */
   const pixelEngine =  new binding.PixelEngine(tty);
 
   return pixelEngine

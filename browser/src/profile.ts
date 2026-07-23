@@ -4,11 +4,7 @@ import path from "node:path";
 
 import { app } from "electron";
 
-/** Chromium profiles are single-process: concurrent instances sharing one
- * userData dir corrupt and deadlock the LevelDB stores (IndexedDB, Local
- * Storage — youtube's icons hang on a wedged IndexedDB, for example). Each
- * instance claims the first profile dir whose lock holder is gone; the first
- * instance keeps the original dir so logins survive. */
+// er i don't think this is necessary anymore given our daemon but i guess it doesn't hurt to be explicit 
 export function claimProfile() {
   const appData = process.env.PIXEL_BROWSER_APPDATA ?? app.getPath("appData");
   for (let i = 0; i < 32; i++) {

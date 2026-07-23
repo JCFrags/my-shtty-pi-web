@@ -2,7 +2,6 @@ import type { EngineKeyEvent, KeyMods } from "pixel-react";
 
 export type KeyBinding = KeyMods & { key: string };
 
-/** parses a "cmd+shift+f" style spec; "none" disables the binding */
 export function parseKeyBinding(spec: string): KeyBinding | null {
   if (spec === "none") return null;
   const parts = spec.toLowerCase().split("+");

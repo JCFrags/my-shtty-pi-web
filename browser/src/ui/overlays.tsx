@@ -87,7 +87,6 @@ function FindButton({
   );
 }
 
-/** transient bubble flashing the new zoom factor after a cmd+/- press */
 export function ZoomHud({
   factor,
   layout,

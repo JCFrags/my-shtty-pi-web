@@ -7,7 +7,6 @@ export interface PaletteView {
 
 export interface NewTabView {
   suggestions: string[];
-  /** -1 highlights the typed query itself */
   index: number;
 }
 
@@ -33,7 +32,6 @@ export interface DeviceView {
   island: DeviceRect | null;
 }
 
-/** width/height are engine pixels, already clamped to fit the page area */
 export interface PopupView {
   title: string;
   host: string;
@@ -77,7 +75,6 @@ export interface ChromeLayout {
   height: number;
   toolbarHeight: number;
   contentHeight: number;
-  /** where the page surface sits, inset from the edges so its frame shows */
   page: { x: number; y: number; width: number; height: number };
   rem: number;
 }

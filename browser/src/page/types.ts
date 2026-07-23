@@ -1,4 +1,3 @@
-// why are we here?
 export interface BrowserState {
   url: string;
   title: string;
@@ -7,7 +6,6 @@ export interface BrowserState {
   canGoBack: boolean;
   canGoForward: boolean;
   findMatches: { active: number; total: number } | null;
-  /** browser zoom factor for the page's host, 1 = 100% */
   zoom: number;
 }
 
@@ -25,8 +23,6 @@ export function initialBrowserState(url: string): BrowserState {
   };
 }
 
-/** Where the page surface sits in the pane, in engine pixels; scale is the
- * device scale the page renders at (css px * scale = engine px). */
 export interface BrowserSurfaceLayout {
   x: number;
   y: number;

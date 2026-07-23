@@ -144,8 +144,6 @@ on run argv
 end run
 `;
 
-// the split direction is an AppleScript enum keyword, not a string — it can't
-// arrive through argv, it has to be baked into the script text
 const splitScript = (direction: Direction) => `
 on run argv
   set marker to item 1 of argv
@@ -174,8 +172,6 @@ function osascript(script: string, args: string[]): string {
       input: script,
       maxBuffer: 4 * 1024 * 1024,
       timeout: 8000,
-      // failed attempts inside withMarkedPane's retry loop are routine;
-      // inherited stderr would print their AppleScript errors to the caller
       stdio: ["pipe", "pipe", "pipe"],
     });
   } catch (error) {
@@ -265,10 +261,6 @@ export const ghostty: Backend = {
     }
     return false;
   },
-  /** The pane is resolved to an id up front (its title marker vanishes once
-   * the process exits) and closed by a detached osascript that outlives the
-   * caller; closing after the process exits means Ghostty sees no running
-   * process and skips its close confirmation. */
   async closePane(titleNeedle) {
     let id: string;
     try {

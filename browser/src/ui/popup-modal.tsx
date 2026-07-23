@@ -5,7 +5,6 @@ import { Icon } from "./icons";
 import type { Theme } from "./theme";
 import type { ChromeActions, ChromeLayout, PopupView } from "./types";
 
-// need to see this in action havne't yet
 export function PopupModal({
   view,
   actions,

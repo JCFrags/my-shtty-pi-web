@@ -8,8 +8,7 @@ import { DAEMON_SOCKET } from "pixel-store";
 import { createSession } from "./session/session";
 import type { SessionHandle } from "./session/session";
 
-// how long an empty daemon lingers so quickly reopening a pane skips the
-// electron cold start
+// what
 const IDLE_EXIT_MS = 15_000;
 
 interface OpenRequest {
@@ -28,9 +27,6 @@ export function buildStamp(): string {
   }
 }
 
-/** One electron process serving every pane: clients hand over their tty path
- * and get a session rendered onto it. The connection is the session's
- * lifeline — when the client (the pane process) dies, the session closes. */
 export async function runDaemon(cdpPort: number | null): Promise<void> {
   if (await socketAlive()) {
     process.stderr.write("pixel-browser daemon already running\n");
@@ -80,7 +76,6 @@ export async function runDaemon(cdpPort: number | null): Promise<void> {
           if (message.build && message.build !== build) {
             reply({ ok: false, error: "stale" });
             connection.end();
-            // a rebuilt client should get a fresh daemon; step aside when idle
             if (sessions.size === 0) app.exit(0);
             return;
           }

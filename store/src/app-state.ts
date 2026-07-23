@@ -1,5 +1,6 @@
 import { store } from "./client";
 
+// why are we using raw sql here?
 function getAppState(key: string): string | null {
   const row = store()
     .sqlite.prepare("SELECT value FROM app_state WHERE key = ?")

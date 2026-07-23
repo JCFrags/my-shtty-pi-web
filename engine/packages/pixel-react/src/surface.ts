@@ -1,23 +1,11 @@
 import type { NativeEngine } from "./native";
 
-/** One frame of surface content: either a CPU pixel buffer, or the IOSurface
- * handle Electron exposes on shared-texture paint events (macOS only). */
-/**
- * fixme: add node types
- */
 export type SurfaceFrame =
-  | { bgra: Buffer; width: number; height: number }
+  | { bgra: Buffer; width: number; height: number } // i think we want to kilt the case of passing the raw pixels to react, there's never a case that I know of
   | { ioSurface: Buffer };
 
-/** Streams client-rendered pixels into the engine. Create with
- * `root.createSurface()`, pass to a Box's `surface` prop to paint the latest
- * frame scaled into that node's rect, and `close()` when done — unmounting
- * the Box releases the placement but not the pixel buffer. */
 export class Surface {
   private readonly id: number;
-  /**
-   * what the shit is a native engine
-   */
   private readonly engine: NativeEngine;
   private closed = false;
 
@@ -26,19 +14,6 @@ export class Surface {
     this.id = id;
   }
 
-  /**
-   * 
-   * what is this abstraction??
-   * 
-   * hm
-   * 
-   * i need a good mental model at least of how we go from asking for a surface
-   * to how that identifies pixels and how those get written back to the slot the box wants
-   * 
-   * 
-   * 
-   * presenting is the place that makes the most sense for <some tab is created> kashira?
-   */
   present(frame: SurfaceFrame): void {
     if (this.closed) throw new Error("surface is closed");
     if ("ioSurface" in frame) {
@@ -50,9 +25,7 @@ export class Surface {
     }
   }
 
-  /** Drops the current frame; nodes referencing this surface paint nothing
-   * until the next present. Use when the content resizes and a stale frame
-   * would show scaled. */
+  // todo: look into electron unhandled error
   clear(): void {
     if (this.closed) return;
     this.engine.removeSurface(this.id);

@@ -4,7 +4,6 @@ import { mix } from "./theme";
 import type { Theme } from "./theme";
 import type { ChromeActions, ChromeLayout, DeviceView } from "./types";
 
-/** phone/tablet emulation: the page surface inside a drawn device shell */
 export function DeviceFrame({
   device,
   layout,

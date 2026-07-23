@@ -164,7 +164,6 @@ function Toolbar({
   );
 }
 
-// why is this called page view
 function BrowserTabContents({
   layout,
   theme,

@@ -7,9 +7,6 @@ import type { Theme } from "./theme";
 import type { ChromeActions, ChromeLayout, NewTabView, PaletteView } from "./types";
 
 function Backdrop({ layout, onClose }: { layout: ChromeLayout; onClose(): void }) {
-  /**
-   * does the layout tree generated get transformed into pain order? hm
-   */
   return (
     <Box
       style={{
@@ -23,7 +20,6 @@ function Backdrop({ layout, onClose }: { layout: ChromeLayout; onClose(): void }
   );
 }
 
-/** shared shell for the centered cards that drop below the toolbar */
 function ModalCard({
   layout,
   theme,

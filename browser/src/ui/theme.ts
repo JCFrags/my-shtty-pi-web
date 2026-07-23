@@ -9,7 +9,6 @@ export interface Theme {
   field: Rgba;
   fieldBorder: Rgba;
   hover: Rgba;
-  /** hover for targets nested inside an already-hovered row */
   hoverStrong: Rgba;
   hairline: Rgba;
   selection: Rgba;

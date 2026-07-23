@@ -12,8 +12,6 @@ interface TabEntry {
   ghost: boolean;
 }
 
-/** widths tween toward their targets so tabs grow in, shrink out, and resize
- * smoothly; closed tabs linger as ghosts until they finish shrinking */
 function useAnimatedTabs(tabs: TabRow[], targetFor: (tab: TabRow) => number): TabEntry[] {
   const ref = useRef<{
     entries: Map<number, TabEntry>;

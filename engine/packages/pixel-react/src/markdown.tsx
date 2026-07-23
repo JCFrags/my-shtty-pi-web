@@ -398,10 +398,7 @@ function Table({ block, theme, rem, nav, index }: BlockProps) {
     <Box
       style={{
         flexDirection: "column",
-        // square corners: a hairline frame composes cleanly with the row
-        // fills, where a rounded stroke leaves an aliased seam at the curve
         border: { width: 1, color: theme.separator },
-        // keep row backgrounds inside the 1px border instead of over it
         padding: 1,
         overflow: "hidden",
       }}

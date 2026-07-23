@@ -1,4 +1,3 @@
-/** search suggestions from google's chrome-client endpoint */
 export async function fetchSuggestions(query: string, limit = 6): Promise<string[]> {
   const url = `https://suggestqueries.google.com/complete/search?client=chrome&q=${encodeURIComponent(query)}`;
   const body = await (await fetch(url)).text();

@@ -29,9 +29,6 @@ export interface SessionLayout {
   device: DeviceView | null;
 }
 
-/** Splits the pane into toolbar and page area, in engine pixels. In device
- * emulation the page shrinks to a drawn phone/tablet shell, so the surface
- * rect and its scale come from fitting the device's aspect ratio. */
 export function computeLayout(
   info: EngineInfo,
   scale: number,
@@ -49,7 +46,6 @@ export function computeLayout(
     height: info.height,
     toolbarHeight,
     contentHeight: Math.max(1, info.height - toolbarHeight),
-    // flush on top; the host chrome provides that spacing
     page: {
       x: padLeft,
       y: toolbarHeight,

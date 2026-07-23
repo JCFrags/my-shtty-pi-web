@@ -1,8 +1,6 @@
 import { Path } from "pixel-react";
 import type { Rgba } from "pixel-react";
 
-/** approximates a circular arc with cubic segments; angles in degrees, y-down,
- * 0° = right, 90° = down */
 function arcPath(cx: number, cy: number, r: number, fromDeg: number, toDeg: number): string {
   const rad = (deg: number) => (deg * Math.PI) / 180;
   const segments = Math.max(1, Math.ceil(Math.abs(toDeg - fromDeg) / 90));
@@ -24,7 +22,6 @@ function arcPath(cx: number, cy: number, r: number, fromDeg: number, toDeg: numb
   return path;
 }
 
-/** stroked icon paths in a 24-unit viewbox */
 export const ICONS = {
   back: "M 14.5 5.5 L 8 12 L 14.5 18.5",
   forward: "M 9.5 5.5 L 16 12 L 9.5 18.5",

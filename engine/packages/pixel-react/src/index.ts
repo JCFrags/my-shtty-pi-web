@@ -148,18 +148,11 @@ export interface RootOptions {
   onResize?: (size: { width: number; height: number; basePx: number }) => void;
   keyEventTypes?: boolean;
   devtools?: boolean;
-  /** drive this tty instead of the process's stdio; each createRoot call
-   * with a tty gets its own engine, so one process can host many panes */
   tty?: string;
 }
 
 export interface PixelRoot {
   info: EngineInfo;
-  /**
-   * hm
-   */
-  /** whether this platform can present IOSurface frames (Surface.present
-   * with `ioSurface`) — decides Electron's `offscreen.useSharedTexture` */
   sharedTextures: boolean;
   render(element: ReactNode): void;
   registerFont(path: string): Promise<number>;
@@ -168,11 +161,7 @@ export interface PixelRoot {
   stop(): void;
   openDevtools(): void;
   closeDevtools(): void;
-  /**
-   * well why not?
-   */
-  /** re-check the tty size now — daemon roots never see SIGWINCH or
-   * process.stdout resize events, the client tells them instead */
+  // nudge resize sounds like a ridiculous api
   nudgeResize(): void;
   setPointerShape(shape: string): void;
   setKeyCapture(keys: string[]): void;
@@ -244,9 +233,6 @@ interface EngineEventJson {
 
 export function createRoot(options: RootOptions = {}): PixelRoot {
   const bridge = options.tty ? new Bridge(options.tty) : getBridge();
-  // the devtools overlay (stores, engineOp, mountDevtools) is a process-wide
-  // singleton wired to the default bridge, so in a multi-root process only
-  // the root that owns that bridge can host it
   const devtoolsEnabled = options.devtools !== false && bridge === getBridge();
   if (devtoolsEnabled) {
     installConsoleCapture();
@@ -444,9 +430,6 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
         if (view === DEVTOOLS_VIEW) {
           handleDevtoolsKey(event.key!);
         } else {
-          /**
-           * wait i dont get whats going on here when is onchange called?  f
-           */
           options.onKey?.({
             key: event.key!,
             kind: event.kind as "press" | "repeat" | "release",
@@ -583,12 +566,6 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
       self: actualDuration,
     });
   };
-/**
- * i guess what im interested in is where we actually copy the pixels 
- * 
- * 
- * wait actually we are kinda in an interesting location?
- */
 
   let nextSurfaceId = 1;
 
@@ -599,7 +576,6 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
       const wrapped = devtoolsEnabled
         ? createElement(ReactProfiler, { id: "pixel-app", onRender: onAppRender }, element)
         : element;
-        // update container? hm prob not
       reconciler.updateContainer(wrapped, root, null, null);
     },
     registerFont(path: string) {
@@ -617,9 +593,6 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
       });
     },
     createSurface() {
-      // oh facts? whats going on here
-
-      // okay some interesting path, does that impl somebody is calling 
       return new Surface(bridge.engine, nextSurfaceId++);
     },
     surfaceStats() {

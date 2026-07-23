@@ -10,9 +10,7 @@ import type { BrowserState } from "./page/types";
 import { INSTANCES_DIR } from "pixel-store";
 
 export interface ControlHost {
-  /** unique per pane: the pid for dedicated processes, pid-session for daemon sessions */
   key: string;
-  /** the pane's tty; null falls back to walking this process's ancestry */
   tty: string | null;
   state(): BrowserState;
   openTab(url?: string): void;

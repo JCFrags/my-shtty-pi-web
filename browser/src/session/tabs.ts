@@ -90,11 +90,6 @@ export class TabManager {
   }
 
   activate(id: number) {
-    // now what are we doing here
-
-/**
- * and what is a host
- */
     const tab = this.tabs.find((t) => t.id === id);
     if (!tab) return;
     if (this.activeId !== id) {
