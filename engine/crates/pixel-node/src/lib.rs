@@ -111,17 +111,17 @@ impl PixelEngine {
             tty,
         })
         .map_err(err)?;
-        let waker = engine.waker().map_err(err)?;
-        engine.cpu_throttle().register_current_thread();
-        let (width, height) = engine.window_px();
-        let (cell_w, cell_h) = engine.cell_px();
+        let waker = engine.term.waker().map_err(err)?;
+        engine.cpu_throttle.register_current_thread();
+        let (width, height) = engine.comp.window;
+        let (cell_w, cell_h) = engine.cell;
         let info = json!({
             "width": width,
             "height": height,
             "cellWidth": cell_w,
             "cellHeight": cell_h,
-            "basePx": engine.base_px(),
-            "colors": colors_json(engine.colors()),
+            "basePx": engine.base_px,
+            "colors": colors_json(&engine.colors),
         })
         .to_string();
         let (tx, rx) = channel();
@@ -131,6 +131,7 @@ impl PixelEngine {
             tx,
             rx: Some(rx),
             waker,
+            // who even uses you tho
             surfaces: Arc::new(SurfaceMailbox::default()),
             stop: Arc::new(AtomicBool::new(false)),
             thread: None,
@@ -167,6 +168,7 @@ impl PixelEngine {
             .ok_or_else(|| Error::from_reason("surface dimensions overflow"))?;
         self.surfaces
             .submit(SurfaceSubmission {
+                // no that makes no sense we wouldn't be passing pixels
                 id,
                 bgra: bgra.as_ref(),
                 width,
@@ -178,6 +180,20 @@ impl PixelEngine {
         Ok(())
     }
 
+/*
+
+hm that's not super clear to me
+
+well whats a surface frame?
+
+well no that makes sense, its not about a tab (is it)
+
+wait yes it is, id expect a surface per tab
+
+i ca look into the tab registry perchance?
+
+
+*/
     #[cfg(target_os = "macos")]
     #[napi]
     pub fn update_surface_texture(&self, id: u32, handle: Buffer) -> Result<()> {
@@ -223,7 +239,7 @@ impl PixelEngine {
             .engine
             .as_mut()
             .ok_or_else(|| Error::from_reason("key reporting must be configured before start"))?;
-        engine.set_key_event_types(enabled).map_err(err)
+        engine.term.set_key_event_types(enabled).map_err(err)
     }
 
     #[napi]
@@ -247,9 +263,9 @@ impl PixelEngine {
             let cell = cell;
             let mut engine = cell.0;
             engine.set_default_menu(true);
-            engine.set_emit_logs(true);
-            let mut ids: Vec<IdMap> = (0..engine.view_count())
-                .map(|view| IdMap::new(engine.view_tree(view).expect("view exists").root()))
+            engine.emit_logs = true;
+            let mut ids: Vec<IdMap> = (0..engine.comp.views.len())
+                .map(|view| IdMap::new(engine.comp.views[view].tree.root()))
                 .collect();
             let exit_error = loop {
                 let events = match engine.pump(None) {
@@ -274,6 +290,20 @@ impl PixelEngine {
                     }
                 }
                 let mut surface_error = None;
+                // how is this getting read?
+
+                // how is surfaces getting written to?
+                // probably a submit step kashira?
+                // oh okay u loop over all the surfaces that get submitted by react
+                // which is information about an offscreen browser window
+                // and that tells the engine to draw the surface
+                /*
+                wait this is a little confusing, so this loops over it once at startup? 
+
+                is there a while loop?
+
+                hm, this feels weird its out of the engine ticks
+                 */
                 for command in surfaces.take() {
                     match command {
                         SurfaceCommand::Frame(frame) => {
@@ -290,6 +320,7 @@ impl PixelEngine {
                             }
                         }
                         SurfaceCommand::Remove(id) => {
+                            // what does it mean to remove?
                             if let Err(error) = engine.delete_surface(id) {
                                 surface_error = Some(error.to_string());
                                 break;

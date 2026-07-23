@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "pixel-store": "workspace:*",
     "pixel-terminals": "workspace:*"
   },
   "devDependencies": {

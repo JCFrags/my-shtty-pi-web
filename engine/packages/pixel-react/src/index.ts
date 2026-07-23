@@ -11,7 +11,7 @@ import {
   MarkRef,
   reconciler,
 } from "./reconciler-config";
-import type { PastedImage, SelectionPart } from "./reconciler-config";
+import type { PasteSource, PastedImage, SelectionPart } from "./reconciler-config";
 import type { EngineInfo } from "./native";
 import { Surface } from "./surface";
 import { handleDevtoolsKey } from "./devtools/app";
@@ -44,7 +44,6 @@ export {
   Input,
   Image,
   MarkedText,
-  Scene,
   Path,
 } from "./components";
 export type { NodeHandle } from "./components";
@@ -57,6 +56,7 @@ export type {
   InputGutter,
   InputProps,
   MarkRef,
+  PasteSource,
   PastedImage,
   CaretInfo,
   ChangeInfo,
@@ -73,8 +73,6 @@ export type {
   SelectionPart,
   WheelEvent,
   PointerEvent,
-  Camera,
-  SceneProps,
   ShapeStroke,
   PathProps,
 } from "./reconciler-config";
@@ -245,12 +243,15 @@ interface EngineEventJson {
 }
 
 export function createRoot(options: RootOptions = {}): PixelRoot {
-  const devtoolsEnabled = options.devtools !== false;
+  const bridge = options.tty ? new Bridge(options.tty) : getBridge();
+  // the devtools overlay (stores, engineOp, mountDevtools) is a process-wide
+  // singleton wired to the default bridge, so in a multi-root process only
+  // the root that owns that bridge can host it
+  const devtoolsEnabled = options.devtools !== false && bridge === getBridge();
   if (devtoolsEnabled) {
     installConsoleCapture();
     installFiberHook();
   }
-  const bridge = options.tty ? new Bridge(options.tty) : getBridge();
   const info = JSON.parse(bridge.engine.info()) as EngineInfo;
   bridge.engine.setKeyEventTypes(!!options.keyEventTypes);
   const container: Container = { bridge, view: APP_VIEW, children: [] };
@@ -348,6 +349,7 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
           path: event.path!,
           width: event.width!,
           height: event.height!,
+          source: event.source as PasteSource,
         };
         const props = bridge.propsById[view]?.get(event.node!);
         if (props?.onPasteImage) {
@@ -597,6 +599,7 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
       const wrapped = devtoolsEnabled
         ? createElement(ReactProfiler, { id: "pixel-app", onRender: onAppRender }, element)
         : element;
+        // update container? hm prob not
       reconciler.updateContainer(wrapped, root, null, null);
     },
     registerFont(path: string) {
@@ -614,6 +617,9 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
       });
     },
     createSurface() {
+      // oh facts? whats going on here
+
+      // okay some interesting path, does that impl somebody is calling 
       return new Surface(bridge.engine, nextSurfaceId++);
     },
     surfaceStats() {

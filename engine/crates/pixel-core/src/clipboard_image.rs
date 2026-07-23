@@ -1,11 +1,19 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PasteSource {
+    Clipboard,
+    Osc,
+    File,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PastedImage {
     pub path: String,
     pub width: u32,
     pub height: u32,
+    pub source: PasteSource,
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
@@ -26,12 +34,13 @@ fn dims(path: &Path) -> Option<(u32, u32)> {
         .ok()
 }
 
-fn from_file(path: &Path) -> Option<PastedImage> {
+fn from_file(path: &Path, source: PasteSource) -> Option<PastedImage> {
     let (width, height) = dims(path)?;
     Some(PastedImage {
         path: path.to_string_lossy().into_owned(),
         width,
         height,
+        source,
     })
 }
 
@@ -46,7 +55,7 @@ pub(crate) enum WorkerPaste {
 pub(crate) fn read_for_worker() -> Option<WorkerPaste> {
     let mut clipboard = arboard::Clipboard::new().ok()?;
     if let Ok(files) = clipboard.get().file_list()
-        && let Some(pasted) = files.iter().find_map(|f| from_file(f))
+        && let Some(pasted) = files.iter().find_map(|f| from_file(f, PasteSource::Clipboard))
     {
         return Some(WorkerPaste::File(pasted));
     }
@@ -58,12 +67,10 @@ pub(crate) fn read_for_worker() -> Option<WorkerPaste> {
     )?;
     let (width, height) = rgba.dimensions();
     let pasted = PastedImage {
-        /**
-         * why are we putting it in a tmp file anyways?
-         */
         path: temp_path("png").to_string_lossy().into_owned(),
         width,
         height,
+        source: PasteSource::Clipboard,
     };
     Some(WorkerPaste::Bitmap { pasted, rgba })
 }
@@ -88,7 +95,7 @@ pub fn image_path_from_paste(text: &str) -> Option<PastedImage> {
     if !path.is_file() {
         return None;
     }
-    from_file(&path)
+    from_file(&path, PasteSource::File)
 }
 
 fn unescape(s: &str) -> String {

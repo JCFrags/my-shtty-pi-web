@@ -5,7 +5,7 @@ import path from "node:path";
 import { app } from "electron";
 
 import { runDaemon } from "./daemon";
-import { LOGS_DIR } from "./paths";
+import { LOGS_DIR, ensureDataDir } from "pixel-store";
 import { claimProfile } from "./profile";
 import { createSession } from "./session/session";
 import type { SessionHandle } from "./session/session";
@@ -14,6 +14,7 @@ app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("disable-background-timer-throttling");
 app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
 try {
+  ensureDataDir();
   fs.mkdirSync(LOGS_DIR, { recursive: true });
 } catch {}
 app.commandLine.appendSwitch("enable-logging", "file");

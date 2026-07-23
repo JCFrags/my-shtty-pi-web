@@ -1,53 +1,4 @@
 use crate::style::Color;
-use crate::tree::PxRect;
-
-// World point at the scene's top-left corner, plus scale. screen = origin + (world - camera) * zoom.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Camera {
-    pub x: f32,
-    pub y: f32,
-    pub zoom: f32,
-}
-
-impl Default for Camera {
-    fn default() -> Self {
-        Self {
-            x: 0.0,
-            y: 0.0,
-            zoom: 1.0,
-        }
-    }
-}
-
-impl Camera {
-    pub fn to_screen(&self, origin: (f32, f32), wx: f32, wy: f32) -> (f32, f32) {
-        (
-            origin.0 + (wx - self.x) * self.zoom,
-            origin.1 + (wy - self.y) * self.zoom,
-        )
-    }
-
-    pub fn rect_to_screen(&self, origin: (f32, f32), r: PxRect) -> PxRect {
-        let (x, y) = self.to_screen(origin, r.x, r.y);
-        PxRect {
-            x,
-            y,
-            w: r.w * self.zoom,
-            h: r.h * self.zoom,
-        }
-    }
-
-    pub(crate) fn transform(&self, origin: (f32, f32)) -> tiny_skia::Transform {
-        tiny_skia::Transform::from_row(
-            self.zoom,
-            0.0,
-            0.0,
-            self.zoom,
-            origin.0 - self.x * self.zoom,
-            origin.1 - self.y * self.zoom,
-        )
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LineCap {
@@ -82,54 +33,13 @@ pub enum PathCmd {
     Close,
 }
 
-// Path geometry is in world coordinates.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShapeProps {
     pub cmds: Vec<PathCmd>,
     pub stroke: ShapeStroke,
+    pub view_box: Option<f32>,
 }
 
-impl ShapeProps {
-    // World-space bounds for placement and hit testing.
-    pub(crate) fn world_bounds(&self) -> Option<PxRect> {
-        let outset = self.stroke.width / 2.0;
-        let raw = points_bounds(self.cmds.iter().flat_map(cmd_points))?;
-        Some(PxRect {
-            x: raw.x - outset,
-            y: raw.y - outset,
-            w: raw.w + outset * 2.0,
-            h: raw.h + outset * 2.0,
-        })
-    }
-}
-
-fn cmd_points(cmd: &PathCmd) -> Vec<(f32, f32)> {
-    match *cmd {
-        PathCmd::MoveTo(x, y) | PathCmd::LineTo(x, y) => vec![(x, y)],
-        PathCmd::QuadTo(cx, cy, x, y) => vec![(cx, cy), (x, y)],
-        PathCmd::CubicTo(c1x, c1y, c2x, c2y, x, y) => vec![(c1x, c1y), (c2x, c2y), (x, y)],
-        PathCmd::Close => vec![],
-    }
-}
-
-fn points_bounds(points: impl Iterator<Item = (f32, f32)>) -> Option<PxRect> {
-    let mut bounds: Option<(f32, f32, f32, f32)> = None;
-    for (x, y) in points {
-        bounds = Some(match bounds {
-            None => (x, y, x, y),
-            Some((x1, y1, x2, y2)) => (x1.min(x), y1.min(y), x2.max(x), y2.max(y)),
-        });
-    }
-    let (x1, y1, x2, y2) = bounds?;
-    Some(PxRect {
-        x: x1,
-        y: y1,
-        w: x2 - x1,
-        h: y2 - y1,
-    })
-}
-
-// Absolute-coordinate subset of SVG path data: M, L, Q, C, Z.
 pub fn parse_path_data(d: &str) -> Vec<PathCmd> {
     let mut cmds = Vec::new();
     let mut nums: Vec<f32> = Vec::new();
@@ -226,9 +136,9 @@ pub(crate) fn build_path(cmds: &[PathCmd]) -> Option<tiny_skia::Path> {
     pb.finish()
 }
 
-pub(crate) fn skia_stroke(stroke: &ShapeStroke, zoom: f32) -> tiny_skia::Stroke {
+pub(crate) fn skia_stroke(stroke: &ShapeStroke, scale: f32) -> tiny_skia::Stroke {
     tiny_skia::Stroke {
-        width: (stroke.width * zoom).max(0.1),
+        width: (stroke.width * scale).max(0.1),
         line_cap: match stroke.cap {
             LineCap::Butt => tiny_skia::LineCap::Butt,
             LineCap::Round => tiny_skia::LineCap::Round,
@@ -246,17 +156,6 @@ pub(crate) fn skia_stroke(stroke: &ShapeStroke, zoom: f32) -> tiny_skia::Stroke 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn camera_maps_world_points_to_screen() {
-        let cam = Camera {
-            x: 100.0,
-            y: 50.0,
-            zoom: 2.0,
-        };
-        let origin = (10.0, 20.0);
-        assert_eq!(cam.to_screen(origin, 130.0, 80.0), (70.0, 80.0));
-    }
 
     #[test]
     fn parse_path_handles_verbs_and_negatives() {
@@ -285,18 +184,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn path_bounds_include_stroke_outset() {
-        let props = ShapeProps {
-            cmds: vec![PathCmd::MoveTo(0.0, 0.0), PathCmd::LineTo(10.0, 20.0)],
-            stroke: ShapeStroke {
-                width: 4.0,
-                color: [0, 0, 0, 255],
-                cap: LineCap::Round,
-                join: LineJoin::Round,
-            },
-        };
-        let b = props.world_bounds().unwrap();
-        assert_eq!((b.x, b.y, b.w, b.h), (-2.0, -2.0, 14.0, 24.0));
-    }
 }

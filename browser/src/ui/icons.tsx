@@ -1,4 +1,4 @@
-import { Path, Scene } from "pixel-react";
+import { Path } from "pixel-react";
 import type { Rgba } from "pixel-react";
 
 /** approximates a circular arc with cubic segments; angles in degrees, y-down,
@@ -48,11 +48,11 @@ export function Icon({
   weight?: number;
 }) {
   return (
-    <Scene
-      camera={{ x: 0, y: 0, zoom: size / 24 }}
+    <Path
+      d={ICONS[icon]}
+      viewBox={24}
+      stroke={{ width: weight, color, cap: "round", join: "round" }}
       style={{ width: size, height: size, flexShrink: 0 }}
-    >
-      <Path d={ICONS[icon]} stroke={{ width: weight, color, cap: "round", join: "round" }} />
-    </Scene>
+    />
   );
 }

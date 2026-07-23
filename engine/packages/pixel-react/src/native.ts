@@ -111,6 +111,7 @@ export function createNativeEngine(tty?: string): NativeEngine {
    * wait im looking at the wrong place
    */
   const pixelEngine =  new binding.PixelEngine(tty);
+
   return pixelEngine
 }
 

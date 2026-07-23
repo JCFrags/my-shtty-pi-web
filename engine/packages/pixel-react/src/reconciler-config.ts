@@ -103,20 +103,6 @@ export interface BoxProps {
   children?: React.ReactNode;
 }
 
-/** World point at the scene's top-left corner plus scale:
- * screen = sceneOrigin + (world - camera) * zoom. */
-export interface Camera {
-  x: number;
-  y: number;
-  zoom: number;
-}
-
-/** A flex box whose shape children live in an infinite 2D world seen through
- * `camera`. Non-shape children lay out normally (e.g. overlay toolbars). */
-export interface SceneProps extends BoxProps {
-  camera?: Camera;
-}
-
 export interface ShapeStroke {
   width: number;
   color: Color;
@@ -125,11 +111,15 @@ export interface ShapeStroke {
 }
 
 export interface PathProps {
+  style?: Style;
   id?: string;
   hidden?: boolean;
   /** absolute-coordinate SVG path data: M, L, Q, C, Z */
   d: string;
   stroke: ShapeStroke;
+  /** path coordinates span this many units per side of the node's box
+   * (an SVG viewBox); omit when coordinates are already pixels */
+  viewBox?: number;
   onClick?: (event: ClickEvent) => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
@@ -168,10 +158,16 @@ export interface MarkRef {
   data?: string;
 }
 
+/** `clipboard` — the OS clipboard still holds this content; `osc` — bytes came
+ * from the terminal over OSC 52 and exist only at `path`; `file` — the paste
+ * was text naming an image file on disk. */
+export type PasteSource = "clipboard" | "osc" | "file";
+
 export interface PastedImage {
   path: string;
   width: number;
   height: number;
+  source: PasteSource;
 }
 
 export interface CaretInfo {
@@ -246,7 +242,6 @@ export type AnyProps = BoxProps &
   InputProps &
   Partial<ImageProps> &
   Partial<Omit<MarkedTextProps, "style" | "id" | "onClick">> &
-  Partial<SceneProps> &
   Partial<PathProps> & {
     slot?: "placeholder" | "error";
     mark?: number;
@@ -377,12 +372,10 @@ function serializeProps(
       strikethrough: s.strikethrough,
     }));
   }
-  if (type === "scene") {
-    const camera = props.camera ?? { x: 0, y: 0, zoom: 1 };
-    base.scene = { camera };
-  } else if (type === "shape-path" && props.stroke) {
+  if (type === "shape-path" && props.stroke) {
     base.shape = {
       d: props.d ?? "",
+      viewBox: props.viewBox,
       stroke: {
         width: props.stroke.width,
         color: parseColor(props.stroke.color),

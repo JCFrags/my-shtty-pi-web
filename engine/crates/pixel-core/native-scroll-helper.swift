@@ -1,3 +1,4 @@
+
 import AppKit
 
 let app = NSApplication.shared
@@ -12,33 +13,9 @@ NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { event in
     print("s \(event.scrollingDeltaY) \(event.phase.rawValue) \(event.momentumPhase.rawValue) \(precise) \(event.scrollingDeltaX)")
     fflush(stdout)
 }
-
-// Pinch cannot ride an NSEvent monitor: macOS never delivers gesture events
-// for other apps to global monitors. Instead we read raw finger contacts from
-// the trackpad through the MultitouchSupport system framework (private, loaded
-// at runtime, no permission prompt) and recognize the pinch ourselves.
-//
-// The scroll-vs-pinch classification follows libinput and the ChromeOS
-// gesture library: each finger's displacement since touch start must clear an
-// absolute floor, and the decision comes from the angle between the two
-// displacement vectors — fingers moving the same way are a scroll, fingers
-// moving against each other are a pinch. Close-together fingers default to
-// scroll after a timeout. A scroll may upgrade to a pinch only briefly after
-// touch start; after that both readings are locked until the fingers lift, so
-// a pan can never leak zoom events mid-gesture.
-//
-// A recognized pinch reports the fractional change of finger distance
-// (distance / lastEmitted - 1, matching NSEvent.magnification), rate-limited
-// by a distance hysteresis so resting fingers do not jitter the zoom.
-//
-// Each contact in the callback buffer is a fixed-size 96-byte record; the
-// fields we need, by byte offset (positions are normalized to the trackpad
-// surface, 0..1; a millimeter is roughly 0.01 of a trackpad width):
-//   16: identifier    20: touch phase    32/36: position x/y    48: size
 private let fingerStride = 96
 
-// Thresholds in trackpad-normalized units (values from libinput, in mm,
-// converted at ~0.01 per mm) and unitless angle/ratio gates from ChromeOS.
+// https://chromium.googlesource.com/chromiumos/platform/gestures/+/f9021145c74025829b14fb0c76b59d16d06d3752/src/immediate_interpreter.cc#1993
 private let noiseFloorMove: Float = 0.010    // 1mm: below this nothing classifies
 private let classifyMove: Float = 0.015      // 1.5mm: per-finger floor for the angle test
 private let soloMove: Float = 0.040          // 4mm: one finger moving alone means scroll
@@ -70,8 +47,6 @@ private struct TouchTrack {
     var lastDirection: Float
 }
 
-// Callbacks arrive on a thread per trackpad, so tracking is per device and
-// guarded by a lock.
 private final class PinchState {
     let lock = NSLock()
     var track: [Int32: TouchTrack] = [:]
@@ -88,8 +63,6 @@ private let contactCallback: MTContactCallback = { device, data, fingerCount, ti
         let base = data.advanced(by: i * fingerStride)
         let phase = base.load(fromByteOffset: 20, as: Int32.self)
         let size = base.load(fromByteOffset: 48, as: Float.self)
-        // Only firmly-touching contacts (phases: 3 = landing, 4 = touching)
-        // count; lifting fingers roll and would read as motion.
         guard phase == 3 || phase == 4, size > 0.05 else { continue }
         contacts.append(Contact(
             id: base.load(fromByteOffset: 16, as: Int32.self),
@@ -158,8 +131,6 @@ private func classify(
     }
     track.mode = decision
     if decision == .pinch {
-        // Motion spent deciding is dropped, so recognition does not open
-        // with one jumpy zoom step.
         track.emittedDistance = distance
         track.lastEmitTime = timestamp
         track.lastDirection = 0
@@ -240,9 +211,6 @@ private final class MultitouchPinch {
         start()
     }
 
-    /// Trackpad devices go silent after sleep and the list captured at start
-    /// misses trackpads plugged in later, so re-enumerate on wake and poll
-    /// slowly for count changes.
     func watchForDeviceChanges() {
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main

@@ -82,7 +82,7 @@ export function Chrome({
           actions={actions}
         />
       ) : (
-        <PageView layout={layout} theme={theme} surface={pageSurface} actions={actions} />
+        <BrowserTabContents layout={layout} theme={theme} surface={pageSurface} actions={actions} />
       )}
       {findOpen && (
         <FindBar state={state} actions={actions} layout={layout} theme={theme} />
@@ -164,9 +164,8 @@ function Toolbar({
   );
 }
 
-/** the page surface plus its hairline frame. The "browser-surface" id keys
- * the node in the engine tree so external tooling can look up the page rect. */
-function PageView({
+// why is this called page view
+function BrowserTabContents({
   layout,
   theme,
   surface,
@@ -240,7 +239,7 @@ function ToolbarButton({
   );
 }
 
-/** persistent toolbar chip showing non-default zoom; clicking resets to 100% */
+// not 100% sure if we want this, but im not super opposed to it
 function ZoomChip({
   zoom,
   rem,

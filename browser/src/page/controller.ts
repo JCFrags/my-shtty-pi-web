@@ -2,6 +2,7 @@ import { BrowserWindow, screen } from "electron";
 import type { OffscreenSharedTexture } from "electron";
 import type {
   EngineKeyEvent,
+  PastedImage,
   PointerEvent,
   Surface,
   WheelEvent,
@@ -295,6 +296,9 @@ export class BrowserController {
   focusContent() {
     if (this.contentFocused) return;
     this.window.focus();
+    /**
+     * web contents, oh
+     */
     this.window.webContents.focus();
     this.contentFocused = true;
     void this.setFocusEmulation(true).catch(() => {});
@@ -330,6 +334,10 @@ export class BrowserController {
 
   paste(text: string) {
     this.input.paste(text);
+  }
+
+  pasteImage(image: PastedImage) {
+    this.input.pasteImage(image);
   }
 
   setActive(active: boolean) {
@@ -390,6 +398,18 @@ export class BrowserController {
     this.window.webContents.reload();
   }
 
+  /**
+   * 
+   * okay we are absolutely getting somewhere
+   * 
+   * for each tab there is a browser window
+   * 
+   * 
+   * and submitting a textsure is just passing the surface handle and then forwarding it to the engine
+   * 
+   * but its not clear to me how the surface is correlated between the UI and the backend logic here
+   * 
+   */
   private submitTexture(texture: OffscreenSharedTexture) {
     try {
       const info = texture.textureInfo;

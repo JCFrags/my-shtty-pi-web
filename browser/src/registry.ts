@@ -3,19 +3,11 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 
-import type { BrowserState } from "./page/types";
-import { INSTANCES_DIR } from "./paths";
+import { removeInstance, upsertInstance } from "pixel-store";
+import type { InstanceRow } from "pixel-store";
 
-export interface InstanceRecord extends BrowserState {
-  tabs?: unknown;
-  viewport?: { width: number; height: number } | null;
-  pid: number;
-  key: string;
-  tty: string | null;
-  socket: string;
-  cdpPort: number | null;
-  startedAt: number;
-}
+import type { BrowserState } from "./page/types";
+import { INSTANCES_DIR } from "pixel-store";
 
 export interface ControlHost {
   /** unique per pane: the pid for dedicated processes, pid-session for daemon sessions */
@@ -54,7 +46,6 @@ function ownTty(): string | null {
 
 export class Registry {
   private readonly host: ControlHost;
-  private readonly file: string;
   private readonly socketPath: string;
   private readonly tty: string | null;
   private readonly startedAt = Date.now();
@@ -65,7 +56,6 @@ export class Registry {
   constructor(host: ControlHost) {
     this.host = host;
     this.tty = host.tty ?? ownTty();
-    this.file = path.join(INSTANCES_DIR, `${host.key}.json`);
     this.socketPath = path.join(INSTANCES_DIR, `${host.key}.sock`);
     fs.mkdirSync(INSTANCES_DIR, { recursive: true });
     fs.rmSync(this.socketPath, { force: true });
@@ -84,7 +74,7 @@ export class Registry {
     this.write();
   }
 
-  record(): InstanceRecord {
+  record(): InstanceRow {
     return {
       ...this.host.state(),
       tabs: this.host.tabs(),
@@ -103,15 +93,13 @@ export class Registry {
     this.disposed = true;
     this.server?.close();
     this.server = null;
-    fs.rmSync(this.file, { force: true });
+    void removeInstance(this.host.key).catch(() => {});
     fs.rmSync(this.socketPath, { force: true });
   }
 
   private write() {
     if (this.disposed) return;
-    try {
-      fs.writeFileSync(this.file, JSON.stringify(this.record()));
-    } catch {}
+    void upsertInstance(this.record()).catch(() => {});
   }
 
   private serve(connection: net.Socket) {

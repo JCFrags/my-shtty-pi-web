@@ -9,7 +9,7 @@ use taffy::prelude::TaffyMaxContent as _;
 use layout::{MeasureCtx, to_taffy};
 
 use crate::image_cache::ImageStatus;
-use crate::scene::{Camera, ShapeProps};
+use crate::shape::ShapeProps;
 use crate::scroll::ScrollState;
 use crate::scrollbar::{self, BarState, ScrollbarRects};
 use crate::selection::{DocLayout, DocSelection, DocSelectionState};
@@ -121,15 +121,12 @@ impl ScrollArea {
 pub struct InputProps {
     pub initial: String,
     pub value: Option<String>,
-    // Mount-time marks claiming sentinels already present in `initial`.
     pub marks: Vec<(u64, usize)>,
     pub caret_color: Color,
     pub selection_color: Color,
     pub auto_focus: bool,
     pub submit: bool,
-    // Wrap-aware line numbers painted in the node's left padding.
     pub gutter: Option<Gutter>,
-    // Fills the caret's logical line across the node's full width.
     pub active_line: Option<Color>,
 }
 
@@ -158,15 +155,9 @@ impl Default for InputProps {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageProps {
     pub src: String,
-    // App-asserted (never verified): these srcs hold identical content, so a
-    // cached one may serve this src's pixels — lets an app swap a temp path
-    // for its persisted copy without a reload.
     pub equal_to: Vec<String>,
 }
 
-// Slot children of an image node render in its place while the source is
-// still decoding (Placeholder) or after it failed (Error). They are laid out
-// against the image's rect, not as flex children.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlotKind {
     Placeholder,
@@ -194,21 +185,11 @@ pub struct Props {
     pub hidden: bool,
     pub input: Option<InputProps>,
     pub image: Option<ImageProps>,
-    // Paints the client-streamed pixel buffer with this id (see surfaces.rs)
-    // scaled into the node's rect.
     pub surface: Option<u32>,
     pub slot: Option<SlotKind>,
-    // Anchors this node inline in its input parent's text at the mark with
-    // this id; it is laid out by text flow, not flex.
     pub mark: Option<u64>,
-    // For static text: marks claiming sentinels already present in `text`,
-    // as (id, offset). Inputs get theirs from InputProps instead.
     pub marks: Vec<(u64, usize)>,
     pub content_height: Option<f32>,
-    // Present when this node is a scene: a camera onto an infinite 2D world.
-    // Shape children are placed and painted through it instead of flex layout.
-    pub scene: Option<Camera>,
-    // World-space geometry; only meaningful under a scene parent.
     pub shape: Option<ShapeProps>,
     pub scroll_events: bool,
     pub wheel_events: bool,
@@ -239,9 +220,6 @@ pub(crate) struct Resolved {
     pub selection_color: Color,
 }
 
-/**
- * react node? how i didn't even know this struct existed kill me
- */
 pub(crate) struct RNode {
     pub style: Style,
     pub text: Option<String>,
@@ -255,6 +233,7 @@ pub(crate) struct RNode {
     pub slot_visible: bool,
     pub mark: Option<u64>,
     pub mark_visible: bool,
+    // review me: i dont remember what static marks are for
     pub static_marks: Vec<crate::text_input::Mark>,
     pub parent: Option<NodeId>,
     pub children: Vec<NodeId>,
@@ -262,7 +241,6 @@ pub(crate) struct RNode {
     pub scroll: ScrollState,
     pub scroll_max: f32,
     pub content_height: Option<f32>,
-    pub scene: Option<Camera>,
     pub shape: Option<ShapeProps>,
     pub scroll_events: bool,
     pub wheel_events: bool,
@@ -281,9 +259,6 @@ pub(crate) struct RNode {
     pub order: u32,
 }
 
-/**
- * huhhh
- */
 struct Slot {
     generation: u32,
     node: Option<RNode>,
@@ -385,12 +360,6 @@ impl Tree {
         self.get(id).is_some()
     }
 
-    /**
-     * this seems plausible to me so far, there exists some content
-     * that we need to draw that gains no information from the existing
-     * layout system, they get drawn within the context of some other object
-     * (kind of like absolute positioning), hm but then they still affect the outer layout
-     */
     pub(crate) fn get(&self, id: NodeId) -> Option<&RNode> {
         let slot = self.slots.get(id.index as usize)?;
         if slot.generation != id.generation {
@@ -458,7 +427,6 @@ impl Tree {
             scroll: ScrollState::default(),
             scroll_max: 0.0,
             content_height: props.content_height,
-            scene: props.scene,
             shape: props.shape,
             scroll_events: props.scroll_events,
             wheel_events: props.wheel_events,
@@ -548,7 +516,7 @@ impl Tree {
                 .iter()
                 .filter(|&&c| {
                     let node = self.node(c);
-                    node.slot.is_none() && node.mark.is_none() && node.shape.is_none()
+                    node.slot.is_none() && node.mark.is_none()
                 })
                 .map(|&c| self.node(c).taffy)
                 .collect();
@@ -612,15 +580,9 @@ impl Tree {
         node.selection_events = props.selection_events;
         node.move_events = props.move_events;
         let mut place_changed = false;
-        if node.scene != props.scene {
-            node.scene = props.scene;
-            changed = true;
-            place_changed = true;
-        }
         if node.shape != props.shape {
             node.shape = props.shape;
             changed = true;
-            place_changed = true;
         }
         if node.spans != props.spans {
             node.spans = props.spans;
@@ -722,8 +684,6 @@ impl Tree {
                     .zip(&static_marks)
                     .all(|(a, b)| a.id == b.id && a.offset == b.offset);
             if !same_marks {
-                // Keep measured advances for surviving ids so an unrelated
-                // prop update doesn't force a widget re-measure flicker.
                 for mark in &mut static_marks {
                     if let Some(old) = node.static_marks.iter().find(|o| o.id == mark.id) {
                         mark.advance = old.advance;
@@ -913,9 +873,6 @@ impl Tree {
         self.needs_paint = false;
     }
 
-    /**
-     * wdym needs place?
-     */
     pub(crate) fn mark_place(&mut self) {
         self.needs_place = true;
     }
@@ -989,7 +946,7 @@ impl Tree {
         let node_text = node.text.clone();
         let non_flow_only = children.iter().all(|&c| {
             let child = self.node(c);
-            child.slot.is_some() || child.mark.is_some() || child.shape.is_some()
+            child.slot.is_some() || child.mark.is_some()
         });
         let text = if image.is_none() && non_flow_only {
             node_text
@@ -1207,15 +1164,7 @@ impl Tree {
             clip
         };
         let image_src = node.image.clone();
-        let scene = node.scene;
         for child in node.children.clone() {
-            if self.node(child).shape.is_some() {
-                match scene {
-                    Some(camera) => self.place_shape(child, rect, camera, visible),
-                    None => self.zero_rects(child),
-                }
-                continue;
-            }
             if let Some(mark_id) = self.node(child).mark {
                 match self.mark_child_origin(id, child, mark_id, fonts) {
                     Some(at) => {
@@ -1281,31 +1230,6 @@ impl Tree {
         ))
     }
 
-    fn place_shape(&mut self, id: NodeId, scene_rect: PxRect, camera: Camera, clip: PxRect) {
-        let node = self.node(id);
-        if node.hidden {
-            self.zero_rects(id);
-            return;
-        }
-        let Some(props) = &node.shape else {
-            self.zero_rects(id);
-            return;
-        };
-        let Some(world) = props.world_bounds() else {
-            self.zero_rects(id);
-            return;
-        };
-        let abs = camera.rect_to_screen((scene_rect.x, scene_rect.y), world);
-        let node = self.node_mut(id);
-        node.abs = abs;
-        node.visible = abs.intersect(clip);
-        self.node_mut(id).order = self.paint_order.len() as u32;
-        self.paint_order.push(id);
-        for child in self.node(id).children.clone() {
-            self.zero_rects(child);
-        }
-    }
-
     fn zero_rects(&mut self, id: NodeId) {
         let node = self.node_mut(id);
         node.abs = PxRect::ZERO;
@@ -1330,8 +1254,7 @@ impl Tree {
         })
     }
 
-    // A pointer subscriber loses the point when a clickable or input is
-    // painted above it — e.g. modal buttons floating over a browser surface.
+    // we may want to be more principled with event propagation than this
     pub fn hit_pointer(&self, x: f32, y: f32) -> Option<NodeId> {
         for &id in self.paint_order.iter().rev() {
             let Some(node) = self.get(id) else {
@@ -1461,7 +1384,6 @@ impl Tree {
                 .iter()
                 .all(|&c| self.get(c).is_some_and(|n| n.mark.is_some() || n.slot.is_some()))
             && node.input.is_none()
-            && node.shape.is_none()
             && !node.hidden
             && node.resolved.selectable
     }
@@ -1603,8 +1525,6 @@ impl Tree {
         })
     }
 
-    // Maps an absolute point to a byte offset in this node's text, so click
-    // handlers can tell which styled span was hit (e.g. an inline link).
     pub fn offset_at_point(
         &self,
         id: NodeId,
@@ -1638,8 +1558,6 @@ impl Tree {
         self.doc.scope()
     }
 
-    // Everything an app needs to mirror the current selection: the covered
-    // keyed nodes with their byte ranges, and a bounding rect for anchoring UI.
     pub fn doc_selection_snapshot(&self, fonts: &[fontdue::Font]) -> Option<SelectionSnapshot> {
         let sel = self.doc_selection()?;
         if sel.is_collapsed() {
@@ -1677,7 +1595,6 @@ impl Tree {
                 parts.push((key.to_string(), range));
             }
         }
-        // unified bands hug the actual selected lines; prefer them when present
         let mut bands: Option<PxRect> = None;
         for (_, group, _) in self.doc_selection_blocks(fonts) {
             for band in group {

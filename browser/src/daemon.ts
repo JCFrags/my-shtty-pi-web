@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { app } from "electron";
 
-import { DAEMON_SOCKET } from "./paths";
+import { DAEMON_SOCKET } from "pixel-store";
 import { createSession } from "./session/session";
 import type { SessionHandle } from "./session/session";
 

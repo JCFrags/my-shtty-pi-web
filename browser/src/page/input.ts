@@ -1,5 +1,6 @@
+import { clipboard, nativeImage } from "electron";
 import type { WebContents } from "electron";
-import type { EngineKeyEvent, PointerEvent, WheelEvent } from "pixel-react";
+import type { EngineKeyEvent, PastedImage, PointerEvent, WheelEvent } from "pixel-react";
 
 export interface InputTarget {
   contents(): WebContents;
@@ -161,6 +162,29 @@ export class PageInput {
     void this.target.contents().insertText(text);
   }
 
+  /** A native paste() hands the page a trusted event with every clipboard
+   * flavor, so it's preferred whenever the OS clipboard actually holds the
+   * image; the other sources only have the bytes at image.path, which must
+   * be staged onto the clipboard first. */
+  pasteImage(image: PastedImage) {
+    this.target.focus();
+    switch (image.source) {
+      case "clipboard":
+        this.target.contents().paste();
+        return;
+      case "osc":
+      case "file": {
+        const staged = nativeImage.createFromPath(image.path);
+        // createFromPath only decodes png/jpeg; pasting without staging
+        // would deliver whatever stale content the clipboard holds
+        if (staged.isEmpty()) return;
+        clipboard.writeImage(staged);
+        this.target.contents().paste();
+        return;
+      }
+    }
+  }
+
   releaseKeys() {
     for (const key of this.sentKeys) {
       const keyCode = electronKey(key);
@@ -172,6 +196,11 @@ export class PageInput {
     }
     this.sentKeys.clear();
   }
+  /**
+   * 
+   * why are we hard coding huerestics for vscode web??
+   * 
+   */
 
   // vs code web never acts on Enter keydowns synthesized by sendInputEvent —
   // its quick-open accept keybinding ignores them (identical DOM events
@@ -303,6 +332,11 @@ function editingCommands(event: EngineKeyEvent): string[] | null {
   return null;
 }
 
+/**
+ * 
+ * this is extremly odd to me and makes 0 sense and reads as slop
+ * 
+ */
 // Ghostty's default keybinds rewrite cmd+backspace into ctrl+u, cmd+left/right
 // into ctrl+a/ctrl+e, and option+arrows into esc b/f before the engine sees
 // them, so the mac editing combos arrive here as these control keys (mirrors

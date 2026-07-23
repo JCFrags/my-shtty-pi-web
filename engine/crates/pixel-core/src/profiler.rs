@@ -142,8 +142,6 @@ fn span_full<T>(
     result
 }
 
-// Recording-relative time of an instant captured on any thread (Instant is
-// process-wide monotonic); instants predating the recording clamp to 0.
 pub fn ms_of(at: Instant) -> Option<f64> {
     ACTIVE.with(|active| {
         active
@@ -153,7 +151,6 @@ pub fn ms_of(at: Instant) -> Option<f64> {
     })
 }
 
-// Record a span whose timing was measured elsewhere (e.g. a worker thread).
 pub fn emit_span(
     name: &'static str,
     start_ms: f64,

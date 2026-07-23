@@ -13,7 +13,8 @@ import { initialBrowserState } from "../page/types";
 import type { BrowserState, BrowserSurfaceLayout } from "../page/types";
 import { zoomDirection } from "../page/zoom";
 import type { ZoomDirection } from "../page/zoom";
-import { LAST_URL_FILE } from "../paths";
+import { lastUrl, setLastUrl } from "pixel-store";
+
 import { Registry } from "../registry";
 import { Chrome } from "../ui/chrome";
 import type { ChromeActions, ChromeLayout, DeviceView, PopupView } from "../ui/types";
@@ -57,6 +58,7 @@ export function createSession(ctx: SessionContext): SessionHandle {
 
 const DEFAULT_URL = "https://github.com/zenbu-labs";
 
+// this doesn ot work need to look into this
 const FONT_CANDIDATES = [
   path.join(os.homedir(), "Library/Fonts/JetBrainsMono-Regular.ttf"),
   "/Library/Fonts/JetBrainsMono-Regular.ttf",
@@ -71,10 +73,6 @@ interface NewTabState {
   timer: ReturnType<typeof setTimeout> | null;
 }
 
-/** One pane's worth of browser: the engine root rendering the chrome, the
- * tabs (each an offscreen chromium window), and the modal/overlay ui state.
- * The daemon runs many of these in one process, so everything lives on the
- * instance. */
 class Session {
   private readonly ctx: SessionContext;
   private readonly backend: Backend | null;
@@ -124,6 +122,7 @@ class Session {
     this.fallbackState = initialBrowserState(this.initialUrl());
     this.tabs = new TabManager(
       {
+        // oh nice
         createController: (url, visible, onState) =>
           new BrowserController(
             this.pageSurface!,
@@ -159,12 +158,16 @@ class Session {
     this.root = createRoot({
       tty: this.ctx.tty,
       keyEventTypes: true,
-      devtools: false,
       onKey: (event) => this.handleKey(event),
       onPaste: (text) => {
         const browser = this.tabs.activeController;
         if (browser?.popup) browser.popup.input.paste(text);
         else if (this.browserFocused) browser?.paste(text);
+      },
+      onPasteImage: (image) => {
+        const browser = this.tabs.activeController;
+        if (browser?.popup) browser.popup.input.pasteImage(image);
+        else if (this.browserFocused) browser?.pasteImage(image);
       },
       onFocus: (focused) => this.tabs.activeController?.setActive(focused),
       onResize: () => {
@@ -180,6 +183,11 @@ class Session {
     if (!this.root.sharedTextures) {
       throw new Error("pixel-browser requires the patched Electron with shared texture support");
     }
+    /**
+     * okay so on start we create a surface... which does what?
+     * 
+     * 
+     */
     this.pageSurface = this.root.createSurface();
     this.popupSurface = this.root.createSurface();
     this.recalculateLayout();
@@ -206,14 +214,14 @@ class Session {
     this.shuttingDown = true;
     try {
       this.root?.setPointerShape("text");
-    } catch {}
+    } catch { }
     this.registry?.dispose();
     this.registry = null;
     this.tabs.stopAll();
     try {
       this.pageSurface?.close();
       this.popupSurface?.close();
-    } catch {}
+    } catch { }
     this.root?.stop();
     this.ctx.onClose(code);
   }
@@ -246,13 +254,13 @@ class Session {
         palette={
           this.palette
             ? {
-                index: Math.min(this.palette.index, Math.max(0, this.filteredPalette().length - 1)),
-                items: this.filteredPalette().map(({ id, label, shortcut }) => ({
-                  id,
-                  label,
-                  shortcut,
-                })),
-              }
+              index: Math.min(this.palette.index, Math.max(0, this.filteredPalette().length - 1)),
+              items: this.filteredPalette().map(({ id, label, shortcut }) => ({
+                id,
+                label,
+                shortcut,
+              })),
+            }
             : null
         }
         pageSurface={this.pageSurface}
@@ -329,14 +337,16 @@ class Session {
           return;
         }
       }
+      if (isPasteKey(event)) this.root?.requestClipboardImage();
       browser.popup.input.key(event);
       return;
     }
     if (event.kind !== "release") {
-      if (event.mods.ctrl && event.key === "q") {
+      if (event.mods.ctrl && (event.key === "q" || event.key === "c")) {
         this.shutdown();
         return;
       }
+
       if (this.palette) {
         const down = event.key === "down" || (event.mods.ctrl && event.key === "n");
         const up = event.key === "up" || (event.mods.ctrl && event.key === "p");
@@ -432,7 +442,13 @@ class Session {
       browser?.key(event);
       return;
     }
-    if (this.browserFocused) browser?.key(event);
+    if (this.browserFocused) {
+      // cmd+v arriving as a key means the terminal had no text to paste
+      // (text pastes come in through onPaste); ask the engine to read the
+      // clipboard for an image, which lands in onPasteImage
+      if (isPasteKey(event)) this.root?.requestClipboardImage();
+      browser?.key(event);
+    }
   }
 
   private applyZoom(direction: ZoomDirection) {
@@ -449,6 +465,9 @@ class Session {
     this.render();
   }
 
+  /**
+   * why doesn't this work in vscode? can i answer that?
+   */
   /** mirror the page's css cursor onto the terminal pointer while the mouse is
    * over the page surface; anywhere else in the chrome shows a plain arrow */
   private syncCursor() {
@@ -529,7 +548,7 @@ class Session {
         if (session.index >= session.suggestions.length) session.index = -1;
         this.render();
       })
-      .catch(() => {});
+      .catch(() => { });
   }
 
   private openCloseConfirm() {
@@ -595,18 +614,6 @@ class Session {
   private paletteActions(): PaletteAction[] {
     return [
       {
-        id: "url-edit",
-        label: "edit url",
-        shortcut: "⌘L",
-        run: () => this.openUrlEdit(),
-      },
-      {
-        id: "new-tab",
-        label: "new tab",
-        shortcut: "⌃T",
-        run: () => this.openNewTabModal(),
-      },
-      {
         id: "find",
         label: "find in page",
         shortcut: `${bindingGlyphs(this.findBinding)}${(this.findBinding?.key ?? "").toUpperCase()}`,
@@ -625,12 +632,6 @@ class Session {
         run: () => this.applyZoom(-1),
       },
       {
-        id: "zoom-reset",
-        label: "reset zoom",
-        shortcut: "⌘0",
-        run: () => this.applyZoom(0),
-      },
-      {
         id: "device-phone",
         label: this.deviceMode === "phone" ? "exit mobile emulation" : "mobile emulation",
         shortcut: "",
@@ -642,25 +643,25 @@ class Session {
         shortcut: "",
         run: () => this.setDeviceMode(this.deviceMode === "tablet" ? "desktop" : "tablet"),
       },
-      ...(this.backend?.zoomPane
-        ? [
-            {
-              id: "zoom-split",
-              label: "full screen (zoom split)",
-              shortcut: "⇧⌘↩",
-              run: () => void this.backend!.zoomPane!(this.marker).catch(() => false),
-            },
-          ]
-        : []),
+      // ...(this.backend?.zoomPane
+      //   ? [
+      //     {
+      //       id: "zoom-split",
+      //       label: "full screen (zoom split)",
+      //       shortcut: "⇧⌘↩",
+      //       run: () => void this.backend!.zoomPane!(this.marker).catch(() => false),
+      //     },
+      //   ]
+      //   : []),
       ...(this.backend?.closePane
         ? [
-            {
-              id: "close-pane",
-              label: "close pane",
-              shortcut: "",
-              run: () => void this.resolveCloseConfirm(true),
-            },
-          ]
+          {
+            id: "close-pane",
+            label: "close pane",
+            shortcut: "",
+            run: () => void this.resolveCloseConfirm(true),
+          },
+        ]
         : []),
     ];
   }
@@ -694,6 +695,7 @@ class Session {
     this.deviceView = result.device;
   }
 
+  // this is scary code, popusp in general
   private popupView(): PopupView | null {
     const popup = this.tabs.activeController?.popup;
     if (!popup || !this.layout || !this.surfaceLayout) return null;
@@ -704,7 +706,7 @@ class Session {
     let host = "";
     try {
       host = new URL(popup.state.url).host;
-    } catch {}
+    } catch { }
     return {
       title: popup.state.title,
       host,
@@ -723,8 +725,9 @@ class Session {
         this.fontId = id;
         this.render();
       })
-      .catch(() => {});
+      .catch(() => { });
   }
+  // stupid
 
   // Pane pixel sizes come from the host terminal, which native terminals
   // report in device pixels but web-based ones (e.g. localterm) report in CSS
@@ -740,9 +743,9 @@ class Session {
     const arg = this.ctx.argv.find((argument) => !argument.startsWith("-"));
     if (arg) return arg;
     try {
-      const last = fs.readFileSync(LAST_URL_FILE, "utf8").trim();
-      if (/^https?:\/\//.test(last)) return last;
-    } catch {}
+      const last = lastUrl()?.trim();
+      if (last && /^https?:\/\//.test(last)) return last;
+    } catch { }
     return DEFAULT_URL;
   }
 }
@@ -754,6 +757,10 @@ interface PaletteAction {
   run(): void;
 }
 
+function isPasteKey(event: EngineKeyEvent): boolean {
+  return event.kind === "press" && event.mods.super && event.key === "v";
+}
+
 function flagValue(argv: string[], flag: string): string | null {
   return (
     argv.find((argument) => argument.startsWith(`${flag}=`))?.slice(flag.length + 1) ?? null
@@ -763,8 +770,8 @@ function flagValue(argv: string[], flag: string): string | null {
 function rememberUrl(url: string) {
   if (!/^https?:\/\//.test(url)) return;
   try {
-    fs.writeFileSync(LAST_URL_FILE, url);
-  } catch {}
+    setLastUrl(url);
+  } catch { }
 }
 
 function terminalBackend(): Backend | null {

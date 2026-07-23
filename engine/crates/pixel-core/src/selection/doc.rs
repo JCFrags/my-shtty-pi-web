@@ -28,9 +28,7 @@ pub(crate) trait DocLayout {
     fn visible_rect(&self, id: NodeId) -> Option<PxRect>;
     fn order_of(&self, id: NodeId) -> Option<u32>;
     fn unified_ancestor(&self, id: NodeId) -> Option<NodeId>;
-    // the region a selection stays inside: the nearest scrollable ancestor
     fn selection_scope(&self, id: NodeId) -> Option<NodeId>;
-    // the scope under a point, from the deepest scrollable containing it
     fn scope_at(&self, point: (f32, f32)) -> Option<NodeId>;
     fn selection_color_of(&self, id: NodeId) -> Option<Color>;
 }

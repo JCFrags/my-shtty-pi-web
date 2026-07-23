@@ -11,6 +11,9 @@ export interface Tab {
 
 /** What the session provides to tabs: controller construction (surfaces,
  * layout, partition) and the side effects that follow tab changes. */
+/**
+ * what an ugly name 
+ */
 export interface TabHost {
   createController(
     url: string,
@@ -31,11 +34,15 @@ export class TabManager {
   private activeId = 0;
   private seq = 1;
 
+  // what the fuck is a tab host?????????????????????????????????//
   constructor(
     private readonly host: TabHost,
     /** opened when the active tab closes and no other tab remains */
     private readonly fallbackUrl: string,
-  ) {}
+  ) {
+
+    // why is nothign here??????//
+  }
 
   get active(): Tab | null {
     return this.tabs.find((tab) => tab.id === this.activeId) ?? null;
@@ -53,6 +60,14 @@ export class TabManager {
     return this.tabs.length;
   }
 
+  /**
+   * 
+   * what does creating a tab actually do?
+   * 
+   * i expect somewhere this triggers some sort of electron tab object getting made
+   * 
+   * 
+   */
   create(url: string, activate = true): Tab {
     const tab = { id: this.seq++, state: initialBrowserState(url) } as Tab;
     tab.controller = this.host.createController(url, activate, (state) => {
@@ -61,6 +76,7 @@ export class TabManager {
       if (tab.id === this.activeId) this.host.onActiveState(state, urlChanged);
       this.host.requestRender();
     });
+    // hm not sure why this exists
     tab.controller.onCursorChange = () => {
       if (tab.id === this.activeId) this.host.onCursorChanged();
     };
@@ -74,6 +90,11 @@ export class TabManager {
   }
 
   activate(id: number) {
+    // now what are we doing here
+
+/**
+ * and what is a host
+ */
     const tab = this.tabs.find((t) => t.id === id);
     if (!tab) return;
     if (this.activeId !== id) {

@@ -8,8 +8,6 @@ std::thread_local! {
         std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
-// Horizontal span to skip on a row so a blit stays inside rounded corners.
-// radius order matches css: [top-left, top-right, bottom-right, bottom-left].
 fn corner_insets(radius: [f32; 4], row: i64, height: i64) -> (i64, i64) {
     if radius == [0.0; 4] {
         return (0, 0);
@@ -117,9 +115,6 @@ impl Canvas {
         self.draw_text_sheared(font, text, x, baseline, px, color, 0.0);
     }
 
-    // Slants glyphs by shifting each pixel row right proportionally to its
-    // height above the baseline — a synthetic oblique, since we only load
-    // regular font faces.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_text_sheared(
         &mut self,
@@ -207,8 +202,6 @@ impl Canvas {
             self.blend_rows(x, y, w, h, mask, color);
             return;
         }
-        // Distribute each row's coverage across the two pixels its fractional
-        // offset lands on, so the slant is anti-aliased instead of stepped.
         let mut sheared = vec![0u8; w + 1];
         for row in 0..h {
             let py = y + row as i32;
@@ -303,8 +296,6 @@ impl Canvas {
         self.blit_image_rounded(x, y, image, [0.0; 4]);
     }
 
-    // Rounding costs one sqrt per corner row and nothing at radius zero: rows
-    // just copy a shorter span near the corners, pixels are never transformed.
     pub fn blit_image_rounded(
         &mut self,
         x: f32,
@@ -353,9 +344,7 @@ impl Canvas {
         }
     }
 
-    // Blits straight-alpha RGBA pixels into the destination rect, scaling
-    // bilinearly when the sizes differ (e.g. a surface rendered at a reduced
-    // resolution shown full size). Corner radii clip by shrinking row spans.
+    // todo: bilinear scaling i think is causing a little bit of blurryness
     #[allow(clippy::too_many_arguments)]
     pub fn blit_scaled_rgba(
         &mut self,
@@ -369,15 +358,6 @@ impl Canvas {
     ) {
         self.blit_scaled_rgba_rounded(x, y, w, h, src, src_w, src_h, [0.0; 4]);
     }
-    /**
-     * i think its helpful to define the use cases im exicted about rationally
-     * 
-     * you have the use case of the built in browser, which is a decent tool i think that im happy to use
-     * 
-     * the use case that id have to be very bullish on is people using the tool as the canvas
-     * id need a strong argument to me not seeing much about cursor canvas
-     */
-
     #[allow(clippy::too_many_arguments)]
     pub fn blit_scaled_rgba_rounded(
         &mut self,

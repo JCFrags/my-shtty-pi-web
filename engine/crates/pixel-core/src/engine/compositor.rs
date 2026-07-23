@@ -11,7 +11,7 @@ const DIVIDER_BG: Color = [32, 33, 38, 255];
 const DIVIDER_BG_ACTIVE: Color = [58, 96, 168, 255];
 const DIVIDER_GRIP: Color = [118, 122, 132, 255];
 
-pub(super) struct View {
+pub struct View {
     pub tree: Tree,
     pub canvas: Canvas,
     pub clear_color: Color,
@@ -35,19 +35,19 @@ impl View {
     }
 }
 
-pub(super) struct Compositor {
+pub struct Compositor {
     pub views: Vec<View>,
     pub window: (u32, u32),
     pub frame: Canvas,
     pub dirty: bool,
     pub divider_drag: bool,
-    split: Option<f32>,
+    pub split: Option<f32>,
     panes: [usize; 2],
     divider_hover: bool,
 }
 
 impl Compositor {
-    pub fn new(window: (u32, u32)) -> Self {
+    pub(crate) fn new(window: (u32, u32)) -> Self {
         Self {
             views: vec![View::new(window), View::new((0, 0))],
             window,
@@ -60,16 +60,12 @@ impl Compositor {
         }
     }
 
-    pub fn add_view(&mut self) -> usize {
+    pub(crate) fn add_view(&mut self) -> usize {
         self.views.push(View::new((0, 0)));
         self.views.len() - 1
     }
 
-    pub fn split(&self) -> Option<f32> {
-        self.split
-    }
-
-    pub fn set_split(&mut self, split: Option<f32>) -> bool {
+    pub(crate) fn set_split(&mut self, split: Option<f32>) -> bool {
         let split = split.map(|f| f.clamp(0.15, 0.85));
         if self.split == split {
             return false;
@@ -78,7 +74,7 @@ impl Compositor {
         true
     }
 
-    pub fn set_pane(&mut self, slot: usize, view: usize) -> bool {
+    pub(crate) fn set_pane(&mut self, slot: usize, view: usize) -> bool {
         if slot >= self.panes.len() || view >= self.views.len() {
             return false;
         }
@@ -90,7 +86,7 @@ impl Compositor {
         true
     }
 
-    pub fn active_views(&self) -> Vec<usize> {
+    pub(crate) fn active_views(&self) -> Vec<usize> {
         if self.split.is_some() {
             vec![self.panes[0], self.panes[1]]
         } else {
@@ -98,11 +94,11 @@ impl Compositor {
         }
     }
 
-    pub fn is_active(&self, view: usize) -> bool {
+    pub(crate) fn is_active(&self, view: usize) -> bool {
         self.active_views().contains(&view)
     }
 
-    pub fn view_at(&self, x: f32) -> usize {
+    pub(crate) fn view_at(&self, x: f32) -> usize {
         if self.split.is_some() && self.views[self.panes[1]].contains(x) {
             self.panes[1]
         } else {
@@ -110,11 +106,11 @@ impl Compositor {
         }
     }
 
-    pub fn to_local(&self, view: usize, point: (f32, f32)) -> (f32, f32) {
+    pub(crate) fn to_local(&self, view: usize, point: (f32, f32)) -> (f32, f32) {
         (point.0 - self.views[view].origin_x as f32, point.1)
     }
 
-    pub fn divider_x(&self) -> Option<u32> {
+    pub(crate) fn divider_x(&self) -> Option<u32> {
         let f = self.split?;
         let w = self.window.0;
         if w <= 2 * MIN_PANE + DIVIDER_W {
@@ -124,20 +120,20 @@ impl Compositor {
         Some(x.clamp(MIN_PANE, w - MIN_PANE - DIVIDER_W))
     }
 
-    pub fn on_divider(&self, x: f32) -> bool {
+    pub(crate) fn on_divider(&self, x: f32) -> bool {
         self.divider_x().is_some_and(|dx| {
             x >= dx as f32 - DIVIDER_GRAB && x < (dx + DIVIDER_W) as f32 + DIVIDER_GRAB
         })
     }
 
-    pub fn set_divider_hover(&mut self, on: bool) {
+    pub(crate) fn set_divider_hover(&mut self, on: bool) {
         if self.divider_hover != on {
             self.divider_hover = on;
             self.dirty = true;
         }
     }
 
-    pub fn apply_layout(&mut self, force: bool) -> Vec<(usize, (u32, u32))> {
+    pub(crate) fn apply_layout(&mut self, force: bool) -> Vec<(usize, (u32, u32))> {
         let (w, h) = self.window;
         let rects: [(u32, u32); 2] = match self.divider_x() {
             Some(dx) => [(0, dx), (dx + DIVIDER_W, w.saturating_sub(dx + DIVIDER_W))],
@@ -162,7 +158,7 @@ impl Compositor {
         resized
     }
 
-    pub fn drag_divider(&mut self, x: f32) -> Vec<(usize, (u32, u32))> {
+    pub(crate) fn drag_divider(&mut self, x: f32) -> Vec<(usize, (u32, u32))> {
         let w = self.window.0.max(1) as f32;
         let f = (x / w).clamp(0.15, 0.85);
         if self.split == Some(f) {
@@ -172,7 +168,7 @@ impl Compositor {
         self.apply_layout(false)
     }
 
-    pub fn compose(&mut self) {
+    pub(crate) fn compose(&mut self) {
         if (self.frame.width, self.frame.height) != self.window {
             self.frame = Canvas::new(self.window.0, self.window.1);
         }

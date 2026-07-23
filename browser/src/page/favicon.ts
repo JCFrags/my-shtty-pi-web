@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { net, nativeImage } from "electron";
 
-import { FAVICONS_DIR } from "../paths";
+import { FAVICONS_DIR } from "pixel-store";
 
 /** Fetches a page's favicon into a local file the engine can decode, keyed by
  * url hash so repeat visits hit the disk cache. The bytes go through

@@ -17,7 +17,6 @@ import type {
   MarkedTextProps,
   MarkRef,
   PathProps,
-  SceneProps,
   TextProps,
 } from "./reconciler-config";
 
@@ -37,7 +36,6 @@ type Host<P> = ForwardRefExoticComponent<P & RefAttributes<NodeHandle>>;
 
 export const Box = "box" as unknown as Host<BoxProps>;
 export const Text = "text" as unknown as Host<TextProps>;
-export const Scene = "scene" as unknown as Host<SceneProps>;
 export const Path = "shape-path" as unknown as Host<PathProps>;
 
 function markWidgets(
@@ -52,6 +50,27 @@ function markWidgets(
 
 const InputHost = "input" as unknown as Host<InputProps>;
 
+/**
+ * okay maybe this can get interesting
+ * 
+ * how does the surface for the box from the component, out from react and gives us that data
+ * 
+ * then where do we interpret that i suppose serialized representation of the surface
+ * 
+ * what does it even mean to create a surface? thats unclear to me. who instructs who to create a <tab>
+ * 
+ * what even is our representation of a tab
+ * 
+ * lots of uknown unknowns, we need to trace
+ * 
+ * where do i want to start
+ * 
+ * it would be nice if i could jump to where the data for the surface goes to for the box
+ * 
+ * which has to be defined somewhere in the reconciler config kashira?
+ * 
+ * like it probably is a generic update event and we create some node on the rust backend
+ */
 export const Input = forwardRef<NodeHandle, InputProps>(function Input(props, ref) {
   const { renderMark, onChange, ...rest } = props;
   const [marks, setMarks] = useState<MarkRef[]>(props.defaultMarks ?? []);

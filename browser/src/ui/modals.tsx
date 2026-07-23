@@ -6,9 +6,10 @@ import { Icon } from "./icons";
 import type { Theme } from "./theme";
 import type { ChromeActions, ChromeLayout, NewTabView, PaletteView } from "./types";
 
-/** invisible clickable layer under a modal card: closing on outside click and,
- * because clickables block pointer hits, keeping the click off the page */
 function Backdrop({ layout, onClose }: { layout: ChromeLayout; onClose(): void }) {
+  /**
+   * does the layout tree generated get transformed into pain order? hm
+   */
   return (
     <Box
       style={{

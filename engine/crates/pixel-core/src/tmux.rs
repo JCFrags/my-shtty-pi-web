@@ -1,7 +1,4 @@
 pub fn in_tmux() -> bool {
-    /**
-     * ah
-     */
     std::env::var_os("TMUX").is_some()
 }
 

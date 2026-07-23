@@ -1,12 +1,3 @@
-/**
- * 
- * my goals still are:
- * 
- * - understand the tmux change
- * - verify the ssh case using the kitty keyboard protocol
- * - check where we are persiting images
- * - profit?
- */
 use std::io;
 use std::time::{Duration, Instant};
 
@@ -147,8 +138,6 @@ impl WindowSize {
     }
 }
 
-/// electron installs signal handlers without SA_RESTART (crashpad, child
-/// reaping), so any syscall during engine setup can come back EINTR
 fn retry_intr<T>(mut call: impl FnMut() -> rustix::io::Result<T>) -> rustix::io::Result<T> {
     loop {
         match call() {
@@ -158,8 +147,6 @@ fn retry_intr<T>(mut call: impl FnMut() -> rustix::io::Result<T>) -> rustix::io:
     }
 }
 
-/** The tty the terminal talks to: the process's own stdio, or any tty opened
- * by path so one process can drive several panes (the browser daemon). */
 enum TtyHandle {
     Stdio { stdin: io::Stdin, stdout: io::Stdout },
     File(std::fs::File),
@@ -198,9 +185,8 @@ pub struct Terminal {
     wake_rx: Option<rustix::fd::OwnedFd>,
     waker: Option<Waker>,
     resize_slot: Option<usize>,
-    /// distinguishes shm frame names when several terminals share a process
     terminal_id: u64,
-    // does the terminal support https://sw.kovidgoyal.net/kitty/clipboard/ 
+    // if the terminal supports https://sw.kovidgoyal.net/kitty/clipboard/
     clipboard_data: bool,
     clip_read: Option<ClipRead>,
 }
@@ -214,8 +200,6 @@ struct ClipRead {
 
 const CLIP_READ_MAX_BYTES: usize = 64 * 1024 * 1024;
 
-// one slot per live Terminal so every engine in the process wakes on
-// SIGWINCH; only atomics — the signal handler cannot take locks
 const RESIZE_WAKE_SLOTS: usize = 64;
 static RESIZE_WAKE_FDS: [std::sync::atomic::AtomicI32; RESIZE_WAKE_SLOTS] =
     [const { std::sync::atomic::AtomicI32::new(-1) }; RESIZE_WAKE_SLOTS];
@@ -254,32 +238,8 @@ pub struct Waker {
     fd: std::sync::Arc<rustix::fd::OwnedFd>,
 }
 
-/**
- * fd fd fd fd fd fd
- * 
- * this is the fd i was lookign for maybe in the future useful?
- */
 impl Waker {
     pub fn wake(&self) {
-        /*
-          the question is where the fuck are we listening for this?
-          
-          and tx is not sending that there
-          
-           are we writing to that in some other way
-          
-          what was that thing where we had a cannel from a pipe
-          
-          how does that work?
-          
-          i have no fucking idea
-          
-          is there any way a channel end could be available somewehre else in the program 
-          
-          okay global variable, is that what was happening?
-         
-         no it seemedl iek it was making a channel using a unix pipe forsomething idfferent right?
-         */
         let _ = rustix::io::write(&*self.fd, &[1]);
     }
 }
@@ -296,9 +256,6 @@ impl Terminal {
         )
     }
 
-    /// Drive a tty this process doesn't own as stdio (a pane handed to the
-    /// browser daemon by path). tmux passthrough is not probed here: the env
-    /// vars it would need belong to the client process, not this one.
     pub fn open(tty_path: &str) -> io::Result<Self> {
         let file = std::fs::File::options().read(true).write(true).open(tty_path)?;
         Self::with_handle(TtyHandle::File(file), false)
@@ -339,8 +296,6 @@ impl Terminal {
             clipboard_data: false,
             clip_read: None,
         };
-        // probed even under a multiplexer: tmux never confirms 1016 (cells),
-        // but hosts that answer the DECRQM relay pane-local pixel positions
         terminal.mouse_pixels = terminal.probe_mouse_pixels()?;
         terminal.clipboard_data = !tmux && terminal.probe_clipboard_data()?;
         terminal.shm_frames = terminal.probe_shm_frames()?;
@@ -632,8 +587,6 @@ impl Terminal {
         Ok(self.cell)
     }
 
-    // i really really don't like this, think it causes some startup latency, and think there's a better option
-    // todo: look at what opentui does
     pub fn query_colors(&mut self) -> io::Result<TerminalColors> {
         let mut query = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\".to_vec();
         for i in 0..16 {
@@ -727,8 +680,6 @@ impl Terminal {
         }
     }
 
-    /// OSC 22 (kitty pointer-shape protocol; ghostty speaks it too): set the
-    /// mouse pointer to a CSS cursor name while it hovers this window.
     pub fn set_pointer_shape(&mut self, shape: &str) -> io::Result<()> {
         if !shape.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') {
             return Ok(());

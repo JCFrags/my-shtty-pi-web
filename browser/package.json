@@ -6,11 +6,12 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:engine": "pnpm --filter pixel-react build",
-    "start": "pnpm build:engine && pnpm build && mkdir -p \"$HOME/.pixel-browser/logs\" && exec electron dist/main.js 2>>\"$HOME/.pixel-browser/logs/stderr.log\"",
+    "start": "pnpm build:engine && pnpm build && mkdir -p \"$HOME/.pixel/logs\" && exec electron dist/main.js 2>>\"$HOME/.pixel/logs/stderr.log\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "pixel-react": "workspace:*",
+    "pixel-store": "workspace:*",
     "pixel-terminals": "workspace:*",
     "react": "^18.3.1"
   },

@@ -29,6 +29,15 @@ export class Surface {
   /**
    * 
    * what is this abstraction??
+   * 
+   * hm
+   * 
+   * i need a good mental model at least of how we go from asking for a surface
+   * to how that identifies pixels and how those get written back to the slot the box wants
+   * 
+   * 
+   * 
+   * presenting is the place that makes the most sense for <some tab is created> kashira?
    */
   present(frame: SurfaceFrame): void {
     if (this.closed) throw new Error("surface is closed");

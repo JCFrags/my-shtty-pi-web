@@ -41,6 +41,7 @@ enum Job {
     Bytes {
         data: Vec<u8>,
         ext: &'static str,
+        source: crate::clipboard_image::PasteSource,
         queued: Instant,
         seq: u64,
     },
@@ -224,21 +225,32 @@ fn decode_worker(jobs: Receiver<Job>, results: Sender<Done>, waker: Arc<Mutex<Op
             Job::Bytes {
                 data,
                 ext,
+                source,
                 queued,
                 seq,
             } => {
                 let started = Instant::now();
                 let rgba = image::load_from_memory(&data).ok().map(|i| i.into_rgba8());
+                let enc_started = Instant::now();
                 let pasted = rgba.as_ref().map(|rgba| {
                     let (width, height) = rgba.dimensions();
+                    // todo: review me harder
+                    let keep_original = matches!(ext, "png" | "jpg");
+                    let path =
+                        crate::clipboard_image::temp_path(if keep_original { ext } else { "png" });
+                    if keep_original {
+                        let _ = std::fs::write(&path, &data);
+                    } else {
+                        let _ = rgba.save(&path);
+                    }
                     crate::clipboard_image::PastedImage {
-                        path: crate::clipboard_image::temp_path(ext)
-                            .to_string_lossy()
-                            .into_owned(),
+                        path: path.to_string_lossy().into_owned(),
                         width,
                         height,
+                        source,
                     }
                 });
+                let enc_finished = Instant::now();
                 let clipboard = Done::Clipboard {
                     seq,
                     queued,
@@ -263,13 +275,11 @@ fn decode_worker(jobs: Receiver<Job>, results: Sender<Done>, waker: Arc<Mutex<Op
                         return;
                     }
                     wake(&waker);
-                    let enc_started = Instant::now();
-                    let _ = std::fs::write(&pasted.path, &data);
                     let sent = send(Done::Encoded {
                         src: pasted.path,
                         seq,
                         started: enc_started,
-                        finished: Instant::now(),
+                        finished: enc_finished,
                     });
                     if !sent {
                         return;
@@ -357,13 +367,18 @@ pub(crate) fn queue_clipboard_read() -> u64 {
     })
 }
 
-pub(crate) fn queue_pasted_bytes(data: Vec<u8>, ext: &'static str) -> u64 {
+pub(crate) fn queue_pasted_bytes(
+    data: Vec<u8>,
+    ext: &'static str,
+    source: crate::clipboard_image::PasteSource,
+) -> u64 {
     CACHE.with_borrow_mut(|cache| {
         cache.next_seq += 1;
         let seq = cache.next_seq;
         let _ = jobs_sender(cache).send(Job::Bytes {
             data,
             ext,
+            source,
             queued: Instant::now(),
             seq,
         });

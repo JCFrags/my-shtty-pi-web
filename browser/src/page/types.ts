@@ -1,3 +1,4 @@
+// why are we here?
 export interface BrowserState {
   url: string;
   title: string;
@@ -13,6 +14,7 @@ export interface BrowserState {
 export function initialBrowserState(url: string): BrowserState {
   return {
     url,
+    // yuck
     title: "",
     favicon: null,
     loading: true,

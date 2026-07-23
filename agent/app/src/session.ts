@@ -627,7 +627,7 @@ class Store {
       const path = parsed.path;
       const durable = path.startsWith(attachmentsDir) ? path : null;
       const attachment: ComposerAttachment = {
-        image: { path, width: 0, height: 0 },
+        image: { path, width: 0, height: 0, source: "file" },
         durable,
         persisted: Promise.resolve(durable),
       };

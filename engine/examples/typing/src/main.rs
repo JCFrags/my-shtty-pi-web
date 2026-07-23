@@ -62,7 +62,7 @@ fn main() -> std::io::Result<()> {
         watch_resize: true,
         tty: None,
     })?;
-    let theme = Theme::from_terminal(engine.colors());
+    let theme = Theme::from_terminal(&engine.colors);
     engine.set_clear_color(0, theme.bg);
 
     let mut app = App {
@@ -73,7 +73,7 @@ fn main() -> std::io::Result<()> {
         native: false,
         context_menu: None,
     };
-    if engine.native_scroll_available() {
+    if engine.native.is_some() {
         app.enable_native();
     }
     sync_scroll_mode(&app, &mut engine);
@@ -86,21 +86,21 @@ fn main() -> std::io::Result<()> {
             let sample = sample(&app, &engine);
             let frame = build_ui(
                 &app,
-                engine.window_px(),
-                engine.base_px(),
+                engine.comp.window,
+                engine.base_px,
                 &sample,
-                &engine.fonts()[FONT_UI],
+                &engine.fonts[FONT_UI],
             );
-            engine.tree_mut().reconcile(frame);
+            engine.comp.views[0].tree.reconcile(frame);
         }
 
         let events = engine.pump(None)?;
         // The status chips sample engine stats, so rebuilding the UI
         // unconditionally would turn "stats changed" into a render loop.
         let scroll = engine
-            .tree()
+            .comp.views[0].tree
             .find(EDITOR)
-            .and_then(|id| engine.tree().scroll_state(id))
+            .and_then(|id| engine.comp.views[0].tree.scroll_state(id))
             .map_or(0.0, |s| s.position);
         if scroll != last_scroll {
             last_scroll = scroll;
@@ -158,31 +158,31 @@ fn main() -> std::io::Result<()> {
                 EngineEvent::RightClick { x, y, .. } => {
                     app.context_menu = None;
                     let over_editor = engine
-                        .tree()
+                        .comp.views[0].tree
                         .find(EDITOR)
-                        .and_then(|id| engine.tree().rect(id))
+                        .and_then(|id| engine.comp.views[0].tree.rect(id))
                         .is_some_and(|rect| rect.contains(x, y));
                     if !over_editor {
                         continue;
                     }
-                    if let Some(input) = engine.tree().find(&input_key(app.active))
-                        && let Some(geometry) = engine.tree().input_geometry(input)
-                        && let Some(text) = engine.tree().input_text(input).map(str::to_string)
+                    if let Some(input) = engine.comp.views[0].tree.find(&input_key(app.active))
+                        && let Some(geometry) = engine.comp.views[0].tree.input_geometry(input)
+                        && let Some(text) = engine.comp.views[0].tree.input_text(input).map(str::to_string)
                     {
                         let marks = engine
-                            .tree()
+                            .comp.views[0].tree
                             .input(input)
                             .map(|i| i.marks().to_vec())
                             .unwrap_or_default();
-                        let offset = geometry.offset_at(&text, &marks, (x, y), engine.fonts());
+                        let offset = geometry.offset_at(&text, &marks, (x, y), &engine.fonts);
                         let in_selection = engine
-                            .tree()
+                            .comp.views[0].tree
                             .input(input)
                             .and_then(|i| i.selection())
                             .is_some_and(|s| s.contains(&offset));
                         if !in_selection {
                             engine
-                                .tree_mut()
+                                .comp.views[0].tree
                                 .edit_input(input, |i| i.set_cursor(offset, false));
                         }
                     }
@@ -223,13 +223,13 @@ fn main() -> std::io::Result<()> {
 }
 
 fn sample(app: &App, engine: &Engine) -> EngineSample {
-    let tree = engine.tree();
+    let tree = &engine.comp.views[0].tree;
     let input = tree
         .find(&input_key(app.active))
         .and_then(|id| tree.input(id));
     EngineSample {
-        recording: engine.profiler_recording(),
-        stats: engine.stats(),
+        recording: engine.profiler.is_recording(),
+        stats: engine.stats,
         editor_scroll: tree
             .find(EDITOR)
             .and_then(|id| tree.scroll_state(id))
@@ -241,8 +241,8 @@ fn sample(app: &App, engine: &Engine) -> EngineSample {
 }
 
 fn sync_scroll_mode(app: &App, engine: &mut Engine) {
-    engine.set_native_scroll(app.native_active());
-    engine.set_scroll_profile(app.profile());
+    engine.use_native = app.native_active();
+    engine.profile = app.profile();
 }
 
 fn key_dump() -> std::io::Result<()> {

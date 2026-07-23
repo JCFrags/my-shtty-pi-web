@@ -5,8 +5,6 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use crate::terminal::Waker;
 
-/// NSEvent.phase "began" bit as the helper reports it; a new finger-down
-/// gesture always starts with it, which is when pairing state resets.
 pub const PHASE_BEGAN: u32 = 1;
 
 #[derive(Clone, Copy)]
@@ -15,13 +13,9 @@ pub enum NativeDelta {
         delta_x: f32,
         delta_y: f32,
         precise: bool,
-        /// NSEvent.phase — began/changed/ended of the finger-down gesture
         phase: u32,
-        /// NSEvent.momentumPhase — the coast after the fingers lift
         momentum: u32,
     },
-    // Trackpad pinch: NSEvent.magnification, the fractional scale change for
-    // this event (a full gesture sums to roughly ±1..3).
     Zoom {
         magnification: f32,
     },
@@ -32,9 +26,6 @@ enum Msg {
     Delta(NativeDelta),
 }
 
-/// One helper process per engine would register one global event monitor per
-/// pane; the daemon multiplies that. The process shares a single helper and
-/// fans its events out to every subscribed engine.
 struct SharedHelper {
     child: Child,
     subscribers: Vec<(Sender<Msg>, Option<Waker>)>,

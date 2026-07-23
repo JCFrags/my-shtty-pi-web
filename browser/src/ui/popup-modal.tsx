@@ -5,7 +5,7 @@ import { Icon } from "./icons";
 import type { Theme } from "./theme";
 import type { ChromeActions, ChromeLayout, PopupView } from "./types";
 
-/** a window.open() child window, drawn as a modal card over the page */
+// need to see this in action havne't yet
 export function PopupModal({
   view,
   actions,

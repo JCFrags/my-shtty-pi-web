@@ -64,8 +64,6 @@ impl SurfaceMailbox {
         }
         let mut slots = self.slots.lock().unwrap_or_else(|error| error.into_inner());
         let slot = slots.entry(update.id).or_default();
-        // interesting, so its 2 memcopies
-        // it would be nice ot have benchamrk of memcopy timings
         let mut pixels = match slot.pending.take() { // take, alr
             Some(Pending::Frame(frame)) => {
                 self.coalesced.fetch_add(1, Ordering::Relaxed);
@@ -80,7 +78,6 @@ impl SurfaceMailbox {
             update.height as usize,
             update.stride,
         );
-        // submitted, alright?
         slot.pending = Some(Pending::Frame(SurfaceFrame {
             id: update.id,
             width: update.width,
@@ -131,7 +128,6 @@ impl SurfaceMailbox {
     }
 }
 
-// so this isn't where the parallezation happened
 fn convert_bgra(src: &[u8], dst: &mut Vec<u8>, row_bytes: usize, height: usize, stride: usize) {
     dst.resize(row_bytes * height, 0);
     for row in 0..height {

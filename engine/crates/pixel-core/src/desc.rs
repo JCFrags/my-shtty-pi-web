@@ -32,7 +32,6 @@ impl Desc {
             mark: None,
             marks: Vec::new(),
             content_height: self.content_height,
-            scene: None,
             shape: None,
             scroll_events: self.scroll_events,
             wheel_events: self.wheel_events,

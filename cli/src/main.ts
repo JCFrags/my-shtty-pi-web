@@ -2,9 +2,9 @@
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
-import os from "node:os";
 import path from "node:path";
 
+import { DAEMON_SOCKET, LOGS_DIR, ensureDataDir } from "pixel-store";
 import { detectBackend, setPaneTitle } from "pixel-terminals";
 import type { Backend, Direction, Pane } from "pixel-terminals";
 import { control } from "./control";
@@ -30,8 +30,6 @@ usage: pixel <command> [args]
                             modifiers of the action shortcuts (screenshot,
                             record, ...), default super+shift. "none" disables)
   help                      show this help
-
-All output is JSON. Browsers are matched to tabs by their pane title (pixel-browser:<pid>).
 `;
 
 interface LocatedInstance extends InstanceRecord {
@@ -124,7 +122,8 @@ function browserLaunchCommand(argv: string[]): { command: string[]; cwd: string 
       fail(`missing ${required} — build the browser first (pnpm --filter pixel-browser build)`);
     }
   }
-  const logDir = path.join(os.homedir(), ".pixel-browser", "logs");
+  ensureDataDir();
+  const logDir = LOGS_DIR;
   fs.mkdirSync(logDir, { recursive: true });
   const quoted = [electron, main, ...argv]
     .map((arg) => `'${arg.replaceAll("'", `'\\''`)}'`)
@@ -144,8 +143,6 @@ function clientLaunchCommand(argv: string[]): { command: string[]; cwd: string }
     .join(" ");
   return { command: ["/bin/sh", "-c", `exec ${quoted}`], cwd: process.cwd() };
 }
-
-const DAEMON_SOCKET = path.join(os.homedir(), ".pixel-browser", "daemon.sock");
 
 function ownTtyPath(): string | null {
   try {
@@ -221,6 +218,12 @@ function nextReply(socket: net.Socket, onLine: (reply: DaemonReply) => void): vo
     }
   });
 }
+/**
+ * 
+ *  question to answer: does the cli node process exit after doing its job?
+ * 
+ * 
+ */
 
 async function openSession(argv: string[], tty: string): Promise<{ socket: net.Socket; reply: DaemonReply }> {
   const request = `${JSON.stringify({
@@ -255,8 +258,6 @@ async function openSession(argv: string[], tty: string): Promise<{ socket: net.S
   return { socket, reply };
 }
 
-/** Attach this pane to the shared daemon: hand over the tty, then idle as the
- * pane's process forwarding resizes until the session ends. */
 async function attachHere(argv: string[]): Promise<never> {
   const tty = ownTtyPath();
   if (!tty) throw new Error("not running on a tty");
@@ -274,6 +275,7 @@ async function attachHere(argv: string[]): Promise<never> {
   socket.on("error", () => process.exit(1));
   process.on("SIGWINCH", () => {
     try {
+      // right, some nuance here with how we implement split pane sizing
       socket.write('{"cmd":"resize"}\n');
     } catch {}
   });
@@ -330,6 +332,7 @@ let cachedScale: number | null = null;
 function displayScale(): number {
   if (cachedScale !== null) return cachedScale;
   try {
+    // woah uh
     const out = execFileSync(
       "osascript",
       ["-l", "JavaScript", "-e", "ObjC.import('AppKit'); $.NSScreen.mainScreen.backingScaleFactor"],
@@ -372,12 +375,12 @@ async function launchInSplit(
   argv: string[],
   size?: number | null,
 ): Promise<InstanceRecord> {
-  const before = new Set(instances().map(recordKey));
+  const before = new Set((await instances()).map(recordKey));
   const { command, cwd } = clientLaunchCommand(argv);
   await backend.split(direction, command, cwd);
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
-    const fresh = instances().find((record) => !before.has(recordKey(record)));
+    const fresh = (await instances()).find((record) => !before.has(recordKey(record)));
     if (fresh) {
       if (size) await applySplitSize(backend, direction, fresh, size).catch(() => {});
       return fresh;
@@ -396,7 +399,7 @@ async function openCommand(backend: Backend, args: string[]) {
   const actionMods = takeModsBinding(args, "--action-mods");
   const url = args[0];
   if (!forceSplit) {
-    const records = instances();
+    const records = await instances();
     if (records.length > 0) {
       const located = locate(records, await backend.panes());
       const here = located.find((record) => record.inCurrentTab);

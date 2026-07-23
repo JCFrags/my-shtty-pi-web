@@ -160,11 +160,6 @@ fn paint_node(
             }
         });
     }
-    /**
-     * i should check how this node gets constructed
-     * 
-     * wait i coulda sworn some step was parallelized
-     */
     if let Some(surface) = node.surface {
         timed(stats.as_mut().map(|s| &mut s.images), || {
             crate::surfaces::with(surface, |s| {
@@ -219,8 +214,7 @@ fn paint_node(
         });
     }
 
-    // A scene always clips: its world content has no relation to the box's bounds.
-    let clips_children = node.style.overflow != Overflow::Visible || node.scene.is_some();
+    let clips_children = node.style.overflow != Overflow::Visible;
     if clips_children {
         canvas.push_clip(rect.x, rect.y, rect.w, rect.h);
     }
@@ -443,9 +437,6 @@ fn paint_node(
                     }
                 });
             }
-            /**
-             * where is the surface painting
-             */
             if let Some(stats) = stats.as_mut() {
                 for (i, line) in lines.iter().enumerate() {
                     let top = origin.1 + line_h * i as f32;
@@ -481,15 +472,10 @@ fn paint_node(
         }) {
             continue;
         }
-        /**
-         * this seems no longer used from the previous canvas impl
-         */
         if tree.get(child).is_some_and(|n| n.shape.is_some()) {
-            if let Some(camera) = node.scene {
-                timed(stats.as_mut().map(|s| &mut s.shapes), || {
-                    paint_shape(tree, child, canvas, camera, rect);
-                });
-            }
+            timed(stats.as_mut().map(|s| &mut s.shapes), || {
+                paint_shape(tree, child, canvas);
+            });
             continue;
         }
         paint_node(
@@ -512,13 +498,7 @@ fn paint_node(
 }
 
 
-fn paint_shape(
-    tree: &Tree,
-    id: NodeId,
-    canvas: &mut Canvas,
-    camera: crate::scene::Camera,
-    scene_rect: PxRect,
-) {
+fn paint_shape(tree: &Tree, id: NodeId, canvas: &mut Canvas) {
     let Some(node) = tree.get(id) else {
         return;
     };
@@ -528,17 +508,25 @@ fn paint_shape(
     let Some(props) = &node.shape else {
         return;
     };
-    let origin = (scene_rect.x, scene_rect.y);
-    let Some(path) = crate::scene::build_path(&props.cmds) else {
+    let rect = node.abs;
+    let scale = match props.view_box {
+        Some(view_box) if view_box > 0.0 => rect.w.min(rect.h) / view_box,
+        _ => 1.0,
+    };
+    if scale <= 0.0 {
+        return;
+    }
+    let Some(path) = crate::shape::build_path(&props.cmds) else {
         return;
     };
-    let Some(path) = path.transform(camera.transform(origin)) else {
+    let to_screen = tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, rect.x, rect.y);
+    let Some(path) = path.transform(to_screen) else {
         return;
     };
     canvas.stroke_path(
         &path,
         props.stroke.color,
-        crate::scene::skia_stroke(&props.stroke, camera.zoom),
+        crate::shape::skia_stroke(&props.stroke, scale),
     );
 }
 

@@ -4,6 +4,7 @@ packages:
   - agent/*
   - browser
   - cli
+  - store
   - terminals
 onlyBuiltDependencies:
   - better-sqlite3

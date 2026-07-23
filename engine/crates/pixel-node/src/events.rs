@@ -29,7 +29,7 @@ fn marks_json(marks: &[MarkRef]) -> serde_json::Value {
 use crate::ops::IdMap;
 
 fn nearest_ext(engine: &Engine, ids: &IdMap, view: usize, node: NodeId) -> Option<u32> {
-    let tree = engine.view_tree(view)?;
+    let tree = &engine.comp.views.get(view)?.tree;
     let mut current = Some(node);
     while let Some(id) = current {
         if let Some(ext) = ids.ext(id) {
@@ -254,6 +254,7 @@ pub fn event_json(event: &EngineEvent, engine: &Engine, ids: &[IdMap]) -> Option
             path,
             width,
             height,
+            source,
         } => json!({
             "type": "pasteImage",
             "view": view,
@@ -262,6 +263,11 @@ pub fn event_json(event: &EngineEvent, engine: &Engine, ids: &[IdMap]) -> Option
             "path": path,
             "width": width,
             "height": height,
+            "source": match source {
+                pixel_core::clipboard_image::PasteSource::Clipboard => "clipboard",
+                pixel_core::clipboard_image::PasteSource::Osc => "osc",
+                pixel_core::clipboard_image::PasteSource::File => "file",
+            },
         }),
         EngineEvent::HoverEnter { view, node, key } => json!({
             "type": "hoverEnter",

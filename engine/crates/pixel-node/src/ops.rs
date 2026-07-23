@@ -6,7 +6,7 @@ use std::collections::HashMap;
  * ah svg stuff suka suka
  */
 use pixel_core::{
-    Align, Border, BorderSide, Camera, Color, Dimension, Edges, Engine, FlexDirection, Gutter,
+    Align, Border, BorderSide, Color, Dimension, Edges, Engine, FlexDirection, Gutter,
     HighlightArea, ImageProps, InputProps, Inset, InsetValue, Justify, LineCap, LineJoin, NodeId,
     Overflow, Position, Props, ScrollbarStyle, SelectionMode, ShapeProps, ShapeStroke,
     SlotKind, Style, TextSpan, parse_path_data,
@@ -208,7 +208,6 @@ struct PropsDto {
     mark: Option<u64>,
     marks: Vec<MarkInitDto>,
     content_height: Option<f32>,
-    scene: Option<SceneDto>,
     shape: Option<ShapeDto>,
     scroll_events: bool,
     wheel_events: bool,
@@ -219,27 +218,6 @@ struct PropsDto {
     selection_events: bool,
     move_events: bool,
     spans: Vec<SpanDto>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SceneDto {
-    camera: CameraDto,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CameraDto {
-    #[serde(default)]
-    x: f32,
-    #[serde(default)]
-    y: f32,
-    #[serde(default = "default_zoom")]
-    zoom: f32,
-}
-
-fn default_zoom() -> f32 {
-    1.0
 }
 
 #[derive(Deserialize)]
@@ -258,12 +236,15 @@ struct StrokeDto {
 struct ShapeDto {
     d: String,
     stroke: StrokeDto,
+    #[serde(default)]
+    view_box: Option<f32>,
 }
 
 impl ShapeDto {
     fn into_props(self) -> ShapeProps {
         ShapeProps {
             cmds: parse_path_data(&self.d),
+            view_box: self.view_box,
             stroke: ShapeStroke {
                 width: self.stroke.width,
                 color: self.stroke.color,
@@ -644,11 +625,6 @@ impl PropsDto {
             mark: self.mark,
             marks: self.marks.iter().map(|m| (m.id, m.offset)).collect(),
             content_height: self.content_height,
-            scene: self.scene.map(|s| Camera {
-                x: s.camera.x,
-                y: s.camera.y,
-                zoom: s.camera.zoom.max(0.01),
-            }),
             shape: self.shape.map(ShapeDto::into_props),
             scroll_events: self.scroll_events,
             wheel_events: self.wheel_events,
@@ -723,7 +699,7 @@ fn apply_op(
 ) {
     if let Op::AddView {} = op {
         let new_view = engine.add_view();
-        let root = engine.view_tree(new_view).expect("view exists").root();
+        let root = engine.comp.views[new_view].tree.root();
         ids.push(IdMap::new(root));
         let reply = serde_json::json!({ "type": "viewCreated", "view": new_view });
         replies.push(reply.to_string());
@@ -733,9 +709,9 @@ fn apply_op(
         replies.push(register_font(engine, &path));
         return;
     }
-    let base_px = engine.base_px();
+    let base_px = engine.base_px;
     let map = &mut ids[view];
-    let Some(tree) = engine.view_tree_mut(view) else {
+    let Some(tree) = engine.comp.views.get_mut(view).map(|v| &mut v.tree) else {
         return;
     };
     match op {
@@ -822,9 +798,9 @@ fn apply_op(
         Op::ProfileStop {} => engine.profile_stop(),
         Op::SetCpuThrottle { rate } => engine.set_cpu_throttle(rate),
         Op::RegisterFont { .. } => unreachable!("handled before the per-view bindings"),
-        Op::SetKeyCapture { keys } => engine.set_key_capture(keys),
+        Op::SetKeyCapture { keys } => engine.key_capture = keys,
         Op::SetPointerShape { shape } => {
-            let _ = engine.set_pointer_shape(&shape);
+            let _ = engine.term.set_pointer_shape(&shape);
         }
         Op::InputSplice {
             id,
@@ -864,7 +840,7 @@ fn apply_op(
 fn layout_json(engine: &Engine, ids: &IdMap, view: usize) -> String {
     use serde_json::json;
     let mut nodes = Vec::new();
-    if let Some(tree) = engine.view_tree(view) {
+    if let Some(tree) = engine.comp.views.get(view).map(|v| &v.tree) {
         let mut stack = vec![tree.root()];
         while let Some(id) = stack.pop() {
             for &child in tree.children(id) {
@@ -911,13 +887,14 @@ fn layout_json(engine: &Engine, ids: &IdMap, view: usize) -> String {
             nodes.push(node);
         }
     }
-    let stats = engine.stats();
+    let stats = engine.stats;
+    let size = engine.comp.views.get(view).map_or((0, 0), |v| v.size);
     json!({
         "type": "layout",
         "view": view,
-        "width": engine.view_size(view).0,
-        "height": engine.view_size(view).1,
-        "split": engine.split(),
+        "width": size.0,
+        "height": size.1,
+        "split": engine.comp.split,
         "stats": { "frameMs": stats.frame_ms, "fps": stats.fps },
         "nodes": nodes,
     })
