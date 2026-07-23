@@ -12,24 +12,23 @@ import { instances } from "./registry";
 import type { InstanceRecord } from "./registry";
 
 
-const HELP = `pixel — control pixel browsers running in your terminal
+// slop fixme
+const HELP = `
+Usage: pixel <command> [args]
 
-usage: pixel <command> [args]
+  open [url] [options]   Open a browser in a new split or tab.
 
-  open [url] [--dir d]      open a browser in a new split (d: right|left|down|up;
-                            --size f: pane fraction 0.2-0.95, ghostty only);
-                            if a browser is already in this tab, opens the url
-                            as a new active tab in it (--split forces a new split)
-                            (--here: run it in the current pane instead,
-                            blocking until the browser quits)
-                            (--isolated: dedicated browser process with its own
-                            chromium profile instead of the shared daemon)
-                            (--palette-key k: rebind the command palette,
-                            default super+p; --find-key k: rebind find in page,
-                            default super+f; --action-mods m: rebind the
-                            modifiers of the action shortcuts (screenshot,
-                            record, ...), default super+shift. "none" disables)
-  help                      show this help
+    Options:
+      --dir <direction>     Split direction: right, left, down, up
+      --size <fraction>     Pane size (0.2-0.95)
+      --split               Force new split even if browser exists
+      --here                Run in current pane, block until close
+      --isolated            Use dedicated browser process/profile
+      --palette-key <key>   Command palette key (default: super+p)
+      --find-key <key>      Find-in-page key (default: super+f)
+      --action-mods <mods>  Action shortcut mods (default: super+shift, "none" disables)
+
+  help                  Show this help
 `;
 
 interface LocatedInstance extends InstanceRecord {
@@ -128,14 +127,10 @@ function browserLaunchCommand(argv: string[]): { command: string[]; cwd: string 
   const quoted = [electron, main, ...argv]
     .map((arg) => `'${arg.replaceAll("'", `'\\''`)}'`)
     .join(" ");
-  // stray chromium/electron stderr lines scroll the pty and misalign the
-  // engine's drawing under tmux, so the launcher keeps fd 2 off the terminal
   const line = `exec ${quoted} 2>>'${logDir.replaceAll("'", `'\\''`)}/stderr.log'`;
   return { command: ["/bin/sh", "-c", line], cwd: browserDir };
 }
 
-/** The pane command for `pixel open` splits: the thin client that attaches
- * this pane's tty to the shared browser daemon. */
 function clientLaunchCommand(argv: string[]): { command: string[]; cwd: string } {
   const cli = path.resolve(__dirname, "main.js");
   const quoted = [process.execPath, cli, "open", "--here", ...argv]
@@ -218,12 +213,7 @@ function nextReply(socket: net.Socket, onLine: (reply: DaemonReply) => void): vo
     }
   });
 }
-/**
- * 
- *  question to answer: does the cli node process exit after doing its job?
- * 
- * 
- */
+
 
 async function openSession(argv: string[], tty: string): Promise<{ socket: net.Socket; reply: DaemonReply }> {
   const request = `${JSON.stringify({
@@ -275,7 +265,6 @@ async function attachHere(argv: string[]): Promise<never> {
   socket.on("error", () => process.exit(1));
   process.on("SIGWINCH", () => {
     try {
-      // right, some nuance here with how we implement split pane sizing
       socket.write('{"cmd":"resize"}\n');
     } catch {}
   });
@@ -332,7 +321,6 @@ let cachedScale: number | null = null;
 function displayScale(): number {
   if (cachedScale !== null) return cachedScale;
   try {
-    // woah uh
     const out = execFileSync(
       "osascript",
       ["-l", "JavaScript", "-e", "ObjC.import('AppKit'); $.NSScreen.mainScreen.backingScaleFactor"],
@@ -346,8 +334,6 @@ function displayScale(): number {
   return cachedScale;
 }
 
-/** a fresh split is 50/50; grow the new pane toward the requested fraction of
- * the space the two panes share (viewport is device px, resize takes points) */
 async function applySplitSize(
   backend: Backend,
   direction: Direction,
@@ -421,7 +407,6 @@ async function main() {
     process.stdout.write(HELP);
     return;
   }
-  // --here needs no terminal backend: it runs the browser on this tty
   if (command === "open" && takeBoolFlag(args, "--here")) {
     return openHere(args);
   }
