@@ -1,4 +1,5 @@
 import type { BrowserController } from "../page/controller";
+import type { DevtoolsAction } from "../page/devtools";
 import { initialBrowserState } from "../page/types";
 import type { BrowserState, DeviceSpec } from "../page/types";
 import type { TabRow } from "../ui/types";
@@ -9,11 +10,7 @@ export interface Tab {
   controller: BrowserController;
 }
 
-/** What the session provides to tabs: controller construction (surfaces,
- * layout, partition) and the side effects that follow tab changes. */
-/**
- * what an ugly name 
- */
+
 export interface TabHost {
   createController(
     url: string,
@@ -21,11 +18,12 @@ export interface TabHost {
     onState: (state: BrowserState) => void,
   ): BrowserController;
   deviceSpec(): DeviceSpec | null;
-  /** a different tab became active; focus/cursor/registry follow-ups */
   onActivated(): void;
-  /** the active tab's page state changed */
   onActiveState(state: BrowserState, urlChanged: boolean): void;
   onCursorChanged(): void;
+  onDevtoolsChanged(): void;
+  onDevtoolsAction(action: DevtoolsAction): void;
+  onPageMenu(params: Electron.ContextMenuParams): void;
   requestRender(): void;
 }
 
@@ -34,14 +32,11 @@ export class TabManager {
   private activeId = 0;
   private seq = 1;
 
-  // what the fuck is a tab host?????????????????????????????????//
   constructor(
     private readonly host: TabHost,
-    /** opened when the active tab closes and no other tab remains */
     private readonly fallbackUrl: string,
   ) {
 
-    // why is nothign here??????//
   }
 
   get active(): Tab | null {
@@ -60,14 +55,7 @@ export class TabManager {
     return this.tabs.length;
   }
 
-  /**
-   * 
-   * what does creating a tab actually do?
-   * 
-   * i expect somewhere this triggers some sort of electron tab object getting made
-   * 
-   * 
-   */
+  
   create(url: string, activate = true): Tab {
     const tab = { id: this.seq++, state: initialBrowserState(url) } as Tab;
     tab.controller = this.host.createController(url, activate, (state) => {
@@ -76,7 +64,6 @@ export class TabManager {
       if (tab.id === this.activeId) this.host.onActiveState(state, urlChanged);
       this.host.requestRender();
     });
-    // hm not sure why this exists
     tab.controller.onCursorChange = () => {
       if (tab.id === this.activeId) this.host.onCursorChanged();
     };
@@ -84,6 +71,16 @@ export class TabManager {
       this.create(openUrl, activateNew);
     };
     tab.controller.onPopupChange = () => this.host.requestRender();
+    tab.controller.onDevtoolsChange = () => {
+      if (tab.id === this.activeId) this.host.onDevtoolsChanged();
+      else this.host.requestRender();
+    };
+    tab.controller.onDevtoolsAction = (action) => {
+      if (tab.id === this.activeId) this.host.onDevtoolsAction(action);
+    };
+    tab.controller.onContextMenu = (params) => {
+      if (tab.id === this.activeId) this.host.onPageMenu(params);
+    };
     this.tabs.push(tab);
     if (activate) this.activate(tab.id);
     return tab;
@@ -134,6 +131,10 @@ export class TabManager {
       title: tab.state.title,
       active: tab.id === this.activeId,
     }));
+  }
+
+  eachController(fn: (controller: BrowserController) => void) {
+    for (const tab of this.tabs) fn(tab.controller);
   }
 
   stopAll() {

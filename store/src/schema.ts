@@ -30,5 +30,15 @@ export const appState = sqliteTable("app_state", {
   value: text("value").notNull(),
 });
 
+export const settings = sqliteTable("settings", {
+  id: integer("id").primaryKey(),
+  devtoolsDock: text("devtools_dock", { enum: ["bottom", "right"] })
+    .notNull()
+    .default("bottom"),
+  devtoolsFraction: real("devtools_fraction").notNull().default(0.4),
+});
+
 export type InstanceRow = typeof instances.$inferSelect;
 export type NewInstanceRow = typeof instances.$inferInsert;
+export type SettingsRow = typeof settings.$inferSelect;
+export type DevtoolsDock = SettingsRow["devtoolsDock"];

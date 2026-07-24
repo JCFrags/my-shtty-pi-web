@@ -43,5 +43,6 @@ agent/app/.data/
 browser/dist/
 cli/dist/
 terminals/dist/
+store/dist/
 .claude/worktrees/
 tools/

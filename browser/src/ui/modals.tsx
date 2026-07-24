@@ -20,6 +20,13 @@ function Backdrop({ layout, onClose }: { layout: ChromeLayout; onClose(): void }
   );
 }
 
+
+function lastRowRadius(last: boolean, rem: number) {
+  if (!last) return undefined;
+  const radius = Math.max(2, rem * 0.55 - 1);
+  return { topLeft: 0, topRight: 0, bottomLeft: radius, bottomRight: radius };
+}
+
 function ModalCard({
   layout,
   theme,
@@ -91,7 +98,7 @@ export function PaletteCard({
           onChange={(text) => actions.paletteQuery(text)}
         />
       </Box>
-      <Box style={{ flexDirection: "column", padding: { bottom: rem * 0.25 } }}>
+      <Box style={{ flexDirection: "column" }}>
         {view.items.length === 0 && (
           <Text
             style={{
@@ -114,6 +121,7 @@ export function PaletteCard({
               padding: { left: rem * 0.85, right: rem * 0.85 },
               background: i === view.index ? theme.hover : undefined,
               hoverBackground: theme.hover,
+              cornerRadius: lastRowRadius(i === view.items.length - 1, rem),
             }}
             onClick={() => actions.paletteRun(i)}
           >
@@ -225,7 +233,7 @@ export function NewTabCard({
         />
       </Box>
       {view.suggestions.length > 0 && (
-        <Box style={{ flexDirection: "column", padding: { bottom: rem * 0.25 } }}>
+        <Box style={{ flexDirection: "column" }}>
           {view.suggestions.map((suggestion, i) => {
             const maxChars = Math.floor((cardW - rem * 3.15) / (rem * 0.95 * 0.6));
             const shown =
@@ -242,6 +250,7 @@ export function NewTabCard({
                   padding: { left: rem * 0.85, right: rem * 0.85 },
                   background: i === view.index ? theme.hover : undefined,
                   hoverBackground: theme.hover,
+                  cornerRadius: lastRowRadius(i === view.suggestions.length - 1, rem),
                 }}
                 onClick={() => actions.newTabSubmit(suggestion)}
               >

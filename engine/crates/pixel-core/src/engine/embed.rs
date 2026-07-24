@@ -45,6 +45,9 @@ impl Engine {
         point: (f32, f32),
         out: &mut Vec<EngineEvent>,
     ) -> bool {
+        if self.drag.is_some() {
+            return false;
+        }
         let target = match mouse.kind {
             MouseKind::Down => {
                 let view = self.comp.view_at(point.0);

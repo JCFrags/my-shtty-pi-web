@@ -1,4 +1,4 @@
-import type { PointerEvent, WheelEvent } from "pixel-react";
+import type { DragEvent, PointerEvent, WheelEvent } from "pixel-react";
 
 export interface PaletteView {
   index: number;
@@ -40,6 +40,16 @@ export interface PopupView {
   height: number;
 }
 
+export type PageMenuItem =
+  | { id: string; label: string; enabled: boolean; shortcut: string }
+  | { id: string; separator: true };
+
+export interface PageMenuView {
+  x: number;
+  y: number;
+  items: PageMenuItem[];
+}
+
 export interface ChromeActions {
   back(): void;
   forward(): void;
@@ -67,6 +77,13 @@ export interface ChromeActions {
   popupPointer(event: PointerEvent): void;
   popupWheel(event: WheelEvent): void;
   popupClose(): void;
+  devtoolsPointer(event: PointerEvent): void;
+  devtoolsWheel(event: WheelEvent): void;
+  devtoolsHover(hovering: boolean): void;
+  devtoolsDividerDrag(event: DragEvent): void;
+  devtoolsDividerHover(hovering: boolean): void;
+  pageMenuAction(id: string): void;
+  pageMenuClose(): void;
   zoomReset(): void;
 }
 
@@ -76,5 +93,12 @@ export interface ChromeLayout {
   toolbarHeight: number;
   contentHeight: number;
   page: { x: number; y: number; width: number; height: number };
+  devtools: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    dock: "bottom" | "right";
+  } | null;
   rem: number;
 }

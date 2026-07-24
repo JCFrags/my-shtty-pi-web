@@ -8,7 +8,12 @@ import type {
   WheelEvent,
 } from "pixel-react";
 import { normalizeUrl, urlHost } from "../url";
+import { cursorShapeFor } from "./cursor";
+import { DevtoolsWindow } from "./devtools";
+import type { DevtoolsAction } from "./devtools";
+import type { DevtoolsDock } from "pixel-store";
 import { FaviconCache } from "./favicon";
+import { frameRate } from "./frame-rate";
 import { PageInput } from "./input";
 import { PopupWindow } from "./popup";
 import { initialBrowserState } from "./types";
@@ -16,12 +21,10 @@ import type { BrowserState, BrowserSurfaceLayout, DeviceSpec } from "./types";
 import { stepZoom } from "./zoom";
 import type { ZoomDirection } from "./zoom";
 
-/** One offscreen chromium window rendering a page into an engine surface:
- * frames arrive via shared textures, input goes in through PageInput, and
- * navigation/title/favicon changes come back out as BrowserState updates. */
 export class BrowserController {
   private readonly surface: Surface;
   private readonly popupSurface: Surface;
+  private readonly devtoolsSurface: Surface;
   private readonly window: BrowserWindow;
   private readonly onState: (state: BrowserState) => void;
   private readonly renderScale: number;
@@ -31,6 +34,7 @@ export class BrowserController {
   private contentFocused = false;
   private readonly input: PageInput;
   private readonly partition: string | null;
+  private readonly background: string;
   private pendingPopupSize: { width: number; height: number } | null = null;
   private findText = "";
   private readonly favicons = new FaviconCache();
@@ -49,23 +53,28 @@ export class BrowserController {
   onOpenTab: ((url: string, activate: boolean) => void) | null = null;
   popup: PopupWindow | null = null;
   onPopupChange: (() => void) | null = null;
+  devtools: DevtoolsWindow | null = null;
+  devtoolsFocused = false;
+  onDevtoolsChange: (() => void) | null = null;
+  onDevtoolsAction: ((action: DevtoolsAction) => void) | null = null;
+  onContextMenu: ((params: Electron.ContextMenuParams) => void) | null = null;
 
   constructor(
     surface: Surface,
     popupSurface: Surface,
+    devtoolsSurface: Surface,
     layout: BrowserSurfaceLayout,
     initialUrl: string,
     background: string,
     visible: boolean,
-    // clients like `pixel code` pass --partition to isolate their page
-    // storage from other panes; chromium hangs IndexedDB opens when separate
-    // sessions share a partition
     partition: string | null,
     onState: (state: BrowserState) => void,
   ) {
     this.partition = partition;
     this.surface = surface;
     this.popupSurface = popupSurface;
+    this.devtoolsSurface = devtoolsSurface;
+    this.background = background;
     this.visible = visible;
     this.layout = layout;
     this.onState = onState;
@@ -108,9 +117,6 @@ export class BrowserController {
       },
     });
     this.window.webContents.setFrameRate(frameRate());
-    // when monitors change, re-apply the rate: chromium rebinds the
-    // window's vsync display inside setFrameRate (our electron patch) and
-    // frameRate() re-reads the new fastest display
     screen.on("display-added", this.onDisplayChange);
     screen.on("display-removed", this.onDisplayChange);
     screen.on("display-metrics-changed", this.onDisplayChange);
@@ -127,8 +133,6 @@ export class BrowserController {
     this.window.webContents.on("did-start-loading", () => this.updateState({ loading: true }));
     this.window.webContents.on("did-stop-loading", () => this.updateNavigation(false));
     this.window.webContents.on("did-navigate", (_event, url) => {
-      // same-site navigations keep the favicon: chromium only re-emits
-      // page-favicodated when the candidate urls actually change
       if (urlHost(url) !== urlHost(this.state.url)) this.updateState({ favicon: null });
       this.updateNavigation(false, url);
     });
@@ -146,6 +150,9 @@ export class BrowserController {
       if (shape === this.cursorShape) return;
       this.cursorShape = shape;
       this.onCursorChange?.(shape);
+    });
+    this.window.webContents.on("context-menu", (_event, params) => {
+      this.onContextMenu?.(params);
     });
     this.window.webContents.on("found-in-page", (_event, result) => {
       this.updateState({
@@ -193,7 +200,7 @@ export class BrowserController {
     this.onState(this.state);
   }
 
-  resize(layout: BrowserSurfaceLayout) {
+  resize(layout: BrowserSurfaceLayout, options?: { keepFrame?: boolean }) {
     if (
       this.layout.x === layout.x &&
       this.layout.y === layout.y &&
@@ -204,7 +211,8 @@ export class BrowserController {
       return;
     }
     this.layout = layout;
-    this.surface.clear();
+    // why keep frame?
+    if (!options?.keepFrame) this.surface.clear();
     const size = this.contentSize(layout);
     this.window.setContentSize(size.width, size.height, false);
   }
@@ -294,6 +302,7 @@ export class BrowserController {
   }
 
   focusContent() {
+    this.blurDevtools();
     if (this.contentFocused) return;
     this.window.focus();
     /**
@@ -304,6 +313,54 @@ export class BrowserController {
     void this.setFocusEmulation(true).catch(() => {});
   }
 
+  openDevtools(layout: BrowserSurfaceLayout, dock: DevtoolsDock) {
+    if (this.devtools) return;
+    const devtools = new DevtoolsWindow(
+      this.window.webContents,
+      this.devtoolsSurface,
+      layout,
+      dock,
+      this.background,
+      this.renderScale,
+      (action) => this.onDevtoolsAction?.(action),
+      () => {
+        if (this.devtools !== devtools) return;
+        this.devtools = null;
+        this.devtoolsFocused = false;
+        this.onDevtoolsChange?.();
+      },
+    );
+    devtools.onCursorChange = () => this.onCursorChange?.(devtools.cursorShape);
+    devtools.setVisible(this.visible);
+    this.devtools = devtools;
+    this.onDevtoolsChange?.();
+  }
+
+  closeDevtools() {
+    this.devtools?.close();
+  }
+
+  focusDevtools() {
+    if (this.devtoolsFocused || !this.devtools) return;
+    this.blurContent();
+    this.devtoolsFocused = true;
+    this.devtools.focus();
+  }
+
+  blurDevtools() {
+    if (!this.devtoolsFocused) return;
+    this.devtoolsFocused = false;
+    this.devtools?.blur();
+  }
+
+  inspect(x: number, y: number) {
+    this.window.webContents.inspectElement(Math.round(x), Math.round(y));
+  }
+
+  copySelection() {
+    this.window.webContents.copy();
+  }
+
   blurContent() {
     if (!this.contentFocused) return;
     this.input.releaseKeys();
@@ -312,9 +369,6 @@ export class BrowserController {
     void this.setFocusEmulation(false).catch(() => {});
   }
 
-  // the offscreen window is never OS-focused, and chromium's renderer skips
-  // painting the text caret in unfocused windows; focus emulation makes the
-  // renderer treat the page as focused so the caret draws and blinks
   private async setFocusEmulation(enabled: boolean) {
     await this.attachCdp();
     await this.cdp("Emulation.setFocusEmulationEnabled", { enabled });
@@ -348,6 +402,7 @@ export class BrowserController {
     if (this.stopped) return;
     this.stopped = true;
     this.popup?.close();
+    this.devtools?.close();
     screen.off("display-added", this.onDisplayChange);
     screen.off("display-removed", this.onDisplayChange);
     screen.off("display-metrics-changed", this.onDisplayChange);
@@ -359,6 +414,7 @@ export class BrowserController {
     if (this.visible === visible) return;
     this.visible = visible;
     this.popup?.setVisible(visible);
+    this.devtools?.setVisible(visible);
     if (visible) {
       this.window.webContents.setFrameRate(frameRate());
       this.window.webContents.invalidate();
@@ -481,23 +537,6 @@ export class BrowserController {
   }
 }
 
-// Requested begin-frame rate for the offscreen window: the fastest connected
-// display, since ghostty can't show more than that. Relies on our patched
-// electron (zenbu-labs/electron-releases), which drives offscreen begin
-// frames from a real display link — stock electron pins offscreen pages to
-// 60fps once they receive any input.
-function frameRate() {
-  const configured = Number(process.env.PIXEL_BROWSER_FPS);
-  if (Number.isFinite(configured) && configured > 0) {
-    return Math.max(1, Math.min(240, Math.round(configured)));
-  }
-  const fastest = Math.max(
-    0,
-    ...screen.getAllDisplays().map((display) => display.displayFrequency),
-  );
-  return fastest > 0 ? Math.min(240, Math.round(fastest)) : 60;
-}
-
 function browserRenderScale(layout: BrowserSurfaceLayout) {
   const explicit = Number(process.env.PIXEL_BROWSER_RENDER_SCALE);
   if (Number.isFinite(explicit) && explicit > 0) {
@@ -509,24 +548,3 @@ function browserRenderScale(layout: BrowserSurfaceLayout) {
   return Math.max(0.5, Math.min(layout.scale, Math.sqrt(maxPixels / cssPixels)));
 }
 
-/** chromium cursor types that map straight to the CSS shape names terminals
- * accept via OSC 22 (kitty pointer-shape protocol; ghostty parses the same
- * names) */
-const CSS_CURSORS = new Set([
-  "default", "crosshair", "text", "wait", "help", "progress",
-  "cell", "vertical-text", "context-menu", "alias", "copy", "move",
-  "no-drop", "not-allowed", "grab", "grabbing", "zoom-in", "zoom-out",
-  "e-resize", "n-resize", "ne-resize", "nw-resize", "s-resize", "se-resize",
-  "sw-resize", "w-resize", "ns-resize", "ew-resize", "nesw-resize",
-  "nwse-resize", "col-resize", "row-resize",
-]);
-
-function cursorShapeFor(type: string): string {
-  // chromium's "pointer" is the plain arrow; its css pointer is "hand"
-  if (type === "hand") return "pointer";
-  if (CSS_CURSORS.has(type)) return type;
-  if (type === "nodrop") return "no-drop";
-  if (type.endsWith("-panning")) return "all-scroll";
-  // pointer, custom, none, null, …
-  return "default";
-}

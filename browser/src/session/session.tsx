@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { app, screen } from "electron";
+import { app, clipboard, screen } from "electron";
 import { createRoot } from "pixel-react";
 import type { EngineKeyEvent, PixelRoot, Surface } from "pixel-react";
 import { detectBackend } from "pixel-terminals";
@@ -13,16 +13,24 @@ import { initialBrowserState } from "../page/types";
 import type { BrowserState, BrowserSurfaceLayout } from "../page/types";
 import { zoomDirection } from "../page/zoom";
 import type { ZoomDirection } from "../page/zoom";
-import { lastUrl, setLastUrl } from "pixel-store";
+import { lastUrl, setLastUrl, settings, store } from "pixel-store";
+import type { DevtoolsDock } from "pixel-store";
 
 import { Registry } from "../registry";
 import { Chrome } from "../ui/chrome";
-import type { ChromeActions, ChromeLayout, DeviceView, PopupView } from "../ui/types";
+import type {
+  ChromeActions,
+  ChromeLayout,
+  DeviceView,
+  PageMenuItem,
+  PageMenuView,
+  PopupView,
+} from "../ui/types";
 import { searchOrUrl } from "../url";
 import { bindingGlyphs, matchesBinding, parseKeyBinding } from "./keybindings";
 import type { KeyBinding } from "./keybindings";
-import { computeLayout, deviceSpec } from "./layout";
-import type { DeviceMode } from "./layout";
+import { clampDevtoolsFraction, computeLayout, deviceSpec, dividerFraction } from "./layout";
+import type { DeviceMode, DevtoolsPlacement } from "./layout";
 import { fetchSuggestions } from "./suggest";
 import { TabManager } from "./tabs";
 
@@ -78,16 +86,20 @@ class Session {
   private readonly partition: string | null;
   private readonly paletteBinding: KeyBinding | null;
   private readonly findBinding: KeyBinding | null;
+  private readonly devtoolsBinding: KeyBinding | null;
+  private readonly consoleBinding: KeyBinding | null;
   private readonly tabs: TabManager;
   private readonly fallbackState: BrowserState;
 
   private root: PixelRoot | null = null;
   private pageSurface: Surface | null = null;
   private popupSurface: Surface | null = null;
+  private devtoolsSurface: Surface | null = null;
   private registry: Registry | null = null;
 
   private layout: ChromeLayout | null = null;
   private surfaceLayout: BrowserSurfaceLayout | null = null;
+  private devtoolsLayout: BrowserSurfaceLayout | null = null;
   private deviceView: DeviceView | null = null;
   private deviceMode: DeviceMode = "desktop";
   private displayScale = 1;
@@ -97,6 +109,21 @@ class Session {
   private browserFocused = false;
   private shuttingDown = false;
   private pageHover = false;
+  private devtoolsHover = false;
+  private devtoolsWasFocused = false;
+  private devtoolsDockSide: DevtoolsDock = "bottom";
+  private devtoolsFraction = 0.4;
+  private dividerHover = false;
+  private dividerDragging = false;
+  private dividerResizeAt = 0;
+  private pageMenu: {
+    x: number;
+    y: number;
+    pageX: number;
+    pageY: number;
+    linkURL: string;
+    selectionText: string;
+  } | null = null;
   private sentCursor: string | null = null;
 
   private findOpen = false;
@@ -115,6 +142,9 @@ class Session {
     this.partition = flagValue(ctx.argv, "--partition");
     this.paletteBinding = parseKeyBinding(flagValue(ctx.argv, "--palette-key") ?? "super+p");
     this.findBinding = parseKeyBinding(flagValue(ctx.argv, "--find-key") ?? "super+shift+f");
+    // we should use 2 shortcuts for console, also not sure if console actually works as expected
+    this.devtoolsBinding = parseKeyBinding(flagValue(ctx.argv, "--devtools-key") ?? "super+shift+i");
+    this.consoleBinding = parseKeyBinding(flagValue(ctx.argv, "--console-key") ?? "super+alt+j");
     this.fallbackState = initialBrowserState(this.initialUrl());
     this.tabs = new TabManager(
       {
@@ -122,6 +152,7 @@ class Session {
           new BrowserController(
             this.pageSurface!,
             this.popupSurface!,
+            this.devtoolsSurface!,
             this.surfaceLayout!,
             url,
             this.windowBg,
@@ -132,9 +163,17 @@ class Session {
         deviceSpec: () => deviceSpec(this.deviceMode),
         onActivated: () => {
           this.browserFocused = true;
+          this.pageMenu = null;
+          this.syncDevtoolsLayout();
           this.syncCursor();
           this.registry?.update();
         },
+        onDevtoolsChanged: () => this.syncDevtoolsLayout(),
+        onDevtoolsAction: (action) => {
+          if (action === "close") this.tabs.activeController?.closeDevtools();
+          else this.setDevtoolsDockSide(action === "dock-bottom" ? "bottom" : "right");
+        },
+        onPageMenu: (params) => this.openPageMenu(params),
         onActiveState: (state, urlChanged) => {
           if (urlChanged) rememberUrl(state.url);
           this.registry?.update();
@@ -148,6 +187,7 @@ class Session {
 
   async start(): Promise<void> {
     if (process.platform === "darwin") app.dock?.hide();
+    await this.loadDevtoolsSettings();
     if (!this.ctx.tty) process.stdout.write(`\x1b]2;${this.marker}\x07`);
     this.displayScale = this.hostDisplayScale();
     this.root = createRoot({
@@ -157,17 +197,22 @@ class Session {
       onPaste: (text) => {
         const browser = this.tabs.activeController;
         if (browser?.popup) browser.popup.input.paste(text);
-        else if (this.browserFocused) browser?.paste(text);
+        else if (this.browserFocused && browser?.devtoolsFocused) {
+          browser.devtools?.input.paste(text);
+        } else if (this.browserFocused) browser?.paste(text);
       },
       onPasteImage: (image) => {
         const browser = this.tabs.activeController;
         if (browser?.popup) browser.popup.input.pasteImage(image);
-        else if (this.browserFocused) browser?.pasteImage(image);
+        else if (this.browserFocused && browser?.devtoolsFocused) {
+          browser.devtools?.input.pasteImage(image);
+        } else if (this.browserFocused) browser?.pasteImage(image);
       },
       onFocus: (focused) => this.tabs.activeController?.setActive(focused),
       onResize: () => {
         this.recalculateLayout();
         if (this.surfaceLayout) this.tabs.activeController?.resize(this.surfaceLayout);
+        if (this.devtoolsLayout) this.tabs.activeController?.devtools?.resize(this.devtoolsLayout);
         this.render();
       },
       onEngineExit: (error) => {
@@ -180,6 +225,7 @@ class Session {
     }
     this.pageSurface = this.root.createSurface();
     this.popupSurface = this.root.createSurface();
+    this.devtoolsSurface = this.root.createSurface();
     this.recalculateLayout();
     this.loadFont();
     this.root.setPointerShape("default");
@@ -211,6 +257,7 @@ class Session {
     try {
       this.pageSurface?.close();
       this.popupSurface?.close();
+      this.devtoolsSurface?.close();
     } catch { }
     this.root?.stop();
     this.ctx.onClose(code);
@@ -222,6 +269,7 @@ class Session {
 
   private render() {
     if (!this.root || !this.layout || !this.pageSurface || !this.popupSurface) return;
+    if (!this.devtoolsSurface) return;
     this.root.render(
       <Chrome
         state={this.tabs.activeState ?? this.fallbackState}
@@ -253,8 +301,11 @@ class Session {
             }
             : null
         }
+        pageMenu={this.pageMenuView()}
+        dividerEngaged={this.dividerHover || this.dividerDragging}
         pageSurface={this.pageSurface}
         popupSurface={this.popupSurface}
+        devtoolsSurface={this.devtoolsSurface}
       />,
     );
   }
@@ -306,6 +357,55 @@ class Session {
     popupPointer: (event) => this.tabs.activeController?.popup?.input.pointer(event),
     popupWheel: (event) => this.tabs.activeController?.popup?.input.wheel(event),
     popupClose: () => this.tabs.activeController?.popup?.close(),
+    devtoolsPointer: (event) => {
+      const browser = this.tabs.activeController;
+      if (!browser?.devtools) return;
+      this.browserFocused = true;
+      browser.focusDevtools();
+      browser.devtools.input.pointer(event);
+    },
+    devtoolsWheel: (event) => {
+      const browser = this.tabs.activeController;
+      if (!browser?.devtools) return;
+      this.browserFocused = true;
+      browser.focusDevtools();
+      browser.devtools.input.wheel(event);
+    },
+    devtoolsHover: (hovering) => {
+      this.devtoolsHover = hovering;
+      this.syncCursor();
+    },
+    devtoolsDividerHover: (hovering) => {
+      this.dividerHover = hovering;
+      this.syncCursor();
+      this.render();
+    },
+    devtoolsDividerDrag: (event) => {
+      const page = this.layout?.page;
+      const devtools = this.layout?.devtools;
+      if (!page || !devtools) return;
+      if (event.phase === "start") {
+        this.dividerDragging = true;
+        this.render();
+      }
+      if (event.phase === "move") {
+        this.devtoolsFraction = dividerFraction(page, devtools, event.x, event.y);
+        this.recalculateLayout();
+        const now = Date.now();
+        if (now - this.dividerResizeAt > 50) {
+          this.dividerResizeAt = now;
+          this.resizeSplitWindows({ keepFrame: true });
+        }
+        this.render();
+      }
+      if (event.phase === "end") {
+        this.dividerDragging = false;
+        this.saveDevtoolsSettings();
+        this.syncDevtoolsLayout({ keepFrame: true });
+      }
+    },
+    pageMenuAction: (id) => this.runPageMenu(id),
+    pageMenuClose: () => this.closePageMenu(),
     zoomReset: () => this.applyZoom(0),
   };
 
@@ -335,6 +435,10 @@ class Session {
       if (event.mods.ctrl && (event.key === "q" || event.key === "c")) {
         this.shutdown();
         return;
+      }
+      if (this.pageMenu) {
+        this.closePageMenu();
+        if (event.key === "escape") return;
       }
 
       if (this.palette) {
@@ -400,6 +504,14 @@ class Session {
         this.openFind();
         return;
       }
+      if (matchesBinding(event, this.devtoolsBinding) || isPlainKey(event, "f12")) {
+        this.toggleDevtools();
+        return;
+      }
+      if (matchesBinding(event, this.consoleBinding)) {
+        this.toggleDevtoolsConsole();
+        return;
+      }
       if (event.key === "escape" && this.findOpen) {
         this.closeFind();
         return;
@@ -412,11 +524,11 @@ class Session {
         browser?.reload();
         return;
       }
-      if ((event.mods.super || event.mods.ctrl) && event.key === "[") {
+      if ((event.mods.super || event.mods.ctrl || event.mods.alt) && event.key === "[") {
         browser?.back();
         return;
       }
-      if ((event.mods.super || event.mods.ctrl) && event.key === "]") {
+      if ((event.mods.super || event.mods.ctrl || event.mods.alt) && event.key === "]") {
         browser?.forward();
         return;
       }
@@ -429,13 +541,19 @@ class Session {
       }
     }
     if (event.kind === "release") {
-      browser?.key(event);
+      this.routeKey(event);
       return;
     }
     if (this.browserFocused) {
       if (isPasteKey(event)) this.root?.requestClipboardImage();
-      browser?.key(event);
+      this.routeKey(event);
     }
+  }
+
+  private routeKey(event: EngineKeyEvent) {
+    const browser = this.tabs.activeController;
+    if (browser?.devtoolsFocused && browser.devtools) browser.devtools.input.key(event);
+    else browser?.key(event);
   }
 
   private applyZoom(direction: ZoomDirection) {
@@ -452,10 +570,18 @@ class Session {
     this.render();
   }
 
+  // fixme: ghostty doesn't support that cursor type, not sure if any terminals do
   private syncCursor() {
-    const shape = this.pageHover
-      ? (this.tabs.activeController?.cursorShape ?? "default")
-      : "default";
+    const browser = this.tabs.activeController;
+    const shape = this.dividerHover
+      ? this.devtoolsDockSide === "bottom"
+        ? "row-resize"
+        : "col-resize"
+      : this.devtoolsHover
+        ? (browser?.devtools?.cursorShape ?? "default")
+        : this.pageHover
+          ? (browser?.cursorShape ?? "default")
+          : "default";
     if (shape === this.sentCursor) return;
     this.sentCursor = shape;
     this.root?.setPointerShape(shape);
@@ -463,12 +589,175 @@ class Session {
 
   private blurToOverlay() {
     this.browserFocused = false;
-    this.tabs.activeController?.blurContent();
+    const browser = this.tabs.activeController;
+    this.devtoolsWasFocused = browser?.devtoolsFocused ?? false;
+    browser?.blurDevtools();
+    browser?.blurContent();
   }
 
   private refocusPage() {
     this.browserFocused = true;
-    this.tabs.activeController?.focusContent();
+    const browser = this.tabs.activeController;
+    if (this.devtoolsWasFocused && browser?.devtools) browser.focusDevtools();
+    else browser?.focusContent();
+  }
+
+  private toggleDevtools() {
+    const browser = this.tabs.activeController;
+    if (!browser) return;
+    if (browser.devtools) browser.closeDevtools();
+    else this.openDevtools();
+  }
+
+  private openDevtoolsConsole() {
+    const browser = this.tabs.activeController;
+    if (!browser) return;
+    this.openDevtools();
+    browser.devtools?.showPanel("console");
+    browser.focusDevtools();
+  }
+
+  private toggleDevtoolsConsole() {
+    const browser = this.tabs.activeController;
+    if (!browser) return;
+    if (browser.devtools) browser.closeDevtools();
+    else this.openDevtoolsConsole();
+  }
+
+  private openDevtools() {
+    const browser = this.tabs.activeController;
+    if (!browser || !this.root || this.deviceMode !== "desktop" || browser.devtools) return;
+    this.recalculateLayout({ dock: this.devtoolsDockSide, fraction: this.devtoolsFraction });
+    if (this.surfaceLayout) browser.resize(this.surfaceLayout);
+    if (this.devtoolsLayout) browser.openDevtools(this.devtoolsLayout, this.devtoolsDockSide);
+    browser.focusDevtools();
+    this.render();
+  }
+
+  private setDevtoolsDockSide(dock: DevtoolsDock) {
+    this.rememberDock(dock);
+    if (this.tabs.activeController?.devtools) this.syncDevtoolsLayout();
+  }
+
+  private rememberDock(dock: DevtoolsDock) {
+    if (this.devtoolsDockSide === dock) return;
+    this.devtoolsDockSide = dock;
+    this.saveDevtoolsSettings();
+    this.tabs.eachController((controller) => controller.devtools?.setDock(dock));
+  }
+
+  private async loadDevtoolsSettings() {
+    try {
+      const [row] = await store().db.select().from(settings);
+      if (!row) return;
+      this.devtoolsDockSide = row.devtoolsDock;
+      this.devtoolsFraction = clampDevtoolsFraction(row.devtoolsFraction);
+    } catch { }
+  }
+
+  private saveDevtoolsSettings() {
+    const row = {
+      id: 1,
+      devtoolsDock: this.devtoolsDockSide,
+      devtoolsFraction: this.devtoolsFraction,
+    };
+    void store()
+      .db.insert(settings)
+      .values(row)
+      .onConflictDoUpdate({ target: settings.id, set: row })
+      .catch(() => { });
+  }
+
+  private syncDevtoolsLayout(options?: { keepFrame?: boolean }) {
+    this.recalculateLayout();
+    this.resizeSplitWindows(options);
+    this.render();
+  }
+
+  private resizeSplitWindows(options?: { keepFrame?: boolean }) {
+    const browser = this.tabs.activeController;
+    if (this.surfaceLayout) browser?.resize(this.surfaceLayout, options);
+    if (this.devtoolsLayout) browser?.devtools?.resize(this.devtoolsLayout, options);
+  }
+
+  private openPageMenu(params: Electron.ContextMenuParams) {
+    if (!this.surfaceLayout) return;
+    if (this.palette || this.newTab || this.urlEditOpen || this.closeConfirmOpen) return;
+    if (this.tabs.activeController?.popup) return;
+    const scale = this.surfaceLayout.scale;
+    this.pageMenu = {
+      x: this.surfaceLayout.x + params.x * scale,
+      y: this.surfaceLayout.y + params.y * scale,
+      pageX: params.x,
+      pageY: params.y,
+      linkURL: params.linkURL,
+      selectionText: params.selectionText.trim(),
+    };
+    this.render();
+  }
+
+  private closePageMenu() {
+    if (!this.pageMenu) return;
+    this.pageMenu = null;
+    this.render();
+  }
+
+  private runPageMenu(id: string) {
+    const menu = this.pageMenu;
+    this.closePageMenu();
+    const browser = this.tabs.activeController;
+    if (!menu || !browser) return;
+    switch (id) {
+      case "back":
+        browser.back();
+        return;
+      case "forward":
+        browser.forward();
+        return;
+      case "reload":
+        browser.reload();
+        return;
+      case "copy":
+        browser.copySelection();
+        return;
+      case "copy-link":
+        clipboard.writeText(menu.linkURL);
+        return;
+      case "inspect":
+        this.openDevtools();
+        if (browser.devtools) browser.inspect(menu.pageX, menu.pageY);
+        return;
+    }
+  }
+
+  private pageMenuView(): PageMenuView | null {
+    if (!this.pageMenu) return null;
+    const state = this.tabs.activeState;
+    const devtoolsShortcut = this.devtoolsBinding
+      ? `${bindingGlyphs(this.devtoolsBinding)}${this.devtoolsBinding.key.toUpperCase()}`
+      : "";
+    const items: PageMenuItem[] = [
+      { id: "back", label: "back", enabled: !!state?.canGoBack, shortcut: "⌥[" },
+      { id: "forward", label: "forward", enabled: !!state?.canGoForward, shortcut: "⌥]" },
+      { id: "reload", label: "reload", enabled: true, shortcut: "⌘R" },
+      { id: "sep-nav", separator: true },
+      ...(this.pageMenu.selectionText
+        ? [{ id: "copy", label: "copy", enabled: true, shortcut: "⌘C" }]
+        : []),
+      ...(this.pageMenu.linkURL
+        ? [{ id: "copy-link", label: "copy link address", enabled: true, shortcut: "" }]
+        : []),
+      ...(this.pageMenu.selectionText || this.pageMenu.linkURL
+        ? [{ id: "sep-edit", separator: true } as const]
+        : []),
+      {
+        id: "inspect",
+        label: "inspect",
+        enabled: this.deviceMode === "desktop",
+        shortcut: devtoolsShortcut,
+      },
+    ];
+    return { x: this.pageMenu.x, y: this.pageMenu.y, items };
   }
 
   private openUrlEdit() {
@@ -614,6 +903,32 @@ class Session {
         run: () => this.applyZoom(-1),
       },
       {
+        id: "devtools",
+        label: this.tabs.activeController?.devtools ? "close devtools" : "open devtools",
+        shortcut: `${bindingGlyphs(this.devtoolsBinding)}${(this.devtoolsBinding?.key ?? "").toUpperCase()}`,
+        run: () => this.toggleDevtools(),
+      },
+      {
+        id: "devtools-console",
+        label: "open console",
+        shortcut: `${bindingGlyphs(this.consoleBinding)}${(this.consoleBinding?.key ?? "").toUpperCase()}`,
+        run: () => this.openDevtoolsConsole(),
+      },
+      ...(this.tabs.activeController?.devtools
+        ? [
+          {
+            id: "devtools-dock",
+            label:
+              this.devtoolsDockSide === "bottom"
+                ? "dock devtools right"
+                : "dock devtools bottom",
+            shortcut: "",
+            run: () =>
+              this.setDevtoolsDockSide(this.devtoolsDockSide === "bottom" ? "right" : "bottom"),
+          },
+        ]
+        : []),
+      {
         id: "device-phone",
         label: this.deviceMode === "phone" ? "exit mobile emulation" : "mobile emulation",
         shortcut: "",
@@ -657,6 +972,7 @@ class Session {
   private setDeviceMode(mode: DeviceMode) {
     if (mode === this.deviceMode) return;
     this.deviceMode = mode;
+    if (mode !== "desktop") this.tabs.activeController?.closeDevtools();
     this.recalculateLayout();
     const browser = this.tabs.activeController;
     browser?.setDevice(deviceSpec(mode));
@@ -664,17 +980,25 @@ class Session {
     this.render();
   }
 
-  private recalculateLayout() {
+  private recalculateLayout(placement: DevtoolsPlacement | null = this.devtoolsPlacement()) {
     if (!this.root) return;
     const result = computeLayout(
       this.root.info,
       this.displayScale,
       this.deviceMode,
       this.hideToolbar,
+      placement,
     );
     this.layout = result.chrome;
     this.surfaceLayout = result.surface;
+    this.devtoolsLayout = result.devtools;
     this.deviceView = result.device;
+  }
+
+  private devtoolsPlacement(): DevtoolsPlacement | null {
+    return this.tabs.activeController?.devtools
+      ? { dock: this.devtoolsDockSide, fraction: this.devtoolsFraction }
+      : null;
   }
 
   // this is scary code, popusp in general
@@ -736,6 +1060,16 @@ interface PaletteAction {
 
 function isPasteKey(event: EngineKeyEvent): boolean {
   return event.kind === "press" && event.mods.super && event.key === "v";
+}
+
+function isPlainKey(event: EngineKeyEvent, key: string): boolean {
+  return (
+    event.key === key &&
+    !event.mods.super &&
+    !event.mods.ctrl &&
+    !event.mods.alt &&
+    !event.mods.shift
+  );
 }
 
 function flagValue(argv: string[], flag: string): string | null {

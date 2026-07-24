@@ -5,6 +5,7 @@ import type { BrowserState } from "../page/types";
 import { DeviceFrame } from "./device-frame";
 import { Icon } from "./icons";
 import type { IconName } from "./icons";
+import { PageContextMenu } from "./context-menu";
 import { CloseConfirmCard, NewTabCard, PaletteCard, UrlCard } from "./modals";
 import { FindBar, ZoomHud } from "./overlays";
 import { PopupModal } from "./popup-modal";
@@ -16,6 +17,7 @@ import type {
   ChromeLayout,
   DeviceView,
   NewTabView,
+  PageMenuView,
   PaletteView,
   PopupView,
   TabRow,
@@ -36,8 +38,11 @@ export function Chrome({
   urlEdit,
   popup,
   zoomHud,
+  pageMenu,
+  dividerEngaged,
   pageSurface,
   popupSurface,
+  devtoolsSurface,
 }: {
   state: BrowserState;
   actions: ChromeActions;
@@ -54,8 +59,11 @@ export function Chrome({
   popup: PopupView | null;
   /** zoom factor to flash in a transient bubble after a cmd+/- press */
   zoomHud: number | null;
+  pageMenu: PageMenuView | null;
+  dividerEngaged: boolean;
   pageSurface: Surface;
   popupSurface: Surface;
+  devtoolsSurface: Surface;
 }) {
   const theme = useMemo(() => makeTheme(colors), [colors]);
   return (
@@ -83,6 +91,18 @@ export function Chrome({
         />
       ) : (
         <BrowserTabContents layout={layout} theme={theme} surface={pageSurface} actions={actions} />
+      )}
+      {layout.devtools && (
+        <DevtoolsPane
+          layout={layout}
+          theme={theme}
+          surface={devtoolsSurface}
+          actions={actions}
+          dividerEngaged={dividerEngaged}
+        />
+      )}
+      {pageMenu && (
+        <PageContextMenu view={pageMenu} actions={actions} layout={layout} theme={theme} />
       )}
       {findOpen && (
         <FindBar state={state} actions={actions} layout={layout} theme={theme} />
@@ -164,6 +184,19 @@ function Toolbar({
   );
 }
 
+
+function seamRadius(radius: number, dock: "bottom" | "right" | null, side: "page" | "devtools") {
+  if (!dock) return radius;
+  if (side === "page") {
+    return dock === "bottom"
+      ? { topLeft: radius, topRight: radius, bottomLeft: 0, bottomRight: 0 }
+      : { topLeft: radius, bottomLeft: radius, topRight: 0, bottomRight: 0 };
+  }
+  return dock === "bottom"
+    ? { bottomLeft: radius, bottomRight: radius, topLeft: 0, topRight: 0 }
+    : { topRight: radius, bottomRight: radius, topLeft: 0, bottomLeft: 0 };
+}
+
 function BrowserTabContents({
   layout,
   theme,
@@ -175,6 +208,7 @@ function BrowserTabContents({
   surface: Surface;
   actions: ChromeActions;
 }) {
+  const dock = layout.devtools?.dock ?? null;
   return (
     <>
       <Box
@@ -183,7 +217,7 @@ function BrowserTabContents({
           inset: { top: layout.page.y - 1, left: layout.page.x - 1 },
           width: layout.page.width + 2,
           height: layout.page.height + 2,
-          cornerRadius: layout.rem * 0.55,
+          cornerRadius: seamRadius(layout.rem * 0.55, dock, "page"),
           border: { width: 1, color: theme.fieldBorder },
         }}
       />
@@ -195,7 +229,7 @@ function BrowserTabContents({
           inset: { top: layout.page.y, left: layout.page.x },
           width: layout.page.width,
           height: layout.page.height,
-          cornerRadius: Math.max(2, layout.rem * 0.55 - 1),
+          cornerRadius: seamRadius(Math.max(2, layout.rem * 0.55 - 1), dock, "page"),
           background: theme.bg,
         }}
         onPointer={actions.pointer}
@@ -203,6 +237,92 @@ function BrowserTabContents({
         onMouseEnter={() => actions.pageHover(true)}
         onMouseLeave={() => actions.pageHover(false)}
       />
+    </>
+  );
+}
+
+const DIVIDER_ACTIVE = [58, 96, 168, 255] as const;
+const DIVIDER_GRIP = [118, 122, 132, 255] as const;
+
+function DevtoolsPane({
+  layout,
+  theme,
+  surface,
+  actions,
+  dividerEngaged,
+}: {
+  layout: ChromeLayout;
+  theme: Theme;
+  surface: Surface;
+  actions: ChromeActions;
+  dividerEngaged: boolean;
+}) {
+  const rect = layout.devtools!;
+  const horizontal = rect.dock === "bottom";
+  const grab = Math.max(8, Math.round(layout.rem * 0.5));
+  const divider = horizontal
+    ? { x: rect.x, y: rect.y - grab + 2, width: rect.width, height: grab }
+    : { x: rect.x - grab + 2, y: rect.y, width: grab, height: rect.height };
+  const gripAlong = (offset: number) =>
+    horizontal
+      ? { top: Math.round(divider.height / 2) - 1, left: Math.round(divider.width / 2) + offset - 1 }
+      : { top: Math.round(divider.height / 2) + offset - 1, left: Math.round(divider.width / 2) - 1 };
+  return (
+    <>
+      <Box
+        style={{
+          position: "absolute",
+          inset: { top: rect.y - 1, left: rect.x - 1 },
+          width: rect.width + 2,
+          height: rect.height + 2,
+          cornerRadius: seamRadius(layout.rem * 0.55, rect.dock, "devtools"),
+          border: { width: 1, color: theme.fieldBorder },
+        }}
+      />
+      <Box
+        id="devtools-surface"
+        surface={surface}
+        style={{
+          position: "absolute",
+          inset: { top: rect.y, left: rect.x },
+          width: rect.width,
+          height: rect.height,
+          cornerRadius: seamRadius(Math.max(2, layout.rem * 0.55 - 1), rect.dock, "devtools"),
+          background: theme.bg,
+        }}
+        onPointer={actions.devtoolsPointer}
+        onWheel={actions.devtoolsWheel}
+        onMouseEnter={() => actions.devtoolsHover(true)}
+        onMouseLeave={() => actions.devtoolsHover(false)}
+      />
+      <Box
+        id="devtools-divider"
+        style={{
+          position: "absolute",
+          inset: { top: divider.y, left: divider.x },
+          width: divider.width,
+          height: divider.height,
+          background: dividerEngaged ? [...DIVIDER_ACTIVE] : undefined,
+          cornerRadius: 2,
+        }}
+        onDrag={actions.devtoolsDividerDrag}
+        onMouseEnter={() => actions.devtoolsDividerHover(true)}
+        onMouseLeave={() => actions.devtoolsDividerHover(false)}
+      >
+        {[-7, 0, 7].map((offset) => (
+          <Box
+            key={offset}
+            style={{
+              position: "absolute",
+              inset: gripAlong(offset),
+              width: 2,
+              height: 2,
+              cornerRadius: 1,
+              background: dividerEngaged ? [235, 238, 245, 255] : [...DIVIDER_GRIP],
+            }}
+          />
+        ))}
+      </Box>
     </>
   );
 }

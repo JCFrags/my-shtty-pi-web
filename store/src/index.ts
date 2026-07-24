@@ -9,7 +9,7 @@ export {
 } from "./paths";
 export { openStore, store } from "./client";
 export type { Store } from "./client";
-export { appState, instances } from "./schema";
-export type { InstanceRow, NewInstanceRow } from "./schema";
+export { appState, instances, settings } from "./schema";
+export type { DevtoolsDock, InstanceRow, NewInstanceRow, SettingsRow } from "./schema";
 export { listInstances, removeInstance, upsertInstance } from "./instances";
 export { lastUrl, setLastUrl } from "./app-state";

@@ -1,4 +1,5 @@
 import type { EngineInfo } from "pixel-react";
+import type { DevtoolsDock } from "pixel-store";
 import type { BrowserSurfaceLayout, DeviceSpec } from "../page/types";
 import type { ChromeLayout, DeviceView } from "../ui/types";
 
@@ -26,7 +27,67 @@ export function deviceSpec(mode: DeviceMode): DeviceSpec | null {
 export interface SessionLayout {
   chrome: ChromeLayout;
   surface: BrowserSurfaceLayout;
+  devtools: BrowserSurfaceLayout | null;
   device: DeviceView | null;
+}
+
+export interface DevtoolsPlacement {
+  dock: DevtoolsDock;
+  fraction: number;
+}
+
+export function clampDevtoolsFraction(value: number): number {
+  return Math.max(0.15, Math.min(0.85, value));
+}
+
+export function dividerFraction(
+  page: { x: number; y: number; width: number; height: number },
+  devtools: { x: number; y: number; width: number; height: number; dock: DevtoolsDock },
+  x: number,
+  y: number,
+): number {
+  const fraction =
+    devtools.dock === "bottom"
+      ? (devtools.y + devtools.height - y) / (devtools.y + devtools.height - page.y)
+      : (devtools.x + devtools.width - x) / (devtools.x + devtools.width - page.x);
+  return clampDevtoolsFraction(fraction);
+}
+
+type PageRect = ChromeLayout["page"];
+
+function splitForDevtools(
+  page: PageRect,
+  placement: DevtoolsPlacement | null,
+  gap: number,
+): { page: PageRect; devtools: (PageRect & { dock: DevtoolsDock }) | null } {
+  if (!placement) return { page, devtools: null };
+  const fraction = clampDevtoolsFraction(placement.fraction);
+  if (placement.dock === "bottom") {
+    const devtoolsHeight = Math.round(page.height * fraction);
+    const pageHeight = Math.max(1, page.height - devtoolsHeight - gap);
+    return {
+      page: { ...page, height: pageHeight },
+      devtools: {
+        x: page.x,
+        y: page.y + pageHeight + gap,
+        width: page.width,
+        height: Math.max(1, devtoolsHeight),
+        dock: "bottom",
+      },
+    };
+  }
+  const devtoolsWidth = Math.round(page.width * fraction);
+  const pageWidth = Math.max(1, page.width - devtoolsWidth - gap);
+  return {
+    page: { ...page, width: pageWidth },
+    devtools: {
+      x: page.x + pageWidth + gap,
+      y: page.y,
+      width: Math.max(1, devtoolsWidth),
+      height: page.height,
+      dock: "right",
+    },
+  };
 }
 
 export function computeLayout(
@@ -34,6 +95,7 @@ export function computeLayout(
   scale: number,
   mode: DeviceMode,
   hideToolbar: boolean,
+  devtools: DevtoolsPlacement | null,
 ): SessionLayout {
   const toolbarHeight = hideToolbar
     ? 0
@@ -52,18 +114,18 @@ export function computeLayout(
       width: Math.max(1, info.width - padLeft - pad),
       height: Math.max(1, info.height - toolbarHeight - padBottom),
     },
+    devtools: null,
     rem: info.basePx,
   };
   if (mode === "desktop") {
+    const gap = Math.max(2, Math.round(info.basePx * 0.25));
+    const split = splitForDevtools(chrome.page, devtools, gap);
+    chrome.page = split.page;
+    chrome.devtools = split.devtools;
     return {
       chrome,
-      surface: {
-        x: chrome.page.x,
-        y: chrome.page.y,
-        width: chrome.page.width,
-        height: chrome.page.height,
-        scale,
-      },
+      surface: { ...split.page, scale },
+      devtools: split.devtools ? { ...split.devtools, scale } : null,
       device: null,
     };
   }
@@ -91,6 +153,7 @@ export function computeLayout(
       height: screenH,
       scale: s,
     },
+    devtools: null,
     device: {
       mode,
       frame: {
