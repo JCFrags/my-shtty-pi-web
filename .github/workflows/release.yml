@@ -15,7 +15,7 @@ jobs:
     env:
       # The runner checks out into a fresh directory each run; keeping the rust
       # build outside it means only changed crates recompile.
-      CARGO_TARGET_DIR: ${{ runner.temp }}/../cargo-target
+      CARGO_TARGET_DIR: ${{ github.workspace }}/../cargo-target
     steps:
       - uses: actions/checkout@v4
 
