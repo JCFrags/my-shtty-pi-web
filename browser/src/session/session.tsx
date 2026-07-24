@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import { app, clipboard, screen } from "electron";
@@ -64,11 +63,7 @@ export function createSession(ctx: SessionContext): SessionHandle {
 
 const DEFAULT_URL = "https://github.com/zenbu-labs";
 
-// this doesn ot work need to look into this
-const FONT_CANDIDATES = [
-  path.join(os.homedir(), "Library/Fonts/JetBrainsMono-Regular.ttf"),
-  "/Library/Fonts/JetBrainsMono-Regular.ttf",
-];
+const FONT_PATH = path.join(__dirname, "..", "..", "assets", "fonts", "JetBrainsMono-Regular.ttf");
 
 interface NewTabState {
   query: string;
@@ -1023,10 +1018,9 @@ class Session {
   }
 
   private loadFont() {
-    const fontPath = FONT_CANDIDATES.find((candidate) => fs.existsSync(candidate));
-    if (!fontPath || !this.root) return;
+    if (!this.root) return;
     this.root
-      .registerFont(fontPath)
+      .registerFont(FONT_PATH)
       .then((id) => {
         this.fontId = id;
         this.render();

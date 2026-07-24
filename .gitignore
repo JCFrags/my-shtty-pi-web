@@ -46,3 +46,4 @@ terminals/dist/
 store/dist/
 .claude/worktrees/
 tools/
+dist-release/

@@ -11,6 +11,9 @@ import { control } from "./control";
 import { instances } from "./registry";
 import type { InstanceRecord } from "./registry";
 
+const DIST_ROOT = process.env.PIXEL_DIST_ROOT ?? null;
+delete process.env.ELECTRON_RUN_AS_NODE;
+
 
 // slop fixme
 const HELP = `
@@ -114,7 +117,9 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function browserLaunchCommand(argv: string[]): { command: string[]; cwd: string } {
   const browserDir = path.resolve(__dirname, "..", "..", "browser");
-  const electron = path.join(browserDir, "node_modules", ".bin", "electron");
+  const electron = DIST_ROOT
+    ? path.join(DIST_ROOT, "electron", "Pixel.app", "Contents", "MacOS", "Pixel")
+    : path.join(browserDir, "node_modules", ".bin", "electron");
   const main = path.join(browserDir, "dist", "main.js");
   for (const required of [electron, main]) {
     if (!fs.existsSync(required)) {
@@ -132,8 +137,10 @@ function browserLaunchCommand(argv: string[]): { command: string[]; cwd: string 
 }
 
 function clientLaunchCommand(argv: string[]): { command: string[]; cwd: string } {
-  const cli = path.resolve(__dirname, "main.js");
-  const quoted = [process.execPath, cli, "open", "--here", ...argv]
+  const runner = DIST_ROOT
+    ? [path.join(DIST_ROOT, "bin", "pixel")]
+    : [process.execPath, path.resolve(__dirname, "main.js")];
+  const quoted = [...runner, "open", "--here", ...argv]
     .map((arg) => `'${arg.replaceAll("'", `'\\''`)}'`)
     .join(" ");
   return { command: ["/bin/sh", "-c", `exec ${quoted}`], cwd: process.cwd() };

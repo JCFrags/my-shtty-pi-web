@@ -1,0 +1,60 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+
+      - name: Cache electron download
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/electron
+          key: electron-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: scripts/release.sh "main-$(git rev-parse --short HEAD)"
+
+      - name: Publish
+        id: publish
+        env:
+          GH_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: |
+          scripts/publish-gist.sh | tee /tmp/publish.log
+          grep -E '^(pinned|latest)=' /tmp/publish.log >> "$GITHUB_OUTPUT"
+
+      - name: Installer
+        run: |
+          {
+            echo "### pixel \`main-$(git rev-parse --short HEAD)\`"
+            echo
+            echo "This commit:"
+            echo '```sh'
+            echo "curl -fsSL ${{ steps.publish.outputs.pinned }} | bash"
+            echo '```'
+            echo "Always current main:"
+            echo '```sh'
+            echo "curl -fsSL ${{ steps.publish.outputs.latest }} | bash"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
