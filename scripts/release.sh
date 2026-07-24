@@ -11,7 +11,7 @@ rm -rf "$OUT"
 mkdir -p "$STAGE"/{bin,cli/dist,browser/dist,browser/native,electron,assets/fonts}
 
 (cd "$ROOT/engine" && cargo build -p pixel-node --release)
-cp "$ROOT/engine/target/release/libpixel_node.dylib" "$STAGE/browser/native/pixel.node"
+cp "${CARGO_TARGET_DIR:-$ROOT/engine/target}/release/libpixel_node.dylib" "$STAGE/browser/native/pixel.node"
 
 ESBUILD="$ROOT/node_modules/.bin/esbuild"
 bundle() {
@@ -30,9 +30,10 @@ bundle "$ROOT/browser/src/main.tsx" "$STAGE/browser/dist/main.js"
 cp "$ROOT/assets/fonts/JetBrainsMono-Regular.ttf" "$STAGE/assets/fonts/"
 
 ELECTRON_DIST="$(node -e 'const p=require("path");console.log(p.join(p.dirname(require.resolve("electron/package.json",{paths:[process.argv[1]]})),"dist"))' "$ROOT/browser")"
+# The electron package ships no postinstall, so pnpm never fetches the binary.
+# install.js pulls it from the mirror and caches it in ~/Library/Caches/electron.
 if [ ! -d "$ELECTRON_DIST/Electron.app" ]; then
-  echo "electron binary missing; run: cd browser && node node_modules/electron/install.js" >&2
-  exit 1
+  (cd "$(dirname "$ELECTRON_DIST")" && node install.js)
 fi
 
 if ! grep -qi "zenbu-labs" "$ROOT/.npmrc"; then
