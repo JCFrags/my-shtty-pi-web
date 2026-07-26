@@ -59,7 +59,7 @@ struct SendEngine(Engine);
 #[allow(unsafe_code)]
 unsafe impl Send for SendEngine {}
 
-fn colors_json(colors: &TerminalColors) -> serde_json::Value {
+pub(crate) fn colors_json(colors: &TerminalColors) -> serde_json::Value {
     json!({
         "foreground": colors.foreground,
         "background": colors.background,

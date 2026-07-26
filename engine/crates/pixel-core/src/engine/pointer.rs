@@ -420,6 +420,7 @@ impl Engine {
 
     fn open_menu(&mut self, view: usize, at: (f32, f32)) {
         let size = self.comp.views[view].size;
+        let style = crate::menu::MenuStyle::from_terminal(&self.colors);
         let focus = self.menu.open(
             &mut self.comp.views[view].tree,
             view,
@@ -428,6 +429,7 @@ impl Engine {
             self.base_px,
             &self.fonts[0],
             view == self.inspect_view,
+            &style,
         );
         if let Some(id) = focus {
             self.set_focus(view, Some(id));

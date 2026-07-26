@@ -12,6 +12,12 @@ export interface NativeEngine {
 
 export type Rgba = [number, number, number, number];
 
+export type TerminalColors = {
+  foreground: Rgba | null;
+  background: Rgba | null;
+  palette: (Rgba | null)[];
+};
+
 /**
  * fixme: this is a very weird name to export
  */
@@ -21,11 +27,7 @@ export interface EngineInfo {
   cellWidth: number;
   cellHeight: number;
   basePx: number;
-  colors: {
-    foreground: Rgba | null;
-    background: Rgba | null;
-    palette: (Rgba | null)[];
-  };
+  colors: TerminalColors;
 }
 
 export interface HighlightSpan {

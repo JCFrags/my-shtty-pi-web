@@ -198,6 +198,11 @@ fn main() -> std::io::Result<()> {
                         app.notes[index].text = text;
                     }
                 }
+                EngineEvent::Colors { colors } => {
+                    app.theme = Theme::from_terminal(&colors);
+                    engine.set_clear_color(0, app.theme.bg);
+                    needs_ui = true;
+                }
                 EngineEvent::Paste { .. }
                 | EngineEvent::Focus { .. }
                 | EngineEvent::Caret { .. }

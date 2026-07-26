@@ -34,7 +34,7 @@ export class BrowserController {
   private contentFocused = false;
   private readonly input: PageInput;
   private readonly partition: string | null;
-  private readonly background: string;
+  private background: string;
   private pendingPopupSize: { width: number; height: number } | null = null;
   private findText = "";
   private readonly favicons = new FaviconCache();
@@ -264,6 +264,24 @@ export class BrowserController {
     await this.cdp("Runtime.enable");
     await this.cdp("Runtime.addBinding", { name: "__pixelEmit" });
     await this.cdp("Page.enable");
+    await this.emulateColorScheme();
+  }
+
+  /** Follows the terminal's theme, so a page honouring prefers-color-scheme flips with it. */
+  async setBackground(background: string): Promise<void> {
+    this.background = background;
+    this.window.setBackgroundColor(background);
+    await this.emulateColorScheme();
+  }
+
+  private async emulateColorScheme(): Promise<void> {
+    if (!this.cdpAttached) return;
+    const n = parseInt(this.background.slice(1), 16);
+    const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    const dark = 0.2126 * r + 0.7152 * g + 0.0722 * b < 128;
+    await this.cdp("Emulation.setEmulatedMedia", {
+      features: [{ name: "prefers-color-scheme", value: dark ? "dark" : "light" }],
+    });
   }
 
   cdp(method: string, params?: Record<string, unknown>): Promise<Record<string, unknown>> {

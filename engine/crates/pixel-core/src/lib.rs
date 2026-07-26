@@ -45,8 +45,8 @@ pub use style::{
     Overflow, Position, ScrollbarStyle, SelectionMode, Style,
 };
 pub use terminal::{
-    Event, Key, KeyEvent, KeyKind, Mods, Mouse, MouseButton, MouseKind, Terminal, TerminalColors, Waker,
-    WindowSize,
+    Event, Key, KeyEvent, KeyKind, Mods, Mouse, MouseButton, MouseKind, Terminal, TerminalColors,
+    Waker, WindowSize,
 };
 pub use text_input::{
     Granularity, InputAction, InputGeometry, InputReply, MARK_CHAR, Mark, TextInput, line_height,

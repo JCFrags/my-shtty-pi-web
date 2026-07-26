@@ -146,6 +146,9 @@ pub enum EngineEvent {
         height: u32,
         base_px: f32,
     },
+    Colors {
+        colors: TerminalColors,
+    },
     Inspect {
         view: usize,
         node: NodeId,
@@ -296,10 +299,17 @@ pub struct Engine {
     last_pointer_activity: Option<Instant>,
     next_pasted_mark: u64,
     pending: Vec<EngineEvent>,
+    color_request_at: Option<Instant>,
+    last_color_request: Option<Instant>,
     last_step: Instant,
     last_frame: Instant,
     pub stats: FrameStats,
 }
+
+/// Terminals can announce the change before their palette has actually settled.
+const COLOR_SETTLE_DELAY: Duration = Duration::from_millis(50);
+/// Floor on how often the focus fallback is allowed to re-query.
+const COLOR_REQUEST_INTERVAL: Duration = Duration::from_secs(1);
 
 impl Engine {
     pub fn new(config: EngineConfig) -> io::Result<Self> {
@@ -334,7 +344,7 @@ impl Engine {
                 }
             ),
         );
-        Ok(Self {
+        let mut engine = Self {
             term,
             comp: Compositor::new(window),
             fonts: config.fonts,
@@ -380,10 +390,14 @@ impl Engine {
             last_pointer_activity: None,
             next_pasted_mark: 1 << 48,
             pending: Vec::new(),
+            color_request_at: None,
+            last_color_request: None,
             last_step: Instant::now(),
             last_frame: Instant::now(),
             stats: FrameStats::default(),
-        })
+        };
+        engine.sync_clear_colors();
+        Ok(engine)
     }
 
     pub fn add_font(&mut self, font: fontdue::Font) -> usize {
@@ -415,9 +429,24 @@ impl Engine {
         let Some(v) = self.comp.views.get_mut(view) else {
             return;
         };
+        v.clear_color_owned = true;
         if v.clear_color != color {
             v.clear_color = color;
             v.tree.mark_paint();
+        }
+    }
+
+
+    fn sync_clear_colors(&mut self) {
+        let Some(background) = self.colors.background else {
+            return;
+        };
+        for view in &mut self.comp.views {
+            if view.clear_color_owned || view.clear_color == background {
+                continue;
+            }
+            view.clear_color = background;
+            view.tree.mark_paint();
         }
     }
 
@@ -588,6 +617,14 @@ impl Engine {
             }
             None => first_wait,
         };
+        self.send_due_color_request()?;
+        let first_wait = match self.color_request_at {
+            Some(deadline) => {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                Some(first_wait.map_or(remaining, |w| w.min(remaining)))
+            }
+            None => first_wait,
+        };
         let mut event = self.term.poll_event(first_wait)?;
         while let Some(current) = event {
             self.handle_event(current, &mut out)?;
@@ -652,6 +689,54 @@ impl Engine {
             self.log_cursor = last.seq + 1;
         }
         out.extend(entries.into_iter().map(EngineEvent::Log));
+    }
+
+    fn schedule_color_request(&mut self, delay: Duration) {
+        let at = Instant::now() + delay;
+        self.color_request_at = Some(self.color_request_at.map_or(at, |queued| queued.min(at)));
+    }
+
+    /// Terminals without mode 2031 never tell us, so treat coming back to the window as
+    /// the moment worth re-checking — that is when the user has just changed their theme.
+    fn recheck_colors_on_focus(&mut self) {
+        if self.term.reports_color_scheme() {
+            return;
+        }
+        let stale = self
+            .last_color_request
+            .is_none_or(|at| at.elapsed() >= COLOR_REQUEST_INTERVAL);
+        if stale {
+            self.schedule_color_request(Duration::ZERO);
+        }
+    }
+
+    fn send_due_color_request(&mut self) -> io::Result<()> {
+        let Some(at) = self.color_request_at else {
+            return Ok(());
+        };
+        if Instant::now() < at {
+            return Ok(());
+        }
+        self.color_request_at = None;
+        self.last_color_request = Some(Instant::now());
+        self.term.request_colors()
+    }
+
+    fn apply_colors(&mut self, colors: TerminalColors, out: &mut Vec<EngineEvent>) {
+        if colors == self.colors {
+            return;
+        }
+        self.colors = colors;
+        logging::info(
+            "engine",
+            format!("colors changed, background {:?}", colors.background),
+        );
+        self.sync_clear_colors();
+        for view in &mut self.comp.views {
+            view.tree.mark_paint();
+        }
+        self.comp.dirty = true;
+        out.push(EngineEvent::Colors { colors });
     }
 
     fn check_resize(&mut self, out: &mut Vec<EngineEvent>) -> io::Result<()> {
@@ -758,6 +843,9 @@ impl Engine {
             Event::Focus(focused) => {
                 let gained = focused && !self.term_focused;
                 self.term_focused = focused;
+                if gained {
+                    self.recheck_colors_on_focus();
+                }
                 if !focused {
                     self.focus_click = None;
                 } else if gained
@@ -774,6 +862,8 @@ impl Engine {
             Event::ClipboardData { items, ok } => {
                 self.clipboard.handle_clipboard_data(&mut self.term, items, ok)
             }
+            Event::ColorSchemeChanged => self.schedule_color_request(COLOR_SETTLE_DELAY),
+            Event::Colors(colors) => self.apply_colors(colors, out),
         }
         self.emit_selection_change(out);
         Ok(())

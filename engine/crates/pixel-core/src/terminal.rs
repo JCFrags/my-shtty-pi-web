@@ -14,6 +14,8 @@ pub enum Event {
     Focus(bool),
     WindowSize(WindowSize),
     ClipboardData { items: Vec<(String, Vec<u8>)>, ok: bool },
+    ColorSchemeChanged,
+    Colors(TerminalColors),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,11 +114,57 @@ pub enum MouseButton {
     None,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TerminalColors {
     pub foreground: Option<[u8; 4]>,
     pub background: Option<[u8; 4]>,
     pub palette: [Option<[u8; 4]>; 16],
+}
+
+impl TerminalColors {
+    fn set(&mut self, slot: ColorSlot, rgba: [u8; 4]) {
+        match slot {
+            ColorSlot::Foreground => self.foreground = Some(rgba),
+            ColorSlot::Background => self.background = Some(rgba),
+            ColorSlot::Palette(i) => self.palette[i as usize] = Some(rgba),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorSlot {
+    Foreground,
+    Background,
+    Palette(u8),
+}
+
+const COLOR_SLOT_COUNT: usize = 18;
+const COLOR_QUERY_TIMEOUT: Duration = Duration::from_millis(1200);
+const COLOR_QUERY_IDLE: Duration = Duration::from_millis(250);
+
+struct ColorQuery {
+    colors: TerminalColors,
+    received: usize,
+    started: Instant,
+    last_reply: Option<Instant>,
+}
+
+impl ColorQuery {
+    fn new() -> Self {
+        Self {
+            colors: TerminalColors::default(),
+            received: 0,
+            started: Instant::now(),
+            last_reply: None,
+        }
+    }
+
+    fn deadline(&self) -> Instant {
+        match self.last_reply {
+            Some(at) => (at + COLOR_QUERY_IDLE).min(self.started + COLOR_QUERY_TIMEOUT),
+            None => self.started + COLOR_QUERY_TIMEOUT,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,6 +237,9 @@ pub struct Terminal {
     // if the terminal supports https://sw.kovidgoyal.net/kitty/clipboard/
     clipboard_data: bool,
     clip_read: Option<ClipRead>,
+    // if the terminal tells us when its palette changes (DEC private mode 2031)
+    color_scheme_updates: bool,
+    color_query: Option<ColorQuery>,
 }
 
 #[derive(Default)]
@@ -295,11 +346,22 @@ impl Terminal {
             terminal_id: NEXT_TERMINAL_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             clipboard_data: false,
             clip_read: None,
+            color_scheme_updates: false,
+            color_query: None,
         };
         terminal.mouse_pixels = terminal.probe_mouse_pixels()?;
         terminal.clipboard_data = !tmux && terminal.probe_clipboard_data()?;
         terminal.shm_frames = terminal.probe_shm_frames()?;
+        terminal.color_scheme_updates = terminal.probe_color_scheme()?;
+        if terminal.color_scheme_updates {
+            terminal.io.out().write_all(b"\x1b[?2031h")?;
+            terminal.io.out().flush()?;
+        }
         Ok(terminal)
+    }
+
+    pub fn reports_color_scheme(&self) -> bool {
+        self.color_scheme_updates
     }
 
     pub fn is_tmux(&self) -> bool {
@@ -450,10 +512,23 @@ impl Terminal {
                         Some(event) => event,
                         None => continue,
                     },
+                    RawEvent::ColorSchemeChanged => Event::ColorSchemeChanged,
+                    RawEvent::Color(slot, rgba) => match self.collect_color(slot, rgba) {
+                        Some(colors) => Event::Colors(colors),
+                        None => continue,
+                    },
                 }));
             }
-            let wait = deadline.map(|d| d.saturating_duration_since(Instant::now()));
+            let color_deadline = self.color_query.as_ref().map(ColorQuery::deadline);
+            let until = [deadline, color_deadline].into_iter().flatten().min();
+            let wait = until.map(|d| d.saturating_duration_since(Instant::now()));
             if !self.wait_for_input(wait)? {
+                if color_deadline.is_some_and(|d| Instant::now() >= d) {
+                    match self.take_settled_colors() {
+                        Some(colors) => return Ok(Some(Event::Colors(colors))),
+                        None => continue,
+                    }
+                }
                 return Ok(None);
             }
             let mut chunk = [0u8; 256];
@@ -588,10 +663,7 @@ impl Terminal {
     }
 
     pub fn query_colors(&mut self) -> io::Result<TerminalColors> {
-        let mut query = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\".to_vec();
-        for i in 0..16 {
-            query.extend_from_slice(format!("\x1b]4;{i};?\x1b\\").as_bytes());
-        }
+        let query = Self::color_queries();
         self.io.out().write_all(&query)?;
         self.io.out().flush()?;
 
@@ -647,6 +719,44 @@ impl Terminal {
         self.io.out().write_all(b"\x1b[?5522$p")?;
         self.io.out().flush()?;
         Ok(self.read_report(150, parse_decrqm_5522)?.unwrap_or(false))
+    }
+
+    fn probe_color_scheme(&mut self) -> io::Result<bool> {
+        self.io.out().write_all(b"\x1b[?2031$p")?;
+        self.io.out().flush()?;
+        Ok(self.read_report(150, parse_decrqm_2031)?.unwrap_or(false))
+    }
+
+    fn color_queries() -> Vec<u8> {
+        let mut query = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\".to_vec();
+        for i in 0..16 {
+            query.extend_from_slice(format!("\x1b]4;{i};?\x1b\\").as_bytes());
+        }
+        query
+    }
+
+    pub fn request_colors(&mut self) -> io::Result<()> {
+        let query = Self::color_queries();
+        self.io.out().write_all(&query)?;
+        self.io.out().flush()?;
+        self.color_query = Some(ColorQuery::new());
+        Ok(())
+    }
+
+    fn take_settled_colors(&mut self) -> Option<TerminalColors> {
+        let query = self.color_query.take()?;
+        (query.received > 0).then_some(query.colors)
+    }
+
+    fn collect_color(&mut self, slot: ColorSlot, rgba: [u8; 4]) -> Option<TerminalColors> {
+        let query = self.color_query.as_mut()?;
+        query.colors.set(slot, rgba);
+        query.received += 1;
+        query.last_reply = Some(Instant::now());
+        if query.received < COLOR_SLOT_COUNT {
+            return None;
+        }
+        self.take_settled_colors()
     }
 
     fn read_report<T>(
@@ -822,6 +932,9 @@ impl Drop for Terminal {
         }
         let delete = crate::kitty::kitty_delete(self.image_id, self.tmux);
         let _ = self.io.out().write_all(&delete);
+        if self.color_scheme_updates {
+            let _ = self.io.out().write_all(b"\x1b[?2031l");
+        }
         let _ = self.io.out().write_all(
             b"\x1b[<u\x1b[?2048l\x1b[?2004l\x1b[?1004l\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?25h\x1b[?1049l",
         );
@@ -838,6 +951,8 @@ enum RawEvent {
     Focus(bool),
     WindowSize(WindowSize),
     Clip(ClipPacket),
+    Color(ColorSlot, [u8; 4]),
+    ColorSchemeChanged,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -920,7 +1035,10 @@ fn parse_event(buf: &[u8]) -> Option<(RawEvent, usize)> {
             }
             consume_string_sequence(buf).map(|end| match parse_osc52_reply(&buf[..end]) {
                 Some(text) => (RawEvent::Paste(text), end),
-                None => (RawEvent::Key(KeyEvent::plain(Key::Unknown)), end),
+                None => match parse_osc_color_reply(&buf[..end]) {
+                    Some((slot, rgba)) => (RawEvent::Color(slot, rgba), end),
+                    None => (RawEvent::Key(KeyEvent::plain(Key::Unknown)), end),
+                },
             })
         }
         b'O' => {
@@ -1137,6 +1255,8 @@ fn parse_csi(buf: &[u8]) -> Option<(RawEvent, usize)> {
             Some(ws) => RawEvent::WindowSize(ws),
             None => RawEvent::Key(KeyEvent::plain(Key::Unknown)),
         },
+        // `CSI ? 997 ; 1 n` — the terminal's palette changed under us.
+        b'n' if params.starts_with(b"?997") => RawEvent::ColorSchemeChanged,
         _ => RawEvent::Key(KeyEvent::plain(Key::Unknown)),
     };
     Some((event, end))
@@ -1362,14 +1482,14 @@ fn parse_decrqm_5522(buf: &[u8]) -> Option<bool> {
     Some(ps == b'1' || ps == b'2' || ps == b'3')
 }
 
-fn parse_osc_color(buf: &[u8], selector: &str) -> Option<[u8; 4]> {
-    let text = String::from_utf8_lossy(buf);
-    let prefix = format!("\x1b]{selector}rgb:");
-    let start = text.find(&prefix)? + prefix.len();
-    let spec: String = text[start..]
-        .chars()
-        .take_while(|c| c.is_ascii_hexdigit() || *c == '/')
-        .collect();
+fn parse_decrqm_2031(buf: &[u8]) -> Option<bool> {
+    let start = buf.windows(8).position(|w| w == b"\x1b[?2031;")? + 8;
+    let ps = *buf.get(start)?;
+    Some(ps == b'1' || ps == b'2')
+}
+
+/// `rgb:RRRR/GGGG/BBBB`, with each channel 1-4 hex digits.
+fn parse_rgb_spec(spec: &str) -> Option<[u8; 4]> {
     let mut channels = spec.split('/').map(|hex| {
         let value = u16::from_str_radix(hex, 16).ok()?;
         Some(match hex.len() {
@@ -1384,6 +1504,43 @@ fn parse_osc_color(buf: &[u8], selector: &str) -> Option<[u8; 4]> {
     let g = channels.next()??;
     let b = channels.next()??;
     Some([r, g, b, 255])
+}
+
+fn parse_osc_color(buf: &[u8], selector: &str) -> Option<[u8; 4]> {
+    let text = String::from_utf8_lossy(buf);
+    let prefix = format!("\x1b]{selector}rgb:");
+    let start = text.find(&prefix)? + prefix.len();
+    let spec: String = text[start..]
+        .chars()
+        .take_while(|c| c.is_ascii_hexdigit() || *c == '/')
+        .collect();
+    parse_rgb_spec(&spec)
+}
+
+/// One complete OSC reply: `OSC 10|11 ; rgb:… ST` or `OSC 4 ; <index> ; rgb:… ST`.
+fn parse_osc_color_reply(seq: &[u8]) -> Option<(ColorSlot, [u8; 4])> {
+    let text = String::from_utf8_lossy(seq);
+    let body = text.strip_prefix("\x1b]")?;
+    let (selector, rest) = body.split_once(';')?;
+    let (slot, rest) = match selector {
+        "10" => (ColorSlot::Foreground, rest),
+        "11" => (ColorSlot::Background, rest),
+        "4" => {
+            let (index, rest) = rest.split_once(';')?;
+            let index: u8 = index.parse().ok()?;
+            if index >= 16 {
+                return None;
+            }
+            (ColorSlot::Palette(index), rest)
+        }
+        _ => return None,
+    };
+    let spec: String = rest
+        .strip_prefix("rgb:")?
+        .chars()
+        .take_while(|c| c.is_ascii_hexdigit() || *c == '/')
+        .collect();
+    Some((slot, parse_rgb_spec(&spec)?))
 }
 
 fn parse_cell_size_report(buf: &[u8]) -> Option<(u32, u32)> {
@@ -1590,13 +1747,52 @@ mod tests {
         assert_eq!(parse_event(b"\x1b_Gi=1;OK"), None, "reply mid-arrival");
         assert_eq!(
             parse_event(b"\x1b]11;rgb:1e/2a/34\x07x"),
-            Some((key(Key::Unknown), 18)),
+            Some((RawEvent::Color(ColorSlot::Background, [30, 42, 52, 255]), 18)),
             "late OSC reply, BEL-terminated"
         );
         assert_eq!(
             parse_event(b"\x1bP1$r0m\x1b\\"),
             Some((key(Key::Unknown), 9))
         );
+    }
+
+    #[test]
+    fn reads_color_replies_for_every_slot() {
+        assert_eq!(
+            parse_event(b"\x1b]10;rgb:ff/ee/dd\x1b\\"),
+            Some((RawEvent::Color(ColorSlot::Foreground, [255, 238, 221, 255]), 19))
+        );
+        assert_eq!(
+            parse_event(b"\x1b]4;13;rgb:9f9f/8686/ebeb\x1b\\"),
+            Some((RawEvent::Color(ColorSlot::Palette(13), [159, 134, 235, 255]), 27))
+        );
+        assert_eq!(
+            parse_osc_color_reply(b"\x1b]4;99;rgb:11/22/33\x07"),
+            None,
+            "slots past the 16 we track"
+        );
+    }
+
+    #[test]
+    fn color_replies_between_keystrokes_leave_the_keystroke_alone() {
+        let stream = b"\x1b]11;rgb:1e/2a/34\x07a";
+        let (event, used) = parse_event(stream).unwrap();
+        assert_eq!(event, RawEvent::Color(ColorSlot::Background, [30, 42, 52, 255]));
+        assert_eq!(parse_event(&stream[used..]), Some((key(Key::Char('a')), 1)));
+    }
+
+    #[test]
+    fn reads_the_color_scheme_notification() {
+        assert_eq!(parse_event(b"\x1b[?997;1n"), Some((RawEvent::ColorSchemeChanged, 9)));
+        assert_eq!(parse_event(b"\x1b[?997;2n"), Some((RawEvent::ColorSchemeChanged, 9)));
+    }
+
+    #[test]
+    fn decrqm_reports_color_scheme_support() {
+        assert_eq!(parse_decrqm_2031(b"\x1b[?2031;1$y"), Some(true));
+        assert_eq!(parse_decrqm_2031(b"\x1b[?2031;2$y"), Some(true));
+        assert_eq!(parse_decrqm_2031(b"\x1b[?2031;0$y"), Some(false));
+        assert_eq!(parse_decrqm_2031(b""), None, "terminal never answered");
     }
 
     #[test]

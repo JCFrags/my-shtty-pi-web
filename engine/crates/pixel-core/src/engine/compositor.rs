@@ -15,6 +15,7 @@ pub struct View {
     pub tree: Tree,
     pub canvas: Canvas,
     pub clear_color: Color,
+    pub clear_color_owned: bool,
     pub origin_x: u32,
     pub size: (u32, u32),
 }
@@ -25,6 +26,7 @@ impl View {
             tree: Tree::new((window.0 as f32, window.1 as f32)),
             canvas: Canvas::new(window.0, window.1),
             clear_color: [0, 0, 0, 255],
+            clear_color_owned: false,
             origin_x: 0,
             size: window,
         }

@@ -84,6 +84,9 @@ const root = createRoot({
   onResize() {
     render();
   },
+  onColors() {
+    render();
+  },
 });
 
 initFonts((path) => root.registerFont(path));

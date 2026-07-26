@@ -210,6 +210,11 @@ class Session {
         if (this.devtoolsLayout) this.tabs.activeController?.devtools?.resize(this.devtoolsLayout);
         this.render();
       },
+      onColors: () => {
+        this.windowBg = this.themeBackground();
+        this.tabs.eachController((c) => void c.setBackground(this.windowBg));
+        this.render();
+      },
       onEngineExit: (error) => {
         if (error) process.stderr.write(`pixel browser engine: ${error}\n`);
         this.shutdown(error ? 1 : 0);
@@ -224,8 +229,7 @@ class Session {
     this.recalculateLayout();
     this.loadFont();
     this.root.setPointerShape("default");
-    const themeBg = this.root.info.colors.background ?? [30, 32, 38, 255];
-    this.windowBg = `#${themeBg.slice(0, 3).map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+    this.windowBg = this.themeBackground();
     this.tabs.create(this.fallbackState.url);
     this.registry = new Registry({
       key: this.ctx.key,
@@ -260,6 +264,11 @@ class Session {
 
   nudgeResize() {
     this.root?.nudgeResize();
+  }
+
+  private themeBackground(): string {
+    const bg = this.root?.info.colors.background ?? [30, 32, 38, 255];
+    return `#${bg.slice(0, 3).map((c) => c.toString(16).padStart(2, "0")).join("")}`;
   }
 
   private render() {
