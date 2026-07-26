@@ -19,21 +19,18 @@ delete process.env.ELECTRON_RUN_AS_NODE;
 
 
 // slop fixme
+// these options are very poorly designed
 const HELP = `
 Usage: pixel <command> [args]
 
   open [url] [direction] [options]
 
-    Opens a new tab in the browser already next to you, or splits a new one off
-    if there is none. Naming a direction only reuses the browser sitting that
-    way, so "pixel open down" beside a browser on the right gets you a split.
+    Opens the browser inside the terminal
 
     Options:
       --dir <direction>     Split direction: right, left, down, up
-                            (also takeable bare: pixel open [split] right)
       --size <fraction>     Pane size (0.2-0.95)
-      --split               Force new split even if browser exists
-      --here                Run in current pane, block until close
+      --split               Split instead of taking over the current pane
       --isolated            Use dedicated browser process/profile
       --palette-key <key>   Command palette key (default: super+p)
       --find-key <key>      Find-in-page key (default: super+f)
@@ -43,19 +40,19 @@ Usage: pixel <command> [args]
 
     Options:
       --all                 Every browser, not just this terminal tab
-      --json                Machine-readable output
+      --json                
 
   action [sel] -- <cmd>  Drive a tab with agent-browser.
 
     Selectors (default: the browser in this terminal tab, its active tab):
-      --browser <key>       Browser key from pixel ls
-      --tab <id>            Tab id within that browser
-      --target <id>         CDP target id, skips resolution
-      --follow              Also bring that tab to the front for the human
+      --browser <key>       
+      --tab <id>            
+      --target <id>        
+      --follow              
 
     Instead of running a command:
-      --resolve             Print what would be targeted
-      --env                 Print AGENT_BROWSER_* env for calling the tool directly
+      --resolve            
+      --env                
 
     Examples:
       pixel action -- snapshot
@@ -140,7 +137,7 @@ function clientLaunchCommand(argv: string[]): { command: string[]; cwd: string }
   const runner = DIST_ROOT
     ? [path.join(DIST_ROOT, "bin", "pixel")]
     : [process.execPath, path.resolve(__dirname, "main.js")];
-  const quoted = [...runner, "open", "--here", ...argv]
+  const quoted = [...runner, "open", ...argv]
     .map((arg) => `'${arg.replaceAll("'", `'\\''`)}'`)
     .join(" ");
   return { command: ["/bin/sh", "-c", `exec ${quoted}`], cwd: process.cwd() };
@@ -156,6 +153,11 @@ function ownTtyPath(): string | null {
   } catch {
     return null;
   }
+}
+
+function interactiveTty(): string | null {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return null;
+  return ownTtyPath();
 }
 
 function browserBuildStamp(): string {
@@ -394,13 +396,21 @@ async function launchInSplit(
   fail("browser did not register within 20s (is the split open?)");
 }
 
-async function openCommand(backend: Backend, args: string[]) {
+async function openCommand(args: string[]) {
   const forceSplit = takeBoolFlag(args, "--split");
   const { direction, explicit } = takeDirection(args);
   const size = takeSizeFlag(args);
   const paletteKey = takeKeyBinding(args, "--palette-key");
   const findKey = takeKeyBinding(args, "--find-key");
   const actionMods = takeModsBinding(args, "--action-mods");
+  const bindings: string[] = [];
+  if (paletteKey) bindings.push(`--palette-key=${paletteKey}`);
+  if (findKey) bindings.push(`--find-key=${findKey}`);
+  if (actionMods) bindings.push(`--action-mods=${actionMods}`);
+  if (!forceSplit && !explicit && interactiveTty()) {
+    return openHere([...args, ...bindings]);
+  }
+  const backend = detectBackend();
   const url = args[0];
   const tty = ownTtyPath() ?? callerTty();
   if (!forceSplit) {
@@ -421,9 +431,7 @@ async function openCommand(backend: Backend, args: string[]) {
   const argv = url ? [url] : [];
   argv.push(`--split-dir=${direction}`);
   if (tty) argv.push(`--parent-tty=${tty}`);
-  if (paletteKey) argv.push(`--palette-key=${paletteKey}`);
-  if (findKey) argv.push(`--find-key=${findKey}`);
-  if (actionMods) argv.push(`--action-mods=${actionMods}`);
+  argv.push(...bindings);
   print(await launchInSplit(backend, direction, argv, size));
 }
 
@@ -447,11 +455,8 @@ async function main(): Promise<number> {
     process.stdout.write(HELP);
     return 0;
   }
-  if (command === "open" && takeBoolFlag(args, "--here")) {
-    return openHere(args);
-  }
   if (command === "open") {
-    await openCommand(detectBackend(), args);
+    await openCommand(args);
     return 0;
   }
   if (command === "ls") {
