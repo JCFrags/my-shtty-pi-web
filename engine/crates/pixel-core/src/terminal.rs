@@ -225,6 +225,7 @@ pub struct Terminal {
     cell: Option<(u32, u32)>,
     cell_query_unsupported: bool,
     pending: Vec<u8>,
+    lone_escape_since: Option<Instant>,
     shm_frames: bool,
     frame_seq: u64,
     tmux: bool,
@@ -250,6 +251,8 @@ struct ClipRead {
 }
 
 const CLIP_READ_MAX_BYTES: usize = 64 * 1024 * 1024;
+
+const LONE_ESCAPE_WAIT: Duration = Duration::from_millis(50);
 
 const RESIZE_WAKE_SLOTS: usize = 64;
 static RESIZE_WAKE_FDS: [std::sync::atomic::AtomicI32; RESIZE_WAKE_SLOTS] =
@@ -298,6 +301,9 @@ impl Waker {
 impl Terminal {
     pub fn new() -> io::Result<Self> {
         let tmux = crate::tmux::in_tmux();
+        if tmux {
+            crate::tmux::enable_passthrough();
+        }
         Self::with_handle(
             TtyHandle::Stdio {
                 stdin: io::stdin(),
@@ -307,15 +313,12 @@ impl Terminal {
         )
     }
 
-    pub fn open(tty_path: &str) -> io::Result<Self> {
+    pub fn open(tty_path: &str, tmux: bool) -> io::Result<Self> {
         let file = std::fs::File::options().read(true).write(true).open(tty_path)?;
-        Self::with_handle(TtyHandle::File(file), false)
+        Self::with_handle(TtyHandle::File(file), tmux)
     }
 
     fn with_handle(mut io: TtyHandle, tmux: bool) -> io::Result<Self> {
-        if tmux {
-            crate::tmux::enable_passthrough();
-        }
         let saved = retry_intr(|| termios::tcgetattr(&io.read_fd()))?;
         let mut raw = saved.clone();
         raw.make_raw();
@@ -325,6 +328,9 @@ impl Terminal {
         io.out().write_all(
             b"\x1b[?1049h\x1b[?25l\x1b[?1003h\x1b[?1006h\x1b[?1016h\x1b[?1004h\x1b[?2004h\x1b[?2048h\x1b[>1u",
         )?; // enable many reporting modes so we get info about mouse/keyboard
+        if tmux {
+            io.out().write_all(b"\x1b[>4;2m")?;
+        }
         io.out().flush()?;
 
         let mut terminal = Self {
@@ -335,6 +341,7 @@ impl Terminal {
             cell: None,
             cell_query_unsupported: false,
             pending: Vec::new(),
+            lone_escape_since: None,
             shm_frames: false,
             frame_seq: 0,
             tmux,
@@ -349,7 +356,7 @@ impl Terminal {
             color_scheme_updates: false,
             color_query: None,
         };
-        terminal.mouse_pixels = terminal.probe_mouse_pixels()?;
+        terminal.mouse_pixels = !tmux && terminal.probe_mouse_pixels()?;
         terminal.clipboard_data = !tmux && terminal.probe_clipboard_data()?;
         terminal.shm_frames = terminal.probe_shm_frames()?;
         terminal.color_scheme_updates = terminal.probe_color_scheme()?;
@@ -491,6 +498,7 @@ impl Terminal {
         loop {
             if let Some((raw, used)) = parse_event(&self.pending) {
                 self.pending.drain(..used);
+                self.lone_escape_since = None;
 
            
                 return Ok(Some(match raw {
@@ -519,10 +527,19 @@ impl Terminal {
                     },
                 }));
             }
+            let escape_deadline = self.lone_escape_deadline();
             let color_deadline = self.color_query.as_ref().map(ColorQuery::deadline);
-            let until = [deadline, color_deadline].into_iter().flatten().min();
+            let until = [deadline, escape_deadline, color_deadline]
+                .into_iter()
+                .flatten()
+                .min();
             let wait = until.map(|d| d.saturating_duration_since(Instant::now()));
             if !self.wait_for_input(wait)? {
+                if escape_deadline.is_some_and(|d| Instant::now() >= d) {
+                    self.pending.drain(..1);
+                    self.lone_escape_since = None;
+                    return Ok(Some(Event::Key(KeyEvent::plain(Key::Escape))));
+                }
                 if color_deadline.is_some_and(|d| Instant::now() >= d) {
                     match self.take_settled_colors() {
                         Some(colors) => return Ok(Some(Event::Colors(colors))),
@@ -542,6 +559,14 @@ impl Terminal {
             }
             self.pending.extend_from_slice(&chunk[..n]);
         }
+    }
+
+    fn lone_escape_deadline(&mut self) -> Option<Instant> {
+        if !self.tmux || self.pending.first() != Some(&0x1b) {
+            self.lone_escape_since = None;
+            return None;
+        }
+        Some(*self.lone_escape_since.get_or_insert_with(Instant::now) + LONE_ESCAPE_WAIT)
     }
 
     pub fn waker(&mut self) -> io::Result<Waker> {
@@ -932,6 +957,9 @@ impl Drop for Terminal {
         }
         let delete = crate::kitty::kitty_delete(self.image_id, self.tmux);
         let _ = self.io.out().write_all(&delete);
+        if self.tmux {
+            let _ = self.io.out().write_all(b"\x1b[>4;0m");
+        }
         if self.color_scheme_updates {
             let _ = self.io.out().write_all(b"\x1b[?2031l");
         }
@@ -2112,8 +2140,8 @@ mod tty_tests {
         let (master_b, _slave_b, path_b) = open_pty();
         let _drain_a = drain(&master_a);
         let _drain_b = drain(&master_b);
-        let mut a = Terminal::open(&path_a).unwrap();
-        let mut b = Terminal::open(&path_b).unwrap();
+        let mut a = Terminal::open(&path_a, false).unwrap();
+        let mut b = Terminal::open(&path_b, false).unwrap();
 
         assert_ne!(a.terminal_id, b.terminal_id);
         assert_ne!(a.shm_name(0), b.shm_name(0));
@@ -2140,5 +2168,54 @@ mod tty_tests {
             -1,
             "dropping a terminal must release its resize slot"
         );
+    }
+
+    #[test]
+    fn a_bare_escape_resolves_on_its_own_under_tmux() {
+        use std::io::Write as _;
+        let (mut master, _slave, path) = open_pty();
+        let _drain = drain(&master);
+        let mut term = Terminal::open(&path, true).unwrap();
+
+        master.write_all(b"\x1b").unwrap();
+        let got = term.poll_event(Some(Duration::from_millis(500))).unwrap();
+        assert!(
+            matches!(&got, Some(Event::Key(key)) if key.key == Key::Escape),
+            "tmux sends the escape key as a bare 0x1b: {got:?}"
+        );
+
+        master.write_all(b"\x1b[112;3u").unwrap();
+        let next = term.poll_event(Some(Duration::from_millis(500))).unwrap();
+        assert!(
+            matches!(&next, Some(Event::Key(key)) if key.key == Key::Char('p') && key.mods.alt),
+            "the key after an escape must survive: {next:?}"
+        );
+    }
+
+    #[test]
+    fn a_bare_escape_still_waits_for_more_outside_tmux() {
+        use std::io::Write as _;
+        let (mut master, _slave, path) = open_pty();
+        let _drain = drain(&master);
+        let mut term = Terminal::open(&path, false).unwrap();
+
+        master.write_all(b"\x1b").unwrap();
+        let got = term.poll_event(Some(Duration::from_millis(200))).unwrap();
+        assert!(got.is_none(), "outside tmux escape arrives as CSI-u: {got:?}");
+    }
+
+    #[test]
+    fn a_wake_ends_a_blocking_poll() {
+        let (master, _slave, path) = open_pty();
+        let _drain = drain(&master);
+        let mut term = Terminal::open(&path, false).unwrap();
+        let waker = term.waker().unwrap();
+
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            waker.wake();
+        });
+        let got = term.poll_event(None).unwrap();
+        assert!(got.is_none(), "a wake carries no terminal event: {got:?}");
     }
 }

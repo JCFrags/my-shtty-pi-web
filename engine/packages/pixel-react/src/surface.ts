@@ -15,7 +15,7 @@ export class Surface {
   }
 
   present(frame: SurfaceFrame): void {
-    if (this.closed) throw new Error("surface is closed");
+    if (this.closed) return;
     if ("ioSurface" in frame) {
       const submit = this.engine.updateSurfaceTexture;
       if (!submit) throw new Error("IOSurface frames are not supported on this platform");
@@ -25,7 +25,6 @@ export class Surface {
     }
   }
 
-  // todo: look into electron unhandled error
   clear(): void {
     if (this.closed) return;
     this.engine.removeSurface(this.id);

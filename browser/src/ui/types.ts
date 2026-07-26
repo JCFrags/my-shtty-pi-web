@@ -40,6 +40,12 @@ export interface PopupView {
   height: number;
 }
 
+export interface DownloadView {
+  name: string;
+  percent: number | null;
+  state: "progressing" | "done" | "failed";
+}
+
 export type PageMenuItem =
   | { id: string; label: string; enabled: boolean; shortcut: string }
   | { id: string; separator: true };

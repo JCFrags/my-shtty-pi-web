@@ -11,11 +11,13 @@ import type { SessionHandle } from "./session/session";
 // what
 const IDLE_EXIT_MS = 15_000;
 
+
 interface OpenRequest {
   cmd: "open";
   tty: string;
   argv?: string[];
   env?: Record<string, string | undefined>;
+  cwd?: string;
   build?: string;
 }
 
@@ -93,6 +95,7 @@ export async function runDaemon(cdpPort: number | null): Promise<void> {
               key: sessionKey,
               argv: message.argv ?? [],
               env: message.env ?? {},
+              cwd: message.cwd ?? process.cwd(),
               cdpPort,
               onClose: (code) => {
                 sessions.delete(sessionKey);

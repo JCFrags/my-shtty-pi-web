@@ -61,6 +61,7 @@ fn main() -> std::io::Result<()> {
         cell_metrics_font: FONT_MONO,
         watch_resize: true,
         tty: None,
+        tmux: false,
     })?;
     let theme = Theme::from_terminal(&engine.colors);
     engine.set_clear_color(0, theme.bg);

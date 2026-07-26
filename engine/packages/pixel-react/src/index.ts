@@ -150,6 +150,7 @@ export interface RootOptions {
   keyEventTypes?: boolean;
   devtools?: boolean;
   tty?: string;
+  tmux?: boolean;
 }
 
 export interface PixelRoot {
@@ -240,7 +241,7 @@ function applyColors(colors: TerminalColors): void {
 }
 
 export function createRoot(options: RootOptions = {}): PixelRoot {
-  const bridge = options.tty ? new Bridge(options.tty) : getBridge();
+  const bridge = options.tty ? new Bridge(options.tty, options.tmux) : getBridge();
   const devtoolsEnabled = options.devtools !== false && bridge === getBridge();
   if (devtoolsEnabled) {
     installConsoleCapture();

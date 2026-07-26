@@ -34,12 +34,14 @@ export class BrowserController {
   private contentFocused = false;
   private readonly input: PageInput;
   private readonly partition: string | null;
+  private readonly cwd: string;
   private background: string;
   private pendingPopupSize: { width: number; height: number } | null = null;
   private findText = "";
   private readonly favicons = new FaviconCache();
   private faviconSeq = 0;
   private cdpAttached = false;
+  private cachedTargetId: string | null = null;
   private emitHandlers = new Map<string, (data: unknown) => void>();
   private device: DeviceSpec | null = null;
   private defaultUserAgent = "";
@@ -48,6 +50,7 @@ export class BrowserController {
     this.window.webContents.setFrameRate(this.visible ? frameRate() : 4);
   };
   private visible = true;
+  private painted = false;
   cursorShape = "default";
   onCursorChange: ((shape: string) => void) | null = null;
   onOpenTab: ((url: string, activate: boolean) => void) | null = null;
@@ -65,12 +68,14 @@ export class BrowserController {
     devtoolsSurface: Surface,
     layout: BrowserSurfaceLayout,
     initialUrl: string,
+    cwd: string,
     background: string,
     visible: boolean,
     partition: string | null,
     onState: (state: BrowserState) => void,
   ) {
     this.partition = partition;
+    this.cwd = cwd;
     this.surface = surface;
     this.popupSurface = popupSurface;
     this.devtoolsSurface = devtoolsSurface;
@@ -196,7 +201,8 @@ export class BrowserController {
       return { action: "deny" };
     });
     this.window.webContents.on("did-create-window", (child) => this.adoptPopup(child));
-    void this.window.loadURL(normalizeUrl(initialUrl));
+    if (visible) this.surface.clear();
+    void this.window.loadURL(normalizeUrl(initialUrl, cwd));
     this.onState(this.state);
   }
 
@@ -218,7 +224,7 @@ export class BrowserController {
   }
 
   navigate(value: string) {
-    void this.window.webContents.loadURL(normalizeUrl(value));
+    void this.window.webContents.loadURL(normalizeUrl(value, this.cwd));
   }
 
   back() {
@@ -246,6 +252,35 @@ export class BrowserController {
 
   osPid(): number {
     return this.window.webContents.getOSProcessId();
+  }
+
+  async fingerprint(): Promise<number | null> {
+    if (this.stopped) return null;
+    try {
+      await this.attachCdp();
+      const result = (await this.cdp("Runtime.evaluate", {
+        expression: "performance.timeOrigin",
+        returnByValue: true,
+      })) as { result?: { value?: number } };
+      return typeof result.result?.value === "number" ? result.result.value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async targetId(): Promise<string | null> {
+    if (this.cachedTargetId) return this.cachedTargetId;
+    if (this.stopped) return null;
+    try {
+      await this.attachCdp();
+      const info = (await this.cdp("Target.getTargetInfo")) as {
+        targetInfo?: { targetId?: string };
+      };
+      this.cachedTargetId = info.targetInfo?.targetId ?? null;
+    } catch {
+      this.cachedTargetId = null;
+    }
+    return this.cachedTargetId;
   }
 
   async attachCdp(): Promise<void> {
@@ -434,6 +469,7 @@ export class BrowserController {
     this.popup?.setVisible(visible);
     this.devtools?.setVisible(visible);
     if (visible) {
+      if (!this.painted) this.surface.clear();
       this.window.webContents.setFrameRate(frameRate());
       this.window.webContents.invalidate();
     } else {
@@ -490,6 +526,7 @@ export class BrowserController {
       const handle = info.handle.ioSurface;
       if (info.widgetType !== "frame" || info.pixelFormat !== "bgra" || !handle) return;
       this.surface.present({ ioSurface: handle });
+      this.painted = true;
     } finally {
       texture.release();
     }

@@ -8,10 +8,14 @@ STAGE="$OUT/pixel"
 APP="$STAGE/electron/Pixel.app"
 
 rm -rf "$OUT"
-mkdir -p "$STAGE"/{bin,cli/dist,browser/dist,browser/native,electron,assets/fonts}
+mkdir -p "$STAGE"/{bin,cli/dist,browser/dist,browser/native,electron,agent-browser/bin,assets/fonts}
 
 (cd "$ROOT/engine" && cargo build -p pixel-node --release)
 cp "${CARGO_TARGET_DIR:-$ROOT/engine/target}/release/libpixel_node.dylib" "$STAGE/browser/native/pixel.node"
+
+AGENT_BROWSER_BIN="$("$ROOT/scripts/agent-browser.sh" --path)"
+cp "$AGENT_BROWSER_BIN" "$STAGE/agent-browser/bin/agent-browser"
+codesign --force --sign - --timestamp=none "$STAGE/agent-browser/bin/agent-browser" 2>/dev/null || true
 
 ESBUILD="$ROOT/node_modules/.bin/esbuild"
 bundle() {

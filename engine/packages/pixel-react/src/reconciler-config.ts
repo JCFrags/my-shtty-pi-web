@@ -266,8 +266,8 @@ export class Bridge {
   private nextId = 1;
   private seq = 0;
 
-  constructor(tty?: string) {
-    this.engine = createNativeEngine(tty);
+  constructor(tty?: string, tmux?: boolean) {
+    this.engine = createNativeEngine(tty, tmux);
     if (!defaultBridge) defaultBridge = this;
   }
 

@@ -93,15 +93,15 @@ export interface DiffRow {
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const binding = require("../native/pixel.node") as {
-  PixelEngine: new (tty?: string) => NativeEngine; // we are we callign this native engine wut
+  PixelEngine: new (tty?: string, tmux?: boolean) => NativeEngine;
   highlight(source: string, language: string): HighlightSpan[];
   highlightCaptures(): string[];
   diff(oldSource: string, newSource: string, contextLines?: number): DiffRow[];
   parseMarkdown(source: string, streaming?: boolean): MarkdownBlock[];
 };
 
-export function createNativeEngine(tty?: string): NativeEngine {
-  const pixelEngine =  new binding.PixelEngine(tty);
+export function createNativeEngine(tty?: string, tmux?: boolean): NativeEngine {
+  const pixelEngine =  new binding.PixelEngine(tty, tmux);
 
   return pixelEngine
 }

@@ -32,7 +32,7 @@ pub use engine::{
 pub use kitty::kitty_transmit;
 pub use logging::{LogEntry, LogLevel};
 pub use menu::{CONTEXT_MENU_KEY, MenuEntry, MenuItem, MenuStyle, context_menu};
-pub use native::{NativeDelta, NativeScroll};
+pub use native::{NativeEvent, NativeScroll};
 pub use paint::paint;
 pub use profiler::{CounterRecord, ProfileData, Profiler, SpanRecord};
 pub use shape::{LineCap, LineJoin, PathCmd, ShapeProps, ShapeStroke, parse_path_data};

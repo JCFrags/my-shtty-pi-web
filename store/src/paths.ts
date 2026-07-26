@@ -20,6 +20,7 @@ export const DATA_DIR = path.join(DATA_HOME, "pixel");
 export const LOGS_DIR = path.join(STATE_HOME, "pixel", "logs");
 export const FAVICONS_DIR = path.join(CACHE_HOME, "pixel", "favicons");
 export const INSTANCES_DIR = path.join(RUNTIME_HOME, "pixel", "instances");
+export const AGENT_SOCKETS_DIR = path.join(RUNTIME_HOME, "pixel", "agent-browser");
 export const DAEMON_SOCKET = path.join(RUNTIME_HOME, "pixel", "daemon.sock");
 export const DB_FILE = path.join(DATA_DIR, "pixel.db");
 

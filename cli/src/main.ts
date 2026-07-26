@@ -5,9 +5,12 @@ import net from "node:net";
 import path from "node:path";
 
 import { DAEMON_SOCKET, LOGS_DIR, ensureDataDir } from "pixel-store";
-import { detectBackend, setPaneTitle } from "pixel-terminals";
-import type { Backend, Direction, Pane } from "pixel-terminals";
+import { callerTty, detectBackend, prepareTmux, setPaneTitle } from "pixel-terminals";
+import type { Backend, Direction } from "pixel-terminals";
+import { actionCommand } from "./action";
 import { control } from "./control";
+import { locate, recordKey, reusable } from "./instances";
+import { lsCommand } from "./ls";
 import { instances } from "./registry";
 import type { InstanceRecord } from "./registry";
 
@@ -19,10 +22,15 @@ delete process.env.ELECTRON_RUN_AS_NODE;
 const HELP = `
 Usage: pixel <command> [args]
 
-  open [url] [options]   Open a browser in a new split or tab.
+  open [url] [direction] [options]
+
+    Opens a new tab in the browser already next to you, or splits a new one off
+    if there is none. Naming a direction only reuses the browser sitting that
+    way, so "pixel open down" beside a browser on the right gets you a split.
 
     Options:
       --dir <direction>     Split direction: right, left, down, up
+                            (also takeable bare: pixel open [split] right)
       --size <fraction>     Pane size (0.2-0.95)
       --split               Force new split even if browser exists
       --here                Run in current pane, block until close
@@ -31,39 +39,31 @@ Usage: pixel <command> [args]
       --find-key <key>      Find-in-page key (default: super+f)
       --action-mods <mods>  Action shortcut mods (default: super+shift, "none" disables)
 
+  ls [options]           List running browsers and their tabs.
+
+    Options:
+      --all                 Every browser, not just this terminal tab
+      --json                Machine-readable output
+
+  action [sel] -- <cmd>  Drive a tab with agent-browser.
+
+    Selectors (default: the browser in this terminal tab, its active tab):
+      --browser <key>       Browser key from pixel ls
+      --tab <id>            Tab id within that browser
+      --target <id>         CDP target id, skips resolution
+      --follow              Also bring that tab to the front for the human
+
+    Instead of running a command:
+      --resolve             Print what would be targeted
+      --env                 Print AGENT_BROWSER_* env for calling the tool directly
+
+    Examples:
+      pixel action -- snapshot
+      pixel action -- click @e14
+      pixel action --browser 90107-1 --tab 2 -- fill @e3 "hello"
+
   help                  Show this help
 `;
-
-interface LocatedInstance extends InstanceRecord {
-  window: string | null;
-  tab: string | null;
-  inCurrentTab: boolean;
-}
-
-const TITLE_PATTERN = /pixel-browser:([\w-]+)/;
-
-function recordKey(record: InstanceRecord): string {
-  return record.key ?? String(record.pid);
-}
-
-function locate(records: InstanceRecord[], panes: Pane[]): LocatedInstance[] {
-  const self = panes.find((pane) => pane.self);
-  const byKey = new Map<string, Pane>();
-  for (const pane of panes) {
-    const match = TITLE_PATTERN.exec(pane.title);
-    if (match) byKey.set(match[1], pane);
-  }
-  return records.map((record) => {
-    const pane = byKey.get(recordKey(record));
-    return {
-      ...record,
-      window: pane?.window ?? null,
-      tab: pane?.tab ?? null,
-      inCurrentTab:
-        !!pane && !!self && pane.window === self.window && pane.tab === self.tab,
-    };
-  });
-}
 
 function fail(message: string): never {
   process.stderr.write(`pixel: ${message}\n`);
@@ -228,6 +228,7 @@ async function openSession(argv: string[], tty: string): Promise<{ socket: net.S
     tty,
     argv,
     env: process.env,
+    cwd: process.cwd(),
     build: browserBuildStamp(),
   })}\n`;
   const ask = (socket: net.Socket) =>
@@ -289,6 +290,7 @@ async function attachHere(argv: string[]): Promise<never> {
 }
 
 async function openHere(argv: string[]): Promise<never> {
+  prepareTmux();
   const isolated = takeBoolFlag(argv, "--isolated");
   if (!isolated) {
     try {
@@ -297,7 +299,7 @@ async function openHere(argv: string[]): Promise<never> {
       process.stderr.write(`pixel: daemon attach failed (${String(error)}); running isolated\n`);
     }
   }
-  const { command, cwd } = browserLaunchCommand(argv);
+  const { command, cwd } = browserLaunchCommand([...argv, `--cwd=${process.cwd()}`]);
   const child = spawn(command[0], command.slice(1), { cwd, stdio: "inherit" });
   const code: number = await new Promise((resolve) =>
     child.on("exit", (status) => resolve(status ?? 0)),
@@ -305,12 +307,21 @@ async function openHere(argv: string[]): Promise<never> {
   process.exit(code);
 }
 
-function takeDirection(args: string[]): Direction {
-  const direction = (takeFlag(args, "--dir") ?? "right") as Direction;
-  if (!["right", "left", "down", "up"].includes(direction)) {
-    fail(`invalid --dir ${direction} (right|left|down|up)`);
-  }
-  return direction;
+const DIRECTIONS: Direction[] = ["right", "left", "down", "up"];
+
+function isDirection(value: string): value is Direction {
+  return (DIRECTIONS as string[]).includes(value);
+}
+
+function takeDirection(args: string[]): { direction: Direction; explicit: boolean } {
+  const flag = takeFlag(args, "--dir");
+  if (flag !== undefined && !isDirection(flag)) fail(`invalid --dir ${flag} (right|left|down|up)`);
+  const filler = args.indexOf("split");
+  if (filler >= 0) args.splice(filler, 1);
+  const wordAt = args.findIndex(isDirection);
+  const word = wordAt >= 0 ? (args.splice(wordAt, 1)[0] as Direction) : undefined;
+  const direction = (flag as Direction | undefined) ?? word;
+  return { direction: direction ?? "right", explicit: direction !== undefined };
 }
 
 function takeSizeFlag(args: string[]): number | null {
@@ -370,7 +381,7 @@ async function launchInSplit(
 ): Promise<InstanceRecord> {
   const before = new Set((await instances()).map(recordKey));
   const { command, cwd } = clientLaunchCommand(argv);
-  await backend.split(direction, command, cwd);
+  await backend.split(direction, command, cwd, size);
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     const fresh = (await instances()).find((record) => !before.has(recordKey(record)));
@@ -385,44 +396,91 @@ async function launchInSplit(
 
 async function openCommand(backend: Backend, args: string[]) {
   const forceSplit = takeBoolFlag(args, "--split");
-  const direction = takeDirection(args);
+  const { direction, explicit } = takeDirection(args);
   const size = takeSizeFlag(args);
   const paletteKey = takeKeyBinding(args, "--palette-key");
   const findKey = takeKeyBinding(args, "--find-key");
   const actionMods = takeModsBinding(args, "--action-mods");
   const url = args[0];
+  const tty = ownTtyPath() ?? callerTty();
   if (!forceSplit) {
     const records = await instances();
     if (records.length > 0) {
-      const located = locate(records, await backend.panes());
-      const here = located.find((record) => record.inCurrentTab);
-      if (here) {
-        return print(await control(here.socket, url ? { cmd: "open-tab", url } : { cmd: "open-tab" }));
+      const found = locate(records, await backend.panes());
+      const target = reusable(found, explicit ? direction : null, tty);
+      if (target) {
+        return print(
+          await control(
+            target.socket,
+            url ? { cmd: "open-tab", url, cwd: process.cwd() } : { cmd: "open-tab" },
+          ),
+        );
       }
     }
   }
   const argv = url ? [url] : [];
+  argv.push(`--split-dir=${direction}`);
+  if (tty) argv.push(`--parent-tty=${tty}`);
   if (paletteKey) argv.push(`--palette-key=${paletteKey}`);
   if (findKey) argv.push(`--find-key=${findKey}`);
   if (actionMods) argv.push(`--action-mods=${actionMods}`);
   print(await launchInSplit(backend, direction, argv, size));
 }
 
-async function main() {
+function splitPassthrough(args: string[]): { own: string[]; passthrough: string[] } {
+  const at = args.indexOf("--");
+  if (at < 0) return { own: args, passthrough: [] };
+  return { own: args.slice(0, at), passthrough: args.slice(at + 1) };
+}
+
+function takeTabFlag(args: string[]): number | undefined {
+  const raw = takeFlag(args, "--tab");
+  if (raw === undefined) return undefined;
+  const id = Number(raw.replace(/^t/, ""));
+  if (!Number.isInteger(id)) fail(`invalid --tab ${raw} (a tab id from pixel ls)`);
+  return id;
+}
+
+async function main(): Promise<number> {
   const [command, ...args] = process.argv.slice(2);
   if (!command || command === "help" || command === "--help" || command === "-h") {
     process.stdout.write(HELP);
-    return;
+    return 0;
   }
   if (command === "open" && takeBoolFlag(args, "--here")) {
     return openHere(args);
   }
   if (command === "open") {
-    return openCommand(detectBackend(), args);
+    await openCommand(detectBackend(), args);
+    return 0;
+  }
+  if (command === "ls") {
+    const all = takeBoolFlag(args, "--all");
+    const json = takeBoolFlag(args, "--json");
+    await lsCommand(detectBackend(), all, json);
+    return 0;
+  }
+  if (command === "action") {
+    const { own, passthrough } = splitPassthrough(args);
+    const options = {
+      browserKey: takeFlag(own, "--browser"),
+      tabId: takeTabFlag(own),
+      targetId: takeFlag(own, "--target"),
+      follow: takeBoolFlag(own, "--follow"),
+      resolve: takeBoolFlag(own, "--resolve"),
+      printEnv: takeBoolFlag(own, "--env"),
+      passthrough,
+    };
+    if (own.length > 0) fail(`unexpected ${own[0]} — put agent-browser arguments after --`);
+    return actionCommand(detectBackend(), options);
   }
   fail(`unknown command: ${command}\n\n${HELP}`);
 }
 
-void main().catch((error: unknown) => {
-  fail(error instanceof Error ? error.message : String(error));
-});
+void main()
+  .then((code) => {
+    if (code) process.exit(code);
+  })
+  .catch((error: unknown) => {
+    fail(error instanceof Error ? error.message : String(error));
+  });

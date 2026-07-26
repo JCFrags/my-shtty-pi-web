@@ -99,7 +99,7 @@ pub struct PixelEngine {
 #[napi]
 impl PixelEngine {
     #[napi(constructor)]
-    pub fn new(tty: Option<String>) -> Result<Self> {
+    pub fn new(tty: Option<String>, tmux: Option<bool>) -> Result<Self> {
         let fonts = vec![
             load_font(SYSTEM_UI_FONTS, UI_FONT_BYTES),
             load_font(SYSTEM_MONO_FONTS, MONO_FONT_BYTES),
@@ -109,6 +109,7 @@ impl PixelEngine {
             cell_metrics_font: 1,
             watch_resize: false,
             tty,
+            tmux: tmux.unwrap_or(false),
         })
         .map_err(err)?;
         let waker = engine.term.waker().map_err(err)?;

@@ -5,6 +5,7 @@ mod doc;
 mod embed;
 mod input;
 mod keys;
+mod hover;
 mod native_pairing;
 mod overlay;
 mod pointer;
@@ -15,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use clipboard::ClipboardFlows;
 use compositor::Compositor;
+use hover::HoverOracle;
 use native_pairing::NativePairing;
 use pointer::DragTarget;
 
@@ -61,6 +63,7 @@ pub struct EngineConfig {
     pub cell_metrics_font: usize,
     pub watch_resize: bool,
     pub tty: Option<String>,
+    pub tmux: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -272,6 +275,7 @@ pub struct Engine {
     pub use_native: bool,
     last_native_scroll: Option<Instant>,
     pairing: NativePairing,
+    hover_oracle: HoverOracle,
     pub profile: &'static dyn ScrollProfile,
     default_menu: bool,
     menu: MenuController,
@@ -315,7 +319,7 @@ impl Engine {
     pub fn new(config: EngineConfig) -> io::Result<Self> {
         assert!(!config.fonts.is_empty());
         let mut term = match &config.tty {
-            Some(path) => Terminal::open(path)?,
+            Some(path) => Terminal::open(path, config.tmux)?,
             None => Terminal::new()?,
         };
         if config.watch_resize {
@@ -363,6 +367,7 @@ impl Engine {
             use_native,
             last_native_scroll: None,
             pairing: NativePairing::new(),
+            hover_oracle: HoverOracle::new(),
             profile: &DEFAULT_PROFILE,
             default_menu: false,
             menu: MenuController::default(),
@@ -790,6 +795,7 @@ impl Engine {
             );
         }
         let base_changed = (base_px - self.base_px).abs() > 0.01;
+        self.hover_oracle.invalidate();
         self.comp.window = window;
         self.cell = cell;
         self.base_px = base_px;

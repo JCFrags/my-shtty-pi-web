@@ -7,7 +7,7 @@ import { Icon } from "./icons";
 import type { IconName } from "./icons";
 import { PageContextMenu } from "./context-menu";
 import { CloseConfirmCard, NewTabCard, PaletteCard, UrlCard } from "./modals";
-import { FindBar, ZoomHud } from "./overlays";
+import { DownloadHud, FindBar, ZoomHud } from "./overlays";
 import { PopupModal } from "./popup-modal";
 import { TabStrip } from "./tab-strip";
 import { makeTheme } from "./theme";
@@ -16,6 +16,7 @@ import type {
   ChromeActions,
   ChromeLayout,
   DeviceView,
+  DownloadView,
   NewTabView,
   PageMenuView,
   PaletteView,
@@ -38,6 +39,7 @@ export function Chrome({
   urlEdit,
   popup,
   zoomHud,
+  download,
   pageMenu,
   dividerEngaged,
   pageSurface,
@@ -59,6 +61,7 @@ export function Chrome({
   popup: PopupView | null;
   /** zoom factor to flash in a transient bubble after a cmd+/- press */
   zoomHud: number | null;
+  download: DownloadView | null;
   pageMenu: PageMenuView | null;
   dividerEngaged: boolean;
   pageSurface: Surface;
@@ -110,6 +113,7 @@ export function Chrome({
       {zoomHud != null && (
         <ZoomHud factor={zoomHud} layout={layout} theme={theme} findOpen={findOpen} />
       )}
+      {download && <DownloadHud download={download} layout={layout} theme={theme} />}
       {popup && (
         <PopupModal
           view={popup}
