@@ -8,7 +8,7 @@ STAGE="$OUT/terminal-browser"
 APP="$STAGE/electron/Pixel.app"
 
 rm -rf "$OUT"
-mkdir -p "$STAGE"/{bin,cli/dist,browser/dist,browser/native,electron,agent-browser/bin,assets/fonts}
+mkdir -p "$STAGE"/{bin,cli/dist,browser/dist,browser/native,electron,agent-browser/bin,assets/fonts,skill}
 
 (cd "$ROOT/engine" && cargo build -p pixel-node --release)
 cp "${CARGO_TARGET_DIR:-$ROOT/engine/target}/release/libpixel_node.dylib" "$STAGE/browser/native/pixel.node"
@@ -17,25 +17,15 @@ AGENT_BROWSER_BIN="$("$ROOT/scripts/agent-browser.sh" --path)"
 cp "$AGENT_BROWSER_BIN" "$STAGE/agent-browser/bin/agent-browser"
 codesign --force --sign - --timestamp=none "$STAGE/agent-browser/bin/agent-browser" 2>/dev/null || true
 
-ESBUILD="$ROOT/node_modules/.bin/esbuild"
-bundle() {
-  "$ESBUILD" "$1" \
-    --bundle --platform=node --format=cjs \
-    --external:electron '--external:*.node' \
-    --alias:pixel-react="$ROOT/engine/packages/pixel-react/src/index.ts" \
-    --alias:pixel-terminals="$ROOT/terminals/src/index.ts" \
-    --alias:pixel-store="$ROOT/store/src/index.ts" \
-    --define:process.env.NODE_ENV='"production"' \
-    --sourcemap --outfile="$2" --log-level=warning
-}
-bundle "$ROOT/cli/src/main.ts" "$STAGE/cli/dist/main.js"
-bundle "$ROOT/browser/src/main.tsx" "$STAGE/browser/dist/main.js"
+"$ROOT/scripts/bundle.sh" "$ROOT/cli/src/main.ts" "$STAGE/cli/dist/main.js"
+"$ROOT/scripts/bundle.sh" "$ROOT/browser/src/main.tsx" "$STAGE/browser/dist/main.js"
+
+"$ROOT/scripts/generate-skill.sh"
+cp "$ROOT/skill/SKILL.md" "$STAGE/skill/SKILL.md"
 
 cp "$ROOT/assets/fonts/JetBrainsMono-Regular.ttf" "$STAGE/assets/fonts/"
 
 ELECTRON_DIST="$(node -e 'const p=require("path");console.log(p.join(p.dirname(require.resolve("electron/package.json",{paths:[process.argv[1]]})),"dist"))' "$ROOT/browser")"
-# The electron package ships no postinstall, so pnpm never fetches the binary.
-# install.js pulls it from the mirror and caches it in ~/Library/Caches/electron.
 if [ ! -d "$ELECTRON_DIST/Electron.app" ]; then
   (cd "$(dirname "$ELECTRON_DIST")" && node install.js)
 fi

@@ -9,6 +9,7 @@ import { callerTty, detectBackend, prepareTmux, setPaneTitle } from "pixel-termi
 import type { Backend, Direction } from "pixel-terminals";
 import { actionCommand } from "./action";
 import { control } from "./control";
+import { commandHelp, helpTopics, rootHelp } from "./help";
 import { locate, recordKey, reusable } from "./instances";
 import { lsCommand } from "./ls";
 import { instances } from "./registry";
@@ -16,51 +17,6 @@ import type { InstanceRecord } from "./registry";
 
 const DIST_ROOT = process.env.TERMINAL_BROWSER_DIST_ROOT ?? null;
 delete process.env.ELECTRON_RUN_AS_NODE;
-
-
-// slop fixme
-// these options are very poorly designed
-const HELP = `
-Usage: terminal-browser <command> [args]
-
-  open [url] [direction] [options]
-
-    Opens the browser inside the terminal
-
-    Options:
-      --dir <direction>     Split direction: right, left, down, up
-      --size <fraction>     Pane size (0.2-0.95)
-      --split               Split instead of taking over the current pane
-      --isolated            Use dedicated browser process/profile
-      --palette-key <key>   Command palette key (default: super+p)
-      --find-key <key>      Find-in-page key (default: super+f)
-      --action-mods <mods>  Action shortcut mods (default: super+shift, "none" disables)
-
-  ls [options]           List running browsers and their tabs.
-
-    Options:
-      --all                 Every browser, not just this terminal tab
-      --json                
-
-  action [sel] -- <cmd>  Drive a tab with agent-browser.
-
-    Selectors (default: the browser in this terminal tab, its active tab):
-      --browser <key>       
-      --tab <id>            
-      --target <id>        
-      --follow              
-
-    Instead of running a command:
-      --resolve            
-      --env                
-
-    Examples:
-      terminal-browser action -- snapshot
-      terminal-browser action -- click @e14
-      terminal-browser action --browser 90107-1 --tab 2 -- fill @e3 "hello"
-
-  help                  Show this help
-`;
 
 function fail(message: string): never {
   process.stderr.write(`terminal-browser: ${message}\n`);
@@ -396,6 +352,8 @@ async function launchInSplit(
   fail("browser did not register within 20s (is the split open?)");
 }
 
+// slop fixme
+// these options are very poorly designed
 async function openCommand(args: string[]) {
   const forceSplit = takeBoolFlag(args, "--split");
   const { direction, explicit } = takeDirection(args);
@@ -449,11 +407,36 @@ function takeTabFlag(args: string[]): number | undefined {
   return id;
 }
 
+function asksForHelp(args: string[]): boolean {
+  const end = args.indexOf("--");
+  const own = end < 0 ? args : args.slice(0, end);
+  return own.includes("--help") || own.includes("-h");
+}
+
+function helpCommand(topic: string | undefined): number {
+  if (!topic) {
+    process.stdout.write(rootHelp());
+    return 0;
+  }
+  const help = commandHelp(topic);
+  if (!help) fail(`no help for ${topic} (try ${helpTopics().join(", ")})`);
+  process.stdout.write(help);
+  return 0;
+}
+
 async function main(): Promise<number> {
   const [command, ...args] = process.argv.slice(2);
-  if (!command || command === "help" || command === "--help" || command === "-h") {
-    process.stdout.write(HELP);
+  if (!command || command === "--help" || command === "-h") {
+    process.stdout.write(rootHelp());
     return 0;
+  }
+  if (command === "help") return helpCommand(args[0]);
+  if (asksForHelp(args)) {
+    const help = commandHelp(command);
+    if (help) {
+      process.stdout.write(help);
+      return 0;
+    }
   }
   if (command === "open") {
     await openCommand(args);
@@ -479,7 +462,7 @@ async function main(): Promise<number> {
     if (own.length > 0) fail(`unexpected ${own[0]} — put agent-browser arguments after --`);
     return actionCommand(detectBackend(), options);
   }
-  fail(`unknown command: ${command}\n\n${HELP}`);
+  fail(`unknown command: ${command}\n\n${rootHelp()}`);
 }
 
 void main()

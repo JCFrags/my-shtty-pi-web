@@ -49,7 +49,21 @@ exec "$APP/bin/terminal-browser" "\$@"
 EOF
 chmod +x "$BIN_HOME/terminal-browser"
 
+SKILL_DIR="${AGENT_SKILLS_HOME:-$HOME/.agents/skills}/terminal-browser"
+mkdir -p "$SKILL_DIR"
+cp "$APP/skill/SKILL.md" "$SKILL_DIR/SKILL.md"
+
+LINKED=""
+for base in "$HOME/.claude" "$HOME/.codex" "$HOME/.cursor" "$HOME/.gemini"; do
+  [ -d "$base/skills" ] || continue
+  LINK="$base/skills/terminal-browser"
+  if [ -e "$LINK" ] && [ ! -L "$LINK" ]; then continue; fi
+  ln -sfn "$SKILL_DIR" "$LINK"
+  LINKED="$LINKED $(basename "$base")"
+done
+
 echo "installed terminal-browser $(cat "$APP/VERSION")"
+echo "skill $SKILL_DIR${LINKED:+ (linked into$LINKED)}"
 case ":$PATH:" in
   *":$BIN_HOME:"*) ;;
   *)
