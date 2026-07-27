@@ -4,17 +4,17 @@ set -euo pipefail
 BASE_URL="__BASE_URL__"
 
 if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
-  echo "pixel currently supports Apple Silicon macOS only" >&2
+  echo "terminal-browser currently supports Apple Silicon macOS only" >&2
   exit 1
 fi
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-echo "downloading pixel..."
+echo "downloading terminal-browser..."
 curl -fsSL "$BASE_URL/chunks.txt" -o "$TMP/chunks.txt"
 SHA="$(head -1 "$TMP/chunks.txt")"
-TARBALL="$TMP/pixel.tar.gz"
+TARBALL="$TMP/terminal-browser.tar.gz"
 : > "$TARBALL"
 tail -n +2 "$TMP/chunks.txt" | while read -r chunk; do
   [ -n "$chunk" ] || continue
@@ -29,7 +29,7 @@ echo "$SHA  $TARBALL" | shasum -a 256 -c - >/dev/null || {
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 BIN_HOME="${XDG_BIN_HOME:-$HOME/.local/bin}"
 
-APP="$DATA_HOME/pixel/app"
+APP="$DATA_HOME/terminal-browser/app"
 if [ -d "$APP" ]; then
   echo "updating existing install (was $(cat "$APP/VERSION" 2>/dev/null || echo unknown))"
 else
@@ -38,18 +38,18 @@ fi
 rm -rf "$APP.new"
 mkdir -p "$APP.new"
 tar -xzf "$TARBALL" -C "$APP.new" --strip-components 1
-pkill -f 'pixel/app/browser/dist/main\.js' 2>/dev/null || true
+pkill -f 'terminal-browser/app/browser/dist/main\.js' 2>/dev/null || true
 rm -rf "$APP"
 mv "$APP.new" "$APP"
 
 mkdir -p "$BIN_HOME"
-cat > "$BIN_HOME/pixel" <<EOF
+cat > "$BIN_HOME/terminal-browser" <<EOF
 #!/bin/sh
-exec "$APP/bin/pixel" "\$@"
+exec "$APP/bin/terminal-browser" "\$@"
 EOF
-chmod +x "$BIN_HOME/pixel"
+chmod +x "$BIN_HOME/terminal-browser"
 
-echo "installed pixel $(cat "$APP/VERSION")"
+echo "installed terminal-browser $(cat "$APP/VERSION")"
 case ":$PATH:" in
   *":$BIN_HOME:"*) ;;
   *)
@@ -59,5 +59,5 @@ case ":$PATH:" in
     ;;
 esac
 echo
-echo "  pixel open example.com"
+echo "  terminal-browser open example.com"
 

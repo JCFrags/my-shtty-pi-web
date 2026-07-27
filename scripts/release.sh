@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="${1:-dev}"
 OUT="$ROOT/dist-release"
-STAGE="$OUT/pixel"
+STAGE="$OUT/terminal-browser"
 APP="$STAGE/electron/Pixel.app"
 
 rm -rf "$OUT"
@@ -52,28 +52,28 @@ mv "$APP/Contents/MacOS/Electron" "$APP/Contents/MacOS/Pixel"
   -c "Set :CFBundleExecutable Pixel" \
   -c "Set :CFBundleName Pixel" \
   -c "Set :CFBundleDisplayName Pixel" \
-  -c "Set :CFBundleIdentifier dev.zenbu.pixel" \
+  -c "Set :CFBundleIdentifier dev.zenbu.terminal-browser" \
   "$APP/Contents/Info.plist" >/dev/null
 codesign --force --sign - --timestamp=none "$APP" 2>/dev/null
 
-cat > "$STAGE/bin/pixel" <<'EOF'
+cat > "$STAGE/bin/terminal-browser" <<'EOF'
 #!/bin/sh
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
-export PIXEL_DIST_ROOT="$ROOT"
+export TERMINAL_BROWSER_DIST_ROOT="$ROOT"
 export ELECTRON_RUN_AS_NODE=1
 exec "$ROOT/electron/Pixel.app/Contents/MacOS/Pixel" "$ROOT/cli/dist/main.js" "$@"
 EOF
-chmod +x "$STAGE/bin/pixel"
+chmod +x "$STAGE/bin/terminal-browser"
 echo "$VERSION" > "$STAGE/VERSION"
 
-TARBALL="$OUT/pixel-darwin-arm64.tar.gz"
-tar -czf "$TARBALL" -C "$OUT" pixel
+TARBALL="$OUT/terminal-browser-darwin-arm64.tar.gz"
+tar -czf "$TARBALL" -C "$OUT" terminal-browser
 
-split -b 45m "$TARBALL" "$OUT/pixel-chunk-"
+split -b 45m "$TARBALL" "$OUT/terminal-browser-chunk-"
 {
   shasum -a 256 "$TARBALL" | cut -d' ' -f1
-  (cd "$OUT" && ls pixel-chunk-*)
+  (cd "$OUT" && ls terminal-browser-chunk-*)
 } > "$OUT/chunks.txt"
 
 du -h "$TARBALL"
-echo "chunks: $(cd "$OUT" && ls pixel-chunk-* | wc -l | tr -d ' ')"
+echo "chunks: $(cd "$OUT" && ls terminal-browser-chunk-* | wc -l | tr -d ' ')"

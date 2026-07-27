@@ -9,7 +9,7 @@ import { control } from "./control";
 import { browsers, describe, recordKey, targets } from "./instances";
 import type { Browser, TabTarget } from "./instances";
 
-const DIST_ROOT = process.env.PIXEL_DIST_ROOT ?? null;
+const DIST_ROOT = process.env.TERMINAL_BROWSER_DIST_ROOT ?? null;
 
 interface AgentTab {
   tabId: string;
@@ -38,10 +38,10 @@ function repoScript(): string {
 }
 
 export function agentBrowserPath(): string {
-  const override = process.env.PIXEL_AGENT_BROWSER;
+  const override = process.env.TERMINAL_BROWSER_AGENT;
   if (override) {
     if (!fs.existsSync(override)) {
-      throw new Error(`PIXEL_AGENT_BROWSER points at a missing file: ${override}`);
+      throw new Error(`TERMINAL_BROWSER_AGENT points at a missing file: ${override}`);
     }
     return override;
   }
@@ -56,7 +56,7 @@ export function agentBrowserPath(): string {
 }
 
 function sessionName(browser: Browser): string {
-  return `pixel-${recordKey(browser)}`;
+  return `terminal-browser-${recordKey(browser)}`;
 }
 
 function childEnv(): NodeJS.ProcessEnv {
@@ -102,7 +102,7 @@ function agentTabs(binary: string, browser: Browser): AgentTab[] {
   }
   const reconnect = runAgent(binary, ["--session", session, "connect", port, "--json"]);
   if (reconnect.status !== 0) {
-    throw new Error(`could not connect agent-browser to pixel browser ${recordKey(browser)} on port ${port}`);
+    throw new Error(`could not connect agent-browser to terminal browser ${recordKey(browser)} on port ${port}`);
   }
   const retry = runAgent(binary, ["--session", session, "tab", "list", "--json"]);
   if (retry.status !== 0) throw new Error("agent-browser could not list tabs after reconnecting");
@@ -122,7 +122,7 @@ function matchTab(
   if (candidates.length === 1) return candidates[0];
   if (typeof tab.timeOrigin !== "number") {
     throw new Error(
-      `cannot tell which of ${candidates.length} tabs on ${tab.url} is pixel tab ${tab.id}`,
+      `cannot tell which of ${candidates.length} tabs on ${tab.url} is terminal browser tab ${tab.id}`,
     );
   }
   for (const candidate of candidates) {
@@ -139,12 +139,12 @@ function matchTab(
       if (evalResult(probe.stdout) === tab.timeOrigin) return { ...candidate, active: true };
     } catch {}
   }
-  throw new Error(`could not find pixel tab ${tab.id} (${tab.url}) among agent-browser's tabs`);
+  throw new Error(`could not find terminal browser tab ${tab.id} (${tab.url}) among agent-browser's tabs`);
 }
 
 async function select(backend: Backend, options: ActionOptions): Promise<Selection> {
   const all = await browsers(backend);
-  if (all.length === 0) throw new Error("no pixel browsers running — start one with: pixel open");
+  if (all.length === 0) throw new Error("no terminal browsers running — start one with: terminal-browser open");
 
   if (options.targetId) {
     for (const browser of all) {
@@ -166,7 +166,7 @@ async function select(backend: Backend, options: ActionOptions): Promise<Selecti
     const here = all.filter((browser) => browser.inCurrentTab);
     if (here.length === 0) {
       throw new Error(
-        `no pixel browser in this terminal tab — pass --browser <key>\n\nrunning:\n  ${all
+        `no terminal browser in this terminal tab — pass --browser <key>\n\nrunning:\n  ${all
           .map(describe)
           .join("\n  ")}`,
       );
@@ -196,32 +196,32 @@ async function select(backend: Backend, options: ActionOptions): Promise<Selecti
 }
 
 const BLOCKED_COMMANDS = new Map([
-  ["launch", "pixel drives the browser you already have open — use: pixel open"],
-  ["install", "pixel never downloads a second browser engine"],
-  ["connect", "pixel manages the CDP connection for you"],
-  ["disconnect", "pixel manages the CDP connection for you"],
+  ["launch", "terminal-browser drives the browser you already have open — use: terminal-browser open"],
+  ["install", "terminal-browser never downloads a second browser engine"],
+  ["connect", "terminal-browser manages the CDP connection for you"],
+  ["disconnect", "terminal-browser manages the CDP connection for you"],
 ]);
 
 const BLOCKED_FLAGS = new Map([
-  ["--cdp", "pixel picks the port from the browser you target"],
-  ["--auto-connect", "pixel picks the port from the browser you target"],
-  ["--session", "pixel names the session after the browser you target"],
+  ["--cdp", "terminal-browser picks the port from the browser you target"],
+  ["--auto-connect", "terminal-browser picks the port from the browser you target"],
+  ["--session", "terminal-browser names the session after the browser you target"],
   ["--headed", "the browser is already visible in your terminal"],
-  ["--executable-path", "pixel drives its own browser, not another engine"],
-  ["--profile", "pixel drives its own browser, not another engine"],
-  ["--provider", "pixel drives the local browser, not a cloud one"],
+  ["--executable-path", "terminal-browser drives its own browser, not another engine"],
+  ["--profile", "terminal-browser drives its own browser, not another engine"],
+  ["--provider", "terminal-browser drives the local browser, not a cloud one"],
 ]);
 
 function checkGuardrails(args: string[]) {
   for (const arg of args) {
     const flag = arg.split("=")[0];
     const reason = BLOCKED_FLAGS.get(flag);
-    if (reason) throw new Error(`${flag} is not available through pixel action — ${reason}`);
+    if (reason) throw new Error(`${flag} is not available through terminal-browser action — ${reason}`);
   }
   const command = args.find((arg) => !arg.startsWith("-"));
   if (!command) return;
   const reason = BLOCKED_COMMANDS.get(command);
-  if (reason) throw new Error(`${command} is not available through pixel action — ${reason}`);
+  if (reason) throw new Error(`${command} is not available through terminal-browser action — ${reason}`);
 }
 
 async function interceptTabLifecycle(
@@ -265,12 +265,12 @@ export async function actionCommand(backend: Backend, options: ActionOptions) {
   if (options.printEnv) {
     process.stdout.write(`AGENT_BROWSER_SOCKET_DIR=${AGENT_SOCKETS_DIR}\n`);
     process.stdout.write(`AGENT_BROWSER_SESSION_NAME=${sessionName(browser)}\n`);
-    process.stdout.write(`PIXEL_TARGET_ID=${tab.targetId ?? ""}\n`);
+    process.stdout.write(`TERMINAL_BROWSER_TARGET_ID=${tab.targetId ?? ""}\n`);
     return 0;
   }
 
   if (options.passthrough.length === 0) {
-    throw new Error("nothing to run — pass a command after --, e.g. pixel action -- snapshot");
+    throw new Error("nothing to run — pass a command after --, e.g. terminal-browser action -- snapshot");
   }
   checkGuardrails(options.passthrough);
 

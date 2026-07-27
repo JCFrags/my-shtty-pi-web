@@ -3,9 +3,9 @@ mod clipboard;
 mod compositor;
 mod doc;
 mod embed;
+mod hover;
 mod input;
 mod keys;
-mod hover;
 mod native_pairing;
 mod overlay;
 mod pointer;
@@ -31,13 +31,13 @@ use crate::profiler::{ProfileData, Profiler};
 use crate::scroll::ScrollProfile;
 use crate::scroll::profiles::Smooth;
 use crate::style::Color;
+use crate::surfaces::Rect;
 use crate::terminal::{
     Event, KeyEvent, Mods, Mouse, MouseButton, MouseKind, Terminal, TerminalColors,
 };
 use crate::text_input::InputReply;
 use crate::throttle::CpuThrottle;
 use crate::tree::{NodeId, PxRect};
-
 
 fn window_from(ws: &crate::terminal::WindowSize, cell: (u32, u32)) -> (u32, u32) {
     let cols = if ws.cols > 0 { ws.cols } else { 80 };
@@ -289,7 +289,13 @@ pub struct Engine {
     drag: Option<(usize, DragTarget)>,
     pointer_capture: Option<(usize, NodeId)>,
     key_passthrough: bool,
-    last_selection: Option<(usize, NodeId, crate::selection::DocPos, crate::selection::DocPos, u32)>,
+    last_selection: Option<(
+        usize,
+        NodeId,
+        crate::selection::DocPos,
+        crate::selection::DocPos,
+        u32,
+    )>,
     bar_hover: Option<(usize, NodeId)>,
     bar_drag: Option<(usize, NodeId, f32)>,
     reveal: bool,
@@ -441,7 +447,6 @@ impl Engine {
         }
     }
 
-
     fn sync_clear_colors(&mut self) {
         let Some(background) = self.colors.background else {
             return;
@@ -517,7 +522,6 @@ impl Engine {
         }
         self.profiler.toggle()
     }
-
 
     pub fn profile_start(&mut self) {
         if !crate::profiler::is_recording() {
@@ -678,7 +682,10 @@ impl Engine {
                 view.tree.mark_layout();
             }
         }
-        for (view, node, image) in self.clipboard.resolve_pastes(&mut self.term, drained.pastes) {
+        for (view, node, image) in self
+            .clipboard
+            .resolve_pastes(&mut self.term, drained.pastes)
+        {
             let mut out = std::mem::take(&mut self.pending);
             self.push_paste_image(view, node, image, &mut out);
             self.pending = out;
@@ -823,7 +830,8 @@ impl Engine {
                         if let Some((_, marks)) = &rich {
                             self.next_pasted_mark += marks.len() as u64;
                         }
-                        let first_id = self.next_pasted_mark - rich.as_ref().map_or(0, |(_, m)| m.len() as u64);
+                        let first_id = self.next_pasted_mark
+                            - rich.as_ref().map_or(0, |(_, m)| m.len() as u64);
                         if let Some(input) = self.comp.views[view].tree.input_mut(focus) {
                             match rich {
                                 Some((rich_text, marks)) => {
@@ -831,7 +839,13 @@ impl Engine {
                                 }
                                 None => input.insert(&text),
                             }
-                            self.finish_reply(view, focus, InputReply::Edited, ChangeSource::Paste, out)?;
+                            self.finish_reply(
+                                view,
+                                focus,
+                                InputReply::Edited,
+                                ChangeSource::Paste,
+                                out,
+                            )?;
                         }
                     }
                     // todo: review this better
@@ -866,7 +880,8 @@ impl Engine {
             Event::WindowSize(ws) => self.apply_window(&ws)?,
             Event::Mouse(mouse) => self.handle_mouse(mouse, out)?,
             Event::ClipboardData { items, ok } => {
-                self.clipboard.handle_clipboard_data(&mut self.term, items, ok)
+                self.clipboard
+                    .handle_clipboard_data(&mut self.term, items, ok)
             }
             Event::ColorSchemeChanged => self.schedule_color_request(COLOR_SETTLE_DELAY),
             Event::Colors(colors) => self.apply_colors(colors, out),
@@ -899,16 +914,26 @@ impl Engine {
 
     fn frame(&mut self) -> io::Result<()> {
         let active = self.comp.active_views();
-        let views_dirty = active.iter().any(|&v| self.comp.views[v].tree.dirty());
-        if !views_dirty && !self.comp.dirty {
+        let work: Vec<(usize, Option<Rect>)> = active
+            .iter()
+            .filter_map(|&i| {
+                let view = &self.comp.views[i];
+                if view.tree.dirty() || (view.canvas.width, view.canvas.height) != view.size {
+                    Some((i, None))
+                } else if view.damage.is_empty() {
+                    None
+                } else {
+                    Some((i, Some(view.damage)))
+                }
+            })
+            .collect();
+        if work.is_empty() && !self.comp.dirty {
             return Ok(());
         }
         crate::profiler::span("frame", || -> io::Result<()> {
             let start = Instant::now();
-            for i in active {
-                if !self.comp.views[i].tree.dirty() {
-                    continue;
-                }
+            let mut painted: Vec<(usize, Rect)> = Vec::new();
+            for (i, damage) in work {
                 let size = self.comp.views[i].size;
                 if size.0 == 0 || size.1 == 0 {
                     continue;
@@ -921,22 +946,33 @@ impl Engine {
                 let fonts = &self.fonts;
                 let base_px = self.base_px;
                 let view = &mut self.comp.views[i];
+                let region = damage.unwrap_or(Rect::sized(size.0, size.1));
                 crate::profiler::span("canvas.clear", || {
                     if (view.canvas.width, view.canvas.height) != size {
                         view.canvas = Canvas::new(size.0, size.1);
                     }
-                    view.canvas.fill(view.clear_color);
+                    view.canvas.push_clip(
+                        region.x as f32,
+                        region.y as f32,
+                        region.w as f32,
+                        region.h as f32,
+                    );
+                    view.canvas
+                        .fill_rect(region.x, region.y, region.w, region.h, view.clear_color);
                 });
                 view.tree.flush_layout(fonts, base_px);
                 paint(&view.tree, &mut view.canvas, fonts, cursor);
+                view.canvas.pop_clip();
                 view.tree.clear_paint_flag();
+                view.damage = Rect::default();
+                painted.push((i, region));
                 self.comp.dirty = true;
             }
             crate::profiler::set_view(0);
             if !self.comp.dirty {
                 return Ok(());
             }
-            self.compose();
+            self.compose(&painted);
             let bytes = crate::profiler::span("draw", || self.term.draw(&self.comp.frame))?;
             crate::profiler::count("bytes", bytes as u64);
 
@@ -957,9 +993,10 @@ impl Engine {
         })
     }
 
-    fn compose(&mut self) {
+    fn compose(&mut self, painted: &[(usize, Rect)]) {
+        let overlays = self.highlight.is_some() || self.inspect_mode;
         crate::profiler::span("compose", || {
-            self.comp.compose();
+            self.comp.compose(painted, overlays);
             if let Some((view, id, area)) = self.highlight {
                 self.draw_node_overlay(view, id, area, false);
             }

@@ -24,7 +24,64 @@ use serde_json::json;
 
 use crate::events::event_json;
 use crate::ops::{IdMap, apply_ops};
-use crate::surface::{SurfaceCommand, SurfaceMailbox, SurfaceSubmission};
+use crate::surface::{SurfaceCommand, SurfaceMailbox, SurfacePixels};
+
+fn draw_frame(
+    engine: &mut Engine,
+    frame: &surface::SurfaceFrame,
+) -> std::result::Result<u32, String> {
+    match &frame.pixels {
+        #[cfg(target_os = "macos")]
+        SurfacePixels::Texture(texture) => {
+            let locked = texture.lock()?;
+            engine
+                .draw_surface(
+                    frame.id,
+                    locked.width,
+                    locked.height,
+                    locked.pixels(),
+                    locked.stride,
+                    frame.damage,
+                )
+                .map(|_| locked.height)
+                .map_err(|error| error.to_string())
+        }
+        SurfacePixels::Owned {
+            bgra,
+            width,
+            height,
+        } => engine
+            .draw_surface(
+                frame.id,
+                *width,
+                *height,
+                bgra,
+                *width as usize * 4,
+                frame.damage,
+            )
+            .map(|_| *height)
+            .map_err(|error| error.to_string()),
+    }
+}
+
+#[napi(object)]
+pub struct DamageRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl DamageRect {
+    fn into_rect(self) -> pixel_core::surfaces::Rect {
+        pixel_core::surfaces::Rect {
+            x: self.x,
+            y: self.y,
+            w: self.width,
+            h: self.height,
+        }
+    }
+}
 
 static UI_FONT_BYTES: &[u8] = include_bytes!("../../../examples/typing/assets/InterVariable.ttf");
 static MONO_FONT_BYTES: &[u8] =
@@ -66,23 +123,6 @@ pub(crate) fn colors_json(colors: &TerminalColors) -> serde_json::Value {
         "palette": colors.palette,
     })
 }
-// i have no idea what it means for a struct to be napi?
-// also wait how are types genned 
-
-
-/*
-
-okay i went off track
-
-i want to see where the pixel s are coppied
-
-so we know where the surface sare create dat least, theres some create surface call which does...?
-that doesn't not make sense to me
-
-am i retarded
-
-
-*/
 
 #[napi]
 pub struct PixelEngine {
@@ -145,7 +185,7 @@ impl PixelEngine {
     }
 
     /*
-    this is the function node calls to send data to rust 
+    this is the function node calls to send data to rust
      */
     #[napi]
     pub fn apply_ops(&self, ops: String) -> Result<()> {
@@ -161,54 +201,50 @@ impl PixelEngine {
         bgra: Buffer,
         width: u32,
         height: u32,
+        damage: Option<DamageRect>,
     ) -> Result<()> {
-        // eh?
-        let stride = width
-            .checked_mul(4)
-            .map(|bytes| bytes as usize)
+        let expected = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|pixels| pixels.checked_mul(4))
             .ok_or_else(|| Error::from_reason("surface dimensions overflow"))?;
-        self.surfaces
-            .submit(SurfaceSubmission {
-                // no that makes no sense we wouldn't be passing pixels
-                id,
-                bgra: bgra.as_ref(),
+        let source = bgra.as_ref();
+        if expected == 0 || source.len() < expected {
+            return Err(Error::from_reason(format!(
+                "surface buffer has {} bytes, expected {expected}",
+                source.len()
+            )));
+        }
+        let mut owned = self.surfaces.take_spare(id);
+        owned.clear();
+        owned.extend_from_slice(&source[..expected]);
+        self.surfaces.submit(
+            id,
+            SurfacePixels::Owned {
+                bgra: owned,
                 width,
                 height,
-                stride,
-            })
-            .map_err(Error::from_reason)?;
+            },
+            damage.map(DamageRect::into_rect),
+        );
         self.waker.wake();
         Ok(())
     }
 
-/*
-
-hm that's not super clear to me
-
-well whats a surface frame?
-
-well no that makes sense, its not about a tab (is it)
-
-wait yes it is, id expect a surface per tab
-
-i ca look into the tab registry perchance?
-
-
-*/
     #[cfg(target_os = "macos")]
     #[napi]
-    pub fn update_surface_texture(&self, id: u32, handle: Buffer) -> Result<()> {
-        let surface = iosurface::LockedSurface::from_handle(handle.as_ref())
-            .map_err(Error::from_reason)?;
-        self.surfaces
-            .submit(SurfaceSubmission {
-                id,
-                bgra: surface.pixels(),
-                width: surface.width,
-                height: surface.height,
-                stride: surface.stride,
-            })
-            .map_err(Error::from_reason)?;
+    pub fn update_surface_texture(
+        &self,
+        id: u32,
+        handle: Buffer,
+        damage: Option<DamageRect>,
+    ) -> Result<()> {
+        let surface =
+            iosurface::RetainedSurface::from_handle(handle.as_ref()).map_err(Error::from_reason)?;
+        self.surfaces.submit(
+            id,
+            SurfacePixels::Texture(surface),
+            damage.map(DamageRect::into_rect),
+        );
         self.waker.wake();
         Ok(())
     }
@@ -221,12 +257,12 @@ i ca look into the tab registry perchance?
 
     #[napi]
     pub fn surface_stats(&self) -> String {
-        let (submitted, coalesced, presented, bytes) = self.surfaces.stats();
+        let (submitted, coalesced, presented, rows) = self.surfaces.stats();
         json!({
             "submitted": submitted,
             "coalesced": coalesced,
             "presented": presented,
-            "bytes": bytes,
+            "rows": rows,
         })
         .to_string()
     }
@@ -291,37 +327,19 @@ i ca look into the tab registry perchance?
                     }
                 }
                 let mut surface_error = None;
-                // how is this getting read?
-
-                // how is surfaces getting written to?
-                // probably a submit step kashira?
-                // oh okay u loop over all the surfaces that get submitted by react
-                // which is information about an offscreen browser window
-                // and that tells the engine to draw the surface
-                /*
-                wait this is a little confusing, so this loops over it once at startup? 
-
-                is there a while loop?
-
-                hm, this feels weird its out of the engine ticks
-                 */
                 for command in surfaces.take() {
                     match command {
                         SurfaceCommand::Frame(frame) => {
-                            let result = engine.draw_surface(
-                                frame.id,
-                                frame.width,
-                                frame.height,
-                                &frame.pixels,
-                            );
-                            surfaces.recycle(frame);
-                            if let Err(error) = result {
-                                surface_error = Some(error.to_string());
-                                break;
+                            let result = draw_frame(&mut engine, &frame);
+                            match result {
+                                Ok(rows) => surfaces.recycle(frame, rows),
+                                Err(error) => {
+                                    surface_error = Some(error);
+                                    break;
+                                }
                             }
                         }
                         SurfaceCommand::Remove(id) => {
-                            // what does it mean to remove?
                             if let Err(error) = engine.delete_surface(id) {
                                 surface_error = Some(error.to_string());
                                 break;
@@ -337,7 +355,6 @@ i ca look into the tab registry perchance?
                         dispatch_to_node.call(Ok(json), ThreadsafeFunctionCallMode::NonBlocking);
                     }
                 }
-
             };
             drop(engine);
             if !stop.load(Ordering::Relaxed) {

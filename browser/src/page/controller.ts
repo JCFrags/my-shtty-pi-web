@@ -16,7 +16,7 @@ import { FaviconCache } from "./favicon";
 import { frameRate } from "./frame-rate";
 import { PageInput } from "./input";
 import { PopupWindow } from "./popup";
-import { initialBrowserState } from "./types";
+import { cssSize, damageOf, initialBrowserState, paintedNothing } from "./types";
 import type { BrowserState, BrowserSurfaceLayout, DeviceSpec } from "./types";
 import { stepZoom } from "./zoom";
 import type { ZoomDirection } from "./zoom";
@@ -51,6 +51,7 @@ export class BrowserController {
   };
   private visible = true;
   private painted = false;
+  private wholeSurfaceNext = true;
   cursorShape = "default";
   onCursorChange: ((shape: string) => void) | null = null;
   onOpenTab: ((url: string, activate: boolean) => void) | null = null;
@@ -470,6 +471,7 @@ export class BrowserController {
     this.devtools?.setVisible(visible);
     if (visible) {
       if (!this.painted) this.surface.clear();
+      this.wholeSurfaceNext = true;
       this.window.webContents.setFrameRate(frameRate());
       this.window.webContents.invalidate();
     } else {
@@ -479,10 +481,7 @@ export class BrowserController {
 
   private contentSize(layout: BrowserSurfaceLayout) {
     if (this.device) return { width: this.device.width, height: this.device.height };
-    return {
-      width: Math.max(1, Math.round(layout.width / layout.scale)),
-      height: Math.max(1, Math.round(layout.height / layout.scale)),
-    };
+    return cssSize(layout.width, layout.height, layout.scale);
   }
 
   setDevice(spec: DeviceSpec | null) {
@@ -525,7 +524,10 @@ export class BrowserController {
       const info = texture.textureInfo;
       const handle = info.handle.ioSurface;
       if (info.widgetType !== "frame" || info.pixelFormat !== "bgra" || !handle) return;
-      this.surface.present({ ioSurface: handle });
+      if (paintedNothing(info) && !this.wholeSurfaceNext) return;
+      const damage = this.wholeSurfaceNext ? undefined : damageOf(info);
+      this.wholeSurfaceNext = false;
+      this.surface.present({ ioSurface: handle, damage });
       this.painted = true;
     } finally {
       texture.release();
@@ -593,11 +595,11 @@ export class BrowserController {
 }
 
 function browserRenderScale(layout: BrowserSurfaceLayout) {
-  const explicit = Number(process.env.PIXEL_BROWSER_RENDER_SCALE);
+  const explicit = Number(process.env.TERMINAL_BROWSER_RENDER_SCALE);
   if (Number.isFinite(explicit) && explicit > 0) {
     return Math.max(0.5, Math.min(layout.scale, explicit));
   }
-  const maxPixels = Number(process.env.PIXEL_BROWSER_MAX_PIXELS ?? 0);
+  const maxPixels = Number(process.env.TERMINAL_BROWSER_MAX_PIXELS ?? 0);
   if (!Number.isFinite(maxPixels) || maxPixels <= 0) return layout.scale;
   const cssPixels = layout.width * layout.height / (layout.scale * layout.scale);
   return Math.max(0.5, Math.min(layout.scale, Math.sqrt(maxPixels / cssPixels)));

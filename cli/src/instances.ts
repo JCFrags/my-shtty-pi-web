@@ -20,7 +20,7 @@ export interface Browser extends InstanceRecord {
   inCurrentTab: boolean;
 }
 
-const TITLE_PATTERN = /pixel-browser:([\w-]+)/;
+const TITLE_PATTERN = /terminal-browser:([\w-]+)/;
 
 export function recordKey(record: InstanceRecord): string {
   return record.key ?? String(record.pid);

@@ -174,7 +174,7 @@ export interface SurfaceStats {
   submitted: number;
   coalesced: number;
   presented: number;
-  bytes: number;
+  rows: number;
 }
 
 /**

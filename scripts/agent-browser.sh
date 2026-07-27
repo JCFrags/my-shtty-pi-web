@@ -3,7 +3,7 @@ set -euo pipefail
 
 REF="v0.33.0"
 
-CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/pixel/agent-browser/$REF"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/terminal-browser/agent-browser/$REF"
 BIN="$CACHE/bin/agent-browser"
 
 if [ "${1:-}" = "--ref" ]; then

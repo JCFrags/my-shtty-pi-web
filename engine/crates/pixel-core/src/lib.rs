@@ -15,7 +15,7 @@ mod scroll;
 mod scrollbar;
 mod selection;
 mod style;
-mod surfaces;
+pub mod surfaces;
 mod terminal;
 mod text_input;
 mod throttle;

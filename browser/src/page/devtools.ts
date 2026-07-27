@@ -5,6 +5,7 @@ import type { DevtoolsDock } from "pixel-store";
 import { cursorShapeFor } from "./cursor";
 import { frameRate } from "./frame-rate";
 import { PageInput } from "./input";
+import { cssSize, damageOf, paintedNothing } from "./types";
 import type { BrowserSurfaceLayout } from "./types";
 
 export type DevtoolsAction = "close" | "dock-bottom" | "dock-right";
@@ -23,6 +24,7 @@ export class DevtoolsWindow {
   private dock: DevtoolsDock;
   private visible = true;
   private focused = false;
+  private wholeSurfaceNext = true;
   private cdpAttached = false;
   private destroyed = false;
   private pendingPanel: string | null = null;
@@ -49,8 +51,7 @@ export class DevtoolsWindow {
     this.dock = dock;
     this.onAction = onAction;
     this.window = new BrowserWindow({
-      width: Math.max(1, Math.round(layout.width / layout.scale)),
-      height: Math.max(1, Math.round(layout.height / layout.scale)),
+      ...cssSize(layout.width, layout.height, layout.scale),
       useContentSize: true,
       backgroundColor: background,
       show: false,
@@ -128,11 +129,8 @@ export class DevtoolsWindow {
     }
     this.layout = layout;
     if (!options?.keepFrame) this.surface.clear();
-    this.window.setContentSize(
-      Math.max(1, Math.round(layout.width / layout.scale)),
-      Math.max(1, Math.round(layout.height / layout.scale)),
-      false,
-    );
+    const size = cssSize(layout.width, layout.height, layout.scale);
+    this.window.setContentSize(size.width, size.height, false);
   }
 
   showPanel(panel: string) {
@@ -179,6 +177,8 @@ export class DevtoolsWindow {
     if (this.visible === visible || this.destroyed) return;
     this.visible = visible;
     if (visible) {
+      // one surface across every tab's inspector, so its pixels belong to whichever one drew last
+      this.wholeSurfaceNext = true;
       this.window.webContents.setFrameRate(frameRate());
       this.window.webContents.invalidate();
     } else {
@@ -216,7 +216,10 @@ export class DevtoolsWindow {
       const info = texture.textureInfo;
       const handle = info.handle.ioSurface;
       if (info.widgetType !== "frame" || info.pixelFormat !== "bgra" || !handle) return;
-      this.surface.present({ ioSurface: handle });
+      if (paintedNothing(info) && !this.wholeSurfaceNext) return;
+      const damage = this.wholeSurfaceNext ? undefined : damageOf(info);
+      this.wholeSurfaceNext = false;
+      this.surface.present({ ioSurface: handle, damage });
     } finally {
       texture.release();
     }

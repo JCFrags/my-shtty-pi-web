@@ -1,8 +1,21 @@
+export interface DamageRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface NativeEngine {
   info(): string;
   applyOps(ops: string): void;
-  updateSurface(id: number, bgra: Buffer, width: number, height: number): void;
-  updateSurfaceTexture?(id: number, handle: Buffer): void;
+  updateSurface(
+    id: number,
+    bgra: Buffer,
+    width: number,
+    height: number,
+    damage?: DamageRect,
+  ): void;
+  updateSurfaceTexture?(id: number, handle: Buffer, damage?: DamageRect): void;
   removeSurface(id: number): void;
   surfaceStats(): string;
   setKeyEventTypes(enabled: boolean): void;

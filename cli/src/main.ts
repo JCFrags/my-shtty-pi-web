@@ -14,14 +14,14 @@ import { lsCommand } from "./ls";
 import { instances } from "./registry";
 import type { InstanceRecord } from "./registry";
 
-const DIST_ROOT = process.env.PIXEL_DIST_ROOT ?? null;
+const DIST_ROOT = process.env.TERMINAL_BROWSER_DIST_ROOT ?? null;
 delete process.env.ELECTRON_RUN_AS_NODE;
 
 
 // slop fixme
 // these options are very poorly designed
 const HELP = `
-Usage: pixel <command> [args]
+Usage: terminal-browser <command> [args]
 
   open [url] [direction] [options]
 
@@ -55,15 +55,15 @@ Usage: pixel <command> [args]
       --env                
 
     Examples:
-      pixel action -- snapshot
-      pixel action -- click @e14
-      pixel action --browser 90107-1 --tab 2 -- fill @e3 "hello"
+      terminal-browser action -- snapshot
+      terminal-browser action -- click @e14
+      terminal-browser action --browser 90107-1 --tab 2 -- fill @e3 "hello"
 
   help                  Show this help
 `;
 
 function fail(message: string): never {
-  process.stderr.write(`pixel: ${message}\n`);
+  process.stderr.write(`terminal-browser: ${message}\n`);
   process.exit(1);
 }
 
@@ -120,7 +120,7 @@ function browserLaunchCommand(argv: string[]): { command: string[]; cwd: string 
   const main = path.join(browserDir, "dist", "main.js");
   for (const required of [electron, main]) {
     if (!fs.existsSync(required)) {
-      fail(`missing ${required} — build the browser first (pnpm --filter pixel-browser build)`);
+      fail(`missing ${required} — build the browser first (pnpm --filter terminal-browser build)`);
     }
   }
   ensureDataDir();
@@ -135,7 +135,7 @@ function browserLaunchCommand(argv: string[]): { command: string[]; cwd: string 
 
 function clientLaunchCommand(argv: string[]): { command: string[]; cwd: string } {
   const runner = DIST_ROOT
-    ? [path.join(DIST_ROOT, "bin", "pixel")]
+    ? [path.join(DIST_ROOT, "bin", "terminal-browser")]
     : [process.execPath, path.resolve(__dirname, "main.js")];
   const quoted = [...runner, "open", ...argv]
     .map((arg) => `'${arg.replaceAll("'", `'\\''`)}'`)
@@ -266,8 +266,8 @@ async function attachHere(argv: string[]): Promise<never> {
     socket.destroy();
     throw new Error(reply.error ?? "daemon refused the session");
   }
-  // the title marker is how pixel commands find this pane
-  setPaneTitle(tty, `pixel-browser:${reply.session}`);
+  // the title marker is how terminal-browser commands find this pane
+  setPaneTitle(tty, `terminal-browser:${reply.session}`);
   nextReply(socket, (message) => {
     if (message.event === "closed") process.exit(message.code ?? 0);
   });
@@ -298,7 +298,7 @@ async function openHere(argv: string[]): Promise<never> {
     try {
       return await attachHere(argv);
     } catch (error) {
-      process.stderr.write(`pixel: daemon attach failed (${String(error)}); running isolated\n`);
+      process.stderr.write(`terminal-browser: daemon attach failed (${String(error)}); running isolated\n`);
     }
   }
   const { command, cwd } = browserLaunchCommand([...argv, `--cwd=${process.cwd()}`]);
@@ -372,7 +372,7 @@ async function applySplitSize(
     down: "up",
     up: "down",
   };
-  await backend.resizePane(`pixel-browser:${recordKey(record)}`, grow[direction], deltaPoints);
+  await backend.resizePane(`terminal-browser:${recordKey(record)}`, grow[direction], deltaPoints);
 }
 
 async function launchInSplit(
@@ -445,7 +445,7 @@ function takeTabFlag(args: string[]): number | undefined {
   const raw = takeFlag(args, "--tab");
   if (raw === undefined) return undefined;
   const id = Number(raw.replace(/^t/, ""));
-  if (!Number.isInteger(id)) fail(`invalid --tab ${raw} (a tab id from pixel ls)`);
+  if (!Number.isInteger(id)) fail(`invalid --tab ${raw} (a tab id from terminal-browser ls)`);
   return id;
 }
 

@@ -31,7 +31,7 @@ export function buildStamp(): string {
 
 export async function runDaemon(cdpPort: number | null): Promise<void> {
   if (await socketAlive()) {
-    process.stderr.write("pixel-browser daemon already running\n");
+    process.stderr.write("terminal-browser daemon already running\n");
     app.exit(3);
     return;
   }
@@ -130,7 +130,7 @@ export async function runDaemon(cdpPort: number | null): Promise<void> {
     });
   });
   server.on("error", (error) => {
-    process.stderr.write(`pixel-browser daemon socket error: ${error}\n`);
+    process.stderr.write(`terminal-browser daemon socket error: ${error}\n`);
     app.exit(1);
   });
   server.listen(DAEMON_SOCKET);

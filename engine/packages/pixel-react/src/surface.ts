@@ -1,8 +1,10 @@
-import type { NativeEngine } from "./native";
+import type { DamageRect, NativeEngine } from "./native";
+
+type Damaged = { damage?: DamageRect };
 
 export type SurfaceFrame =
-  | { bgra: Buffer; width: number; height: number } // i think we want to kilt the case of passing the raw pixels to react, there's never a case that I know of
-  | { ioSurface: Buffer };
+  | ({ bgra: Buffer; width: number; height: number } & Damaged) // i think we want to kilt the case of passing the raw pixels to react, there's never a case that I know of
+  | ({ ioSurface: Buffer } & Damaged);
 
 export class Surface {
   private readonly id: number;
@@ -19,9 +21,9 @@ export class Surface {
     if ("ioSurface" in frame) {
       const submit = this.engine.updateSurfaceTexture;
       if (!submit) throw new Error("IOSurface frames are not supported on this platform");
-      submit.call(this.engine, this.id, frame.ioSurface);
+      submit.call(this.engine, this.id, frame.ioSurface, frame.damage);
     } else {
-      this.engine.updateSurface(this.id, frame.bgra, frame.width, frame.height);
+      this.engine.updateSurface(this.id, frame.bgra, frame.width, frame.height, frame.damage);
     }
   }
 

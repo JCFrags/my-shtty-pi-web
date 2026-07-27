@@ -36,7 +36,7 @@ async function collect(list: Browser[]): Promise<Listed[]> {
 }
 
 function render(list: Listed[]): string {
-  if (list.length === 0) return "no pixel browsers running\n";
+  if (list.length === 0) return "no terminal browsers running\n";
   const lines: string[] = [];
   for (const browser of list) {
     const where = browser.pane.window
@@ -60,7 +60,7 @@ export async function lsCommand(backend: Backend, all: boolean, json: boolean) {
   if (!json) {
     process.stdout.write(render(list));
     if (!all && found.length > list.length) {
-      process.stdout.write(`\n${found.length - list.length} more elsewhere — pixel ls --all\n`);
+      process.stdout.write(`\n${found.length - list.length} more elsewhere — terminal-browser ls --all\n`);
     }
     return;
   }

@@ -150,7 +150,7 @@ class Session {
     this.ctx = ctx;
     this.backend = terminalBackend(ctx.env);
     this.tmux = !!ctx.env.TMUX;
-    this.marker = `pixel-browser:${ctx.key}`;
+    this.marker = `terminal-browser:${ctx.key}`;
     this.hideToolbar = ctx.argv.includes("--no-toolbar");
     this.partition = flagValue(ctx.argv, "--partition");
     const binding = (flag: string, fallback: string) =>
@@ -240,12 +240,12 @@ class Session {
         this.render();
       },
       onEngineExit: (error) => {
-        if (error) process.stderr.write(`pixel browser engine: ${error}\n`);
+        if (error) process.stderr.write(`terminal-browser engine: ${error}\n`);
         this.shutdown(error ? 1 : 0);
       },
     });
     if (!this.root.sharedTextures) {
-      throw new Error("pixel-browser requires the patched Electron with shared texture support");
+      throw new Error("terminal-browser requires the patched Electron with shared texture support");
     }
     this.pageSurface = this.root.createSurface();
     this.popupSurface = this.root.createSurface();
@@ -1097,7 +1097,7 @@ class Session {
 
   // stupid
   private hostDisplayScale() {
-    const explicit = Number(this.ctx.env.PIXEL_BROWSER_DISPLAY_SCALE);
+    const explicit = Number(this.ctx.env.TERMINAL_BROWSER_DISPLAY_SCALE);
     if (Number.isFinite(explicit) && explicit > 0) return explicit;
     return screen.getPrimaryDisplay().scaleFactor;
   }
