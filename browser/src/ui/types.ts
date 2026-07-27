@@ -78,8 +78,6 @@ export interface ChromeActions {
   newTabQuery(text: string): void;
   newTabSubmit(text: string): void;
   newTabCancel(): void;
-  closeConfirmChoose(closePane: boolean): void;
-  closeConfirmCancel(): void;
   popupPointer(event: PointerEvent): void;
   popupWheel(event: WheelEvent): void;
   popupClose(): void;

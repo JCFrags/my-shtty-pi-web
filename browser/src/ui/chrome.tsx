@@ -6,7 +6,7 @@ import { DeviceFrame } from "./device-frame";
 import { Icon } from "./icons";
 import type { IconName } from "./icons";
 import { PageContextMenu } from "./context-menu";
-import { CloseConfirmCard, NewTabCard, PaletteCard, UrlCard } from "./modals";
+import { NewTabCard, PaletteCard, UrlCard } from "./modals";
 import { DownloadHud, FindBar, ZoomHud } from "./overlays";
 import { PopupModal } from "./popup-modal";
 import { TabStrip } from "./tab-strip";
@@ -35,7 +35,6 @@ export function Chrome({
   device,
   tabs,
   newTab,
-  closeConfirm,
   urlEdit,
   popup,
   zoomHud,
@@ -56,7 +55,6 @@ export function Chrome({
   device: DeviceView | null;
   tabs: TabRow[];
   newTab: NewTabView | null;
-  closeConfirm: boolean;
   urlEdit: boolean;
   popup: PopupView | null;
   /** zoom factor to flash in a transient bubble after a cmd+/- press */
@@ -124,7 +122,6 @@ export function Chrome({
         />
       )}
       {newTab && <NewTabCard view={newTab} actions={actions} layout={layout} theme={theme} />}
-      {closeConfirm && <CloseConfirmCard actions={actions} layout={layout} theme={theme} />}
       {urlEdit && <UrlCard state={state} actions={actions} layout={layout} theme={theme} />}
       {palette && <PaletteCard view={palette} actions={actions} layout={layout} theme={theme} />}
     </Box>

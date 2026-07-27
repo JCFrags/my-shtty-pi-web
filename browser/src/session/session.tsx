@@ -138,7 +138,6 @@ class Session {
 
   private findOpen = false;
   private urlEditOpen = false;
-  private closeConfirmOpen = false;
   private palette: { query: string; index: number } | null = null;
   private newTab: NewTabState | null = null;
   private zoomHud: number | null = null;
@@ -334,7 +333,6 @@ class Session {
             ? { suggestions: this.newTab.suggestions, index: this.newTab.index }
             : null
         }
-        closeConfirm={this.closeConfirmOpen}
         urlEdit={this.urlEditOpen}
         popup={this.popupView()}
         zoomHud={this.zoomHud}
@@ -394,7 +392,7 @@ class Session {
     paletteRun: (index) => this.runPalette(index),
     paletteClose: () => this.closePalette(),
     tabSwitch: (id) => this.tabs.activate(id),
-    tabClose: (id) => (this.tabs.count <= 1 ? this.openCloseConfirm() : this.tabs.close(id)),
+    tabClose: (id) => (this.tabs.count <= 1 ? this.shutdown() : this.tabs.close(id)),
     tabNew: () => this.openNewTabModal(),
     newTabQuery: (text) => this.newTabQuery(text),
     newTabSubmit: (text) => {
@@ -402,8 +400,6 @@ class Session {
       if (text.trim()) this.tabs.create(searchOrUrl(text, this.ctx.cwd));
     },
     newTabCancel: () => this.closeNewTabModal(),
-    closeConfirmChoose: (closePane) => void this.resolveCloseConfirm(closePane),
-    closeConfirmCancel: () => this.cancelCloseConfirm(),
     popupPointer: (event) => this.tabs.activeController?.popup?.input.pointer(event),
     popupWheel: (event) => this.tabs.activeController?.popup?.input.wheel(event),
     popupClose: () => this.tabs.activeController?.popup?.close(),
@@ -503,12 +499,6 @@ class Session {
             this.render();
           }
         } else if (event.key === "enter") this.runPalette();
-        return;
-      }
-      if (this.closeConfirmOpen) {
-        if (event.key === "escape") this.cancelCloseConfirm();
-        else if (event.key === "y") void this.resolveCloseConfirm(true);
-        else if (event.key === "n") void this.resolveCloseConfirm(false);
         return;
       }
       if (this.newTab) {
@@ -755,7 +745,7 @@ class Session {
 
   private openPageMenu(params: Electron.ContextMenuParams) {
     if (!this.surfaceLayout) return;
-    if (this.palette || this.newTab || this.urlEditOpen || this.closeConfirmOpen) return;
+    if (this.palette || this.newTab || this.urlEditOpen) return;
     if (this.tabs.activeController?.popup) return;
     const scale = this.surfaceLayout.scale;
     this.pageMenu = {
@@ -895,23 +885,8 @@ class Session {
       .catch(() => { });
   }
 
-  private openCloseConfirm() {
-    if (this.closeConfirmOpen) return;
-    this.closeConfirmOpen = true;
-    this.blurToOverlay();
-    this.render();
-  }
-
-  private cancelCloseConfirm() {
-    if (!this.closeConfirmOpen) return;
-    this.closeConfirmOpen = false;
-    this.refocusPage();
-    this.render();
-  }
-
-  private async resolveCloseConfirm(closePane: boolean) {
-    this.closeConfirmOpen = false;
-    if (closePane) await this.backend?.closePane?.(this.marker).catch(() => false);
+  private async closePaneAndExit() {
+    await this.backend?.closePane?.(this.marker).catch(() => false);
     this.shutdown();
   }
 
@@ -1029,7 +1004,7 @@ class Session {
             id: "close-pane",
             label: "close pane",
             shortcut: "",
-            run: () => void this.resolveCloseConfirm(true),
+            run: () => void this.closePaneAndExit(),
           },
         ]
         : []),
