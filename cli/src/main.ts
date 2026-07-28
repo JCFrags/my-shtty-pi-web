@@ -5,7 +5,14 @@ import net from "node:net";
 import path from "node:path";
 
 import { DAEMON_SOCKET, LOGS_DIR, ensureDataDir } from "pixel-store";
-import { callerTty, detectBackend, prepareTmux, setPaneTitle } from "pixel-terminals";
+import {
+  callerTty,
+  checkKittyGraphics,
+  detectBackend,
+  prepareTmux,
+  setPaneTitle,
+  unsupportedGraphicsMessage,
+} from "pixel-terminals";
 import type { Backend, Direction } from "pixel-terminals";
 import { actionCommand } from "./action";
 import { control } from "./control";
@@ -352,6 +359,17 @@ async function launchInSplit(
   fail("browser did not register within 20s (is the split open?)");
 }
 
+// the browser paints the page as an image in the pane, so a terminal without the
+// kitty graphics protocol can launch it but never show it — refuse up front
+async function requireKittyGraphics() {
+  // passthrough has to be on before we can probe through tmux
+  prepareTmux();
+  if ((await checkKittyGraphics()) !== "unsupported") return;
+  // not fail(): this one stands on its own, without the command-name prefix
+  process.stderr.write(unsupportedGraphicsMessage(process.stderr.isTTY === true));
+  process.exit(1);
+}
+
 // slop fixme
 // these options are very poorly designed
 async function openCommand(args: string[]) {
@@ -365,6 +383,7 @@ async function openCommand(args: string[]) {
   if (paletteKey) bindings.push(`--palette-key=${paletteKey}`);
   if (findKey) bindings.push(`--find-key=${findKey}`);
   if (actionMods) bindings.push(`--action-mods=${actionMods}`);
+  await requireKittyGraphics();
   if (!forceSplit && !explicit && interactiveTty()) {
     return openHere([...args, ...bindings]);
   }
