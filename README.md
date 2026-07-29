@@ -43,7 +43,7 @@ The outer UI of the browser is implemented using a graphics engine built on top 
 
 ### Roadmap
 - linux support ([PR](https://github.com/zenbu-labs/terminal-browser/pull/4))
-- chrome extension
+- chrome extensions
 - design mode
 
 ### Contributing
