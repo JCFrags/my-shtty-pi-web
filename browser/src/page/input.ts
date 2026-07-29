@@ -162,10 +162,20 @@ export class PageInput {
     void this.target.contents().insertText(text);
   }
 
-  /** A native paste() hands the page a trusted event with every clipboard
-   * flavor, so it's preferred whenever the OS clipboard actually holds the
-   * image; the other sources only have the bytes at image.path, which must
-   * be staged onto the clipboard first. */
+ 
+  async selectionText(): Promise<string> {
+    for (const frame of this.target.contents().mainFrame.framesInSubtree) {
+      const text = await frame.executeJavaScript(SELECTION_SNIPPET).catch(() => "");
+      if (typeof text === "string" && text) return text;
+    }
+    return "";
+  }
+
+  cut() {
+    this.target.contents().cut();
+  }
+
+
   pasteImage(image: PastedImage) {
     this.target.focus();
     switch (image.source) {
@@ -175,8 +185,6 @@ export class PageInput {
       case "osc":
       case "file": {
         const staged = nativeImage.createFromPath(image.path);
-        // createFromPath only decodes png/jpeg; pasting without staging
-        // would deliver whatever stale content the clipboard holds
         if (staged.isEmpty()) return;
         clipboard.writeImage(staged);
         this.target.contents().paste();
@@ -274,6 +282,17 @@ export class PageInput {
     return result;
   }
 }
+
+// input types like number and email throw when asked where their selection is
+const SELECTION_SNIPPET = `(() => {
+  const el = document.activeElement;
+  try {
+    if (el && "selectionStart" in el && el.selectionStart !== el.selectionEnd) {
+      return el.value.slice(el.selectionStart, el.selectionEnd);
+    }
+  } catch {}
+  return String(getSelection() ?? "");
+})()`;
 
 function wholeDelta(value: number) {
   return value < 0 ? Math.ceil(value) : Math.floor(value);

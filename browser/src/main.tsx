@@ -19,7 +19,7 @@ try {
 } catch {}
 app.commandLine.appendSwitch("enable-logging", "file");
 app.commandLine.appendSwitch("log-file", path.join(LOGS_DIR, "chromium.log"));
-app.setName("Pixel Browser");
+app.setName("terminal-browser");
 claimProfile();
 
 let session: SessionHandle | null = null;

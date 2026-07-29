@@ -217,9 +217,6 @@ interface EngineProfileEvent {
 
 const IMAGE_LANE_NAMES = new Set(["image.wait", "image.decode", "image.encode"]);
 
-// Waits can overlap (several images in flight), so unlike call-stack lanes
-// their rows are packed here: each wait takes a free row pair, its decode
-// sits on the row below, matched by the shared per-image arg.
 function packImageRows(spans: TimeSpan[]) {
   const waits = spans.filter((s) => s.lane === "images" && s.name === "image.wait");
   const rowEnds: number[] = [];

@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { app, clipboard, screen } from "electron";
+import { app, screen } from "electron";
 import { createRoot } from "pixel-react";
 import type { EngineKeyEvent, PixelRoot, Surface } from "pixel-react";
-import { detectBackend } from "pixel-terminals";
+import { detectBackend, reportedPixelUnit } from "pixel-terminals";
 import type { Backend } from "pixel-terminals";
 
 import { configureBrowserSession } from "../page/browser-session";
@@ -102,7 +102,6 @@ class Session {
   private readonly fallbackState: BrowserState;
 
   private root: PixelRoot | null = null;
-  private pageSurface: Surface | null = null;
   private popupSurface: Surface | null = null;
   private devtoolsSurface: Surface | null = null;
   private registry: Registry | null = null;
@@ -142,6 +141,7 @@ class Session {
   private newTab: NewTabState | null = null;
   private zoomHud: number | null = null;
   private zoomHudTimer: ReturnType<typeof setTimeout> | null = null;
+  private cellFollow: { height: number; basePx: number } | null = null;
   private download: DownloadView | null = null;
   private downloadTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -165,7 +165,7 @@ class Session {
       {
         createController: (url, visible, onState) =>
           new BrowserController(
-            this.pageSurface!,
+            this.root!.createSurface(),
             this.popupSurface!,
             this.devtoolsSurface!,
             this.surfaceLayout!,
@@ -228,6 +228,7 @@ class Session {
       },
       onFocus: (focused) => this.tabs.activeController?.setActive(focused),
       onResize: () => {
+        this.followCellZoom();
         this.recalculateLayout();
         if (this.surfaceLayout) this.tabs.activeController?.resize(this.surfaceLayout);
         if (this.devtoolsLayout) this.tabs.activeController?.devtools?.resize(this.devtoolsLayout);
@@ -246,9 +247,9 @@ class Session {
     if (!this.root.sharedTextures) {
       throw new Error("terminal-browser requires the patched Electron with shared texture support");
     }
-    this.pageSurface = this.root.createSurface();
     this.popupSurface = this.root.createSurface();
     this.devtoolsSurface = this.root.createSurface();
+    this.followCellZoom();
     this.recalculateLayout();
     this.fontId = await this.root.registerFont(bundledFontPath());
     this.root.setPointerShape("default");
@@ -288,6 +289,37 @@ class Session {
     return event.kind === "press" && this.cmdHeld(event) && event.key === "v";
   }
 
+  private isCopyKey(event: EngineKeyEvent): boolean {
+    return event.kind === "press" && this.cmdHeld(event) && event.key === "c";
+  }
+
+  private isCutKey(event: EngineKeyEvent): boolean {
+    return event.kind === "press" && this.cmdHeld(event) && event.key === "x";
+  }
+
+  private focusedInput(): { selectionText(): Promise<string>; cut(): void } | null {
+    const browser = this.tabs.activeController;
+    if (!browser) return null;
+    if (browser.popup) return browser.popup.input;
+    if (browser.devtoolsFocused && browser.devtools) return browser.devtools.input;
+    return browser;
+  }
+
+  private async copySelection() {
+    const text = await this.focusedInput()?.selectionText();
+    if (text) this.root?.setClipboard(text);
+  }
+
+ 
+  private async cutSelection() {
+    const input = this.focusedInput();
+    if (!input) return;
+    const text = await input.selectionText();
+    if (!text) return;
+    this.root?.setClipboard(text);
+    input.cut();
+  }
+
   shutdown(code = 0) {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
@@ -298,7 +330,6 @@ class Session {
     this.registry = null;
     this.tabs.stopAll();
     try {
-      this.pageSurface?.close();
       this.popupSurface?.close();
       this.devtoolsSurface?.close();
     } catch { }
@@ -316,8 +347,10 @@ class Session {
   }
 
   private render() {
-    if (!this.root || !this.layout || !this.pageSurface || !this.popupSurface) return;
+    if (!this.root || !this.layout || !this.popupSurface) return;
     if (!this.devtoolsSurface) return;
+    const pageSurface = this.tabs.activeController?.surface;
+    if (!pageSurface) return;
     this.root.render(
       <Chrome
         state={this.tabs.activeState ?? this.fallbackState}
@@ -351,7 +384,7 @@ class Session {
         }
         pageMenu={this.pageMenuView()}
         dividerEngaged={this.dividerHover || this.dividerDragging}
-        pageSurface={this.pageSurface}
+        pageSurface={pageSurface}
         popupSurface={this.popupSurface}
         devtoolsSurface={this.devtoolsSurface}
       />,
@@ -452,7 +485,6 @@ class Session {
     },
     pageMenuAction: (id) => this.runPageMenu(id),
     pageMenuClose: () => this.closePageMenu(),
-    zoomReset: () => this.applyZoom(0),
   };
 
   private handleKey(event: EngineKeyEvent) {
@@ -474,6 +506,11 @@ class Session {
         }
       }
       if (this.isPasteKey(event)) this.root?.requestClipboardImage();
+      if (this.isCopyKey(event)) void this.copySelection();
+      if (this.isCutKey(event)) {
+        void this.cutSelection();
+        return;
+      }
       browser.popup.input.key(event);
       return;
     }
@@ -586,6 +623,11 @@ class Session {
     }
     if (this.browserFocused) {
       if (this.isPasteKey(event)) this.root?.requestClipboardImage();
+      if (this.isCopyKey(event)) void this.copySelection();
+      if (this.isCutKey(event)) {
+        void this.cutSelection();
+        return;
+      }
       this.routeKey(event);
     }
   }
@@ -600,6 +642,30 @@ class Session {
     const browser = this.tabs.activeController;
     const factor = browser?.popup ? browser.popup.zoom(direction) : browser?.zoom(direction);
     if (factor == null) return;
+    this.showZoomHud(factor);
+  }
+
+  private followCellZoom() {
+    if (!this.root) return;
+    const { height, basePx } = this.root.info;
+    const prev = this.cellFollow;
+    this.cellFollow = { height, basePx };
+    if (!prev || !prev.basePx || !prev.height) return;
+    const ratio = basePx / prev.basePx;
+    if (!Number.isFinite(ratio) || ratio <= 0 || Math.abs(ratio - 1) < 0.01) return;
+    const paneRatio = height / prev.height;
+    if (Math.abs(paneRatio - ratio) < 0.04 * ratio) return;
+    let hud: number | null = null;
+    const active = this.tabs.activeController;
+    this.tabs.eachController((controller) => {
+      const factor = controller.scaleZoom(ratio);
+      if (controller === active) hud = factor;
+    });
+    if (active?.popup) hud = active.popup.scaleZoom(ratio);
+    if (hud != null) this.showZoomHud(hud);
+  }
+
+  private showZoomHud(factor: number) {
     this.zoomHud = factor;
     if (this.zoomHudTimer) clearTimeout(this.zoomHudTimer);
     this.zoomHudTimer = setTimeout(() => {
@@ -781,10 +847,10 @@ class Session {
         browser.reload();
         return;
       case "copy":
-        browser.copySelection();
+        this.root?.setClipboard(menu.selectionText);
         return;
       case "copy-link":
-        clipboard.writeText(menu.linkURL);
+        this.root?.setClipboard(menu.linkURL);
         return;
       case "inspect":
         this.openDevtools();
@@ -1070,10 +1136,10 @@ class Session {
     };
   }
 
-  // stupid
   private hostDisplayScale() {
     const explicit = Number(this.ctx.env.TERMINAL_BROWSER_DISPLAY_SCALE);
     if (Number.isFinite(explicit) && explicit > 0) return explicit;
+    if (reportedPixelUnit(this.ctx.env) === "css") return 1;
     return screen.getPrimaryDisplay().scaleFactor;
   }
 

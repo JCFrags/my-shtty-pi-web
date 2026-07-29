@@ -3,9 +3,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="${1:-dev}"
+CHANNEL="${2:-dev}"
 OUT="$ROOT/dist-release"
 STAGE="$OUT/terminal-browser"
-APP="$STAGE/electron/Pixel.app"
+APP="$STAGE/electron/terminal-browser.app"
 
 rm -rf "$OUT"
 mkdir -p "$STAGE"/{bin,cli/dist,browser/dist,browser/native,electron,agent-browser/bin,assets/fonts,skill}
@@ -37,11 +38,11 @@ fi
 
 
 ditto "$ELECTRON_DIST/Electron.app" "$APP"
-mv "$APP/Contents/MacOS/Electron" "$APP/Contents/MacOS/Pixel"
+mv "$APP/Contents/MacOS/Electron" "$APP/Contents/MacOS/terminal-browser"
 /usr/libexec/PlistBuddy \
-  -c "Set :CFBundleExecutable Pixel" \
-  -c "Set :CFBundleName Pixel" \
-  -c "Set :CFBundleDisplayName Pixel" \
+  -c "Set :CFBundleExecutable terminal-browser" \
+  -c "Set :CFBundleName terminal-browser" \
+  -c "Set :CFBundleDisplayName terminal-browser" \
   -c "Set :CFBundleIdentifier dev.zenbu.terminal-browser" \
   "$APP/Contents/Info.plist" >/dev/null
 codesign --force --sign - --timestamp=none "$APP" 2>/dev/null
@@ -51,7 +52,7 @@ cat > "$STAGE/bin/terminal-browser" <<'EOF'
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 export TERMINAL_BROWSER_DIST_ROOT="$ROOT"
 export ELECTRON_RUN_AS_NODE=1
-exec "$ROOT/electron/Pixel.app/Contents/MacOS/Pixel" "$ROOT/cli/dist/main.js" "$@"
+exec "$ROOT/electron/terminal-browser.app/Contents/MacOS/terminal-browser" "$ROOT/cli/dist/main.js" "$@"
 EOF
 chmod +x "$STAGE/bin/terminal-browser"
 echo "$VERSION" > "$STAGE/VERSION"
@@ -59,11 +60,16 @@ echo "$VERSION" > "$STAGE/VERSION"
 TARBALL="$OUT/terminal-browser-darwin-arm64.tar.gz"
 tar -czf "$TARBALL" -C "$OUT" terminal-browser
 
-split -b 45m "$TARBALL" "$OUT/terminal-browser-chunk-"
+cat > "$OUT/manifest.json" <<EOF
 {
-  shasum -a 256 "$TARBALL" | cut -d' ' -f1
-  (cd "$OUT" && ls terminal-browser-chunk-*)
-} > "$OUT/chunks.txt"
+  "version": "$VERSION",
+  "channel": "$CHANNEL",
+  "platform": "darwin-arm64",
+  "file": "$(basename "$TARBALL")",
+  "sha256": "$(shasum -a 256 "$TARBALL" | cut -d' ' -f1)",
+  "size": $(stat -f%z "$TARBALL"),
+  "published": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
 
 du -h "$TARBALL"
-echo "chunks: $(cd "$OUT" && ls terminal-browser-chunk-* | wc -l | tr -d ' ')"

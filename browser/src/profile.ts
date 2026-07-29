@@ -8,7 +8,7 @@ import { app } from "electron";
 export function claimProfile() {
   const appData = process.env.TERMINAL_BROWSER_APPDATA ?? app.getPath("appData");
   for (let i = 0; i < 32; i++) {
-    const dir = path.join(appData, i === 0 ? "Pixel Browser" : `Pixel Browser ${i + 1}`);
+    const dir = path.join(appData, i === 0 ? "terminal-browser" : `terminal-browser-${i + 1}`);
     const lock = path.join(dir, "terminal-browser.lock");
     try {
       fs.mkdirSync(dir, { recursive: true });
