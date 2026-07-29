@@ -1,7 +1,7 @@
 # <img width="75" height="75" alt="01-caret" src="https://github.com/user-attachments/assets/26d51fdd-0520-4983-91b1-3bd0ca8da33d" align="center"  /> terminal-browser
 
 
-A real browser that runs inside your existing terminal
+A real browser that runs inside your terminal
 
 
 
