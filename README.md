@@ -5,6 +5,10 @@ A real browser that runs inside your existing terminal
 
 
 
+https://github.com/user-attachments/assets/abe2f43e-fc50-4866-b753-33388967945d
+
+
+
 ### Install:
 
 ```bash
