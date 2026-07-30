@@ -25,7 +25,6 @@ export function detectBackend(env: NodeJS.ProcessEnv = process.env): Backend {
     if ((env.TERM_PROGRAM_VERSION?.localeCompare("1.3.0", undefined, { numeric: true }) ?? 0) < 0) throw new Error(`Ghostty ${env.TERM_PROGRAM_VERSION} does not support automation: upgrade to Ghostty 1.3.0 or newer.`);
     return ghostty;
   }
-  if (term.includes("kitty")) return createKitty(env);
   if (env.KITTY_WINDOW_ID || env.KITTY_PID) return createKitty(env);
   if (env.TERM_PROGRAM === "WezTerm" || env.WEZTERM_PANE) return createWezterm(env);
   throw new Error(
