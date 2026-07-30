@@ -75,4 +75,4 @@ case ":$PATH:" in
     ;;
 esac
 echo
-echo "  terminal-browser open example.com"
+echo "  terminal-browser open terminal-browser.com"
