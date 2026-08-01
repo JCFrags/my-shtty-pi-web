@@ -50,6 +50,7 @@ exec "$ROOT/electron/terminal-browser.app/Contents/MacOS/terminal-browser" "$ROO
 EOF
 chmod +x "$STAGE/bin/terminal-browser"
 echo "$VERSION" > "$STAGE/VERSION"
+echo "$CHANNEL" > "$STAGE/CHANNEL"
 
 TARBALL="$OUT/terminal-browser-darwin-arm64.tar.gz"
 tar -czf "$TARBALL" -C "$OUT" terminal-browser
