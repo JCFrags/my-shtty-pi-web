@@ -27,16 +27,10 @@ cp "$ROOT/skill/SKILL.md" "$STAGE/skill/SKILL.md"
 cp "$ROOT/assets/fonts/JetBrainsMono-Regular.ttf" "$STAGE/assets/fonts/"
 
 ELECTRON_DIST="$(node -e 'const p=require("path");console.log(p.join(p.dirname(require.resolve("electron/package.json",{paths:[process.argv[1]]})),"dist"))' "$ROOT/browser")"
-if [ ! -d "$ELECTRON_DIST/Electron.app" ]; then
-  (cd "$(dirname "$ELECTRON_DIST")" && node install.js)
-fi
-
-if ! grep -qi "zenbu-labs" "$ROOT/.npmrc"; then
-  echo "refusing to build: .npmrc no longer points at the patched electron mirror" >&2
+if [ ! -f "$ELECTRON_DIST/.zenbu-electron-sha256" ]; then
+  echo "refusing to build: installed electron does not come from https://github.com/zenbu-labs/electron-releases" >&2
   exit 1
 fi
-
-
 ditto "$ELECTRON_DIST/Electron.app" "$APP"
 mv "$APP/Contents/MacOS/Electron" "$APP/Contents/MacOS/terminal-browser"
 /usr/libexec/PlistBuddy \
