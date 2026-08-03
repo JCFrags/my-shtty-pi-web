@@ -45,6 +45,14 @@ browser from drawing in them. Editors built on vscode ship with terminal images
 switched off, so this turns "terminal.integrated.enableImages" on in each one.
 `,
   },
+  upgrade: {
+    summary: "Upgrade to the latest release",
+    usage: "terminal-browser upgrade",
+    body: `
+Checks this install's release channel and installs the latest version. Does
+nothing when already up to date.
+`,
+  },
   action: {
     summary: "Use the open browser through the agent-browser CLI",
     usage: "terminal-browser action [selectors] -- <command>",
@@ -84,6 +92,7 @@ Usage: terminal-browser [url] [options]
 ${lines.join("\n")}
 
 terminal-browser <command> --help for one command's options
+terminal-browser --version prints the installed version
 `);
 }
 

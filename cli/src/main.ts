@@ -22,6 +22,7 @@ import { locate, recordKey, reusable } from "./instances";
 import { lsCommand } from "./ls";
 import { instances } from "./registry";
 import type { InstanceRecord } from "./registry";
+import { installedVersion, upgradeCommand } from "./upgrade";
 
 const DIST_ROOT = process.env.TERMINAL_BROWSER_DIST_ROOT ?? null;
 delete process.env.ELECTRON_RUN_AS_NODE;
@@ -429,6 +430,10 @@ async function main(): Promise<number> {
     process.stdout.write(rootHelp());
     return 0;
   }
+  if (command === "--version" || command === "-v") {
+    process.stdout.write(`terminal-browser ${installedVersion() ?? "dev"}\n`);
+    return 0;
+  }
   if (command === "help") return helpCommand(args[0]);
   if (asksForHelp(args)) {
     const help = commandHelp(command);
@@ -448,6 +453,7 @@ async function main(): Promise<number> {
     return 0;
   }
   if (command === "setup") return setupCommand();
+  if (command === "upgrade") return upgradeCommand();
   if (command === "action") {
     const { own, passthrough } = splitPassthrough(args);
     const options = {

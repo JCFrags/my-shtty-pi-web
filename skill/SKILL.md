@@ -23,12 +23,14 @@ $ terminal-browser help
 Usage: terminal-browser [url] [options]
        terminal-browser <command> [args]
 
-  open    Open the browser in a terminal pane
-  ls      List running browsers and their tabs
-  setup   Configure installed terminals so terminal-browser works best
-  action  Use the open browser through the agent-browser CLI
+  open     Open the browser in a terminal pane
+  ls       List running browsers and their tabs
+  setup    Configure installed terminals so terminal-browser works best
+  upgrade  Upgrade to the latest release
+  action   Use the open browser through the agent-browser CLI
 
 terminal-browser <command> --help for one command's options
+terminal-browser --version prints the installed version
 ```
 
 ```
@@ -69,6 +71,14 @@ Usage: terminal-browser setup
 Finds the terminals on this machine and fixes any settings that would keep the
 browser from drawing in them. Editors built on vscode ship with terminal images
 switched off, so this turns "terminal.integrated.enableImages" on in each one.
+```
+
+```
+$ terminal-browser upgrade --help
+Usage: terminal-browser upgrade
+
+Checks this install's release channel and installs the latest version. Does
+nothing when already up to date.
 ```
 
 ```
