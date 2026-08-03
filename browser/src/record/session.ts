@@ -44,7 +44,6 @@ import {
   buildSampleTimes,
 } from "./samples";
 import { MAX_RECORDING_MS, Recorder, lastIndexAtOrBefore } from "./recorder";
-import type { DecodedFrame } from "./recorder";
 import type { RecordActions, RecordInteraction, RecordShot, RecordView } from "./types";
 
 export interface RecordHost {
@@ -691,39 +690,30 @@ export class RecordSession {
     const key = `${pxW}x${pxH}`;
     if (key === this.stripKey) return;
     this.stripBusy = true;
-    void this.buildFilmstrip(pxW, pxH, key).finally(() => {
-      this.stripBusy = false;
-    });
+    void this.buildFilmstrip(pxW, pxH)
+      .then(() => {
+        this.stripKey = key;
+      })
+      .catch(() => {})
+      .finally(() => {
+        this.stripBusy = false;
+      });
   }
 
-  private async buildFilmstrip(pxW: number, pxH: number, key: string) {
+  private async buildFilmstrip(pxW: number, pxH: number) {
     const duration = this.recorder.durationMs();
     const base = this.recorder.frames[0];
     const tileW = Math.max(8, Math.round(pxH * (base.width / Math.max(1, base.height))));
     const count = Math.max(1, Math.ceil(pxW / tileW));
-    const strip = Buffer.alloc(pxW * pxH * 4);
-    for (let i = 3; i < strip.length; i += 4) strip[i] = 255;
-    let lastIndex = -1;
-    let frame: DecodedFrame | null = null;
+    const indices: number[] = [];
     for (let i = 0; i < count; i++) {
-      if (this.closed) return;
-      const index = this.recorder.frameAt(duration * ((i + 0.5) / count)) ?? 0;
-      if (index !== lastIndex || !frame) {
-        try {
-          frame = this.recorder.bitmap(index);
-          lastIndex = index;
-        } catch {
-          return;
-        }
-      }
-      drawFilmstripTile(strip, pxW, pxH, i * tileW, Math.min(tileW, pxW - i * tileW), tileW, frame);
-      await new Promise((resolve) => setImmediate(resolve));
-      if (this.closed) return;
-      this.stripSurface ??= this.host.root.createSurface();
-      this.stripSurface.present({ bgra: strip, width: pxW, height: pxH });
-      this.host.requestRender();
+      indices.push(this.recorder.frameAt(duration * ((i + 0.5) / count)) ?? 0);
     }
-    this.stripKey = key;
+    const strip = await this.recorder.filmstrip(indices, tileW, pxW, pxH);
+    if (this.closed) return;
+    this.stripSurface ??= this.host.root.createSurface();
+    this.stripSurface.present({ bgra: strip, width: pxW, height: pxH });
+    this.host.requestRender();
   }
 
   // what an ass backwards name
@@ -939,7 +929,8 @@ export class RecordSession {
 
   private presentFrame() {
     if (this.presentTimer) return;
-    const wait = 15 - (Date.now() - this.presentAt);
+    // we probably just want to sync to display refresh rate
+    const wait = 8 - (Date.now() - this.presentAt);
     if (wait <= 0) {
       this.presentNow();
       return;
@@ -1449,35 +1440,4 @@ export class RecordSession {
     this.host.requestRender();
   }
 
-}
-
-function drawFilmstripTile(
-  strip: Buffer,
-  stripW: number,
-  stripH: number,
-  x0: number,
-  width: number,
-  tileW: number,
-  frame: DecodedFrame,
-) {
-  const sx = frame.width / tileW;
-  const sy = frame.height / stripH;
-  for (let y = 0; y < stripH; y++) {
-    const rowA = Math.min(frame.height - 1, Math.floor((y + 0.25) * sy)) * frame.width;
-    const rowB = Math.min(frame.height - 1, Math.floor((y + 0.75) * sy)) * frame.width;
-    for (let x = 0; x < width; x++) {
-      const colA = Math.min(frame.width - 1, Math.floor((x + 0.25) * sx));
-      const colB = Math.min(frame.width - 1, Math.floor((x + 0.75) * sx));
-      const at = (y * stripW + x0 + x) * 4;
-      for (let c = 0; c < 3; c++) {
-        strip[at + c] =
-          (frame.bgra[(rowA + colA) * 4 + c] +
-            frame.bgra[(rowA + colB) * 4 + c] +
-            frame.bgra[(rowB + colA) * 4 + c] +
-            frame.bgra[(rowB + colB) * 4 + c]) >>
-          2;
-      }
-      strip[at + 3] = 255;
-    }
-  }
 }

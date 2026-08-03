@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { captureFilmstrip } from "pixel-react";
 import type { SurfaceCapture } from "pixel-react";
 import type { BrowserController } from "../page/controller";
 
@@ -189,6 +190,11 @@ export class Recorder {
     const meta = this.frames[index];
     if (!this.capture || !meta) throw new Error(`no captured frame ${index}`);
     return { bgra: this.capture.frame(index), width: meta.width, height: meta.height };
+  }
+
+  filmstrip(indices: number[], tileWidth: number, width: number, height: number): Promise<Buffer> {
+    if (!this.capture) throw new Error("no capture");
+    return captureFilmstrip(this.framesDir, indices, tileWidth, width, height);
   }
 
   async deleteRawFrames(): Promise<void> {

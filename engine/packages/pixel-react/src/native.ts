@@ -119,6 +119,13 @@ const binding = require("../native/pixel.node") as {
     jobJson: string,
     onProgress?: (err: unknown, percent: number) => void,
   ): Promise<void>;
+  captureFilmstrip(
+    dir: string,
+    frames: number[],
+    tileWidth: number,
+    width: number,
+    height: number,
+  ): Promise<Buffer>;
 };
 
 export function createNativeEngine(tty?: string, tmux?: boolean): NativeEngine {
@@ -148,6 +155,16 @@ export function encodeRecording(
         if (err == null) onProgress(percent);
       }),
   );
+}
+
+export function captureFilmstrip(
+  dir: string,
+  frames: number[],
+  tileWidth: number,
+  width: number,
+  height: number,
+): Promise<Buffer> {
+  return binding.captureFilmstrip(dir, frames, tileWidth, width, height);
 }
 
 export function parseMarkdown(source: string, streaming?: boolean): MarkdownBlock[] {

@@ -52,6 +52,60 @@ impl Task for EncodeRecordingTask {
     }
 }
 
+pub struct FilmstripTask {
+    dir: String,
+    frames: Vec<u32>,
+    tile_width: u32,
+    width: u32,
+    height: u32,
+}
+
+impl Task for FilmstripTask {
+    type Output = Vec<u8>;
+    type JsValue = Buffer;
+
+    fn compute(&mut self) -> Result<Vec<u8>> {
+        let mut segment = capture::Segment::open(std::path::Path::new(&self.dir))
+            .map_err(|e| Error::from_reason(format!("{}: {e}", self.dir)))?;
+        let mut strip = pixel_core::Canvas::new(self.width, self.height);
+        strip.fill([24, 24, 26, 255]);
+        for (slot, &index) in self.frames.iter().enumerate() {
+            let (pixels, w, h) = segment.frame(index as usize).map_err(err)?;
+            strip.blit_scaled_rgba(
+                (slot as u32 * self.tile_width) as f32,
+                0.0,
+                self.tile_width as f32,
+                self.height as f32,
+                pixels,
+                w,
+                h,
+            );
+        }
+        Ok(strip.pixels)
+    }
+
+    fn resolve(&mut self, _env: Env, output: Vec<u8>) -> Result<Buffer> {
+        Ok(Buffer::from(output))
+    }
+}
+
+#[napi(ts_return_type = "Promise<Buffer>")]
+pub fn capture_filmstrip(
+    dir: String,
+    frames: Vec<u32>,
+    tile_width: u32,
+    width: u32,
+    height: u32,
+) -> AsyncTask<FilmstripTask> {
+    AsyncTask::new(FilmstripTask {
+        dir,
+        frames,
+        tile_width,
+        width,
+        height,
+    })
+}
+
 #[napi(ts_return_type = "Promise<void>")]
 pub fn encode_recording(
     job_json: String,

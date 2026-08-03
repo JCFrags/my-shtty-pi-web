@@ -91,7 +91,7 @@ export type {
   Rgba,
   TerminalColors,
 } from "./native";
-export { HIGHLIGHT_CAPTURES, diff, encodeRecording, highlight, parseMarkdown } from "./native";
+export { HIGHLIGHT_CAPTURES, captureFilmstrip, diff, encodeRecording, highlight, parseMarkdown } from "./native";
 export { useTerminalColors } from "./colors";
 export { Surface, SurfaceCapture } from "./surface";
 export type { SurfaceFrame, CaptureStats, CaptureFrameMeta, CaptureIndex } from "./surface";
@@ -151,7 +151,6 @@ export interface RootOptions {
   onPasteImage?: (image: PastedImage) => void;
   onEngineExit?: (error: string | null) => void;
   onResize?: (size: { width: number; height: number; basePx: number }) => void;
-  /** the terminal's palette changed — rebuild any theme derived from it */
   onColors?: (colors: TerminalColors) => void;
   keyEventTypes?: boolean;
   devtools?: boolean;
@@ -169,7 +168,7 @@ export interface PixelRoot {
   stop(): void;
   openDevtools(): void;
   closeDevtools(): void;
-  // nudge resize sounds like a ridiculous api
+  // nudge resize is a ridiculous api
   nudgeResize(): void;
   setPointerShape(shape: string): void;
   setKeyCapture(keys: string[]): void;
