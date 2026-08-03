@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { app, screen } from "electron";
 import { createRoot } from "pixel-react";
-import type { EngineKeyEvent, PixelRoot, Surface } from "pixel-react";
+import type { DragEvent, EngineKeyEvent, PixelRoot, Surface } from "pixel-react";
 import { detectBackend, reportedPixelUnit } from "pixel-terminals";
 import type { Backend } from "pixel-terminals";
 
@@ -17,22 +17,24 @@ import type { ZoomDirection } from "../page/zoom";
 import { lastUrl, setLastUrl, settings, store } from "pixel-store";
 import type { DevtoolsDock, InstanceRow } from "pixel-store";
 
+import { RecordSession } from "../record/session";
+import type { RecordActions } from "../record/types";
 import { Registry } from "../registry";
 import { Chrome } from "../ui/chrome";
+import { ICONS } from "../ui/icons";
 import type {
   ChromeActions,
   ChromeLayout,
-  DeviceView,
   DownloadView,
   PageMenuItem,
   PageMenuView,
   PopupView,
 } from "../ui/types";
 import { normalizeUrl, searchOrUrl } from "../url";
-import { bindingGlyphs, matchesBinding, parseKeyBinding } from "./keybindings";
+import { bindingLabel, listStep, matchesBinding, parseKeyBinding } from "./keybindings";
 import type { KeyBinding } from "./keybindings";
-import { clampDevtoolsFraction, computeLayout, deviceSpec, dividerFraction } from "./layout";
-import type { DeviceMode, DevtoolsPlacement } from "./layout";
+import { clampDevtoolsFraction, computeLayout, dividerFraction, recordBarHeight } from "./layout";
+import type { DevtoolsPlacement } from "./layout";
 import { fetchSuggestions } from "./suggest";
 import { TabManager } from "./tabs";
 
@@ -79,6 +81,7 @@ function bundledFontPath(): string {
   }
 }
 
+
 interface NewTabState {
   query: string;
   suggestions: string[];
@@ -109,8 +112,6 @@ class Session {
   private layout: ChromeLayout | null = null;
   private surfaceLayout: BrowserSurfaceLayout | null = null;
   private devtoolsLayout: BrowserSurfaceLayout | null = null;
-  private deviceView: DeviceView | null = null;
-  private deviceMode: DeviceMode = "desktop";
   private displayScale = 1;
   private fontId = 0;
   private windowBg = "#1e2026";
@@ -144,6 +145,11 @@ class Session {
   private cellFollow: { height: number; basePx: number } | null = null;
   private download: DownloadView | null = null;
   private downloadTimer: ReturnType<typeof setTimeout> | null = null;
+  private toast: { text: string; detail?: string; failed: boolean } | null = null;
+  private toastTimer: ReturnType<typeof setTimeout> | null = null;
+  private records = new Map<BrowserController, RecordSession>();
+  private shownRecord: RecordSession | null = null;
+  private recordStarting = false;
 
   constructor(ctx: SessionContext) {
     this.ctx = ctx;
@@ -176,10 +182,10 @@ class Session {
             this.partition,
             onState,
           ),
-        deviceSpec: () => deviceSpec(this.deviceMode),
         onActivated: () => {
           this.browserFocused = true;
           this.pageMenu = null;
+          this.reconcileRecord();
           this.syncDevtoolsLayout();
           this.syncCursor();
           this.registry?.update();
@@ -190,7 +196,14 @@ class Session {
           else this.setDevtoolsDockSide(action === "dock-bottom" ? "bottom" : "right");
         },
         onPageMenu: (params) => this.openPageMenu(params),
-        onTabsChanged: () => this.registry?.update(),
+        onTabOpened: (opener, url) => this.records.get(opener)?.linkOpened(url),
+        tabSwitchAllowed: () => !this.activeRecord()?.reviewing,
+        onTabsChanged: () => {
+          this.registry?.update();
+          for (const record of [...this.records.values()]) {
+            if (record.active && this.tabs.stateFor(record.controller) == null) record.tabClosed();
+          }
+        },
         onActiveState: (state, urlChanged) => {
           if (urlChanged) rememberUrl(state.url);
           this.registry?.update();
@@ -263,7 +276,7 @@ class Session {
       state: () => this.tabs.activeState ?? this.fallbackState,
       openTab: (url, cwd) => this.tabs.create(url ? normalizeUrl(url, cwd) : DEFAULT_URL).id,
       activateTab: (id) => {
-        if (!this.tabs.has(id)) return false;
+        if (!this.tabs.has(id) || this.activeRecord()?.reviewing) return false;
         this.tabs.activate(id);
         return true;
       },
@@ -323,6 +336,9 @@ class Session {
   shutdown(code = 0) {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
+    for (const record of this.records.values()) record.dispose();
+    this.records.clear();
+    this.shownRecord = null;
     try {
       this.root?.setPointerShape("text");
     } catch { }
@@ -359,7 +375,6 @@ class Session {
         colors={this.root.info.colors}
         font={this.fontId}
         findOpen={this.findOpen}
-        device={this.deviceView}
         tabs={this.tabs.view()}
         newTab={
           this.newTab
@@ -370,6 +385,7 @@ class Session {
         popup={this.popupView()}
         zoomHud={this.zoomHud}
         download={this.download}
+        toast={this.toast}
         palette={
           this.palette
             ? {
@@ -384,6 +400,8 @@ class Session {
         }
         pageMenu={this.pageMenuView()}
         dividerEngaged={this.dividerHover || this.dividerDragging}
+        record={this.activeRecord()?.view() ?? null}
+        recordSurface={this.activeRecord()?.surface ?? null}
         pageSurface={pageSurface}
         popupSurface={this.popupSurface}
         devtoolsSurface={this.devtoolsSurface}
@@ -394,7 +412,10 @@ class Session {
   private readonly actions: ChromeActions = {
     back: () => this.tabs.activeController?.back(),
     forward: () => this.tabs.activeController?.forward(),
-    reload: () => this.tabs.activeController?.reload(),
+    reload: () => {
+      this.activeRecord()?.reloaded();
+      this.tabs.activeController?.reload();
+    },
     urlEdit: () => this.openUrlEdit(),
     urlEditCancel: () => this.closeUrlEdit(),
     urlSubmit: (text) => {
@@ -403,6 +424,7 @@ class Session {
     },
     pointer: (event) => {
       this.browserFocused = true;
+      this.activeRecord()?.pointerSample(event);
       this.tabs.activeController?.pointer(event);
     },
     wheel: (event) => {
@@ -485,7 +507,107 @@ class Session {
     },
     pageMenuAction: (id) => this.runPageMenu(id),
     pageMenuClose: () => this.closePageMenu(),
+    record: this.recordActions(),
   };
+
+  /** the record session lives with its tab; the active tab's session gets the UI and input */
+  private activeRecord(): RecordSession | null {
+    const controller = this.tabs.activeController;
+    return controller ? this.records.get(controller) ?? null : null;
+  }
+
+  private reconcileRecord() {
+    const current = this.activeRecord();
+    if (this.shownRecord === current) return;
+    const previous = this.shownRecord;
+    this.shownRecord = current;
+    if (previous?.active) previous.suspended();
+    current?.resumed();
+    this.syncRecordLayout();
+  }
+
+  private recordActions(): RecordActions {
+    const active = () => this.activeRecord()?.actions;
+    return {
+      trackDrag: (event) => active()?.trackDrag(event),
+      trimDrag: (edge, event) => active()?.trimDrag(edge, event),
+      seek: (tMs) => active()?.seek(tMs),
+      playToggle: () => active()?.playToggle(),
+      stop: () => active()?.stop(),
+      complete: () => active()?.complete(),
+      discard: () => active()?.discard(),
+      canvasDrag: (event) => active()?.canvasDrag(event),
+      canvasWheel: (event) => active()?.canvasWheel(event),
+      canvasMove: (event) => active()?.canvasMove(event),
+      toolbarDrag: (event) => active()?.toolbarDrag(event),
+      setTool: (tool) => active()?.setTool(tool),
+      setColor: (color) => active()?.setColor(color),
+      beginCrop: (scope) => active()?.beginCrop(scope),
+      toggleCropMenu: () => active()?.toggleCropMenu(),
+      closeCropMenu: () => active()?.closeCropMenu(),
+      snapshot: () => active()?.snapshot(),
+      dismissShot: (tMs) => active()?.dismissShot(tMs),
+      textChange: (text) => active()?.textChange(text),
+      textSubmit: (text) => active()?.textSubmit(text),
+    };
+  }
+
+  private async startRecording() {
+    if (this.recordStarting) return;
+    const controller = this.tabs.activeController;
+    if (!controller || !this.root || this.records.has(controller)) return;
+    const whenActive = (fn: () => void) => () => {
+      if (this.tabs.activeController === controller) fn();
+    };
+    this.recordStarting = true;
+    try {
+      const session = await RecordSession.create(
+        {
+          root: this.root,
+          layout: () => this.layout,
+          canvasRect: () => {
+            const surface = this.surfaceLayout!;
+            return { x: surface.x, y: surface.y, width: surface.width, height: surface.height };
+          },
+          page: () => {
+            const state = this.tabs.stateFor(controller) ?? this.fallbackState;
+            return { url: state.url, title: state.title };
+          },
+          fontFile: () => bundledFontPath(),
+          requestRender: () => this.render(),
+          blurToOverlay: whenActive(() => this.blurToOverlay()),
+          reviewStarted: whenActive(() => this.syncRecordLayout()),
+          refocusPage: whenActive(() => this.refocusPage()),
+          setKeyCapture: (keys) => {
+            if (keys.length === 0 || this.tabs.activeController === controller) {
+              this.root?.setKeyCapture(keys);
+            }
+          },
+          setClipboard: (text) => this.root?.setClipboard(text),
+          toast: (name, state, detail) => this.showToast(name, state, detail),
+          finished: () => {
+            this.records.delete(controller);
+            if (this.shownRecord?.controller === controller) this.shownRecord = null;
+            this.syncRecordLayout();
+          },
+        },
+        controller,
+      );
+      this.records.set(controller, session);
+    } catch (error) {
+      this.showToast(error instanceof Error ? error.message : String(error), "failed");
+      return;
+    } finally {
+      this.recordStarting = false;
+    }
+    this.reconcileRecord();
+  }
+
+  private syncRecordLayout() {
+    this.recalculateLayout();
+    this.resizeSplitWindows();
+    this.render();
+  }
 
   private handleKey(event: EngineKeyEvent) {
     const browser = this.tabs.activeController;
@@ -525,14 +647,13 @@ class Session {
       }
 
       if (this.palette) {
-        const down = event.key === "down" || (event.mods.ctrl && event.key === "n");
-        const up = event.key === "up" || (event.mods.ctrl && event.key === "p");
+        const step = listStep(event);
         if (event.key === "escape" || matchesBinding(event, this.paletteBinding)) {
           this.closePalette();
-        } else if (down || up) {
+        } else if (step) {
           const count = this.filteredPalette().length;
           if (count > 0) {
-            this.palette.index = (this.palette.index + (down ? 1 : -1) + count) % count;
+            this.palette.index = (this.palette.index + step + count) % count;
             this.render();
           }
         } else if (event.key === "enter") this.runPalette();
@@ -540,19 +661,19 @@ class Session {
       }
       if (this.newTab) {
         const session = this.newTab;
-        const down = event.key === "down" || (event.mods.ctrl && event.key === "n");
-        const up = event.key === "up" || (event.mods.ctrl && event.key === "p");
+        const step = listStep(event);
         if (event.key === "escape") this.closeNewTabModal();
-        else if (down || up) {
+        else if (step) {
           const count = session.suggestions.length;
           if (count > 0) {
-            session.index = down
-              ? session.index >= count - 1
-                ? -1
-                : session.index + 1
-              : session.index <= -1
-                ? count - 1
-                : session.index - 1;
+            session.index =
+              step > 0
+                ? session.index >= count - 1
+                  ? -1
+                  : session.index + 1
+                : session.index <= -1
+                  ? count - 1
+                  : session.index - 1;
             this.render();
           }
         } else if (event.key === "enter") {
@@ -565,8 +686,19 @@ class Session {
         if (event.key === "escape") this.closeUrlEdit();
         return;
       }
+      if (!this.findOpen && this.activeRecord()?.handleKey(event)) return;
+      if (
+        event.mods.ctrl &&
+        !event.mods.super &&
+        !event.mods.alt &&
+        !event.mods.shift &&
+        event.key === "r"
+      ) {
+        if (!this.activeRecord()) void this.startRecording();
+        return;
+      }
       if ((this.cmdHeld(event) || event.mods.ctrl) && event.key === "t") {
-        this.openNewTabModal();
+        if (!this.activeRecord()?.reviewing) this.openNewTabModal();
         return;
       }
       if (matchesBinding(event, this.paletteBinding)) {
@@ -598,6 +730,7 @@ class Session {
         return;
       }
       if (this.cmdHeld(event) && event.key === "r") {
+        this.activeRecord()?.reloaded();
         browser?.reload();
         return;
       }
@@ -699,18 +832,31 @@ class Session {
     this.render();
   }
 
+  private showToast(text: string, state: "done" | "failed", detail?: string) {
+    this.toast = { text, detail, failed: state === "failed" };
+    if (this.toastTimer) clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => {
+      this.toast = null;
+      this.toastTimer = null;
+      this.render();
+    }, 5000);
+    this.render();
+  }
+
   // fixme: ghostty doesn't support that cursor type, not sure if any terminals do
   private syncCursor() {
     const browser = this.tabs.activeController;
-    const shape = this.dividerHover
-      ? this.devtoolsDockSide === "bottom"
-        ? "row-resize"
-        : "col-resize"
-      : this.devtoolsHover
-        ? (browser?.devtools?.cursorShape ?? "default")
-        : this.pageHover
-          ? (browser?.cursorShape ?? "default")
-          : "default";
+    const shape = this.activeRecord()?.reviewing
+      ? "default"
+      : this.dividerHover
+        ? this.devtoolsDockSide === "bottom"
+          ? "row-resize"
+          : "col-resize"
+        : this.devtoolsHover
+          ? (browser?.devtools?.cursorShape ?? "default")
+          : this.pageHover
+            ? (browser?.cursorShape ?? "default")
+            : "default";
     if (shape === this.sentCursor) return;
     this.sentCursor = shape;
     this.root?.setPointerShape(shape);
@@ -722,6 +868,7 @@ class Session {
     this.devtoolsWasFocused = browser?.devtoolsFocused ?? false;
     browser?.blurDevtools();
     browser?.blurContent();
+    this.syncCursor();
   }
 
   private refocusPage() {
@@ -729,6 +876,7 @@ class Session {
     const browser = this.tabs.activeController;
     if (this.devtoolsWasFocused && browser?.devtools) browser.focusDevtools();
     else browser?.focusContent();
+    this.syncCursor();
   }
 
   private toggleDevtools() {
@@ -755,7 +903,7 @@ class Session {
 
   private openDevtools() {
     const browser = this.tabs.activeController;
-    if (!browser || !this.root || this.deviceMode !== "desktop" || browser.devtools) return;
+    if (!browser || !this.root || browser.devtools) return;
     this.recalculateLayout({ dock: this.devtoolsDockSide, fraction: this.devtoolsFraction });
     if (this.surfaceLayout) browser.resize(this.surfaceLayout);
     if (this.devtoolsLayout) browser.openDevtools(this.devtoolsLayout, this.devtoolsDockSide);
@@ -837,15 +985,6 @@ class Session {
     const browser = this.tabs.activeController;
     if (!menu || !browser) return;
     switch (id) {
-      case "back":
-        browser.back();
-        return;
-      case "forward":
-        browser.forward();
-        return;
-      case "reload":
-        browser.reload();
-        return;
       case "copy":
         this.root?.setClipboard(menu.selectionText);
         return;
@@ -856,22 +995,18 @@ class Session {
         this.openDevtools();
         if (browser.devtools) browser.inspect(menu.pageX, menu.pageY);
         return;
+      case "record":
+        if (this.activeRecord()) this.activeRecord()?.actions.complete();
+        else void this.startRecording();
+        return;
     }
   }
 
   private pageMenuView(): PageMenuView | null {
     if (!this.pageMenu) return null;
-    const state = this.tabs.activeState;
-    const devtoolsShortcut = this.devtoolsBinding
-      ? `${bindingGlyphs(this.devtoolsBinding)}${this.devtoolsBinding.key.toUpperCase()}`
-      : "";
     const items: PageMenuItem[] = [
-      { id: "back", label: "back", enabled: !!state?.canGoBack, shortcut: "⌥[" },
-      { id: "forward", label: "forward", enabled: !!state?.canGoForward, shortcut: "⌥]" },
-      { id: "reload", label: "reload", enabled: true, shortcut: "⌘R" },
-      { id: "sep-nav", separator: true },
       ...(this.pageMenu.selectionText
-        ? [{ id: "copy", label: "copy", enabled: true, shortcut: "⌘C" }]
+        ? [{ id: "copy", label: "copy", enabled: true, shortcut: "cmd+c" }]
         : []),
       ...(this.pageMenu.linkURL
         ? [{ id: "copy-link", label: "copy link address", enabled: true, shortcut: "" }]
@@ -880,10 +1015,17 @@ class Session {
         ? [{ id: "sep-edit", separator: true } as const]
         : []),
       {
+        id: "record",
+        label: this.activeRecord() ? "complete recording" : "record",
+        enabled: true,
+        shortcut: "",
+        icon: { d: ICONS.record, tint: "red" as const, weight: 4.5 },
+      },
+      {
         id: "inspect",
         label: "inspect",
-        enabled: this.deviceMode === "desktop",
-        shortcut: devtoolsShortcut,
+        enabled: true,
+        shortcut: bindingLabel(this.devtoolsBinding),
       },
     ];
     return { x: this.pageMenu.x, y: this.pageMenu.y, items };
@@ -951,11 +1093,6 @@ class Session {
       .catch(() => { });
   }
 
-  private async closePaneAndExit() {
-    await this.backend?.closePane?.(this.marker).catch(() => false);
-    this.shutdown();
-  }
-
   private openFind() {
     if (this.findOpen) return;
     this.findOpen = true;
@@ -1001,32 +1138,29 @@ class Session {
       {
         id: "find",
         label: "find in page",
-        shortcut: `${bindingGlyphs(this.findBinding)}${(this.findBinding?.key ?? "").toUpperCase()}`,
+        shortcut: bindingLabel(this.findBinding),
         run: () => this.openFind(),
       },
       {
-        id: "zoom-in",
-        label: "zoom in",
-        shortcut: "⌘+",
-        run: () => this.applyZoom(1),
-      },
-      {
-        id: "zoom-out",
-        label: "zoom out",
-        shortcut: "⌘−",
-        run: () => this.applyZoom(-1),
+        id: "record",
+        label: this.activeRecord()
+          ? this.activeRecord()?.reviewing
+            ? "complete recording"
+            : "stop recording"
+          : "record page",
+        shortcut: this.activeRecord()?.reviewing ? "ctrl+enter" : "ctrl+r",
+        run: () => {
+          const record = this.activeRecord();
+          if (!record) void this.startRecording();
+          else if (record.reviewing) record.actions.complete();
+          else record.actions.stop();
+        },
       },
       {
         id: "devtools",
         label: this.tabs.activeController?.devtools ? "close devtools" : "open devtools",
-        shortcut: `${bindingGlyphs(this.devtoolsBinding)}${(this.devtoolsBinding?.key ?? "").toUpperCase()}`,
+        shortcut: bindingLabel(this.devtoolsBinding),
         run: () => this.toggleDevtools(),
-      },
-      {
-        id: "devtools-console",
-        label: "open console",
-        shortcut: `${bindingGlyphs(this.consoleBinding)}${(this.consoleBinding?.key ?? "").toUpperCase()}`,
-        run: () => this.openDevtoolsConsole(),
       },
       ...(this.tabs.activeController?.devtools
         ? [
@@ -1042,38 +1176,6 @@ class Session {
           },
         ]
         : []),
-      {
-        id: "device-phone",
-        label: this.deviceMode === "phone" ? "exit mobile emulation" : "mobile emulation",
-        shortcut: "",
-        run: () => this.setDeviceMode(this.deviceMode === "phone" ? "desktop" : "phone"),
-      },
-      {
-        id: "device-tablet",
-        label: this.deviceMode === "tablet" ? "exit tablet emulation" : "tablet emulation",
-        shortcut: "",
-        run: () => this.setDeviceMode(this.deviceMode === "tablet" ? "desktop" : "tablet"),
-      },
-      // ...(this.backend?.zoomPane
-      //   ? [
-      //     {
-      //       id: "zoom-split",
-      //       label: "full screen (zoom split)",
-      //       shortcut: "⇧⌘↩",
-      //       run: () => void this.backend!.zoomPane!(this.marker).catch(() => false),
-      //     },
-      //   ]
-      //   : []),
-      ...(this.backend?.closePane
-        ? [
-          {
-            id: "close-pane",
-            label: "close pane",
-            shortcut: "",
-            run: () => void this.closePaneAndExit(),
-          },
-        ]
-        : []),
     ];
   }
 
@@ -1083,30 +1185,19 @@ class Session {
     return this.paletteActions().filter((action) => action.label.toLowerCase().includes(query));
   }
 
-  private setDeviceMode(mode: DeviceMode) {
-    if (mode === this.deviceMode) return;
-    this.deviceMode = mode;
-    if (mode !== "desktop") this.tabs.activeController?.closeDevtools();
-    this.recalculateLayout();
-    const browser = this.tabs.activeController;
-    browser?.setDevice(deviceSpec(mode));
-    if (this.surfaceLayout) browser?.resize(this.surfaceLayout);
-    this.render();
-  }
-
   private recalculateLayout(placement: DevtoolsPlacement | null = this.devtoolsPlacement()) {
     if (!this.root) return;
+    const reviewing = this.activeRecord()?.reviewing ?? false;
     const result = computeLayout(
       this.root.info,
       this.displayScale,
-      this.deviceMode,
       this.hideToolbar,
-      placement,
+      reviewing ? null : placement,
+      reviewing ? recordBarHeight(this.root.info) : 0,
     );
     this.layout = result.chrome;
     this.surfaceLayout = result.surface;
     this.devtoolsLayout = result.devtools;
-    this.deviceView = result.device;
   }
 
   private devtoolsPlacement(): DevtoolsPlacement | null {

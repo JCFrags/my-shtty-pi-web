@@ -1,4 +1,5 @@
 import type { DragEvent, PointerEvent, WheelEvent } from "pixel-react";
+import type { RecordActions } from "../record/types";
 
 export interface PaletteView {
   index: number;
@@ -17,20 +18,6 @@ export interface TabRow {
   active: boolean;
 }
 
-export interface DeviceRect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-export interface DeviceView {
-  mode: "phone" | "tablet";
-  frame: DeviceRect & { radius: number };
-  screen: DeviceRect;
-  island: DeviceRect | null;
-}
-
 export interface PopupView {
   title: string;
   host: string;
@@ -45,8 +32,14 @@ export interface DownloadView {
   state: "progressing" | "done" | "failed";
 }
 
+export interface PageMenuIcon {
+  d: string;
+  tint?: "red";
+  weight?: number;
+}
+
 export type PageMenuItem =
-  | { id: string; label: string; enabled: boolean; shortcut: string }
+  | { id: string; label: string; enabled: boolean; shortcut: string; icon?: PageMenuIcon }
   | { id: string; separator: true };
 
 export interface PageMenuView {
@@ -87,12 +80,14 @@ export interface ChromeActions {
   devtoolsDividerHover(hovering: boolean): void;
   pageMenuAction(id: string): void;
   pageMenuClose(): void;
+  record: RecordActions;
 }
 
 export interface ChromeLayout {
   width: number;
   height: number;
   toolbarHeight: number;
+  recordBarHeight: number;
   contentHeight: number;
   page: { x: number; y: number; width: number; height: number };
   devtools: {

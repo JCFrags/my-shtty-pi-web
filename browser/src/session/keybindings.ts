@@ -13,9 +13,18 @@ export function matchesBinding(event: EngineKeyEvent, binding: KeyBinding | null
   return binding !== null && event.key.toLowerCase() === binding.key && matchesMods(event, binding);
 }
 
-export function bindingGlyphs(mods: KeyMods | null): string {
-  if (!mods) return "";
-  return `${mods.super ? "⌘" : ""}${mods.ctrl ? "⌃" : ""}${mods.alt ? "⌥" : ""}${mods.shift ? "⇧" : ""}`;
+export function listStep(event: EngineKeyEvent): 1 | -1 | null {
+  if (event.key === "down" || (event.mods.ctrl && event.key === "n")) return 1;
+  if (event.key === "up" || (event.mods.ctrl && event.key === "p")) return -1;
+  return null;
+}
+
+export function bindingLabel(binding: KeyBinding | null): string {
+  if (!binding) return "";
+  const mods = `${binding.super ? "cmd+" : ""}${binding.ctrl ? "ctrl+" : ""}${
+    binding.alt ? "alt+" : ""
+  }${binding.shift ? "shift+" : ""}`;
+  return `${mods}${binding.key}`;
 }
 
 function parseMods(parts: string[]): KeyMods {

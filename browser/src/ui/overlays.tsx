@@ -82,7 +82,7 @@ function FindButton({
       }}
       onClick={onClick}
     >
-      <Icon icon={icon} size={rem * 0.8} color={theme.muted} />
+      <Icon icon={icon} size={rem * 0.95} color={theme.muted} />
     </Box>
   );
 }
@@ -119,11 +119,64 @@ export function DownloadHud({
         border: { width: 1, color: theme.fieldBorder },
       }}
     >
-      <Icon icon="download" size={rem * 0.8} color={theme.muted} />
+      <Icon icon="download" size={rem * 0.95} color={theme.muted} />
       <Text style={{ fontSize: rem * 0.9, wrap: false, selectable: false }}>{download.name}</Text>
       <Text style={{ color: theme.muted, fontSize: rem * 0.8, wrap: false, selectable: false }}>
         {status}
       </Text>
+    </Box>
+  );
+}
+
+export function Toast({
+  toast,
+  layout,
+  theme,
+}: {
+  toast: { text: string; detail?: string; failed: boolean };
+  layout: ChromeLayout;
+  theme: Theme;
+}) {
+  const rem = layout.rem;
+  const detailLines = toast.detail ? toast.detail.split("\n") : [];
+  return (
+    <Box
+      style={{
+        position: "absolute",
+        inset: { top: layout.toolbarHeight + rem * 0.5, right: rem * 0.75 },
+        flexDirection: "column",
+        justifyContent: "center",
+        gap: rem * 0.25,
+        height: detailLines.length > 0 ? rem * (2.3 + detailLines.length * 1.05) : rem * 2,
+        padding: { left: rem * 0.9, right: rem * 0.9 },
+        background: theme.bg,
+        cornerRadius: rem * 0.5,
+        border: { width: 1, color: theme.fieldBorder },
+      }}
+    >
+      <Text
+        style={{
+          fontSize: detailLines.length > 0 ? rem : rem * 0.9,
+          color: toast.failed ? [255, 143, 146, 255] : theme.fg,
+          wrap: false,
+          selectable: false,
+        }}
+      >
+        {toast.text}
+      </Text>
+      {detailLines.map((line) => (
+        <Text
+          key={line}
+          style={{
+            fontSize: rem * 0.75,
+            color: theme.muted,
+            wrap: false,
+            selectable: false,
+          }}
+        >
+          {line}
+        </Text>
+      ))}
     </Box>
   );
 }

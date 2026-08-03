@@ -122,7 +122,7 @@ pub fn parse_path_data(d: &str) -> Vec<PathCmd> {
     cmds
 }
 
-pub(crate) fn build_path(cmds: &[PathCmd]) -> Option<tiny_skia::Path> {
+pub fn build_path(cmds: &[PathCmd]) -> Option<tiny_skia::Path> {
     let mut pb = tiny_skia::PathBuilder::new();
     for cmd in cmds {
         match *cmd {
@@ -136,7 +136,7 @@ pub(crate) fn build_path(cmds: &[PathCmd]) -> Option<tiny_skia::Path> {
     pb.finish()
 }
 
-pub(crate) fn skia_stroke(stroke: &ShapeStroke, scale: f32) -> tiny_skia::Stroke {
+pub fn skia_stroke(stroke: &ShapeStroke, scale: f32) -> tiny_skia::Stroke {
     tiny_skia::Stroke {
         width: (stroke.width * scale).max(0.1),
         line_cap: match stroke.cap {

@@ -32,10 +32,60 @@ export class Surface {
     this.engine.removeSurface(this.id);
   }
 
+  startCapture(dir: string): SurfaceCapture {
+    return new SurfaceCapture(this.engine, this.engine.startSurfaceCapture(this.id, dir));
+  }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;
     this.engine.removeSurface(this.id);
+  }
+}
+
+export interface CaptureStats {
+  frames: number;
+  drops: number;
+  durationMs: number;
+}
+
+export interface CaptureFrameMeta {
+  tMs: number;
+  key: boolean;
+  width: number;
+  height: number;
+  dropsBefore: number;
+}
+
+export interface CaptureIndex {
+  frames: CaptureFrameMeta[];
+  drops: number;
+  durationMs: number;
+}
+
+export class SurfaceCapture {
+  private readonly engine: NativeEngine;
+  readonly id: number;
+
+  constructor(engine: NativeEngine, id: number) {
+    this.engine = engine;
+    this.id = id;
+  }
+
+  stop(): CaptureStats {
+    return JSON.parse(this.engine.stopSurfaceCapture(this.id)) as CaptureStats;
+  }
+
+  index(): CaptureIndex {
+    return JSON.parse(this.engine.captureIndex(this.id)) as CaptureIndex;
+  }
+
+  frame(index: number): Buffer {
+    return this.engine.captureFrame(this.id, index);
+  }
+
+  release(): void {
+    this.engine.releaseCapture(this.id);
   }
 }
 

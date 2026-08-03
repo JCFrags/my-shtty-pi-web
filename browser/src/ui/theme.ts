@@ -12,6 +12,15 @@ export interface Theme {
   hoverStrong: Rgba;
   hairline: Rgba;
   selection: Rgba;
+  red: Rgba;
+  green: Rgba;
+  yellow: Rgba;
+  magenta: Rgba;
+  cyan: Rgba;
+}
+
+export function withAlpha(color: Rgba, alpha: number): Rgba {
+  return [color[0], color[1], color[2], alpha];
 }
 
 export function mix(base: Rgba, toward: Rgba, t: number): Rgba {
@@ -40,5 +49,10 @@ export function makeTheme(colors: EngineInfo["colors"]): Theme {
     hoverStrong: mix(bg, fg, 0.26),
     hairline: mix(bg, fg, 0.12),
     selection: mix(bg, accent, 0.35),
+    red: colors.palette[9] ?? colors.palette[1] ?? [229, 72, 77, 255],
+    green: colors.palette[10] ?? colors.palette[2] ?? [48, 164, 108, 255],
+    yellow: colors.palette[11] ?? colors.palette[3] ?? [245, 165, 36, 255],
+    magenta: colors.palette[13] ?? colors.palette[5] ?? [186, 148, 255, 255],
+    cyan: colors.palette[14] ?? colors.palette[6] ?? [94, 201, 227, 255],
   };
 }

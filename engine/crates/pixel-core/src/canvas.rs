@@ -105,6 +105,17 @@ impl Canvas {
         }
     }
 
+    pub fn from_rgba(pixels: Vec<u8>, width: u32, height: u32) -> Self {
+        debug_assert_eq!(pixels.len(), (width * height * 4) as usize);
+        Self {
+            width,
+            height,
+            pixels,
+            clip_stack: Vec::new(),
+            scratch: Vec::new(),
+        }
+    }
+
     pub fn push_clip(&mut self, x: f32, y: f32, w: f32, h: f32) {
         let (cx1, cy1, cx2, cy2) = self.clip_bounds();
         let x1 = (x.round().max(0.0) as u32).clamp(cx1, cx2);
@@ -536,14 +547,34 @@ impl Canvas {
         crate::profiler::count("surface.resampled", 1);
         let src_stride = src_w as usize * 4;
         let dst_stride = self.width as usize * 4;
-        let sample = |i: i64, origin: i64, dst_extent: u32, max: u32| {
-            let scaled = (i - origin) as u32 as u64 * max as u64 / dst_extent as u64;
-            (scaled as u32).min(max - 1) as usize
+        let weight = |i: i64, origin: i64, dst_extent: u32, max: u32| {
+            let pos = (((i - origin) as f32 + 0.5) * max as f32 / dst_extent as f32 - 0.5)
+                .clamp(0.0, (max - 1) as f32);
+            let lo = pos as usize;
+            (lo, ((pos - lo as f32) * 256.0) as u32)
         };
-        // the x sample coordinates repeat on every row, so build them once
-        let columns: Vec<usize> = (x1..x2)
-            .map(|col| sample(col, x0, dst_w, src_w) * 4)
+        let columns: Vec<(usize, u32)> = (x1..x2)
+            .map(|col| {
+                let (lo, f) = weight(col, x0, dst_w, src_w);
+                (lo * 4, f)
+            })
             .collect();
+        let row_bytes = columns.len() * 4;
+        let hsample = |src_row: &[u8], out: &mut [u8]| {
+            for (&(at, f), dst) in columns.iter().zip(out.chunks_exact_mut(4)) {
+                let a = &src_row[at..at + 4];
+                let b = if at + 8 <= src_row.len() {
+                    &src_row[at + 4..at + 8]
+                } else {
+                    a
+                };
+                for c in 0..4 {
+                    dst[c] = ((u32::from(a[c]) * (256 - f) + u32::from(b[c]) * f + 128) >> 8) as u8;
+                }
+            }
+        };
+        let mut top = (usize::MAX, vec![0u8; row_bytes]);
+        let mut bottom = (usize::MAX, vec![0u8; row_bytes]);
         for row in y1..y2 {
             let (inset_l, inset_r) = corner_insets(radius, row - y0, i64::from(dst_h));
             let rx1 = x1.max(x0 + inset_l);
@@ -551,28 +582,52 @@ impl Canvas {
             if rx2 <= rx1 {
                 continue;
             }
-            let src_row = &src[sample(row, y0, dst_h, src_h) * src_stride..][..src_stride];
+            let (sy0, fy) = weight(row, y0, dst_h, src_h);
+            let sy1 = (sy0 + 1).min(src_h as usize - 1);
+            if top.0 != sy0 {
+                if bottom.0 == sy0 {
+                    std::mem::swap(&mut top, &mut bottom);
+                } else {
+                    hsample(&src[sy0 * src_stride..][..src_stride], &mut top.1);
+                    top.0 = sy0;
+                }
+            }
+            if fy != 0 && bottom.0 != sy1 {
+                hsample(&src[sy1 * src_stride..][..src_stride], &mut bottom.1);
+                bottom.0 = sy1;
+            }
             let dst_off = row as usize * dst_stride + rx1 as usize * 4;
             let dst_row = &mut self.pixels[dst_off..dst_off + (rx2 - rx1) as usize * 4];
-            let cols = &columns[(rx1 - x1) as usize..(rx2 - x1) as usize];
-            for (&col, dst) in cols.iter().zip(dst_row.chunks_exact_mut(4)) {
-                let s = &src_row[col..col + 4];
+            let from = (rx1 - x1) as usize * 4;
+            for ((dst, a), b) in dst_row
+                .chunks_exact_mut(4)
+                .zip(top.1[from..].chunks_exact(4))
+                .zip(bottom.1[from..].chunks_exact(4))
+            {
+                let mut s = [0u8; 4];
+                for c in 0..4 {
+                    s[c] = ((u32::from(a[c]) * (256 - fy) + u32::from(b[c]) * fy + 128) >> 8) as u8;
+                }
                 match s[3] {
-                    255 => dst.copy_from_slice(s),
+                    255 => dst.copy_from_slice(&s),
                     0 => {}
-                    sa => blend_pixel(dst, s, sa),
+                    sa => blend_pixel(dst, &s, sa),
                 }
             }
         }
     }
 
-    pub(crate) fn stroke_path(
+    pub fn stroke_path(
         &mut self,
         path: &tiny_skia::Path,
         color: [u8; 4],
         stroke: tiny_skia::Stroke,
     ) {
         self.paint_path_stroked(path, color, Some(stroke));
+    }
+
+    pub fn fill_path(&mut self, path: &tiny_skia::Path, color: [u8; 4]) {
+        self.paint_path(path, color, None);
     }
 
     fn paint_path(&mut self, path: &tiny_skia::Path, color: [u8; 4], stroke_width: Option<f32>) {
@@ -777,6 +832,29 @@ pub(crate) fn char_advance(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scaled_blit_interpolates_instead_of_dropping_pixels() {
+        let mut canvas = Canvas::new(3, 1);
+        canvas.fill([0, 0, 0, 255]);
+        let src: Vec<u8> = [[0u8, 0, 0, 255], [255, 255, 255, 255]].concat();
+        canvas.blit_scaled_rgba(0.0, 0.0, 3.0, 1.0, &src, 2, 1);
+        let middle = canvas.pixels[4];
+        assert!(
+            middle > 60 && middle < 200,
+            "upscale midpoint should be a blend, got {middle}"
+        );
+
+        let mut down = Canvas::new(3, 1);
+        down.fill([0, 0, 0, 255]);
+        let ramp: Vec<u8> = (0..4).flat_map(|i| [i * 80, i * 80, i * 80, 255]).collect();
+        down.blit_scaled_rgba(0.0, 0.0, 3.0, 1.0, &ramp, 4, 1);
+        assert!(
+            down.pixels[0] < down.pixels[4] && down.pixels[4] < down.pixels[8],
+            "downscale must keep the gradient, got {:?}",
+            [down.pixels[0], down.pixels[4], down.pixels[8]]
+        );
+    }
 
     #[test]
     fn fill_rect_clamps_to_bounds() {
