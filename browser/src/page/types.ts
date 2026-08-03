@@ -56,9 +56,3 @@ export function paintedNothing(info: TextureInfo) {
   const rect = info.metadata?.captureUpdateRect;
   return !!rect && (rect.width <= 0 || rect.height <= 0);
 }
-
-export interface DeviceSpec {
-  width: number;
-  height: number;
-  userAgent: string;
-}

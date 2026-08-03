@@ -91,10 +91,10 @@ export type {
   Rgba,
   TerminalColors,
 } from "./native";
-export { HIGHLIGHT_CAPTURES, diff, highlight, parseMarkdown } from "./native";
+export { HIGHLIGHT_CAPTURES, diff, encodeRecording, highlight, parseMarkdown } from "./native";
 export { useTerminalColors } from "./colors";
-export { Surface } from "./surface";
-export type { SurfaceFrame } from "./surface";
+export { Surface, SurfaceCapture } from "./surface";
+export type { SurfaceFrame, CaptureStats, CaptureFrameMeta, CaptureIndex } from "./surface";
 export { Markdown } from "./markdown";
 export type { MarkdownProps, MarkdownTheme } from "./markdown";
 export { openDevtools, closeDevtools, toggleDevtools, requestLayout, engineOp };
@@ -636,6 +636,7 @@ export function createRoot(options: RootOptions = {}): PixelRoot {
     closeDevtools() {
       closeDevtools();
     },
+    // shitty name     
     nudgeResize() {
       forwardResize();
     },

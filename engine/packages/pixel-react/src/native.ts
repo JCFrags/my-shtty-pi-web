@@ -18,6 +18,11 @@ export interface NativeEngine {
   updateSurfaceTexture?(id: number, handle: Buffer, damage?: DamageRect): void;
   removeSurface(id: number): void;
   surfaceStats(): string;
+  startSurfaceCapture(surfaceId: number, dir: string): number;
+  stopSurfaceCapture(captureId: number): string;
+  captureIndex(captureId: number): string;
+  captureFrame(captureId: number, index: number): Buffer;
+  releaseCapture(captureId: number): void;
   setKeyEventTypes(enabled: boolean): void;
   start(callback: (err: unknown, event: string) => void): void;
   stop(): void;
@@ -84,7 +89,6 @@ export interface MarkdownBlock {
   src: string;
   rows: MarkdownRow[];
   aligns: ("left" | "center" | "right" | "none")[];
-  /** byte range of this block in the parsed source */
   sourceStart: number;
   sourceEnd: number;
 }
@@ -111,6 +115,10 @@ const binding = require("../native/pixel.node") as {
   highlightCaptures(): string[];
   diff(oldSource: string, newSource: string, contextLines?: number): DiffRow[];
   parseMarkdown(source: string, streaming?: boolean): MarkdownBlock[];
+  encodeRecording(
+    jobJson: string,
+    onProgress?: (err: unknown, percent: number) => void,
+  ): Promise<void>;
 };
 
 export function createNativeEngine(tty?: string, tmux?: boolean): NativeEngine {
@@ -127,6 +135,19 @@ export const HIGHLIGHT_CAPTURES: readonly string[] = binding.highlightCaptures()
 
 export function diff(oldSource: string, newSource: string, contextLines?: number): DiffRow[] {
   return binding.diff(oldSource, newSource, contextLines);
+}
+
+export function encodeRecording(
+  jobJson: string,
+  onProgress?: (percent: number) => void,
+): Promise<void> {
+  return binding.encodeRecording(
+    jobJson,
+    onProgress &&
+      ((err, percent) => {
+        if (err == null) onProgress(percent);
+      }),
+  );
 }
 
 export function parseMarkdown(source: string, streaming?: boolean): MarkdownBlock[] {

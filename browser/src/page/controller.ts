@@ -17,7 +17,7 @@ import { frameRate } from "./frame-rate";
 import { PageInput } from "./input";
 import { PopupWindow } from "./popup";
 import { cssSize, damageOf, initialBrowserState, paintedNothing } from "./types";
-import type { BrowserState, BrowserSurfaceLayout, DeviceSpec } from "./types";
+import type { BrowserState, BrowserSurfaceLayout } from "./types";
 import { scaleZoom, stepZoom } from "./zoom";
 import type { ZoomDirection } from "./zoom";
 
@@ -43,14 +43,16 @@ export class BrowserController {
   private cdpAttached = false;
   private cachedTargetId: string | null = null;
   private emitHandlers = new Map<string, (data: unknown) => void>();
-  private device: DeviceSpec | null = null;
-  private defaultUserAgent = "";
+  private cdpEventHandlers = new Map<string, (params: unknown) => void>();
+  private framePinned = false;
   private readonly onDisplayChange = () => {
     if (this.stopped) return;
-    this.window.webContents.setFrameRate(this.visible ? frameRate() : 4);
+    this.applyFrameRate();
   };
   private visible = true;
   private wholeSurfaceNext = true;
+  private lastFrameSize: { width: number; height: number } | null = null;
+  onFrameSubmitted: (() => void) | null = null;
   cursorShape = "default";
   onCursorChange: ((shape: string) => void) | null = null;
   onOpenTab: ((url: string, activate: boolean) => void) | null = null;
@@ -124,7 +126,6 @@ export class BrowserController {
     screen.on("display-added", this.onDisplayChange);
     screen.on("display-removed", this.onDisplayChange);
     screen.on("display-metrics-changed", this.onDisplayChange);
-    this.defaultUserAgent = this.window.webContents.getUserAgent();
     this.window.webContents.on("paint", (event) => {
       const texture = event.texture;
       if (!texture) return;
@@ -287,11 +288,12 @@ export class BrowserController {
     this.window.webContents.debugger.attach("1.3");
     this.cdpAttached = true;
     this.window.webContents.debugger.on("message", (_event, method, params) => {
+      this.cdpEventHandlers.get(method)?.(params);
       if (method !== "Runtime.bindingCalled") return;
       const call = params as { name: string; payload: string };
-      if (call.name !== "__pixelEmit") return;
+      if (call.name !== "__pixelEmit") return; // eh? 
       try {
-        const message = JSON.parse(call.payload) as { channel: string; data: unknown };
+        const message = JSON.parse(call.payload) as { channel: string; data: unknown }; // whats going on here
         this.emitHandlers.get(message.channel)?.(message.data);
       } catch {}
     });
@@ -325,6 +327,21 @@ export class BrowserController {
   onEmit(channel: string, handler: ((data: unknown) => void) | null) {
     if (handler) this.emitHandlers.set(channel, handler);
     else this.emitHandlers.delete(channel);
+  }
+
+  onCdpEvent(method: string, handler: ((params: unknown) => void) | null) {
+    if (handler) this.cdpEventHandlers.set(method, handler);
+    else this.cdpEventHandlers.delete(method);
+  }
+
+  pinFrameRate(pinned: boolean) {
+    if (this.framePinned === pinned || this.stopped) return;
+    this.framePinned = pinned;
+    this.applyFrameRate();
+  }
+
+  private applyFrameRate() {
+    this.window.webContents.setFrameRate(this.visible || this.framePinned ? frameRate() : 4);
   }
 
   runJs(source: string): Promise<unknown> {
@@ -469,40 +486,12 @@ export class BrowserController {
     this.visible = visible;
     this.popup?.setVisible(visible);
     this.devtools?.setVisible(visible);
-    if (visible) {
-      this.window.webContents.setFrameRate(frameRate());
-      this.window.webContents.invalidate();
-    } else {
-      this.window.webContents.setFrameRate(4);
-    }
+    this.applyFrameRate();
+    if (visible) this.window.webContents.invalidate();
   }
 
   private contentSize(layout: BrowserSurfaceLayout) {
-    if (this.device) return { width: this.device.width, height: this.device.height };
     return cssSize(layout.width, layout.height, layout.scale);
-  }
-
-  setDevice(spec: DeviceSpec | null) {
-    if (spec?.userAgent === this.device?.userAgent) return;
-    this.device = spec;
-    this.surface.clear();
-    const size = this.contentSize(this.layout);
-    this.window.setContentSize(size.width, size.height, false);
-    if (spec) {
-      this.window.webContents.setUserAgent(spec.userAgent);
-      this.window.webContents.enableDeviceEmulation({
-        screenPosition: "mobile",
-        screenSize: { width: spec.width, height: spec.height },
-        viewSize: { width: spec.width, height: spec.height },
-        viewPosition: { x: 0, y: 0 },
-        deviceScaleFactor: 0,
-        scale: 1,
-      });
-    } else {
-      this.window.webContents.disableDeviceEmulation();
-      this.window.webContents.setUserAgent(this.defaultUserAgent);
-    }
-    this.window.webContents.reload();
   }
 
  
@@ -514,10 +503,21 @@ export class BrowserController {
       if (paintedNothing(info) && !this.wholeSurfaceNext) return;
       const damage = this.wholeSurfaceNext ? undefined : damageOf(info);
       this.wholeSurfaceNext = false;
+      this.lastFrameSize = { width: info.codedSize.width, height: info.codedSize.height };
       this.surface.present({ ioSurface: handle, damage });
+      this.onFrameSubmitted?.();
     } finally {
       texture.release();
     }
+  }
+
+  frameSize(): { width: number; height: number } | null {
+    return this.lastFrameSize;
+  }
+
+  invalidate(): void {
+    this.wholeSurfaceNext = true;
+    this.window.webContents.invalidate();
   }
 
   private async loadFavicon(urls: string[]) {

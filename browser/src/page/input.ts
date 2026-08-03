@@ -329,15 +329,7 @@ function editingCommands(event: EngineKeyEvent): string[] | null {
   return null;
 }
 
-/**
- * 
- * this is extremly odd to me and makes 0 sense and reads as slop
- * 
- */
-// Ghostty's default keybinds rewrite cmd+backspace into ctrl+u, cmd+left/right
-// into ctrl+a/ctrl+e, and option+arrows into esc b/f before the engine sees
-// them, so the mac editing combos arrive here as these control keys (mirrors
-// the engine's own text input handling)
+// fixme this is left over and shouldn't exist 
 function controlEditingCommands(event: EngineKeyEvent): string[] | null {
   const { key, mods } = event;
   if (mods.super || mods.alt) return null;

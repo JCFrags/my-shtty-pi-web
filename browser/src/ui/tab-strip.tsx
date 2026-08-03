@@ -173,7 +173,7 @@ export function TabStrip({
               }}
               onClick={() => actions.tabClose(tab.id)}
             >
-              <Icon icon="close" size={rem * 0.78} color={theme.muted} />
+              <Icon icon="close" size={rem * 0.9} color={theme.muted} />
             </Box>
           ) : (
             <Box style={{ width: closeW, height: closeW, margin: { left: closeGap }, flexShrink: 0 }} />
@@ -192,7 +192,7 @@ export function TabStrip({
         }}
         onClick={actions.tabNew}
       >
-        <Icon icon="plus" size={rem * 0.85} color={theme.muted} />
+        <Icon icon="plus" size={rem * 1} color={theme.muted} />
       </Box>
     </Box>
   );

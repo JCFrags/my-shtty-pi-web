@@ -2,20 +2,26 @@ import { useMemo } from "react";
 import { Box, Text } from "pixel-react";
 import type { EngineInfo, Surface } from "pixel-react";
 import type { BrowserState } from "../page/types";
-import { DeviceFrame } from "./device-frame";
 import { Icon } from "./icons";
 import type { IconName } from "./icons";
 import { PageContextMenu } from "./context-menu";
+import { MarkupCanvas } from "./markup-canvas";
 import { NewTabCard, PaletteCard, UrlCard } from "./modals";
-import { DownloadHud, FindBar, ZoomHud } from "./overlays";
+import { DownloadHud, FindBar, Toast, ZoomHud } from "./overlays";
 import { PopupModal } from "./popup-modal";
+import {
+  RecordBar,
+  RecordCornerButton,
+  RecordToolbarPill,
+  ReviewToolbar,
+} from "./record-bar";
 import { TabStrip } from "./tab-strip";
 import { makeTheme } from "./theme";
 import type { Theme } from "./theme";
+import type { RecordView } from "../record/types";
 import type {
   ChromeActions,
   ChromeLayout,
-  DeviceView,
   DownloadView,
   NewTabView,
   PageMenuView,
@@ -32,15 +38,17 @@ export function Chrome({
   font,
   findOpen,
   palette,
-  device,
   tabs,
   newTab,
   urlEdit,
   popup,
   zoomHud,
   download,
+  toast,
   pageMenu,
   dividerEngaged,
+  record,
+  recordSurface,
   pageSurface,
   popupSurface,
   devtoolsSurface,
@@ -52,16 +60,17 @@ export function Chrome({
   font: number;
   findOpen: boolean;
   palette: PaletteView | null;
-  device: DeviceView | null;
   tabs: TabRow[];
   newTab: NewTabView | null;
   urlEdit: boolean;
   popup: PopupView | null;
-  /** zoom factor to flash in a transient bubble after a cmd+/- press */
   zoomHud: number | null;
   download: DownloadView | null;
+  toast: { text: string; detail?: string; failed: boolean } | null;
   pageMenu: PageMenuView | null;
   dividerEngaged: boolean;
+  record: RecordView | null;
+  recordSurface: Surface | null;
   pageSurface: Surface;
   popupSurface: Surface;
   devtoolsSurface: Surface;
@@ -79,20 +88,26 @@ export function Chrome({
         font,
       }}
     >
-      {layout.toolbarHeight > 0 && (
-        <Toolbar state={state} actions={actions} layout={layout} theme={theme} tabs={tabs} />
-      )}
-      {device ? (
-        <DeviceFrame
-          device={device}
-          layout={layout}
-          theme={theme}
-          surface={pageSurface}
-          actions={actions}
-        />
-      ) : (
-        <BrowserTabContents layout={layout} theme={theme} surface={pageSurface} actions={actions} />
-      )}
+      {layout.toolbarHeight > 0 &&
+        (record?.stopped ? (
+          <ReviewToolbar view={record} actions={actions} layout={layout} theme={theme} />
+        ) : (
+          <Toolbar
+            state={state}
+            actions={actions}
+            layout={layout}
+            theme={theme}
+            tabs={tabs}
+            record={record}
+          />
+        ))}
+      <BrowserTabContents
+        layout={layout}
+        theme={theme}
+        surface={pageSurface}
+        actions={actions}
+        interactive={!record?.canvas}
+      />
       {layout.devtools && (
         <DevtoolsPane
           layout={layout}
@@ -101,6 +116,21 @@ export function Chrome({
           actions={actions}
           dividerEngaged={dividerEngaged}
         />
+      )}
+      {record?.canvas && recordSurface && (
+        <MarkupCanvas
+          view={record.canvas}
+          surface={recordSurface}
+          actions={actions}
+          layout={layout}
+          theme={theme}
+        />
+      )}
+      {record && layout.recordBarHeight > 0 && (
+        <RecordBar view={record} actions={actions} layout={layout} theme={theme} />
+      )}
+      {record && layout.toolbarHeight === 0 && (
+        <RecordCornerButton view={record} actions={actions} layout={layout} theme={theme} />
       )}
       {pageMenu && (
         <PageContextMenu view={pageMenu} actions={actions} layout={layout} theme={theme} />
@@ -112,6 +142,7 @@ export function Chrome({
         <ZoomHud factor={zoomHud} layout={layout} theme={theme} findOpen={findOpen} />
       )}
       {download && <DownloadHud download={download} layout={layout} theme={theme} />}
+      {toast && <Toast toast={toast} layout={layout} theme={theme} />}
       {popup && (
         <PopupModal
           view={popup}
@@ -134,12 +165,14 @@ function Toolbar({
   layout,
   theme,
   tabs,
+  record,
 }: {
   state: BrowserState;
   actions: ChromeActions;
   layout: ChromeLayout;
   theme: Theme;
   tabs: TabRow[];
+  record: RecordView | null;
 }) {
   const rem = layout.rem;
   return (
@@ -178,6 +211,7 @@ function Toolbar({
         onClick={actions.reload}
       />
       <TabStrip tabs={tabs} state={state} actions={actions} rem={rem} theme={theme} />
+      {record && <RecordToolbarPill view={record} actions={actions} rem={rem} theme={theme} />}
     </Box>
   );
 }
@@ -200,25 +234,29 @@ function BrowserTabContents({
   theme,
   surface,
   actions,
+  interactive,
 }: {
   layout: ChromeLayout;
   theme: Theme;
   surface: Surface;
   actions: ChromeActions;
+  interactive: boolean;
 }) {
   const dock = layout.devtools?.dock ?? null;
   return (
     <>
-      <Box
-        style={{
-          position: "absolute",
-          inset: { top: layout.page.y - 1, left: layout.page.x - 1 },
-          width: layout.page.width + 2,
-          height: layout.page.height + 2,
-          cornerRadius: seamRadius(layout.rem * 0.55, dock, "page"),
-          border: { width: 1, color: theme.fieldBorder },
-        }}
-      />
+      {interactive && (
+        <Box
+          style={{
+            position: "absolute",
+            inset: { top: layout.page.y - 1, left: layout.page.x - 1 },
+            width: layout.page.width + 2,
+            height: layout.page.height + 2,
+            cornerRadius: seamRadius(layout.rem * 0.55, dock, "page"),
+            border: { width: 1, color: theme.fieldBorder },
+          }}
+        />
+      )}
       <Box
         id="browser-surface"
         surface={surface}
@@ -230,8 +268,8 @@ function BrowserTabContents({
           cornerRadius: seamRadius(Math.max(2, layout.rem * 0.55 - 1), dock, "page"),
           background: theme.bg,
         }}
-        onPointer={actions.pointer}
-        onWheel={actions.wheel}
+        onPointer={interactive ? actions.pointer : undefined}
+        onWheel={interactive ? actions.wheel : undefined}
         onMouseEnter={() => actions.pageHover(true)}
         onMouseLeave={() => actions.pageHover(false)}
       />
@@ -351,7 +389,7 @@ function ToolbarButton({
       }}
       onClick={enabled ? onClick : undefined}
     >
-      <Icon icon={icon} size={rem * 0.95} color={enabled ? theme.muted : theme.disabled} />
+      <Icon icon={icon} size={rem * 1.1} color={enabled ? theme.muted : theme.disabled} />
     </Box>
   );
 }

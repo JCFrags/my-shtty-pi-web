@@ -1,4 +1,4 @@
-import { Box, Text } from "pixel-react";
+import { Box, Path, Text } from "pixel-react";
 import type { Theme } from "./theme";
 import type { ChromeActions, ChromeLayout, PageMenuItem, PageMenuView } from "./types";
 
@@ -66,6 +66,7 @@ export function PageContextMenu({
               actions={actions}
               first={i === 0}
               last={i === view.items.length - 1}
+              alignIcons={view.items.some((other) => "icon" in other && other.icon)}
             />
           ),
         )}
@@ -82,6 +83,7 @@ function MenuRow({
   actions,
   first,
   last,
+  alignIcons,
 }: {
   item: Extract<PageMenuItem, { label: string }>;
   rowH: number;
@@ -90,6 +92,7 @@ function MenuRow({
   actions: ChromeActions;
   first: boolean;
   last: boolean;
+  alignIcons: boolean;
 }) {
   const radius = Math.max(2, rem * 0.45 - 1);
   return (
@@ -109,6 +112,30 @@ function MenuRow({
       }}
       onClick={item.enabled ? () => actions.pageMenuAction(item.id) : undefined}
     >
+      {item.icon ? (
+        <Path
+          d={item.icon.d}
+          viewBox={24}
+          stroke={{
+            width: item.icon.weight ?? 2.2,
+            color: item.enabled
+              ? item.icon.tint === "red"
+                ? theme.red
+                : theme.muted
+              : theme.disabled,
+            cap: "round",
+            join: "round",
+          }}
+          style={{
+            width: rem * 0.75,
+            height: rem * 0.75,
+            flexShrink: 0,
+            margin: { right: rem * 0.45 },
+          }}
+        />
+      ) : (
+        alignIcons && <Box style={{ width: rem * 1.2, flexShrink: 0 }} />
+      )}
       <Text
         style={{
           flexGrow: 1,

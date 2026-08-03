@@ -1,7 +1,7 @@
 import type { BrowserController } from "../page/controller";
 import type { DevtoolsAction } from "../page/devtools";
 import { initialBrowserState } from "../page/types";
-import type { BrowserState, DeviceSpec } from "../page/types";
+import type { BrowserState } from "../page/types";
 import type { TabRow } from "../ui/types";
 import { displayUrl } from "../url";
 
@@ -28,7 +28,6 @@ export interface TabHost {
     visible: boolean,
     onState: (state: BrowserState) => void,
   ): BrowserController;
-  deviceSpec(): DeviceSpec | null;
   onActivated(): void;
   onActiveState(state: BrowserState, urlChanged: boolean): void;
   onCursorChanged(): void;
@@ -36,6 +35,8 @@ export interface TabHost {
   onDevtoolsAction(action: DevtoolsAction): void;
   onPageMenu(params: Electron.ContextMenuParams): void;
   onTabsChanged(): void;
+  onTabOpened(opener: BrowserController, url: string): void;
+  tabSwitchAllowed(): boolean;
   requestRender(): void;
 }
 
@@ -81,6 +82,7 @@ export class TabManager {
     };
     tab.controller.onOpenTab = (openUrl, activateNew) => {
       this.create(openUrl, activateNew);
+      this.host.onTabOpened(tab.controller, openUrl);
     };
     tab.controller.onPopupChange = () => this.host.requestRender();
     tab.controller.onDevtoolsChange = () => {
@@ -105,13 +107,12 @@ export class TabManager {
 
   activate(id: number) {
     const tab = this.tabs.find((t) => t.id === id);
-    if (!tab) return;
+    if (!tab || (id !== this.activeId && !this.host.tabSwitchAllowed())) return;
     if (this.activeId !== id) {
       const previous = this.tabs.find((t) => t.id === this.activeId);
       previous?.controller.setVisible(false);
     }
     this.activeId = id;
-    tab.controller.setDevice(this.host.deviceSpec());
     tab.controller.setVisible(true);
     tab.controller.focusContent();
     this.host.onActivated();
@@ -134,6 +135,10 @@ export class TabManager {
 
   has(id: number): boolean {
     return this.tabs.some((tab) => tab.id === id);
+  }
+
+  stateFor(controller: BrowserController): BrowserState | null {
+    return this.tabs.find((tab) => tab.controller === controller)?.state ?? null;
   }
 
   view(): TabRow[] {
