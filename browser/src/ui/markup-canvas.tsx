@@ -31,6 +31,7 @@ const TOOL_ICONS: Record<Tool, IconName> = {
   select: "cursor",
   pen: "pen",
   arrow: "arrow",
+  oval: "oval",
   text: "text",
   crop: "crop",
 };
@@ -355,6 +356,35 @@ function MarkupNode({
             inset: { top: minY, left: minX },
             width: maxX - minX,
             height: maxY - minY,
+          }}
+        />
+      );
+    }
+    case "oval": {
+      if (object.rect.width < 1 || object.rect.height < 1) return null;
+      const origin = toView({ x: object.rect.x, y: object.rect.y });
+      const pad = Math.max(2, object.width * scale);
+      const rx = (object.rect.width * scale) / 2;
+      const ry = (object.rect.height * scale) / 2;
+      const cx = rx + pad;
+      const cy = ry + pad;
+      const k = 0.5523;
+      const n = pathNumber;
+      const d =
+        `M ${n(cx + rx)} ${n(cy)}` +
+        ` C ${n(cx + rx)} ${n(cy + k * ry)} ${n(cx + k * rx)} ${n(cy + ry)} ${n(cx)} ${n(cy + ry)}` +
+        ` C ${n(cx - k * rx)} ${n(cy + ry)} ${n(cx - rx)} ${n(cy + k * ry)} ${n(cx - rx)} ${n(cy)}` +
+        ` C ${n(cx - rx)} ${n(cy - k * ry)} ${n(cx - k * rx)} ${n(cy - ry)} ${n(cx)} ${n(cy - ry)}` +
+        ` C ${n(cx + k * rx)} ${n(cy - ry)} ${n(cx + rx)} ${n(cy - k * ry)} ${n(cx + rx)} ${n(cy)} Z`;
+      return (
+        <Path
+          d={d}
+          stroke={{ width: Math.max(1, object.width * scale), color: object.color, cap: "round", join: "round" }}
+          style={{
+            position: "absolute",
+            inset: { top: origin.y - pad, left: origin.x - pad },
+            width: rx * 2 + pad * 2,
+            height: ry * 2 + pad * 2,
           }}
         />
       );

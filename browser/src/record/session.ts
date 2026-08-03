@@ -71,6 +71,7 @@ const TOOL_KEYS: Record<string, Tool> = {
   v: "select",
   p: "pen",
   a: "arrow",
+  o: "oval",
   t: "text",
   c: "crop",
 };
@@ -89,6 +90,7 @@ type Gesture =
   | { type: "resize"; id: number; handle: HandleId; start: MarkupObject }
   | { type: "pen"; id: number; last: Vec }
   | { type: "arrow"; id: number; from: Vec }
+  | { type: "oval"; id: number; anchor: Vec }
   | { type: "crop"; id: number; anchor: Vec }
   | { type: "text"; start: Vec; moved: number };
 
@@ -447,7 +449,7 @@ export class RecordSession {
       this.playToggle();
       return true;
     }
-    if (/^[1-5]$/.test(event.key)) {
+    if (/^[1-6]$/.test(event.key)) {
       this.selectTool(TOOLS[Number(event.key) - 1]);
       return true;
     }
@@ -456,8 +458,14 @@ export class RecordSession {
       this.selectTool(mnemonic);
       return true;
     }
-    if (/^[6-9]$/.test(event.key)) {
-      this.color = MARKUP_COLORS[Number(event.key) - 6];
+    if (/^[7-9]$/.test(event.key)) {
+      this.color = MARKUP_COLORS[Number(event.key) - 7];
+      this.recolorSelected();
+      this.host.requestRender();
+      return true;
+    }
+    if (event.key === "0") {
+      this.color = MARKUP_COLORS[3];
       this.recolorSelected();
       this.host.requestRender();
       return true;
@@ -495,7 +503,7 @@ export class RecordSession {
       this.beginCrop(CROP_SCOPES[menu.focus ?? 0].scope);
       return;
     }
-    if (event.key === "escape" || event.key === "5" || event.key === "c") {
+    if (event.key === "escape" || event.key === "6" || event.key === "c") {
       this.cropMenu = null;
       this.host.requestRender();
     }
@@ -1137,6 +1145,20 @@ export class RecordSession {
         this.gesture = { type: "arrow", id: object.id, from: fp };
         return;
       }
+      case "oval": {
+        this.markup.begin(frame);
+        const width = Math.max(2, Math.min(10, Math.round(meta.height * 0.005)));
+        const object: MarkupObject = {
+          kind: "oval",
+          id: this.markup.allocId(),
+          color: this.color,
+          width,
+          rect: { x: fp.x, y: fp.y, width: 0, height: 0 },
+        };
+        this.markup.replace(frame, [...this.markup.objects(frame), object]);
+        this.gesture = { type: "oval", id: object.id, anchor: fp };
+        return;
+      }
       case "text": {
         this.gesture = { type: "text", start: local, moved: 0 };
         return;
@@ -1208,6 +1230,22 @@ export class RecordSession {
         this.markup.update(frame, { ...object, to });
         return;
       }
+      case "oval": {
+        const object = this.currentObject(gesture.id);
+        if (!object || object.kind !== "oval") return;
+        let rect = rectFromPoints(gesture.anchor, fp);
+        if (event.mods.shift) {
+          const side = Math.max(rect.width, rect.height);
+          rect = {
+            x: fp.x < gesture.anchor.x ? gesture.anchor.x - side : gesture.anchor.x,
+            y: fp.y < gesture.anchor.y ? gesture.anchor.y - side : gesture.anchor.y,
+            width: side,
+            height: side,
+          };
+        }
+        this.markup.update(frame, { ...object, rect });
+        return;
+      }
       // will need to think about how much i love the croppoing implementation
       case "crop": {
         const object = this.currentObject(gesture.id);
@@ -1264,6 +1302,16 @@ export class RecordSession {
           Math.hypot(object.to.x - object.from.x, object.to.y - object.from.y) < 8 / scale
         ) {
           this.markup.remove(frame, gesture.id);
+        }
+        return;
+      }
+      case "oval": {
+        const object = this.currentObject(gesture.id);
+        if (object?.kind === "oval" && (object.rect.width < 8 / scale) && (object.rect.height < 8 / scale)) {
+          this.markup.remove(frame, gesture.id);
+        } else {
+          this.selection = [gesture.id];
+          this.tool = "select";
         }
         return;
       }

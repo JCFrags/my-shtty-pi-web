@@ -33,6 +33,7 @@ export const ICONS = {
   cursor: "M 6.5 4.5 L 18 11.8 L 12.6 13.2 L 10.2 19 Z",
   pen: "M 4.5 19.5 L 8.2 18.6 L 18.8 8 L 16 5.2 L 5.4 15.8 L 4.5 19.5 Z",
   arrow: "M 6 18 L 17.5 6.5 M 10.5 6 L 18 6 L 18 13.5",
+  oval: arcPath(12, 12, 7.5, 0, 360),
   text: "M 5.5 6 L 18.5 6 M 12 6 L 12 19",
   crop: "M 7 3 L 7 17 L 21 17 M 3 7 L 17 7 L 17 21",
   record: arcPath(12, 12, 4.5, 0, 360),

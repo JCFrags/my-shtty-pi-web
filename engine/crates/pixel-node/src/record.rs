@@ -175,6 +175,11 @@ enum Markup {
         color: String,
         width: f32,
     },
+    Oval {
+        rect: RectJson,
+        color: String,
+        width: f32,
+    },
     Text {
         text: String,
         pos: Vec2,
@@ -757,6 +762,11 @@ fn composite(canvas: &mut Canvas, objects: &[Markup], font: &fontdue::Font) {
                     canvas.stroke_path(&path, parse_color(color), round_stroke(*width));
                 }
             }
+            Markup::Oval { rect, color, width } => {
+                if let Some(path) = build_path(&oval_cmds(rect)) {
+                    canvas.stroke_path(&path, parse_color(color), round_stroke(*width));
+                }
+            }
             Markup::Text {
                 text,
                 pos,
@@ -845,6 +855,22 @@ fn arrow_cmds(from: Vec2, to: Vec2, width: f32) -> Vec<PathCmd> {
         ));
     }
     cmds
+}
+
+fn oval_cmds(rect: &RectJson) -> Vec<PathCmd> {
+    let rx = rect.width / 2.0;
+    let ry = rect.height / 2.0;
+    let cx = rect.x + rx;
+    let cy = rect.y + ry;
+    let k = 0.5523;
+    vec![
+        PathCmd::MoveTo(cx + rx, cy),
+        PathCmd::CubicTo(cx + rx, cy + k * ry, cx + k * rx, cy + ry, cx, cy + ry),
+        PathCmd::CubicTo(cx - k * rx, cy + ry, cx - rx, cy + k * ry, cx - rx, cy),
+        PathCmd::CubicTo(cx - rx, cy - k * ry, cx - k * rx, cy - ry, cx, cy - ry),
+        PathCmd::CubicTo(cx + k * rx, cy - ry, cx + rx, cy - k * ry, cx + rx, cy),
+        PathCmd::Close,
+    ]
 }
 
 fn round_stroke(width: f32) -> tiny_skia::Stroke {
@@ -1020,6 +1046,8 @@ mod tests {
                     { "kind": "pen", "id": 1, "color": "#e5484d", "width": 4.0,
                       "points": [{"x": 10.0, "y": 10.0}, {"x": 60.0, "y": 40.0}, {"x": 120.0, "y": 20.0}] },
                     { "kind": "text", "id": 2, "color": "#f5a524", "text": "hi", "pos": {"x": 30.0, "y": 80.0}, "fontPx": 24.0 },
+                    { "kind": "oval", "id": 3, "color": "#3b82f6", "width": 4.0,
+                      "rect": {"x": 140.0, "y": 60.0, "width": 90.0, "height": 60.0} },
                 ],
             }],
             "crops": [{ "frame": 1, "tMs": 200, "file": dir.join("crops/crop-200.png").to_str().unwrap(),

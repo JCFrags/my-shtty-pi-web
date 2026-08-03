@@ -1,6 +1,6 @@
-export type Tool = "select" | "pen" | "arrow" | "text" | "crop";
+export type Tool = "select" | "pen" | "arrow" | "oval" | "text" | "crop";
 
-export const TOOLS: Tool[] = ["select", "pen", "arrow", "text", "crop"];
+export const TOOLS: Tool[] = ["select", "pen", "arrow", "oval", "text", "crop"];
 
 export const MARKUP_COLORS = ["#e5484d", "#f5a524", "#3b82f6", "#30a46c"];
 
@@ -19,6 +19,7 @@ export interface Rect {
 export type MarkupObject =
   | { kind: "pen"; id: number; color: string; width: number; points: Vec[] }
   | { kind: "arrow"; id: number; color: string; width: number; from: Vec; to: Vec }
+  | { kind: "oval"; id: number; color: string; width: number; rect: Rect }
   | { kind: "text"; id: number; color: string; text: string; pos: Vec; fontPx: number }
   | { kind: "crop"; id: number; rect: Rect; scope: CropScope };
 
@@ -72,6 +73,7 @@ export function bboxOf(object: MarkupObject): Rect {
       const size = measureText(object.text || " ", object.fontPx);
       return { x: object.pos.x, y: object.pos.y, ...size };
     }
+    case "oval":
     case "crop":
       return object.rect;
   }
@@ -170,6 +172,15 @@ export function hitTest(objects: MarkupObject[], p: Vec, tolerance: number): num
         if (pointInRect(p, bboxOf(object), tolerance)) return object.id;
         break;
       }
+      case "oval": {
+        const rx = Math.max(1, object.rect.width / 2);
+        const ry = Math.max(1, object.rect.height / 2);
+        const dx = (p.x - (object.rect.x + rx)) / rx;
+        const dy = (p.y - (object.rect.y + ry)) / ry;
+        const fromRing = Math.abs(Math.hypot(dx, dy) - 1) * Math.min(rx, ry);
+        if (fromRing <= tolerance + object.width / 2) return object.id;
+        break;
+      }
       case "crop": {
         if (nearRectBorder(p, object.rect, tolerance)) return object.id;
         break;
@@ -217,6 +228,7 @@ export function moveObject(object: MarkupObject, dx: number, dy: number): Markup
       };
     case "text":
       return { ...object, pos: { x: object.pos.x + dx, y: object.pos.y + dy } };
+    case "oval":
     case "crop":
       return { ...object, rect: { ...object.rect, x: object.rect.x + dx, y: object.rect.y + dy } };
   }
@@ -277,6 +289,8 @@ export function resizeObject(start: MarkupObject, handle: HandleId, p: Vec): Mar
         },
       };
     }
+    case "oval":
+      return { ...start, rect: resizedRect(start.rect, handle, p, 8) };
     case "crop":
       return { ...start, rect: resizedRect(start.rect, handle, p, 12) };
   }
