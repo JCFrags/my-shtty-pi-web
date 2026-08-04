@@ -26,7 +26,7 @@ export function configureBrowserSession(
   partition: string | null,
   onDownload: (progress: DownloadProgress) => void,
 ): Session {
-  const target = partition ? session.fromPartition(partition) : session.defaultSession;
+  const target = browserSession(partition);
   if (configured.has(target)) return target;
   configured.add(target);
 
@@ -64,6 +64,14 @@ export function configureBrowserSession(
   });
 
   return target;
+}
+
+export function browserSession(partition: string | null): Session {
+  return partition ? session.fromPartition(persistentPartition(partition)) : session.defaultSession;
+}
+
+function persistentPartition(partition: string): string {
+  return partition.startsWith("persist:") ? partition : `persist:${partition}`;
 }
 
 function requestedDirectory(url: string): string | null {

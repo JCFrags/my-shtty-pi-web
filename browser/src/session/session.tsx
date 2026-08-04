@@ -7,7 +7,7 @@ import type { DragEvent, EngineKeyEvent, PixelRoot, Surface } from "pixel-react"
 import { detectBackend, reportedPixelUnit } from "pixel-terminals";
 import type { Backend } from "pixel-terminals";
 
-import { configureBrowserSession } from "../page/browser-session";
+import { browserSession, configureBrowserSession } from "../page/browser-session";
 import type { DownloadProgress } from "../page/browser-session";
 import { BrowserController } from "../page/controller";
 import { initialBrowserState } from "../page/types";
@@ -341,6 +341,9 @@ class Session {
     this.shownRecord = null;
     try {
       this.root?.setPointerShape("text");
+    } catch { }
+    try {
+      browserSession(this.partition).flushStorageData();
     } catch { }
     this.registry?.dispose();
     this.registry = null;
