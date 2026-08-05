@@ -63,7 +63,8 @@ LINKED=""
 while read -r kind name location variant; do
   [ "$kind" = agent ] || continue
   DIR="$HOME/$location"
-  [ -d "$DIR" ] || continue
+  [ -d "$(dirname "$DIR")" ] || continue
+  mkdir -p "$DIR"
   MADE=""
   while read -r skind skill; do
     [ "$skind" = skill ] || continue
