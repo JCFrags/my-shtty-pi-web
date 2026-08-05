@@ -9,7 +9,7 @@ STAGE="$OUT/terminal-browser"
 APP="$STAGE/electron/terminal-browser.app"
 
 rm -rf "$OUT"
-mkdir -p "$STAGE"/{bin,cli/dist,browser/dist,browser/native,electron,agent-browser/bin,assets/fonts,skill}
+mkdir -p "$STAGE"/{bin,cli/dist,browser/dist,browser/native,electron,agent-browser/bin,assets/fonts}
 
 (cd "$ROOT/engine" && cargo build -p pixel-node --release)
 cp "${CARGO_TARGET_DIR:-$ROOT/engine/target}/release/libpixel_node.dylib" "$STAGE/browser/native/pixel.node"
@@ -22,7 +22,7 @@ codesign --force --sign - --timestamp=none "$STAGE/agent-browser/bin/agent-brows
 "$ROOT/scripts/bundle.sh" "$ROOT/browser/src/main.tsx" "$STAGE/browser/dist/main.js"
 
 "$ROOT/scripts/generate-skill.sh"
-cp "$ROOT/skill/SKILL.md" "$STAGE/skill/SKILL.md"
+cp -R "$ROOT/skill/build" "$STAGE/skills"
 
 cp "$ROOT/assets/fonts/JetBrainsMono-Regular.ttf" "$STAGE/assets/fonts/"
 

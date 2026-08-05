@@ -21,6 +21,7 @@ import { commandHelp, helpTopics, rootHelp } from "./help";
 import { locate, recordKey, reusable } from "./instances";
 import { lsCommand } from "./ls";
 import { instances } from "./registry";
+import { deniedRefusal, sandboxRefusal } from "./sandbox";
 import type { InstanceRecord } from "./registry";
 import { installedVersion, upgradeCommand } from "./upgrade";
 
@@ -356,7 +357,13 @@ function rejectUnknownFlags(args: string[]) {
   }
 }
 
+function requirePaneAccess(): void {
+  const refusal = sandboxRefusal();
+  if (refusal) fail(refusal);
+}
+
 async function openCommand(args: string[]) {
+  requirePaneAccess();
   const split = takeSplitFlag(args);
   const size = takeSizeFlag(args);
   if (size !== null && !split) fail("--size only applies to a split (--split <direction>)");
@@ -369,11 +376,16 @@ async function openCommand(args: string[]) {
   if (!split && interactiveTty()) {
     return openHere(args);
   }
-  // without a tty there is no pane to take over, so a split is the only way in
   const direction = split ?? "right";
   const backend = detectBackend();
   const url = args.find((arg) => !arg.startsWith("-"));
-  const tty = ownTtyPath() ?? callerTty();
+  const own = ownTtyPath();
+  const caller = own ? null : callerTty();
+  if (caller?.denied) {
+    const refusal = deniedRefusal();
+    if (refusal) fail(refusal);
+  }
+  const tty = own ?? caller?.path ?? null;
   const records = await instances();
   if (records.length > 0) {
     const found = locate(records, await backend.panes());
@@ -447,6 +459,7 @@ async function main(): Promise<number> {
     return 0;
   }
   if (command === "ls") {
+    requirePaneAccess();
     const all = takeBoolFlag(args, "--all");
     const json = takeBoolFlag(args, "--json");
     await lsCommand(detectBackend(), all, json);
@@ -455,6 +468,7 @@ async function main(): Promise<number> {
   if (command === "setup") return setupCommand();
   if (command === "upgrade") return upgradeCommand();
   if (command === "action") {
+    requirePaneAccess();
     const { own, passthrough } = splitPassthrough(args);
     const options = {
       browserKey: takeFlag(own, "--browser"),

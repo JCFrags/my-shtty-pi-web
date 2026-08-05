@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="$ROOT/skill/SKILL.md"
+MANIFEST="$ROOT/skill/skills.json"
+OUT="$ROOT/skill/build"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -13,7 +14,6 @@ trap 'rm -rf "$TMP"' EXIT
 COMMANDS="$(node -e 'process.stdout.write(require(process.argv[1]).helpTopics().join("\n"))' "$TMP/help.js")"
 
 {
-  cat "$ROOT/skill/SKILL.template.md"
   printf '\n```\n$ terminal-browser help\n'
   node "$TMP/cli.js" help
   printf '```\n'
@@ -23,7 +23,39 @@ COMMANDS="$(node -e 'process.stdout.write(require(process.argv[1]).helpTopics().
     node "$TMP/cli.js" "$command" --help
     printf '```\n'
   done
-} > "$TMP/SKILL.md"
+} > "$TMP/reference.md"
 
-mv "$TMP/SKILL.md" "$OUT"
-echo "wrote $OUT"
+render() {
+  awk -v overlay="$2" '
+    { print }
+    /^---$/ && ++dashes == 2 && overlay != "" {
+      print ""
+      while ((getline line < overlay) > 0) print line
+    }
+  ' "$1"
+}
+
+rm -rf "$OUT"
+node -p "require('$MANIFEST').skills.map(s => s.name + ' ' + s.variants.join(',')).join('\n')" |
+  while read -r name variants; do
+    [ -n "$name" ] || continue
+    for variant in ${variants//,/ }; do
+      overlay="$ROOT/skill/$name/overlays/$variant.md"
+      [ -f "$overlay" ] || overlay=""
+      mkdir -p "$OUT/$variant/$name"
+      {
+        render "$ROOT/skill/$name/SKILL.template.md" "$overlay"
+        cat "$TMP/reference.md"
+      } > "$OUT/$variant/$name/SKILL.md"
+      echo "wrote $OUT/$variant/$name/SKILL.md"
+    done
+  done
+
+node -e '
+  const manifest = require(process.argv[1]);
+  const lines = [
+    ...manifest.agents.map((a) => `agent ${a.id} ${a.skills} ${a.variant ?? "default"}`),
+    ...manifest.skills.map((s) => `skill ${s.name}`),
+  ];
+  process.stdout.write(lines.join("\n") + "\n");
+' "$MANIFEST" > "$OUT/manifest"

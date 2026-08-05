@@ -25,7 +25,12 @@ export interface Backend {
   zoomPane?(titleNeedle: string): Promise<boolean>;
 }
 
-export function callerTty(): string | null {
+export interface CallerTty {
+  path: string | null;
+  denied: boolean;
+}
+
+export function callerTty(): CallerTty {
   let pid = process.pid;
   for (let hops = 0; hops < 30 && pid > 1; hops++) {
     let out: string;
@@ -34,15 +39,15 @@ export function callerTty(): string | null {
         encoding: "utf8",
       }).trim();
     } catch {
-      return null;
+      return { path: null, denied: hops === 0 };
     }
-    if (!out) return null;
+    if (!out) return { path: null, denied: hops === 0 };
     const [ppid, tty] = out.split(/\s+/);
-    if (tty && tty !== "??") return `/dev/${tty}`;
+    if (tty && tty !== "??") return { path: `/dev/${tty}`, denied: false };
     pid = Number(ppid);
-    if (!Number.isFinite(pid)) return null;
+    if (!Number.isFinite(pid)) return { path: null, denied: false };
   }
-  return null;
+  return { path: null, denied: false };
 }
 
 export function setPaneTitle(tty: string, title: string): void {
