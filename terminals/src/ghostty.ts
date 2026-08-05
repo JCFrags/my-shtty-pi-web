@@ -1,32 +1,48 @@
 import { execFileSync, spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
   Backend,
   Direction,
   Pane,
   callerTty,
-  setPaneTitle,
+  setPaneWorkingDirectory,
   shellQuote,
   sleep,
 } from "./shared";
 
 const LIST_SCRIPT = `
 on run argv
-  set marker to item 1 of argv
   set out to ""
   set sep to tab
   tell application "Ghostty"
     repeat with w in windows
       repeat with tb in tabs of w
         repeat with term in terminals of tb
-          set selfFlag to "0"
-          if (name of term) contains marker then set selfFlag to "1"
-          set out to out & (id of w) & sep & (id of tb) & sep & (id of term) & sep & selfFlag & sep & (name of term) & linefeed
+          set out to out & (id of w) & sep & (id of tb) & sep & (id of term) & sep & (working directory of term) & sep & (name of term) & linefeed
         end repeat
       end repeat
     end repeat
   end tell
   return out
+end run
+`;
+
+const FIND_BY_CWD_SCRIPT = `
+on run argv
+  set wanted to item 1 of argv
+  tell application "Ghostty"
+    repeat with w in windows
+      repeat with tb in tabs of w
+        repeat with term in terminals of tb
+          if (working directory of term) is wanted then return (id of term) as text
+        end repeat
+      end repeat
+    end repeat
+  end tell
+  return ""
 end run
 `;
 
@@ -59,6 +75,25 @@ on run argv
       repeat with tb in tabs of w
         repeat with term in terminals of tb
           if (name of term) contains needle then
+            focus term
+            return "ok"
+          end if
+        end repeat
+      end repeat
+    end repeat
+  end tell
+  return "not-found"
+end run
+`;
+
+const FOCUS_ID_SCRIPT = `
+on run argv
+  set targetId to item 1 of argv
+  tell application "Ghostty"
+    repeat with w in windows
+      repeat with tb in tabs of w
+        repeat with term in terminals of tb
+          if (id of term) as text is targetId then
             focus term
             return "ok"
           end if
@@ -146,20 +181,21 @@ end run
 
 const splitScript = (direction: Direction) => `
 on run argv
-  set marker to item 1 of argv
+  set targetId to item 1 of argv
   set cmdText to item 2 of argv
+  set startDir to item 3 of argv
   tell application "Ghostty"
     repeat with w in windows
       repeat with tb in tabs of w
         repeat with term in terminals of tb
-          if (name of term) contains marker then
-            split term direction ${direction} with configuration {initial input:cmdText & linefeed}
+          if (id of term) as text is targetId then
+            split term direction ${direction} with configuration {initial working directory:startDir, initial input:cmdText & linefeed}
             return
           end if
         end repeat
       end repeat
     end repeat
-    error "could not find this pane"
+    error "this pane went away before we could split it"
   end tell
 end run
 `;
@@ -180,63 +216,98 @@ function osascript(script: string, args: string[]): string {
         "controlling Ghostty timed out — this environment may lack macOS automation permission for Ghostty",
       );
     }
+    const stderr = String((error as { stderr?: unknown }).stderr ?? "").trim();
+    if (stderr) throw new Error(`controlling Ghostty failed: ${stderr}`);
     throw error;
   }
 }
 
-async function withMarkedPane<T>(fn: (marker: string) => T): Promise<T> {
-  const tty = callerTty();
-  if (!tty) throw new Error("no terminal tty found for this process");
-  const marker = `pixel-marker-${process.pid}-${Math.floor(Math.random() * 1e9)}`;
-  for (let attempt = 0; attempt < 6; attempt++) {
-    setPaneTitle(tty, marker);
-    await sleep(150);
-    try {
-      return fn(marker);
-    } catch {}
-  }
-  throw new Error(
-    `could not find this pane in Ghostty — something keeps rewriting the ${tty} title (busy TUI), or this shell is inside tmux (which drops the title marker unless set-titles is on)`,
-  );
+interface Surface {
+  window: string;
+  tab: string;
+  pane: string;
+  cwd: string;
+  title: string;
 }
 
-function parseListing(out: string, marker: string): Pane[] {
-  const panes: Pane[] = [];
-  for (const line of out.split("\n")) {
+function listSurfaces(): Surface[] {
+  const surfaces: Surface[] = [];
+  for (const line of osascript(LIST_SCRIPT, []).split("\n")) {
     if (!line.trim()) continue;
-    const [window, tab, pane, selfFlag, ...title] = line.split("\t");
-    panes.push({ window, tab, pane, self: selfFlag === "1" && marker !== "", title: title.join("\t") });
+    const [window, tab, pane, cwd, ...title] = line.split("\t");
+    surfaces.push({ window, tab, pane, cwd, title: title.join("\t") });
   }
-  return panes;
+  return surfaces;
+}
+
+const MARKER_ATTEMPTS = 6;
+
+function markerDirectory(): string {
+  try {
+    return fs.mkdtempSync(path.join(os.tmpdir(), "terminal-browser-pane-"));
+  } catch {
+    return path.join(os.tmpdir(), `terminal-browser-pane-${process.pid}-${Math.floor(Math.random() * 1e9)}`);
+  }
+}
+
+async function selfPane(): Promise<{ id: string; cwd: string; surfaces: Surface[] }> {
+  const tty = callerTty();
+  if (!tty) throw new Error("no terminal tty found for this process");
+  const surfaces = listSurfaces();
+  const marker = markerDirectory();
+  let restoreTo = process.cwd();
+  try {
+    for (let attempt = 0; attempt < MARKER_ATTEMPTS; attempt++) {
+      setPaneWorkingDirectory(tty, marker);
+      if (attempt > 0) await sleep(120);
+      const id = osascript(FIND_BY_CWD_SCRIPT, [marker]).trim();
+      if (id) {
+        restoreTo = surfaces.find((surface) => surface.pane === id)?.cwd || restoreTo;
+        return { id, cwd: restoreTo, surfaces };
+      }
+    }
+    throw new Error(
+      `could not find this pane in Ghostty — we marked ${tty} and no Ghostty pane reported it back, so ${tty} is not a Ghostty pane (a shell inside tmux or a remote session looks like this)`,
+    );
+  } finally {
+    setPaneWorkingDirectory(tty, restoreTo);
+    fs.rmSync(marker, { recursive: true, force: true });
+  }
 }
 
 export const ghostty: Backend = {
   app: "ghostty",
-  panes() {
-    return withMarkedPane((marker) => {
-      const panes = parseListing(osascript(LIST_SCRIPT, [marker]), marker);
-      if (!panes.some((pane) => pane.self)) throw new Error("marker not visible yet");
-      return panes;
-    });
+  async panes() {
+    const { id, surfaces } = await selfPane();
+    return surfaces.map((surface) => ({
+      window: surface.window,
+      tab: surface.tab,
+      pane: surface.pane,
+      title: surface.title,
+      self: surface.pane === id,
+    }));
   },
-  async listAll() {
-    return parseListing(osascript(LIST_SCRIPT, ["pixel-never-matches"]), "");
+  async listAll(): Promise<Omit<Pane, "self">[]> {
+    return listSurfaces().map((surface) => ({
+      window: surface.window,
+      tab: surface.tab,
+      pane: surface.pane,
+      title: surface.title,
+    }));
   },
   async sendText(paneId, text) {
     return osascript(SEND_SCRIPT, [paneId, text]).trim() === "ok";
   },
-  split(direction, command) {
-    return withMarkedPane((marker) => {
-      osascript(splitScript(direction), [marker, shellQuote(command)]);
-    });
+  async split(direction, command) {
+    const { id, cwd } = await selfPane();
+    osascript(splitScript(direction), [id, shellQuote(command), cwd]);
   },
   async focusPane(titleNeedle) {
     return osascript(FOCUS_SCRIPT, [titleNeedle]).trim() === "ok";
   },
-  focusSelf() {
-    return withMarkedPane(
-      (marker) => osascript(FOCUS_SCRIPT, [marker]).trim() === "ok",
-    );
+  async focusSelf() {
+    const { id } = await selfPane();
+    return osascript(FOCUS_ID_SCRIPT, [id]).trim() === "ok";
   },
   async resizePane(titleNeedle, grow, points) {
     const amount = Math.round(Math.abs(points));

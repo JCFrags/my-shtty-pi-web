@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 
 export type Direction = "right" | "left" | "down" | "up";
 
@@ -46,6 +47,11 @@ export function callerTty(): string | null {
 
 export function setPaneTitle(tty: string, title: string): void {
   fs.writeFileSync(tty, `\x1b]2;${title}\x07`);
+}
+
+export function setPaneWorkingDirectory(tty: string, directory: string): void {
+  const encoded = directory.split("/").map(encodeURIComponent).join("/");
+  fs.writeFileSync(tty, `\x1b]7;file://${os.hostname()}${encoded}\x07`);
 }
 
 export function shellQuote(argv: string[]): string {
