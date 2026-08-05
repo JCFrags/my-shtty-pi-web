@@ -54,6 +54,8 @@ The outer UI of the browser is implemented using a graphics engine built on top 
 
 To get a local development setup of terminal-browser, the recommended way is to ask a coding agent.
 
+### [Discord](https://discord.gg/t3jzHHfc6z)
+
 ### Acknowledgments
 - the [kitty](https://github.com/kovidgoyal/kitty) project for developing the kitty graphics protocol
 - [awrit](https://github.com/chase/awrit) - the first attempt to embed chromium inside a terminal
