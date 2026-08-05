@@ -251,7 +251,7 @@ function markerDirectory(): string {
 }
 
 async function selfPane(): Promise<{ id: string; cwd: string; surfaces: Surface[] }> {
-  const tty = callerTty();
+  const { path: tty } = callerTty();
   if (!tty) throw new Error("no terminal tty found for this process");
   const surfaces = listSurfaces();
   const marker = markerDirectory();
