@@ -26,11 +26,14 @@ COMMANDS="$(node -e 'process.stdout.write(require(process.argv[1]).helpTopics().
 } > "$TMP/reference.md"
 
 render() {
-  awk -v overlay="$2" '
+  awk -v overlay="$2" -v suffix="$3" '
+    /^---$/ { dashes++ }
+    dashes == 1 && /^description: / && suffix != "" { print $0 " " suffix; next }
     { print }
-    /^---$/ && ++dashes == 2 && overlay != "" {
+    dashes == 2 && /^---$/ && overlay != "" && !spliced {
       print ""
       while ((getline line < overlay) > 0) print line
+      spliced = 1
     }
   ' "$1"
 }
@@ -42,9 +45,13 @@ node -p "require('$MANIFEST').skills.map(s => s.name + ' ' + s.variants.join(','
     for variant in ${variants//,/ }; do
       overlay="$ROOT/skill/$name/overlays/$variant.md"
       [ -f "$overlay" ] || overlay=""
+      suffix=""
+      if [ "$variant" != default ]; then
+        suffix="If another $name skill is listed from a shared skills directory, use this one instead."
+      fi
       mkdir -p "$OUT/$variant/$name"
       {
-        render "$ROOT/skill/$name/SKILL.template.md" "$overlay"
+        render "$ROOT/skill/$name/SKILL.template.md" "$overlay" "$suffix"
         cat "$TMP/reference.md"
       } > "$OUT/$variant/$name/SKILL.md"
       echo "wrote $OUT/$variant/$name/SKILL.md"
