@@ -11,3 +11,5 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
   --alias:pixel-store="$ROOT/store/src/index.ts" \
   --define:process.env.NODE_ENV='"production"' \
   --sourcemap --outfile="$2" --log-level=warning
+
+printf '{"type":"commonjs"}\n' > "$(dirname "$2")/package.json"
