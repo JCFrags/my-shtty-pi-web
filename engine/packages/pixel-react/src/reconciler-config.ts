@@ -266,8 +266,8 @@ export class Bridge {
   private nextId = 1;
   private seq = 0;
 
-  constructor(tty?: string, tmux?: boolean) {
-    this.engine = createNativeEngine(tty, tmux);
+  constructor(tty?: string, wrapper?: string) {
+    this.engine = createNativeEngine(tty, wrapper);
     if (!defaultBridge) defaultBridge = this;
   }
 
@@ -298,8 +298,8 @@ export class Bridge {
 
 let defaultBridge: Bridge | null = null;
 
-export function getBridge(): Bridge {
-  if (!defaultBridge) defaultBridge = new Bridge();
+export function getBridge(wrapper?: string): Bridge {
+  if (!defaultBridge) defaultBridge = new Bridge(undefined, wrapper);
   return defaultBridge;
 }
 

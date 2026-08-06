@@ -914,7 +914,7 @@ mod tests {
     use super::*;
 
     static FONT_BYTES: &[u8] =
-        include_bytes!("../../../examples/typing/assets/JetBrainsMono-Regular.ttf");
+        include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
 
     fn font() -> fontdue::Font {
         fontdue::Font::from_bytes(FONT_BYTES, fontdue::FontSettings::default()).unwrap()

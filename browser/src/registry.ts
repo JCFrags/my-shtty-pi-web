@@ -9,9 +9,16 @@ import type { InstanceRow } from "pixel-store";
 import type { BrowserState } from "./page/types";
 import { INSTANCES_DIR } from "pixel-store";
 
+export interface Where {
+  terminal: string | null;
+  tab: string | null;
+  pane: string | null;
+}
+
 export interface ControlHost {
   key: string;
   tty: string | null;
+  where(): Promise<Where>;
   splitDir: InstanceRow["splitDir"];
   parentTty: string | null;
   state(): BrowserState;
@@ -135,6 +142,8 @@ export class Registry {
     switch (request.cmd) {
       case "state":
         return this.record();
+      case "where":
+        return this.host.where();
       case "open-tab": {
         const id = this.host.openTab(request.url, request.cwd);
         return { ...this.record(), openedTab: id, tabs: await this.host.targets() };

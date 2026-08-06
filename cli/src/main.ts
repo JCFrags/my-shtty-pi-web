@@ -7,18 +7,19 @@ import path from "node:path";
 import { DAEMON_SOCKET, LOGS_DIR, ensureDataDir } from "pixel-store";
 import {
   callerTty,
-  checkKittyGraphics,
-  detectBackend,
-  prepareTmux,
-  setPaneTitle,
+  canSplit,
+  cannotOpenPanes,
+  checkTerminal,
+  detect,
   unsupportedGraphicsMessage,
 } from "pixel-terminals";
-import type { Backend, Direction } from "pixel-terminals";
+import type { Direction, Terminal, TerminalCheck } from "pixel-terminals";
 import { actionCommand } from "./action";
 import { control } from "./control";
 import { setupCommand } from "./editors";
 import { commandHelp, helpTopics, rootHelp } from "./help";
-import { locate, recordKey, reusable } from "./instances";
+import { browsers, describe, recordKey } from "./instances";
+import type { Browser } from "./instances";
 import { lsCommand } from "./ls";
 import { instances } from "./registry";
 import { deniedRefusal, sandboxRefusal } from "./sandbox";
@@ -145,6 +146,7 @@ interface DaemonReply {
   session?: string;
   event?: string;
   code?: number;
+  sessions?: number;
 }
 
 function nextReply(socket: net.Socket, onLine: (reply: DaemonReply) => void): void {
@@ -198,6 +200,71 @@ async function openSession(argv: string[], tty: string): Promise<{ socket: net.S
   return { socket, reply };
 }
 
+async function daemonPid(): Promise<number | null> {
+  for (const record of await instances()) {
+    try {
+      process.kill(record.pid, 0);
+      return record.pid;
+    } catch {}
+  }
+  return null;
+}
+
+async function gone(pid: number, within: number): Promise<boolean> {
+  const deadline = Date.now() + within;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
+    await sleep(100);
+  }
+  return false;
+}
+
+async function shutdownDaemon(): Promise<number> {
+  let socket: net.Socket | null = null;
+  try {
+    socket = await connectDaemon();
+  } catch {}
+  const pid = await daemonPid();
+  if (!socket) {
+    if (pid === null) {
+      process.stdout.write("no daemon running\n");
+      return 0;
+    }
+    return kill(pid, "it was not listening");
+  }
+  const answer = await new Promise<DaemonReply | null>((resolve) => {
+    const timer = setTimeout(() => resolve(null), 2500);
+    const settle = (value: DaemonReply | null) => {
+      clearTimeout(timer);
+      resolve(value);
+    };
+    nextReply(socket!, settle);
+    socket!.once("close", () => settle({ ok: true }));
+    socket!.write('{"cmd":"shutdown"}\n');
+  });
+  socket.destroy();
+  if (answer === null) {
+    if (pid === null) fail("the daemon did not answer and no browser names its process");
+    return kill(pid, "it did not answer");
+  }
+  const browsers = answer.sessions ?? 0;
+  process.stdout.write(
+    browsers === 0 ? "daemon stopped\n" : `daemon stopped, with ${browsers} open\n`,
+  );
+  return 0;
+}
+
+async function kill(pid: number, why: string): Promise<number> {
+  process.kill(pid, "SIGTERM");
+  if (!(await gone(pid, 2000))) process.kill(pid, "SIGKILL");
+  process.stdout.write(`daemon stopped, killed ${pid} because ${why}\n`);
+  return 0;
+}
+
 async function attachHere(argv: string[]): Promise<never> {
   const tty = ownTtyPath();
   if (!tty) throw new Error("not running on a tty");
@@ -206,8 +273,6 @@ async function attachHere(argv: string[]): Promise<never> {
     socket.destroy();
     throw new Error(reply.error ?? "daemon refused the session");
   }
-  // the title marker is how terminal-browser commands find this pane
-  setPaneTitle(tty, `terminal-browser:${reply.session}`);
   nextReply(socket, (message) => {
     if (message.event === "closed") process.exit(message.code ?? 0);
   });
@@ -232,7 +297,6 @@ async function attachHere(argv: string[]): Promise<never> {
 }
 
 async function openHere(argv: string[]): Promise<never> {
-  prepareTmux();
   try {
     return await attachHere(argv);
   } catch (error) {
@@ -269,58 +333,30 @@ function takeSizeFlag(args: string[]): number | null {
   return size;
 }
 
-let cachedScale: number | null = null;
 
-function displayScale(): number {
-  if (cachedScale !== null) return cachedScale;
-  try {
-    const out = execFileSync(
-      "osascript",
-      ["-l", "JavaScript", "-e", "ObjC.import('AppKit'); $.NSScreen.mainScreen.backingScaleFactor"],
-      { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] },
-    ).trim();
-    const scale = Number(out);
-    cachedScale = Number.isFinite(scale) && scale > 0 ? scale : 2;
-  } catch {
-    cachedScale = 2;
-  }
-  return cachedScale;
-}
 
-async function applySplitSize(
-  backend: Backend,
-  direction: Direction,
-  record: InstanceRecord,
-  size: number,
-) {
-  if (!backend.resizePane) return;
-  const viewport = record.viewport;
-  if (!viewport?.width || !viewport?.height) return;
-  const horizontal = direction === "right" || direction === "left";
-  const current = horizontal ? viewport.width : viewport.height;
-  const deltaPoints = ((2 * size - 1) * current) / displayScale();
-  const grow: Record<Direction, Direction> = {
-    right: "left",
-    left: "right",
-    down: "up",
-    up: "down",
-  };
-  await backend.resizePane(`terminal-browser:${recordKey(record)}`, grow[direction], deltaPoints);
-}
+
 
 async function launchInSplit(
-  backend: Backend,
+  terminal: Terminal,
   direction: Direction,
   argv: string[],
   size?: number | null,
 ): Promise<InstanceRecord> {
+  const from = await terminal.getCurrentPane?.({ tty: ownTtyPath() ?? callerTty().path });
+  if (!from) fail(`could not work out which ${terminal.name} pane you are in`);
   const before = new Set((await instances()).map(recordKey));
-  await backend.split(direction, clientLaunchCommand(argv), size);
+  await terminal.split!({
+    from,
+    direction,
+    command: clientLaunchCommand(argv),
+    size: size ?? null,
+    tty: ownTtyPath() ?? callerTty().path,
+  });
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     const fresh = (await instances()).find((record) => !before.has(recordKey(record)));
     if (fresh) {
-      if (size) await applySplitSize(backend, direction, fresh, size).catch(() => {});
       return fresh;
     }
     await sleep(250);
@@ -328,10 +364,44 @@ async function launchInSplit(
   fail("browser did not register within 20s (is the split open?)");
 }
 
-async function requireKittyGraphics() {
-  prepareTmux();
-  if ((await checkKittyGraphics()) !== "unsupported") return;
-  // not fail(): this one stands on its own, without the command-name prefix
+let asked: Promise<TerminalCheck> | null = null;
+
+function currentTerminal(): Promise<TerminalCheck> {
+  asked ??= checkTerminal(detect());
+  return asked;
+}
+
+async function newTabCommand(url: string | undefined, key: string | undefined): Promise<number> {
+  const check = await currentTerminal();
+  const found = await browsers(check.terminal);
+  const here = key
+    ? found.filter((browser) => recordKey(browser) === key)
+    : found.filter((browser) => browser.inCurrentTab);
+  const list = (browsers: Browser[]) => browsers.map((browser) => `  ${describe(browser)}`).join("\n");
+  if (key && here.length === 0) fail(`no browser ${key}. Running:\n${list(found)}`);
+  if (here.length > 1) {
+    fail(`${here.length} browsers in this tab, so say which with --browser:\n${list(here)}`);
+  }
+  const target = here[0];
+  if (target) {
+    const where = url ? { cmd: "open-tab", url, cwd: process.cwd() } : { cmd: "open-tab" };
+    print(await control(target.socket, where));
+    return 0;
+  }
+  await requireGraphics(check);
+  const argv = url ? [url] : [];
+  if (interactiveTty()) return openHere(argv);
+  if (!canSplit(check.terminal)) fail(cannotOpenPanes(check.terminal));
+  const split = url && fs.existsSync(url) ? [path.resolve(url)] : argv;
+  split.push("--split-dir=right");
+  const tty = ownTtyPath() ?? callerTty().path;
+  if (tty) split.push(`--parent-tty=${tty}`);
+  print(await launchInSplit(check.terminal!, "right", split, null));
+  return 0;
+}
+
+async function requireGraphics(check: TerminalCheck) {
+  if (check.graphics !== "unsupported") return;
   process.stderr.write(unsupportedGraphicsMessage(process.stderr.isTTY === true));
   process.exit(1);
 }
@@ -372,12 +442,13 @@ async function openCommand(args: string[]) {
   if (positionals.length > 1) {
     fail(`unexpected ${positionals[1]} (one url; --split <direction> opens a new pane)`);
   }
-  await requireKittyGraphics();
+  await requireGraphics(await currentTerminal());
   if (!split && interactiveTty()) {
     return openHere(args);
   }
+  const terminal = (await currentTerminal()).terminal;
   const direction = split ?? "right";
-  const backend = detectBackend();
+  if (!canSplit(terminal)) fail(cannotOpenPanes(terminal));
   const url = args.find((arg) => !arg.startsWith("-"));
   const own = ownTtyPath();
   const caller = own ? null : callerTty();
@@ -386,23 +457,10 @@ async function openCommand(args: string[]) {
     if (refusal) fail(refusal);
   }
   const tty = own ?? caller?.path ?? null;
-  const records = await instances();
-  if (records.length > 0) {
-    const found = locate(records, await backend.panes());
-    const target = reusable(found, split, tty);
-    if (target) {
-      return print(
-        await control(
-          target.socket,
-          url ? { cmd: "open-tab", url, cwd: process.cwd() } : { cmd: "open-tab" },
-        ),
-      );
-    }
-  }
   const argv = args.map((arg) => (arg === url && fs.existsSync(arg) ? path.resolve(arg) : arg));
   argv.push(`--split-dir=${direction}`);
   if (tty) argv.push(`--parent-tty=${tty}`);
-  print(await launchInSplit(backend, direction, argv, size));
+  print(await launchInSplit(terminal!, direction, argv, size));
 }
 
 function splitPassthrough(args: string[]): { own: string[]; passthrough: string[] } {
@@ -448,11 +506,8 @@ async function main(): Promise<number> {
   }
   if (command === "help") return helpCommand(args[0]);
   if (asksForHelp(args)) {
-    const help = commandHelp(command);
-    if (help) {
-      process.stdout.write(help);
-      return 0;
-    }
+    process.stdout.write(commandHelp(command) ?? rootHelp());
+    return 0;
   }
   if (command === "open") {
     await openCommand(args);
@@ -462,11 +517,17 @@ async function main(): Promise<number> {
     requirePaneAccess();
     const all = takeBoolFlag(args, "--all");
     const json = takeBoolFlag(args, "--json");
-    await lsCommand(detectBackend(), all, json);
+    await lsCommand((await currentTerminal()).terminal, all, json);
     return 0;
   }
   if (command === "setup") return setupCommand();
   if (command === "upgrade") return upgradeCommand();
+  if (command === "shutdown") return shutdownDaemon();
+  if (command === "new-tab") {
+    requirePaneAccess();
+    const key = takeFlag(args, "--browser");
+    return newTabCommand(args.find((arg) => !arg.startsWith("-")), key);
+  }
   if (command === "action") {
     requirePaneAccess();
     const { own, passthrough } = splitPassthrough(args);
@@ -478,7 +539,7 @@ async function main(): Promise<number> {
       passthrough,
     };
     if (own.length > 0) fail(`unexpected ${own[0]} — put agent-browser arguments after --`);
-    return actionCommand(detectBackend(), options);
+    return actionCommand((await currentTerminal()).terminal, options);
   }
   const rest = process.argv.slice(2);
   if (asksForHelp(rest)) {

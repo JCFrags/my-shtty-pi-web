@@ -19,7 +19,7 @@ pub mod surfaces;
 mod terminal;
 mod text_input;
 mod throttle;
-mod tmux;
+pub mod wrapper;
 mod tree;
 mod wrap;
 

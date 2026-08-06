@@ -7,8 +7,6 @@ import { app } from "electron";
 import { runDaemon } from "./daemon";
 import { LOGS_DIR, ensureDataDir } from "pixel-store";
 import { claimProfile } from "./profile";
-import { createSession } from "./session/session";
-import type { SessionHandle } from "./session/session";
 
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("disable-background-timer-throttling");
@@ -22,7 +20,6 @@ app.commandLine.appendSwitch("log-file", path.join(LOGS_DIR, "chromium.log"));
 app.setName("terminal-browser");
 claimProfile();
 
-let session: SessionHandle | null = null;
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -38,26 +35,14 @@ function freePort(): Promise<number> {
   });
 }
 
-process.on("SIGINT", () => (session ? session.close() : app.exit(130)));
-process.on("SIGTERM", () => (session ? session.close() : app.exit(143)));
+process.on("SIGINT", () => app.exit(130));
+process.on("SIGTERM", () => app.exit(143));
 
 void (async () => {
   const cdpPort = await freePort().catch(() => null);
   if (cdpPort != null) app.commandLine.appendSwitch("remote-debugging-port", String(cdpPort));
   await app.whenReady();
-  if (process.argv.slice(2).includes("--daemon")) {
-    await runDaemon(cdpPort);
-    return;
-  }
-  const argv = process.argv.slice(2);
-  session = createSession({
-    key: String(process.pid),
-    argv,
-    env: process.env,
-    cwd: argv.find((arg) => arg.startsWith("--cwd="))?.slice("--cwd=".length) ?? process.cwd(),
-    cdpPort,
-    onClose: (code) => app.exit(code),
-  });
+  await runDaemon(cdpPort);
 })().catch((error) => {
   process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
   app.exit(1);

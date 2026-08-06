@@ -2,28 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 
-export type Direction = "right" | "left" | "down" | "up";
-
-export interface Pane {
-  window: string;
-  tab: string;
-  pane: string;
-  title: string;
-  self: boolean;
-}
-
-export interface Backend {
-  app: "ghostty" | "kitty" | "wezterm" | "tmux"
-  panes(): Promise<Pane[]>;
-  listAll(): Promise<Omit<Pane, "self">[]>;
-  split(direction: Direction, command: string[], size?: number | null): Promise<void>;
-  focusPane(titleNeedle: string): Promise<boolean>;
-  focusSelf(): Promise<boolean>;
-  sendText(paneId: string, text: string): Promise<boolean>;
-  resizePane?(titleNeedle: string, grow: Direction, points: number): Promise<boolean>;
-  closePane?(titleNeedle: string): Promise<boolean>;
-  zoomPane?(titleNeedle: string): Promise<boolean>;
-}
+import type { Pane } from "./terminal";
 
 export interface CallerTty {
   path: string | null;
@@ -50,13 +29,18 @@ export function callerTty(): CallerTty {
   return { path: null, denied: false };
 }
 
-export function setPaneTitle(tty: string, title: string): void {
-  fs.writeFileSync(tty, `\x1b]2;${title}\x07`);
-}
 
 export function setPaneWorkingDirectory(tty: string, directory: string): void {
   const encoded = directory.split("/").map(encodeURIComponent).join("/");
   fs.writeFileSync(tty, `\x1b]7;file://${os.hostname()}${encoded}\x07`);
+}
+
+export async function paneById(
+  panes: () => Promise<Pane[]>,
+  id: string | null | undefined,
+): Promise<Pane | null> {
+  if (!id) return null;
+  return (await panes()).find((pane) => pane.id === id) ?? null;
 }
 
 export function shellQuote(argv: string[]): string {

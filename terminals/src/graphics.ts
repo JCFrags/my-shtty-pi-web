@@ -1,5 +1,7 @@
 import fs from "node:fs";
 
+import type { Terminal } from "./terminal";
+
 export type GraphicsSupport = "supported" | "unsupported" | "unknown";
 
 export const SKIP_ENV = "TERMINAL_BROWSER_SKIP_GRAPHICS_CHECK";
@@ -12,9 +14,9 @@ function passthrough(seq: string): string {
   return `\x1bPtmux;${seq.replaceAll("\x1b", "\x1b\x1b")}\x1b\\`;
 }
 
-function probeSequence(tmux: boolean): string {
+function probeSequence(wrap: boolean): string {
   const query = `\x1b_Gi=${PROBE_ID},a=q,t=d,f=24,s=1,v=1;AAAA\x1b\\`;
-  return `${tmux ? passthrough(query) : query}\x1b[c`;
+  return `${wrap ? passthrough(query) : query}\x1b[c`;
 }
 
 function graphicsReply(buffer: string): boolean | null {
@@ -26,88 +28,100 @@ function graphicsReply(buffer: string): boolean | null {
   return rest.startsWith("OK");
 }
 
-function sawPrimaryDa(buffer: string): boolean {
-  return /\x1b\[\?[0-9;]*c/.test(buffer);
-}
-
-export function probeKittyGraphics(
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<GraphicsSupport> {
+/** Asks the terminal whether it can draw images. Only works on a real tty. */
+export function probeGraphics(terminal: Terminal | null): Promise<GraphicsSupport> {
   const stdin = process.stdin;
-  if (!stdin.isTTY || !process.stdout.isTTY || typeof stdin.setRawMode !== "function") {
+  if (!stdin.isTTY || !process.stdout.isTTY || !stdin.setRawMode) {
     return Promise.resolve("unknown");
   }
 
-  const tmux = Boolean(env.TMUX);
   const wasRaw = stdin.isRaw;
 
   return new Promise<GraphicsSupport>((resolve) => {
     let buffer = "";
+    let timer: NodeJS.Timeout | null = null;
     let done = false;
-    let timer: NodeJS.Timeout;
 
-    const finish = (result: GraphicsSupport) => {
+    const finish = (graphics: GraphicsSupport) => {
       if (done) return;
       done = true;
-      clearTimeout(timer);
-      stdin.removeListener("data", onData);
-      stdin.pause();
-      // leave the tty exactly as we found it — the caller may still need to read
+      if (timer) clearTimeout(timer);
+      stdin.off("data", onData);
       try {
-        stdin.setRawMode(wasRaw);
-      } catch {}
-      resolve(result);
+        if (!wasRaw) stdin.setRawMode?.(false);
+      } catch { }
+      if (!stdin.isPaused()) stdin.pause();
+      resolve(graphics);
     };
 
     const onData = (chunk: Buffer) => {
       buffer += chunk.toString("binary");
       const reply = graphicsReply(buffer);
       if (reply !== null) return finish(reply ? "supported" : "unsupported");
-      // inside tmux the DA1 answer comes from tmux itself, so it can beat the outer
-      // terminal's passthrough reply — there it is not evidence of anything
-      if (!tmux && sawPrimaryDa(buffer)) return finish("unsupported");
       if (buffer.length > 1024) finish("unknown");
     };
 
     try {
       stdin.setRawMode(true);
     } catch {
-      return resolve("unknown");
+      return finish("unknown");
     }
     stdin.resume();
     stdin.on("data", onData);
 
-    timer = setTimeout(() => {
-      finish(sawPrimaryDa(buffer) ? "unsupported" : "unknown");
-    }, PROBE_TIMEOUT_MS);
+    timer = setTimeout(() => finish("unknown"), PROBE_TIMEOUT_MS);
 
     try {
-      fs.writeSync(1, probeSequence(tmux));
+      fs.writeSync(1, probeSequence(terminal?.wrapper === "tmux"));
     } catch {
       finish("unknown");
     }
   });
 }
 
-/** Best guess from the environment, for when we cannot probe the tty. */
-export function graphicsFromEnv(env: NodeJS.ProcessEnv = process.env): GraphicsSupport {
-  const term = env.TERM ?? "";
-  if (term.includes("kitty") || env.KITTY_WINDOW_ID || env.KITTY_PID) return "supported";
-  if (term.includes("ghostty") || env.TERM_PROGRAM === "ghostty" || env.GHOSTTY_RESOURCES_DIR) {
-    return "supported";
-  }
-  if (env.TERM_PROGRAM === "WezTerm" || env.WEZTERM_PANE) return "supported";
-  // tmux hides whatever is outside it; without a probe we cannot say
-  if (env.TMUX) return "unknown";
-  return "unsupported";
-}
+export function panePixels(): Promise<{ width: number; height: number } | null> {
+  const stdin = process.stdin;
+  if (!stdin.isTTY || !process.stdout.isTTY || !stdin.setRawMode) return Promise.resolve(null);
 
-export async function checkKittyGraphics(
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<GraphicsSupport> {
-  if (env[SKIP_ENV]) return "supported";
-  const probed = await probeKittyGraphics(env);
-  return probed === "unknown" ? graphicsFromEnv(env) : probed;
+  const wasRaw = stdin.isRaw;
+  return new Promise((resolve) => {
+    let buffer = "";
+    let timer: NodeJS.Timeout | null = null;
+    let done = false;
+
+    const finish = (value: { width: number; height: number } | null) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      stdin.off("data", onData);
+      try {
+        if (!wasRaw) stdin.setRawMode?.(false);
+      } catch { }
+      if (!stdin.isPaused()) stdin.pause();
+      resolve(value);
+    };
+
+    const onData = (chunk: Buffer) => {
+      buffer += chunk.toString("binary");
+      const reply = /\x1b\[4;(\d+);(\d+)t/.exec(buffer);
+      if (reply) finish({ width: Number(reply[2]), height: Number(reply[1]) });
+    };
+
+    try {
+      stdin.setRawMode(true);
+    } catch {
+      return finish(null);
+    }
+    stdin.resume();
+    stdin.on("data", onData);
+    timer = setTimeout(() => finish(null), PROBE_TIMEOUT_MS);
+
+    try {
+      fs.writeSync(1, "\x1b[14t");
+    } catch {
+      finish(null);
+    }
+  });
 }
 
 export function unsupportedGraphicsMessage(color = false): string {
@@ -119,7 +133,7 @@ export function unsupportedGraphicsMessage(color = false): string {
     `  ${sgr("2", "We recommend Ghostty:")}`,
     `  ${sgr("4", "https://ghostty.org/download")}`,
     "",
-    `  ${sgr("2", "Any terminal that supports the kitty graphics protocol works too.")}`,
+    `  ${sgr("2", "Note: any terminal that supports the kitty graphics protocol is supported")}`,
     "",
   ].join("\n");
 }

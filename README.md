@@ -54,6 +54,11 @@ The outer UI of the browser is implemented using a graphics engine built on top 
 
 To get a local development setup of terminal-browser, the recommended way is to ask a coding agent.
 
+### Adding enhanced support for a new terminal
+`terminal-browser`'s cli includes sub commands that rely on terminal/multiplexer scripting features. 
+To implement support for a terminal/multiplexer not yet supported, reference existing implementations
+located here terminals/src/terminals. 
+
 ### [Discord](https://discord.gg/t3jzHHfc6z)
 
 ### Acknowledgments

@@ -23,6 +23,7 @@ use pointer::DragTarget;
 pub use overlay::HighlightArea;
 
 use crate::canvas::Canvas;
+use crate::wrapper::Wrapper;
 use crate::logging;
 use crate::menu::MenuController;
 use crate::native::NativeScroll;
@@ -63,7 +64,7 @@ pub struct EngineConfig {
     pub cell_metrics_font: usize,
     pub watch_resize: bool,
     pub tty: Option<String>,
-    pub tmux: bool,
+    pub wrapper: Wrapper,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -322,14 +323,14 @@ pub struct Engine {
 
 const COLOR_SETTLE_DELAY: Duration = Duration::from_millis(50);
 const COLOR_REQUEST_INTERVAL: Duration = Duration::from_secs(1);
-const TMUX_RESIZE_POLL: Duration = Duration::from_millis(500);
+const RELAYED_RESIZE_POLL: Duration = Duration::from_millis(500);
 
 impl Engine {
     pub fn new(config: EngineConfig) -> io::Result<Self> {
         assert!(!config.fonts.is_empty());
         let mut term = match &config.tty {
-            Some(path) => Terminal::open(path, config.tmux)?,
-            None => Terminal::new()?,
+            Some(path) => Terminal::open(path, config.wrapper)?,
+            None => Terminal::new(config.wrapper)?,
         };
         if config.watch_resize {
             term.watch_resize()?;
@@ -351,7 +352,7 @@ impl Engine {
                 cell.0,
                 cell.1,
                 use_native,
-                if term.is_tmux() {
+                if term.relayed() {
                     ", tmux passthrough"
                 } else {
                     ""
@@ -642,8 +643,8 @@ impl Engine {
             }
             None => first_wait,
         };
-        let first_wait = if self.term.is_tmux() {
-            Some(first_wait.map_or(TMUX_RESIZE_POLL, |w| w.min(TMUX_RESIZE_POLL)))
+        let first_wait = if self.term.relayed() {
+            Some(first_wait.map_or(RELAYED_RESIZE_POLL, |w| w.min(RELAYED_RESIZE_POLL)))
         } else {
             first_wait
         };

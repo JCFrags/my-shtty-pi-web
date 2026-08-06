@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { AGENT_SOCKETS_DIR } from "pixel-store";
-import type { Backend } from "pixel-terminals";
+import type { Terminal } from "pixel-terminals";
 
 import { control } from "./control";
 import { browsers, describe, recordKey, targets } from "./instances";
@@ -140,8 +140,8 @@ function matchTab(
   throw new Error(`could not find terminal browser tab ${tab.id} (${tab.url}) among agent-browser's tabs`);
 }
 
-async function select(backend: Backend, options: ActionOptions): Promise<Selection> {
-  const all = await browsers(backend);
+async function select(terminal: Terminal | null, options: ActionOptions): Promise<Selection> {
+  const all = await browsers(terminal);
   if (all.length === 0) throw new Error("no terminal browsers running — start one with: terminal-browser open");
 
   if (options.targetId) {
@@ -243,8 +243,8 @@ async function interceptTabLifecycle(
   return null;
 }
 
-export async function actionCommand(backend: Backend, options: ActionOptions) {
-  const selection = await select(backend, options);
+export async function actionCommand(terminal: Terminal | null, options: ActionOptions) {
+  const selection = await select(terminal, options);
   const { browser, tab } = selection;
 
   if (options.passthrough.length === 0) {

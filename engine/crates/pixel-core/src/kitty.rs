@@ -1,3 +1,4 @@
+use crate::wrapper::Wrapper;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 
@@ -21,12 +22,8 @@ impl Placement {
     }
 }
 
-fn emit(out: &mut Vec<u8>, seq: &[u8], tmux: bool) {
-    if tmux {
-        out.extend_from_slice(&crate::tmux::passthrough(seq));
-    } else {
-        out.extend_from_slice(seq);
-    }
+fn emit(out: &mut Vec<u8>, seq: &[u8], wrapper: Wrapper) {
+    out.extend_from_slice(&wrapper.wrap(seq));
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,13 +47,13 @@ pub(crate) fn kitty_query_medium(
     medium: Medium,
     width: u32,
     height: u32,
-    tmux: bool,
+    wrapper: Wrapper,
 ) -> Vec<u8> {
     let payload = BASE64.encode(name);
     let t = medium.key();
     let seq = format!("\x1b_Gi={image_id},a=q,t={t},f=32,s={width},v={height};{payload}\x1b\\");
     let mut out = Vec::new();
-    emit(&mut out, seq.as_bytes(), tmux);
+    emit(&mut out, seq.as_bytes(), wrapper);
     out
 }
 
@@ -69,7 +66,7 @@ pub(crate) fn kitty_transmit_named(
     name: &str,
     medium: Medium,
     placement: Placement,
-    tmux: bool,
+    wrapper: Wrapper,
 ) -> Vec<u8> {
     let payload = BASE64.encode(name);
     let keys = placement.keys();
@@ -78,12 +75,12 @@ pub(crate) fn kitty_transmit_named(
         "\x1b_Ga=T,f=32,s={width},v={height},t={t},i={image_id},{keys},q=2;{payload}\x1b\\"
     );
     let mut out = Vec::new();
-    emit(&mut out, seq.as_bytes(), tmux);
+    emit(&mut out, seq.as_bytes(), wrapper);
     out
 }
 
 pub fn kitty_transmit(image_id: u32, width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
-    kitty_transmit_placed(image_id, width, height, rgba, Placement::Cursor, false)
+    kitty_transmit_placed(image_id, width, height, rgba, Placement::Cursor, Wrapper::None)
 }
 
 pub(crate) fn kitty_transmit_placed(
@@ -92,7 +89,7 @@ pub(crate) fn kitty_transmit_placed(
     height: u32,
     rgba: &[u8],
     placement: Placement,
-    tmux: bool,
+    wrapper: Wrapper,
 ) -> Vec<u8> {
     assert_eq!(rgba.len(), (width * height * 4) as usize);
     let compressed = crate::profiler::span("kitty.compress", || {
@@ -120,14 +117,14 @@ pub(crate) fn kitty_transmit_placed(
         seq.push(b';');
         seq.extend_from_slice(chunk);
         seq.extend_from_slice(b"\x1b\\");
-        emit(&mut out, &seq, tmux);
+        emit(&mut out, &seq, wrapper);
     }
     out
 }
 // verify this is needed later
-pub(crate) fn kitty_delete(image_id: u32, tmux: bool) -> Vec<u8> {
-    if tmux {
-        crate::tmux::passthrough(format!("\x1b_Ga=d,d=I,i={image_id},q=2\x1b\\").as_bytes())
+pub(crate) fn kitty_delete(image_id: u32, wrapper: Wrapper) -> Vec<u8> {
+    if wrapper.relayed() {
+        wrapper.wrap(format!("\x1b_Ga=d,d=I,i={image_id},q=2\x1b\\").as_bytes())
     } else {
         b"\x1b_Ga=d,d=A,q=2\x1b\\".to_vec()
     }
@@ -251,7 +248,7 @@ mod tests {
             64,
             &pixels,
             Placement::Cells { cols: 8, rows: 4 },
-            true,
+            Wrapper::Tmux,
         );
         let text = String::from_utf8_lossy(&out);
         assert!(text.starts_with("\x1bPtmux;\x1b\x1b_Ga=T,"));
@@ -265,10 +262,10 @@ mod tests {
     }
 
     #[test]
-    fn delete_is_scoped_to_our_image_under_tmux() {
-        assert_eq!(kitty_delete(5, false), b"\x1b_Ga=d,d=A,q=2\x1b\\");
+    fn delete_is_scoped_to_our_image_when_relayed() {
+        assert_eq!(kitty_delete(5, Wrapper::None), b"\x1b_Ga=d,d=A,q=2\x1b\\");
         assert_eq!(
-            kitty_delete(5, true),
+            kitty_delete(5, Wrapper::Tmux),
             b"\x1bPtmux;\x1b\x1b_Ga=d,d=I,i=5,q=2\x1b\x1b\\\x1b\\"
         );
     }

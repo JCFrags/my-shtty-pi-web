@@ -116,6 +116,10 @@ export async function runDaemon(cdpPort: number | null): Promise<void> {
           session?.nudgeResize();
         } else if (message.cmd === "close") {
           session?.close();
+        } else if (message.cmd === "shutdown") {
+          reply({ ok: true, sessions: sessions.size });
+          connection.end();
+          setTimeout(() => app.exit(0), 50);
         }
       }
     });
