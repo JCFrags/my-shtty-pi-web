@@ -9,6 +9,7 @@ export interface Pane {
 
 export interface PaneContext {
   tty: string | null;
+  cwd: string;
 }
 
 export interface SplitRequest {

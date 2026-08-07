@@ -297,17 +297,7 @@ async function attachHere(argv: string[]): Promise<never> {
 }
 
 async function openHere(argv: string[]): Promise<never> {
-  try {
-    return await attachHere(argv);
-  } catch (error) {
-    process.stderr.write(`terminal-browser: daemon attach failed (${String(error)}); starting a separate browser\n`);
-  }
-  const { command, cwd } = browserLaunchCommand([...argv, `--cwd=${process.cwd()}`]);
-  const child = spawn(command[0], command.slice(1), { cwd, stdio: "inherit" });
-  const code: number = await new Promise((resolve) =>
-    child.on("exit", (status) => resolve(status ?? 0)),
-  );
-  process.exit(code);
+  return attachHere(argv).catch((error) => fail(`could not start the browser: ${String(error)}`));
 }
 
 const DIRECTIONS: Direction[] = ["right", "left", "down", "up"];
@@ -343,7 +333,7 @@ async function launchInSplit(
   argv: string[],
   size?: number | null,
 ): Promise<InstanceRecord> {
-  const from = await terminal.getCurrentPane?.({ tty: ownTtyPath() ?? callerTty().path });
+  const from = await terminal.getCurrentPane?.({ tty: ownTtyPath() ?? callerTty().path, cwd: process.cwd() });
   if (!from) fail(`could not work out which ${terminal.name} pane you are in`);
   const before = new Set((await instances()).map(recordKey));
   await terminal.split!({

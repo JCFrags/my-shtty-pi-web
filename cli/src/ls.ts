@@ -63,7 +63,7 @@ export async function lsCommand(terminal: Terminal | null, all: boolean, json: b
     }
     return;
   }
-  const self = (await terminal?.getCurrentPane?.({ tty: callerTty().path })) ?? null;
+  const self = (await terminal?.getCurrentPane?.({ tty: callerTty().path, cwd: process.cwd() })) ?? null;
   process.stdout.write(
     `${JSON.stringify(
       { self: self ? { tab: self.tab, pane: self.id } : null, browsers: list },

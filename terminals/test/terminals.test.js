@@ -28,7 +28,7 @@ for (const file of fs.readdirSync(FIXTURES)) {
     const { run } = recorder(exec);
     const terminal = detect(env, run);
     assert.equal(terminal?.name, expect.name);
-    assert.deepEqual(await terminal.getCurrentPane({ tty: null }), expect.currentPane);
+    assert.deepEqual(await terminal.getCurrentPane({ tty: null, cwd: "/" }), expect.currentPane);
   });
 
   test(`${expect.name}: opens a split`, async () => {

@@ -73,7 +73,7 @@ export function reusable(
 }
 
 export async function browsers(terminal: Terminal | null): Promise<Browser[]> {
-  const current = (await terminal?.getCurrentPane?.({ tty: callerTty().path })) ?? null;
+  const current = (await terminal?.getCurrentPane?.({ tty: callerTty().path, cwd: process.cwd() })) ?? null;
   const records = await instances();
   return locate(records, current, terminal?.name ?? null, await asked(records));
 }

@@ -301,7 +301,7 @@ class Session {
   private findOwnPane(): Promise<Pane | null> {
     if (this.ownPane) return Promise.resolve(this.ownPane);
     this.finding ??= (
-      this.terminal?.getCurrentPane?.({ tty: this.ctx.tty ?? null }) ?? Promise.resolve(null)
+      this.terminal?.getCurrentPane?.({ tty: this.ctx.tty ?? null, cwd: this.ctx.cwd }) ?? Promise.resolve(null)
     )
       .catch(() => null)
       .then((pane) => {

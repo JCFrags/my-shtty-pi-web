@@ -156,11 +156,11 @@ export const ghostty: Detect = (env, run) => {
     return listed;
   }
 
-  async function getCurrentPane({ tty }: PaneContext): Promise<Pane | null> {
+  async function getCurrentPane({ tty, cwd }: PaneContext): Promise<Pane | null> {
     if (!tty) return null;
     const before = await panes();
     const marker = markerDirectory();
-    let restoreTo = process.cwd();
+    let restoreTo = cwd;
     try {
       for (let attempt = 0; attempt < MARKER_ATTEMPTS; attempt++) {
         setPaneWorkingDirectory(tty, marker);
