@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/pixel-core", "crates/pixel-node", "examples/typing"]
+members = ["crates/pixel-core", "crates/pixel-node"]
 
 [workspace.package]
 version = "0.1.0"

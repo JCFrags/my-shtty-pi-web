@@ -53,6 +53,32 @@ Checks this install's release channel and installs the latest version. Does
 nothing when already up to date.
 `,
   },
+  "new-tab": {
+    summary: "Open a tab here, and a browser too if there is none",
+    usage: "terminal-browser new-tab [url] [options]",
+    body: `
+      Opens a tab in a browser already open. By default, if there is a single browser open
+      in the current terminal tab, it will open a tab in that browser. If there are no browsers,
+      a new browser will be opened with the specified tab as the initial (if ran from a shell without a TTY, it will open in a split to the right). If there are mulitiple browsers,
+      new-tab will error and a --browser <key> is a required argument (<key> can be found by running terminal-browser ls)
+
+      Options:
+        --browser <key>     A browser key from terminal-browser ls
+
+      Examples:
+        terminal-browser new-tab github.com
+        terminal-browser new-tab --browser 90107-1 localhost:3000
+    `,
+  },
+  shutdown: {
+    summary: "Stop the daemon",
+    usage: "terminal-browser shutdown",
+    body: `
+Every browser in a terminal pane shares one browser process as an optimization. To
+fully quit terminal-browser operations, you can use this shutdown command. This will
+close all open browsers.
+`,
+  },
   action: {
     summary: "Use the open browser through the agent-browser CLI",
     usage: "terminal-browser action [selectors] -- <command>",

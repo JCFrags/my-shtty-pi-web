@@ -45,6 +45,7 @@ export interface EngineInfo {
   cellWidth: number;
   cellHeight: number;
   basePx: number;
+  kittyKeyboard: boolean;
   colors: TerminalColors;
 }
 
@@ -110,7 +111,7 @@ export interface DiffRow {
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const binding = require("../native/pixel.node") as {
-  PixelEngine: new (tty?: string, tmux?: boolean) => NativeEngine;
+  PixelEngine: new (tty?: string, wrapper?: string) => NativeEngine;
   highlight(source: string, language: string): HighlightSpan[];
   highlightCaptures(): string[];
   diff(oldSource: string, newSource: string, contextLines?: number): DiffRow[];
@@ -128,8 +129,8 @@ const binding = require("../native/pixel.node") as {
   ): Promise<Buffer>;
 };
 
-export function createNativeEngine(tty?: string, tmux?: boolean): NativeEngine {
-  const pixelEngine =  new binding.PixelEngine(tty, tmux);
+export function createNativeEngine(tty?: string, wrapper?: string): NativeEngine {
+  const pixelEngine =  new binding.PixelEngine(tty, wrapper);
 
   return pixelEngine
 }

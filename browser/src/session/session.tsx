@@ -4,8 +4,8 @@ import path from "node:path";
 import { app, screen } from "electron";
 import { createRoot } from "pixel-react";
 import type { DragEvent, EngineKeyEvent, PixelRoot, Surface } from "pixel-react";
-import { detectBackend, reportedPixelUnit } from "pixel-terminals";
-import type { Backend } from "pixel-terminals";
+import { detect } from "pixel-terminals";
+import type { Pane, Terminal } from "pixel-terminals";
 
 import { browserSession, configureBrowserSession } from "../page/browser-session";
 import type { DownloadProgress } from "../page/browser-session";
@@ -92,15 +92,17 @@ interface NewTabState {
 
 class Session {
   private readonly ctx: SessionContext;
-  private readonly backend: Backend | null;
-  private readonly tmux: boolean;
+  private readonly terminal: Terminal | null;
   private readonly marker: string;
+  private ownPane: Pane | null = null;
+  private finding: Promise<Pane | null> | null = null;
   private readonly hideToolbar: boolean;
   private readonly partition: string | null;
-  private readonly paletteBinding: KeyBinding | null;
-  private readonly findBinding: KeyBinding | null;
-  private readonly devtoolsBinding: KeyBinding | null;
-  private readonly consoleBinding: KeyBinding | null;
+  private paletteBinding: KeyBinding | null = null;
+  private findBinding: KeyBinding | null = null;
+  private devtoolsBinding: KeyBinding | null = null;
+  private consoleBinding: KeyBinding | null = null;
+  private noSuper = false;
   private readonly tabs: TabManager;
   private readonly fallbackState: BrowserState;
 
@@ -153,18 +155,10 @@ class Session {
 
   constructor(ctx: SessionContext) {
     this.ctx = ctx;
-    this.backend = terminalBackend(ctx.env);
-    this.tmux = !!ctx.env.TMUX;
+    this.terminal = detect(ctx.env);
     this.marker = `terminal-browser:${ctx.key}`;
     this.hideToolbar = ctx.argv.includes("--no-toolbar");
     this.partition = flagValue(ctx.argv, "--partition");
-    const binding = (flag: string, fallback: string) =>
-      parseKeyBinding(flagValue(ctx.argv, flag) ?? defaultBinding(fallback, ctx.env));
-    this.paletteBinding = binding("--palette-key", "super+p");
-    this.findBinding = binding("--find-key", "super+shift+f");
-    // we should use 2 shortcuts for console, also not sure if console actually works as expected
-    this.devtoolsBinding = binding("--devtools-key", "super+shift+i");
-    this.consoleBinding = binding("--console-key", "super+alt+j");
     this.fallbackState = initialBrowserState(this.initialUrl());
     configureBrowserSession(this.partition, (progress) => this.showDownload(progress));
     this.tabs = new TabManager(
@@ -222,7 +216,7 @@ class Session {
     this.displayScale = this.hostDisplayScale();
     this.root = createRoot({
       tty: this.ctx.tty,
-      tmux: this.tmux,
+      wrapper: this.terminal?.wrapper,
       keyEventTypes: true,
       onKey: (event) => this.handleKey(event),
       onPaste: (text) => {
@@ -260,6 +254,7 @@ class Session {
     if (!this.root.sharedTextures) {
       throw new Error("terminal-browser requires the patched Electron with shared texture support");
     }
+    this.applyKeyBindings(this.root.info.kittyKeyboard);
     this.popupSurface = this.root.createSurface();
     this.devtoolsSurface = this.root.createSurface();
     this.followCellZoom();
@@ -271,6 +266,14 @@ class Session {
     this.registry = new Registry({
       key: this.ctx.key,
       tty: this.ctx.tty ?? null,
+      where: async () => {
+        const pane = await this.findOwnPane();
+        return {
+          terminal: this.terminal?.name ?? null,
+          tab: pane?.tab ?? null,
+          pane: pane?.id ?? null,
+        };
+      },
       splitDir: splitDirection(flagValue(this.ctx.argv, "--split-dir")),
       parentTty: flagValue(this.ctx.argv, "--parent-tty"),
       state: () => this.tabs.activeState ?? this.fallbackState,
@@ -291,11 +294,37 @@ class Session {
       targets: () => this.tabs.targets(),
     });
     this.registry.setCdpPort(this.ctx.cdpPort);
+    void this.findOwnPane();
     this.render();
   }
 
+  private findOwnPane(): Promise<Pane | null> {
+    if (this.ownPane) return Promise.resolve(this.ownPane);
+    this.finding ??= (
+      this.terminal?.getCurrentPane?.({ tty: this.ctx.tty ?? null, cwd: this.ctx.cwd }) ?? Promise.resolve(null)
+    )
+      .catch(() => null)
+      .then((pane) => {
+        this.ownPane = pane;
+        this.finding = null;
+        return pane;
+      });
+    return this.finding;
+  }
+
+  private applyKeyBindings(kittyKeyboard: boolean) {
+    this.noSuper = !kittyKeyboard;
+    const binding = (flag: string, fallback: string) =>
+      parseKeyBinding(flagValue(this.ctx.argv, flag) ?? defaultBinding(fallback, this.noSuper));
+    this.paletteBinding = binding("--palette-key", "super+p");
+    this.findBinding = binding("--find-key", "super+shift+f");
+    // we should use 2 shortcuts for console, also not sure if console actually works as expected
+    this.devtoolsBinding = binding("--devtools-key", "super+shift+i");
+    this.consoleBinding = binding("--console-key", "super+alt+j");
+  }
+
   private cmdHeld(event: EngineKeyEvent): boolean {
-    return event.mods.super || (this.tmux && event.mods.alt);
+    return event.mods.super || (this.noSuper && event.mods.alt);
   }
 
   private isPasteKey(event: EngineKeyEvent): boolean {
@@ -323,7 +352,7 @@ class Session {
     if (text) this.root?.setClipboard(text);
   }
 
- 
+
   private async cutSelection() {
     const input = this.focusedInput();
     if (!input) return;
@@ -737,11 +766,11 @@ class Session {
         browser?.reload();
         return;
       }
-      if ((event.mods.super || event.mods.ctrl || event.mods.alt) && event.key === "[") {
+      if (this.cmdHeld(event) && event.key === "[") {
         browser?.back();
         return;
       }
-      if ((event.mods.super || event.mods.ctrl || event.mods.alt) && event.key === "]") {
+      if (this.cmdHeld(event) && event.key === "]") {
         browser?.forward();
         return;
       }
@@ -828,10 +857,10 @@ class Session {
       progress.state === "progressing"
         ? null
         : setTimeout(() => {
-            this.download = null;
-            this.downloadTimer = null;
-            this.render();
-          }, 4000);
+          this.download = null;
+          this.downloadTimer = null;
+          this.render();
+        }, 4000);
     this.render();
   }
 
@@ -1233,7 +1262,7 @@ class Session {
   private hostDisplayScale() {
     const explicit = Number(this.ctx.env.TERMINAL_BROWSER_DISPLAY_SCALE);
     if (Number.isFinite(explicit) && explicit > 0) return explicit;
-    if (reportedPixelUnit(this.ctx.env) === "css") return 1;
+    if (this.terminal?.reportsCssPixels) return 1;
     return screen.getPrimaryDisplay().scaleFactor;
   }
 
@@ -1265,8 +1294,8 @@ function isPlainKey(event: EngineKeyEvent, key: string): boolean {
   );
 }
 
-function defaultBinding(spec: string, env: NodeJS.ProcessEnv): string {
-  if (!env.TMUX) return spec;
+function defaultBinding(spec: string, noSuper: boolean): string {
+  if (!noSuper) return spec;
   const parts = spec.split("+");
   const key = parts.pop()!;
   const mods = [...new Set(parts.map((mod) => (mod === "super" ? "alt" : mod)))];
@@ -1291,10 +1320,3 @@ function rememberUrl(url: string) {
   } catch { }
 }
 
-function terminalBackend(env: NodeJS.ProcessEnv): Backend | null {
-  try {
-    return detectBackend(env);
-  } catch {
-    return null;
-  }
-}

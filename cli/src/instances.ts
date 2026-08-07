@@ -1,4 +1,5 @@
-import type { Backend, Direction, Pane } from "pixel-terminals";
+import { callerTty } from "pixel-terminals";
+import type { Direction, Pane, Terminal } from "pixel-terminals";
 
 import { control } from "./control";
 import { instances } from "./registry";
@@ -14,34 +15,49 @@ export interface TabTarget {
 }
 
 export interface Browser extends InstanceRecord {
-  window: string | null;
-  tab: string | null;
   pane: string | null;
+  paneTab: string | null;
   inCurrentTab: boolean;
 }
-
-const TITLE_PATTERN = /terminal-browser:([\w-]+)/;
 
 export function recordKey(record: InstanceRecord): string {
   return record.key ?? String(record.pid);
 }
 
-export function locate(records: InstanceRecord[], panes: Pane[]): Browser[] {
-  const self = panes.find((pane) => pane.self);
-  const byKey = new Map<string, Pane>();
-  for (const pane of panes) {
-    const match = TITLE_PATTERN.exec(pane.title);
-    if (match) byKey.set(match[1], pane);
-  }
+export interface Where {
+  terminal: string | null;
+  tab: string | null;
+  pane: string | null;
+}
+
+export async function asked(records: InstanceRecord[]): Promise<Map<string, Where>> {
+  const answers = await Promise.all(
+    records.map(async (record) => {
+      const where = await control(record.socket, { cmd: "where" }, 2000).catch(() => null);
+      return [recordKey(record), where as Where | null] as const;
+    }),
+  );
+  return new Map(
+    answers.filter((entry): entry is [string, Where] => entry[1] !== null),
+  );
+}
+
+export function locate(
+  records: InstanceRecord[],
+  current: Pane | null,
+  terminalName: string | null,
+  answers: Map<string, Where> = new Map(),
+): Browser[] {
   return records.map((record) => {
-    const pane = byKey.get(recordKey(record));
+    const said = answers.get(recordKey(record));
+    const claimed = said?.terminal === terminalName ? said : null;
+    const pane = claimed?.pane ?? null;
+    const paneTab = claimed?.tab ?? null;
     return {
       ...record,
-      window: pane?.window ?? null,
-      tab: pane?.tab ?? null,
-      pane: pane?.pane ?? null,
-      inCurrentTab:
-        !!pane && !!self && pane.window === self.window && pane.tab === self.tab,
+      pane,
+      paneTab,
+      inCurrentTab: !!paneTab && !!current && paneTab === current.tab,
     };
   });
 }
@@ -56,8 +72,10 @@ export function reusable(
   return candidates.find((browser) => tty !== null && browser.parentTty === tty) ?? candidates[0];
 }
 
-export async function browsers(backend: Backend): Promise<Browser[]> {
-  return locate(await instances(), await backend.panes());
+export async function browsers(terminal: Terminal | null): Promise<Browser[]> {
+  const current = (await terminal?.getCurrentPane?.({ tty: callerTty().path, cwd: process.cwd() })) ?? null;
+  const records = await instances();
+  return locate(records, current, terminal?.name ?? null, await asked(records));
 }
 
 export async function targets(browser: Browser): Promise<TabTarget[]> {
@@ -66,6 +84,7 @@ export async function targets(browser: Browser): Promise<TabTarget[]> {
 }
 
 export function describe(browser: Browser): string {
-  const where = browser.window ? `${browser.window}:${browser.tab}:${browser.pane}` : "no pane";
+  const where = browser.pane ? `${browser.paneTab}:${browser.pane}` : "no pane";
   return `${recordKey(browser)} (${where}) ${browser.url}`;
 }
+

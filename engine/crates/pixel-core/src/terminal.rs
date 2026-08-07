@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use rustix::termios::{self, OptionalActions, Termios};
 
 use crate::canvas::Canvas;
+use crate::wrapper::Wrapper;
 use crate::kitty::Placement;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -235,7 +236,7 @@ pub struct Terminal {
     transport: FrameTransport,
     frame_files: Vec<FrameFile>,
     frame_seq: u64,
-    tmux: bool,
+    wrapper: Wrapper,
     image_id: u32,
     placeholders: Option<(u32, u32)>,
     wake_rx: Option<rustix::fd::OwnedFd>,
@@ -248,6 +249,7 @@ pub struct Terminal {
     // if the terminal tells us when its palette changes (DEC private mode 2031)
     color_scheme_updates: bool,
     color_query: Option<ColorQuery>,
+    kitty_keyboard: bool,
 }
 
 #[derive(Default)]
@@ -306,29 +308,22 @@ impl Waker {
 }
 
 impl Terminal {
-    pub fn new() -> io::Result<Self> {
-        let tmux = crate::tmux::in_tmux();
-        if tmux {
-            crate::tmux::enable_passthrough();
-        }
+    pub fn new(wrapper: Wrapper) -> io::Result<Self> {
         Self::with_handle(
             TtyHandle::Stdio {
                 stdin: io::stdin(),
                 stdout: io::stdout(),
             },
-            tmux,
+            wrapper,
         )
     }
 
-    pub fn open(tty_path: &str, tmux: bool) -> io::Result<Self> {
-        if tmux {
-            crate::tmux::enable_passthrough_for_tty(tty_path);
-        }
+    pub fn open(tty_path: &str, wrapper: Wrapper) -> io::Result<Self> {
         let file = std::fs::File::options().read(true).write(true).open(tty_path)?;
-        Self::with_handle(TtyHandle::File(file), tmux)
+        Self::with_handle(TtyHandle::File(file), wrapper)
     }
 
-    fn with_handle(mut io: TtyHandle, tmux: bool) -> io::Result<Self> {
+    fn with_handle(mut io: TtyHandle, wrapper: Wrapper) -> io::Result<Self> {
         let saved = retry_intr(|| termios::tcgetattr(&io.read_fd()))?;
         let mut raw = saved.clone();
         raw.make_raw();
@@ -338,9 +333,6 @@ impl Terminal {
         io.out().write_all(
             b"\x1b[?1049h\x1b[?25l\x1b[?1003h\x1b[?1006h\x1b[?1016h\x1b[?1004h\x1b[?2004h\x1b[?2048h\x1b[>1u",
         )?; // enable many reporting modes so we get info about mouse/keyboard
-        if tmux {
-            io.out().write_all(b"\x1b[>4;2m")?;
-        }
         io.out().flush()?;
 
         let mut terminal = Self {
@@ -355,8 +347,8 @@ impl Terminal {
             transport: FrameTransport::Inline,
             frame_files: Vec::new(),
             frame_seq: 0,
-            tmux,
-            image_id: frame_image_id(tmux),
+            wrapper,
+            image_id: frame_image_id(wrapper.relayed()),
             placeholders: None,
             wake_rx: None,
             waker: None,
@@ -366,9 +358,15 @@ impl Terminal {
             clip_read: None,
             color_scheme_updates: false,
             color_query: None,
+            kitty_keyboard: false,
         };
-        terminal.mouse_pixels = !tmux && terminal.probe_mouse_pixels()?;
-        terminal.clipboard_data = !tmux && terminal.probe_clipboard_data()?;
+        terminal.kitty_keyboard = terminal.probe_kitty_keyboard()?;
+        if !terminal.kitty_keyboard {
+            terminal.io.out().write_all(b"\x1b[>4;2m")?;
+            terminal.io.out().flush()?;
+        }
+        terminal.mouse_pixels = !wrapper.relayed() && terminal.probe_mouse_pixels()?;
+        terminal.clipboard_data = !wrapper.relayed() && terminal.probe_clipboard_data()?;
         terminal.transport = terminal.probe_transport()?;
         terminal.color_scheme_updates = terminal.probe_color_scheme()?;
         if terminal.color_scheme_updates {
@@ -382,8 +380,12 @@ impl Terminal {
         self.color_scheme_updates
     }
 
-    pub fn is_tmux(&self) -> bool {
-        self.tmux
+    pub fn relayed(&self) -> bool {
+        self.wrapper.relayed()
+    }
+
+    pub fn kitty_keyboard(&self) -> bool {
+        self.kitty_keyboard
     }
 
     pub fn set_key_event_types(&mut self, enabled: bool) -> io::Result<()> {
@@ -410,29 +412,13 @@ impl Terminal {
             crate::logging::info("terminal", "frames go through a file the terminal re-reads");
             return Ok(FrameTransport::File);
         }
-        if self.tmux {
-            if let Ok(Some(tty)) = rustix::termios::ttyname(self.io.read_fd(), Vec::new())
-                .map(|name| name.into_string().ok())
-            {
-                crate::tmux::enable_passthrough_for_tty(&tty);
-            } else {
-                crate::tmux::enable_passthrough();
-            }
-            if self.probe_frame_file()? {
-                crate::logging::info(
-                    "terminal",
-                    "frames go through a file, after turning tmux passthrough on",
-                );
-                return Ok(FrameTransport::File);
-            }
-        }
         if self.probe_shared_memory()? {
             crate::logging::info("terminal", "frames go through shared memory");
             return Ok(FrameTransport::Shared);
         }
         crate::logging::warn(
             "terminal",
-            if self.tmux {
+            if self.wrapper.relayed() {
                 "no answer about file or shared memory frames under tmux, sending pixels inline — \
                  check `tmux show -p allow-passthrough`, or set TERMINAL_BROWSER_FRAMES=file"
             } else {
@@ -454,7 +440,7 @@ impl Terminal {
             crate::kitty::Medium::File,
             1,
             1,
-            self.tmux,
+            self.wrapper,
         ))?;
         self.io.out().flush()?;
         let reply = self.read_report(FRAME_PROBE_TIMEOUT_MS, |buf| {
@@ -475,7 +461,7 @@ impl Terminal {
             crate::kitty::Medium::Shared,
             1,
             1,
-            self.tmux,
+            self.wrapper,
         ))?;
         self.io.out().flush()?;
         let reply = self.read_report(FRAME_PROBE_TIMEOUT_MS, |buf| {
@@ -493,8 +479,6 @@ impl Terminal {
         ))
     }
 
-    /// Rewrites the next slot in place. The ring exists because the terminal may still be reading
-    /// the frame we sent last.
     fn write_frame_file(&mut self, data: &[u8]) -> io::Result<String> {
         if self
             .frame_files
@@ -535,7 +519,7 @@ impl Terminal {
         let mut frame = Vec::new();
         frame.extend_from_slice(b"\x1b[?2026h"); // mode 2026 atomic updates
         if shrank {
-            frame.extend_from_slice(&crate::kitty::kitty_delete(self.image_id, self.tmux));
+            frame.extend_from_slice(&crate::kitty::kitty_delete(self.image_id, self.wrapper));
             frame.extend_from_slice(b"\x1b[2J");
             if let Ok(ws) = self.size() {
                 let blank_row = " ".repeat(ws.cols as usize);
@@ -545,7 +529,7 @@ impl Terminal {
             }
             self.placeholders = None;
         }
-        let placement = if self.tmux {
+        let placement = if self.wrapper.relayed() {
             let (cols, rows) = self.grid_for(canvas);
             Placement::Cells { cols, rows }
         } else {
@@ -573,7 +557,7 @@ impl Terminal {
                 &name,
                 medium,
                 placement,
-                self.tmux,
+                self.wrapper,
             ));
         } else {
             frame.extend_from_slice(&crate::kitty::kitty_transmit_placed(
@@ -582,7 +566,7 @@ impl Terminal {
                 canvas.height,
                 &canvas.pixels,
                 placement,
-                self.tmux,
+                self.wrapper,
             ));
         }
         if let Placement::Cells { cols, rows } = placement
@@ -685,7 +669,7 @@ impl Terminal {
     }
 
     fn lone_escape_deadline(&mut self) -> Option<Instant> {
-        if !self.tmux || self.pending.first() != Some(&0x1b) {
+        if !self.wrapper.relayed() || self.pending.first() != Some(&0x1b) {
             self.lone_escape_since = None;
             return None;
         }
@@ -783,14 +767,10 @@ impl Terminal {
         })
     }
 
-    /// Whether mouse reports carry pixels. Without it they name a cell, and
-    /// the position is only ever the middle of that cell.
     pub fn reports_pixel_mouse(&self) -> bool {
         self.mouse_pixels
     }
 
-    /// Whether every frame travels down the tty as pixels. Shared memory sends
-    /// a name instead, which costs the same whatever the window size.
     pub fn frames_are_inline(&self) -> bool {
         self.transport == FrameTransport::Inline
     }
@@ -803,7 +783,7 @@ impl Terminal {
         if self.cell.is_some() {
             return Ok(self.cell);
         }
-        if self.tmux {
+        if self.wrapper.relayed() {
             self.cell = self.size()?.cell_size();
             if self.cell.is_some() {
                 return Ok(self.cell);
@@ -867,6 +847,12 @@ impl Terminal {
             *slot = parse_osc_color(&buf, &format!("4;{i};"));
         }
         Ok(colors)
+    }
+
+    fn probe_kitty_keyboard(&mut self) -> io::Result<bool> {
+        self.io.out().write_all(b"\x1b[?u")?;
+        self.io.out().flush()?;
+        Ok(self.read_report(150, parse_kitty_keyboard)?.unwrap_or(false))
     }
 
     fn probe_mouse_pixels(&mut self) -> io::Result<bool> {
@@ -1053,8 +1039,8 @@ static NEXT_TERMINAL_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 /**
  * need to think about this case harder 
  */
-fn frame_image_id(tmux: bool) -> u32 {
-    if !tmux {
+fn frame_image_id(relayed: bool) -> u32 {
+    if !relayed {
         return 1;
     }
     match std::process::id() & 0xff_ffff {
@@ -1157,9 +1143,9 @@ impl Drop for Terminal {
         for slot in 0..FRAME_SLOTS {
             let _ = rustix::shm::unlink(self.shm_name(slot));
         }
-        let delete = crate::kitty::kitty_delete(self.image_id, self.tmux);
+        let delete = crate::kitty::kitty_delete(self.image_id, self.wrapper);
         let _ = self.io.out().write_all(&delete);
-        if self.tmux {
+        if !self.kitty_keyboard {
             let _ = self.io.out().write_all(b"\x1b[>4;0m");
         }
         if self.color_scheme_updates {
@@ -1702,6 +1688,19 @@ fn parse_sgr_mouse(params: &[u8], press: bool) -> Option<(MouseKind, MouseButton
     Some((kind, button, mods, x, y))
 }
 
+fn parse_kitty_keyboard(buf: &[u8]) -> Option<bool> {
+    let mut at = 0;
+    while let Some(found) = buf[at..].windows(3).position(|w| w == b"\x1b[?") {
+        let digits = at + found + 3;
+        let end = digits + buf[digits..].iter().take_while(|b| b.is_ascii_digit()).count();
+        if end > digits && buf.get(end) == Some(&b'u') {
+            return Some(true);
+        }
+        at = digits;
+    }
+    None
+}
+
 fn parse_decrqm_1016(buf: &[u8]) -> Option<bool> {
     let start = buf.windows(8).position(|w| w == b"\x1b[?1016;")? + 8;
     let ps = *buf.get(start)?;
@@ -1920,6 +1919,22 @@ mod tests {
         );
         assert_eq!(parse_sgr_mouse(b"0;1;1", true), None);
         assert_eq!(parse_sgr_mouse(b"<0;0;1", true), None);
+    }
+
+    #[test]
+    fn kitty_keyboard_reply_is_the_whole_answer() {
+        // a terminal that speaks the protocol names the flags it is using
+        assert_eq!(parse_kitty_keyboard(b"\x1b[?1u"), Some(true));
+        assert_eq!(parse_kitty_keyboard(b"\x1b[?27u"), Some(true));
+        assert_eq!(parse_kitty_keyboard(b"\x1b[?0u"), Some(true));
+        // one that does not stays quiet, and other reports share the opening without
+        // being an answer — reading them as "no" would end the wait on the wrong evidence
+        assert_eq!(parse_kitty_keyboard(b""), None);
+        assert_eq!(parse_kitty_keyboard(b"\x1b[?62;22;52c"), None);
+        assert_eq!(parse_kitty_keyboard(b"\x1b[?1016;1$y"), None);
+        assert_eq!(parse_kitty_keyboard(b"\x1b[?u"), None);
+        // and it is still found behind one of them
+        assert_eq!(parse_kitty_keyboard(b"\x1b[?62;22;52c\x1b[?27u"), Some(true));
     }
 
     #[test]
@@ -2367,8 +2382,8 @@ mod tty_tests {
         let (master_b, _slave_b, path_b) = open_pty();
         let _drain_a = drain(&master_a);
         let _drain_b = drain(&master_b);
-        let mut a = Terminal::open(&path_a, false).unwrap();
-        let mut b = Terminal::open(&path_b, false).unwrap();
+        let mut a = Terminal::open(&path_a, Wrapper::None).unwrap();
+        let mut b = Terminal::open(&path_b, Wrapper::None).unwrap();
 
         assert_ne!(a.terminal_id, b.terminal_id);
         assert_ne!(a.shm_name(0), b.shm_name(0));
@@ -2402,7 +2417,7 @@ mod tty_tests {
         use std::io::Write as _;
         let (mut master, _slave, path) = open_pty();
         let _drain = drain(&master);
-        let mut term = Terminal::open(&path, true).unwrap();
+        let mut term = Terminal::open(&path, Wrapper::Tmux).unwrap();
 
         master.write_all(b"\x1b").unwrap();
         let got = term.poll_event(Some(Duration::from_millis(500))).unwrap();
@@ -2424,7 +2439,7 @@ mod tty_tests {
         use std::io::Write as _;
         let (mut master, _slave, path) = open_pty();
         let _drain = drain(&master);
-        let mut term = Terminal::open(&path, false).unwrap();
+        let mut term = Terminal::open(&path, Wrapper::None).unwrap();
 
         master.write_all(b"\x1b").unwrap();
         let got = term.poll_event(Some(Duration::from_millis(200))).unwrap();
@@ -2435,7 +2450,7 @@ mod tty_tests {
     fn a_wake_ends_a_blocking_poll() {
         let (master, _slave, path) = open_pty();
         let _drain = drain(&master);
-        let mut term = Terminal::open(&path, false).unwrap();
+        let mut term = Terminal::open(&path, Wrapper::None).unwrap();
         let waker = term.waker().unwrap();
 
         std::thread::spawn(move || {

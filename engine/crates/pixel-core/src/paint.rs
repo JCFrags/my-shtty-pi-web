@@ -705,7 +705,7 @@ mod tests {
     use crate::style::{Dimension, Style};
 
     static FONT_BYTES: &[u8] =
-        include_bytes!("../../../examples/typing/assets/JetBrainsMono-Regular.ttf");
+        include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
 
     const RED: Color = [255, 0, 0, 255];
     const FALLBACK: Color = [9, 9, 9, 255];

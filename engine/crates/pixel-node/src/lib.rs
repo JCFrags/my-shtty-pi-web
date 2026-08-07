@@ -178,9 +178,9 @@ impl DamageRect {
     }
 }
 
-static UI_FONT_BYTES: &[u8] = include_bytes!("../../../examples/typing/assets/InterVariable.ttf");
+static UI_FONT_BYTES: &[u8] = include_bytes!("../../../assets/fonts/InterVariable.ttf");
 static MONO_FONT_BYTES: &[u8] =
-    include_bytes!("../../../examples/typing/assets/JetBrainsMono-Regular.ttf");
+    include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
 
 const SYSTEM_UI_FONTS: &[&str] = &[
     "/System/Library/Fonts/SFNSRounded.ttf",
@@ -235,7 +235,7 @@ pub struct PixelEngine {
 #[napi]
 impl PixelEngine {
     #[napi(constructor)]
-    pub fn new(tty: Option<String>, tmux: Option<bool>) -> Result<Self> {
+    pub fn new(tty: Option<String>, wrapper: Option<String>) -> Result<Self> {
         let fonts = vec![
             load_font(SYSTEM_UI_FONTS, UI_FONT_BYTES),
             load_font(SYSTEM_MONO_FONTS, MONO_FONT_BYTES),
@@ -245,7 +245,7 @@ impl PixelEngine {
             cell_metrics_font: 1,
             watch_resize: false,
             tty,
-            tmux: tmux.unwrap_or(false),
+            wrapper: pixel_core::wrapper::Wrapper::named(wrapper.as_deref()),
         })
         .map_err(err)?;
         let waker = engine.term.waker().map_err(err)?;
@@ -258,6 +258,7 @@ impl PixelEngine {
             "cellWidth": cell_w,
             "cellHeight": cell_h,
             "basePx": engine.base_px,
+            "kittyKeyboard": engine.term.kitty_keyboard(),
             "colors": colors_json(&engine.colors),
         })
         .to_string();

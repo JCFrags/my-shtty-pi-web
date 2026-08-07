@@ -1,4 +1,5 @@
-import type { Backend } from "pixel-terminals";
+import { callerTty } from "pixel-terminals";
+import type { Terminal } from "pixel-terminals";
 
 import { browsers, recordKey, targets } from "./instances";
 import type { Browser, TabTarget } from "./instances";
@@ -9,7 +10,7 @@ interface Listed {
   cdpPort: number | null;
   socket: string;
   tty: string | null;
-  pane: { window: string | null; tab: string | null; pane: string | null };
+  pane: { tab: string | null; pane: string | null };
   splitDir: Browser["splitDir"];
   parentTty: string | null;
   inCurrentTab: boolean;
@@ -25,7 +26,7 @@ async function collect(list: Browser[]): Promise<Listed[]> {
       cdpPort: browser.cdpPort,
       socket: browser.socket,
       tty: browser.tty,
-      pane: { window: browser.window, tab: browser.tab, pane: browser.pane },
+      pane: { tab: browser.paneTab, pane: browser.pane },
       splitDir: browser.splitDir,
       parentTty: browser.parentTty,
       inCurrentTab: browser.inCurrentTab,
@@ -39,9 +40,7 @@ function render(list: Listed[]): string {
   if (list.length === 0) return "no terminal browsers running\n";
   const lines: string[] = [];
   for (const browser of list) {
-    const where = browser.pane.window
-      ? `${browser.pane.window}:${browser.pane.tab}:${browser.pane.pane}`
-      : "no pane";
+    const where = browser.pane.pane ? `${browser.pane.tab}:${browser.pane.pane}` : "no pane";
     lines.push(`${browser.key}  ${where}${browser.inCurrentTab ? "  (this tab)" : ""}`);
     for (const tab of browser.tabs) {
       const mark = tab.active ? "*" : " ";
@@ -53,8 +52,8 @@ function render(list: Listed[]): string {
   return `${lines.join("\n")}\n`;
 }
 
-export async function lsCommand(backend: Backend, all: boolean, json: boolean) {
-  const found = await browsers(backend);
+export async function lsCommand(terminal: Terminal | null, all: boolean, json: boolean) {
+  const found = await browsers(terminal);
   const scoped = all ? found : found.filter((browser) => browser.inCurrentTab);
   const list = await collect(scoped);
   if (!json) {
@@ -64,14 +63,10 @@ export async function lsCommand(backend: Backend, all: boolean, json: boolean) {
     }
     return;
   }
-  const panes = await backend.panes();
-  const self = panes.find((pane) => pane.self);
+  const self = (await terminal?.getCurrentPane?.({ tty: callerTty().path, cwd: process.cwd() })) ?? null;
   process.stdout.write(
     `${JSON.stringify(
-      {
-        self: self ? { window: self.window, tab: self.tab, pane: self.pane } : null,
-        browsers: list,
-      },
+      { self: self ? { tab: self.tab, pane: self.id } : null, browsers: list },
       null,
       2,
     )}\n`,
