@@ -84,12 +84,15 @@ impl SharedHelper {
 
 static SHARED: Mutex<Option<SharedHelper>> = Mutex::new(None);
 
-fn subscribe(waker: Option<Waker>) -> Option<Receiver<Msg>> {
-    let mut shared = SHARED.lock().unwrap();
-    if shared.is_none() {
-        let path = std::env::var("NATIVE_SCROLL_HELPER")
-            .ok()
-            .or_else(|| option_env!("NATIVE_SCROLL_HELPER").map(String::from))?;
+fn helper_paths() -> impl Iterator<Item = String> {
+    std::env::var("NATIVE_SCROLL_HELPER")
+        .ok()
+        .into_iter()
+        .chain(option_env!("NATIVE_SCROLL_HELPER").map(String::from))
+}
+
+fn spawn_helper() -> Option<SharedHelper> {
+    helper_paths().find_map(|path| {
         let mut child = Command::new(&path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -106,7 +109,7 @@ fn subscribe(waker: Option<Waker>) -> Option<Receiver<Msg>> {
                 helper.subscribers.clear();
             }
         });
-        *shared = Some(SharedHelper {
+        Some(SharedHelper {
             child,
             stdin,
             subscribers: Vec::new(),
@@ -114,7 +117,14 @@ fn subscribe(waker: Option<Waker>) -> Option<Receiver<Msg>> {
             dead: false,
             wanting: 0,
             armed_at: None,
-        });
+        })
+    })
+}
+
+fn subscribe(waker: Option<Waker>) -> Option<Receiver<Msg>> {
+    let mut shared = SHARED.lock().unwrap();
+    if shared.is_none() {
+        *shared = Some(spawn_helper()?);
     }
     let helper = shared.as_mut().unwrap();
     if helper.dead {

@@ -14,6 +14,10 @@ mkdir -p "$STAGE"/{bin,cli/dist,browser/dist,browser/native,electron,agent-brows
 (cd "$ROOT/engine" && cargo build -p pixel-node --release)
 cp "${CARGO_TARGET_DIR:-$ROOT/engine/target}/release/libpixel_node.dylib" "$STAGE/browser/native/pixel.node"
 
+swiftc -O "$ROOT/engine/crates/pixel-core/native-scroll-helper.swift" \
+  -o "$STAGE/bin/native-scroll-helper"
+codesign --force --sign - --timestamp=none "$STAGE/bin/native-scroll-helper" 2>/dev/null || true
+
 AGENT_BROWSER_BIN="$("$ROOT/scripts/agent-browser.sh" --path)"
 cp "$AGENT_BROWSER_BIN" "$STAGE/agent-browser/bin/agent-browser"
 codesign --force --sign - --timestamp=none "$STAGE/agent-browser/bin/agent-browser" 2>/dev/null || true
@@ -46,6 +50,7 @@ cat > "$STAGE/bin/terminal-browser" <<'EOF'
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 export TERMINAL_BROWSER_DIST_ROOT="$ROOT"
 export ELECTRON_RUN_AS_NODE=1
+export NATIVE_SCROLL_HELPER="$ROOT/bin/native-scroll-helper"
 exec "$ROOT/electron/terminal-browser.app/Contents/MacOS/terminal-browser" "$ROOT/cli/dist/main.js" "$@"
 EOF
 chmod +x "$STAGE/bin/terminal-browser"
