@@ -84,37 +84,44 @@ impl SharedHelper {
 
 static SHARED: Mutex<Option<SharedHelper>> = Mutex::new(None);
 
+fn helper_path() -> Option<String> {
+    std::env::var("NATIVE_SCROLL_HELPER")
+        .ok()
+        .or_else(|| option_env!("NATIVE_SCROLL_HELPER").map(String::from))
+}
+
+fn spawn_helper() -> Option<SharedHelper> {
+    let mut child = Command::new(helper_path()?)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let stdout = child.stdout.take()?;
+    let stdin = child.stdin.take();
+    std::thread::spawn(move || {
+        read_lines(stdout);
+        let mut shared = SHARED.lock().unwrap();
+        if let Some(helper) = shared.as_mut() {
+            helper.dead = true;
+            helper.subscribers.clear();
+        }
+    });
+    Some(SharedHelper {
+        child,
+        stdin,
+        subscribers: Vec::new(),
+        scale: 2.0,
+        dead: false,
+        wanting: 0,
+        armed_at: None,
+    })
+}
+
 fn subscribe(waker: Option<Waker>) -> Option<Receiver<Msg>> {
     let mut shared = SHARED.lock().unwrap();
     if shared.is_none() {
-        let path = std::env::var("NATIVE_SCROLL_HELPER")
-            .ok()
-            .or_else(|| option_env!("NATIVE_SCROLL_HELPER").map(String::from))?;
-        let mut child = Command::new(&path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?;
-        let stdout = child.stdout.take()?;
-        let stdin = child.stdin.take();
-        std::thread::spawn(move || {
-            read_lines(stdout);
-            let mut shared = SHARED.lock().unwrap();
-            if let Some(helper) = shared.as_mut() {
-                helper.dead = true;
-                helper.subscribers.clear();
-            }
-        });
-        *shared = Some(SharedHelper {
-            child,
-            stdin,
-            subscribers: Vec::new(),
-            scale: 2.0,
-            dead: false,
-            wanting: 0,
-            armed_at: None,
-        });
+        *shared = Some(spawn_helper()?);
     }
     let helper = shared.as_mut().unwrap();
     if helper.dead {
