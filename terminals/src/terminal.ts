@@ -19,12 +19,24 @@ export interface SplitRequest {
   tty: string | null;
 }
 
+
 export interface Terminal {
   readonly name: string;
+  /**
+   * When terminal-browser tries to write to the TTY to render graphics using the
+   * kitty graphics protocol, tmux will by default not forward those escape
+   * codes to the outer TTY. But, tmux supports a passthrough mode if the content
+   * is wrapped in tmux specific escape codes. We implement this "wrapping" functionality
+   * internally, and allow a backend to configure what kind of wrapping should be applied (if any)
+   */
   readonly wrapper?: "tmux";
+  /**
+   * When terminal-browser is rendered, it is scaled by the DPI of the display
+   * Terminals that report css based pixels when queried already perform that normalization, so we need an explicit flag to avoid rescaling
+   */
   readonly reportsCssPixels?: boolean;
   /**
-   * allows code to be ran at startup, useful for preparing the terminal environment for terminal-browser
+   * Allows code to be ran at startup, useful for preparing the terminal environment for terminal-browser
    */
   prepare?(): void;
   /**
@@ -32,7 +44,7 @@ export interface Terminal {
    * This gives terminal-browser the ability to know if a terminal-browser instance
    * is open inside the terminal-pane, and powers features such as:
    * - terminal-browser ls lists the browers inside the current terminal tab
-   * - terminal-browser tab [url] will open in the browser inside the current terminal tab by default
+   * - terminal-browser new-tab [url] will open in the browser inside the current terminal tab by default
    */
   getCurrentPane?(context: PaneContext): Promise<Pane | null>;
   /**

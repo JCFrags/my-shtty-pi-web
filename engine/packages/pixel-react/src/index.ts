@@ -236,7 +236,6 @@ interface EngineEventJson {
     arg?: number | null;
   }>;
   counters?: Array<{ name: string; at: number; value: number }>;
-  // input mark refs on change/submit; profiler marks on profile
   marks?: unknown[];
 }
 

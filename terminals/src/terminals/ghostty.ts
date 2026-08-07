@@ -97,8 +97,7 @@ const RESIZE_SCRIPT = onPane(`            set r to perform action (item 2 of arg
 
 const MARKER_ATTEMPTS = 6;
 
-/** A directory no other pane is sitting in. Real when we can make one, since Ghostty may
- *  not report back a directory that does not exist. */
+
 function markerDirectory(): string {
   const name = `terminal-browser-pane-${process.pid}-`;
   try {
@@ -202,7 +201,7 @@ export const ghostty: Detect = (env, run) => {
     name: "ghostty",
     getCurrentPane,
     
-    async split({ from, direction, command, size, tty }) {
+    async split({ from, direction, command, size }) {
       const startDir = directories.get(from.id) ?? process.cwd();
       const opened = await osascript(splitScript(direction), [
         from.id,

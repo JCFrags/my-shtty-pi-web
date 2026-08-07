@@ -318,7 +318,6 @@ impl Terminal {
         )
     }
 
-    /// Draws on some other pane's tty.
     pub fn open(tty_path: &str, wrapper: Wrapper) -> io::Result<Self> {
         let file = std::fs::File::options().read(true).write(true).open(tty_path)?;
         Self::with_handle(TtyHandle::File(file), wrapper)
@@ -480,8 +479,6 @@ impl Terminal {
         ))
     }
 
-    /// Rewrites the next slot in place. The ring exists because the terminal may still be reading
-    /// the frame we sent last.
     fn write_frame_file(&mut self, data: &[u8]) -> io::Result<String> {
         if self
             .frame_files

@@ -352,7 +352,7 @@ class Session {
     if (text) this.root?.setClipboard(text);
   }
 
- 
+
   private async cutSelection() {
     const input = this.focusedInput();
     if (!input) return;
@@ -857,10 +857,10 @@ class Session {
       progress.state === "progressing"
         ? null
         : setTimeout(() => {
-            this.download = null;
-            this.downloadTimer = null;
-            this.render();
-          }, 4000);
+          this.download = null;
+          this.downloadTimer = null;
+          this.render();
+        }, 4000);
     this.render();
   }
 
