@@ -35,7 +35,7 @@ export const cmux: Detect = (env, run) => {
     name: "cmux",
     getCurrentPane: () => paneById(panes, env.CMUX_SURFACE_ID),
     async split({ from, direction, command }) {
-      const created = await asked(["new-split", direction, "--surface", from.id]);
+      const created = await asked(["new-split", direction, "--surface", from.id, "--focus", "true"]);
       const opened = created.surface_id ?? created.surface_ref;
       if (!opened) throw new Error("cmux opened a split but did not say which surface it is");
       await cmux(["send", "--surface", opened, "--", `${shellQuote(command)}\\n`]);
