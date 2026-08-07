@@ -35,8 +35,6 @@ function freePort(): Promise<number> {
   });
 }
 
-process.on("SIGINT", () => app.exit(130));
-process.on("SIGTERM", () => app.exit(143));
 
 void (async () => {
   const cdpPort = await freePort().catch(() => null);

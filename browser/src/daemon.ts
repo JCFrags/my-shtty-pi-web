@@ -51,6 +51,18 @@ export async function runDaemon(cdpPort: number | null): Promise<void> {
   };
   scheduleIdleExit();
 
+  const stopEverything = (code: number) => {
+    for (const open of [...sessions.values()]) {
+      try {
+        open.close();
+      } catch {}
+    }
+    sessions.clear();
+    setTimeout(() => app.exit(code), 200);
+  };
+  process.on("SIGINT", () => stopEverything(130));
+  process.on("SIGTERM", () => stopEverything(143));
+
   const server = net.createServer((connection) => {
     let key: string | null = null;
     let session: SessionHandle | null = null;
