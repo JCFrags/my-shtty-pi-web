@@ -23,7 +23,7 @@ export async function checkTerminal(
   terminal: Terminal | null,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<TerminalCheck> {
-  terminal?.prepare?.();
+  await terminal?.prepare?.();
   if (env[SKIP_ENV]) return { terminal, graphics: "supported" };
   const probed = await probeGraphics(terminal);
   const graphics = probed === "unknown" ? (terminal ? "supported" : "unsupported") : probed;

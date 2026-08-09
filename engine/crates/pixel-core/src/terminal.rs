@@ -1038,13 +1038,10 @@ impl Terminal {
 
 const SHM_PROBE_ID: u32 = 299;
 const FILE_PROBE_ID: u32 = 300;
-/// tmux adds a hop in each direction, so the answer needs longer than a direct terminal would take.
 const FRAME_PROBE_TIMEOUT_MS: u64 = 300;
 
 const FRAME_SLOTS: u64 = 8;
 
-/// How a frame reaches the terminal, cheapest first. Inline means the pixels travel inside the
-/// escape sequence, which costs a compress and a write proportional to the window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FrameTransport {
     File,
@@ -1067,9 +1064,6 @@ fn frame_image_id(relayed: bool) -> u32 {
     }
 }
 
-/// The needle deliberately omits the `\x1b_` that starts the reply: tmux with extended-keys on
-/// re-encodes the escape pairs of a passed-through reply as key events (`\x1b_` arrives as
-/// `\x1b[27;3;95~`), leaving only the body intact.
 fn parse_probe_reply(buf: &[u8], needle: &[u8]) -> Option<bool> {
     let pos = buf.windows(needle.len()).position(|w| w == needle)?;
     let rest = &buf[pos + needle.len()..];
