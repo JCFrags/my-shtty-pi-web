@@ -3,6 +3,7 @@ pub mod clipboard_image;
 mod desc;
 mod engine;
 pub mod ghostty;
+mod herdr;
 mod image_cache;
 mod kitty;
 pub mod logging;
