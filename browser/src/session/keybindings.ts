@@ -2,15 +2,27 @@ import type { EngineKeyEvent, KeyMods } from "pixel-react";
 
 export type KeyBinding = KeyMods & { key: string };
 
-export function parseKeyBinding(spec: string): KeyBinding | null {
-  if (spec === "none") return null;
-  const parts = spec.toLowerCase().split("+");
-  const key = parts.pop() ?? "";
-  return { ...parseMods(parts), key };
+export const defaultKeys =
+  process.platform === "darwin"
+    ? { palette: "super+p", find: "super+shift+f", devtools: "super+shift+i", console: "super+alt+j" }
+    : { palette: "ctrl+shift+k alt+k", find: "ctrl+shift+f", devtools: "ctrl+shift+i", console: "ctrl+alt+j" };
+
+export function parseKeyBindings(spec: string): KeyBinding[] {
+  if (spec === "none") return [];
+  return spec
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((chord) => {
+      const parts = chord.toLowerCase().split("+");
+      const key = parts.pop() ?? "";
+      return { ...parseMods(parts), key };
+    });
 }
 
-export function matchesBinding(event: EngineKeyEvent, binding: KeyBinding | null): boolean {
-  return binding !== null && event.key.toLowerCase() === binding.key && matchesMods(event, binding);
+export function matchesBinding(event: EngineKeyEvent, bindings: KeyBinding[]): boolean {
+  return bindings.some(
+    (binding) => event.key.toLowerCase() === binding.key && matchesMods(event, binding),
+  );
 }
 
 export function listStep(event: EngineKeyEvent): 1 | -1 | null {
@@ -19,9 +31,11 @@ export function listStep(event: EngineKeyEvent): 1 | -1 | null {
   return null;
 }
 
-export function bindingLabel(binding: KeyBinding | null): string {
+export function bindingLabel(bindings: KeyBinding[]): string {
+  const binding = bindings[0];
   if (!binding) return "";
-  const mods = `${binding.super ? "cmd+" : ""}${binding.ctrl ? "ctrl+" : ""}${
+  const superKey = process.platform === "darwin" ? "cmd+" : "super+";
+  const mods = `${binding.super ? superKey : ""}${binding.ctrl ? "ctrl+" : ""}${
     binding.alt ? "alt+" : ""
   }${binding.shift ? "shift+" : ""}`;
   return `${mods}${binding.key}`;

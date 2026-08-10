@@ -5,6 +5,14 @@ export interface DamageRect {
   height: number;
 }
 
+export interface SurfaceShm {
+  fd: number;
+  width: number;
+  height: number;
+  stride: number;
+  size: number;
+}
+
 export interface NativeEngine {
   info(): string;
   applyOps(ops: string): void;
@@ -16,6 +24,12 @@ export interface NativeEngine {
     damage?: DamageRect,
   ): void;
   updateSurfaceTexture?(id: number, handle: Buffer, damage?: DamageRect): void;
+  updateSurfaceShm?(
+    id: number,
+    shm: SurfaceShm,
+    damage?: DamageRect,
+    released?: (...args: unknown[]) => void,
+  ): void;
   removeSurface(id: number): void;
   surfaceStats(): string;
   startSurfaceCapture(surfaceId: number, dir: string): number;

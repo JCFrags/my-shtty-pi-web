@@ -54,6 +54,8 @@ fn window_from(ws: &crate::terminal::WindowSize, cell: (u32, u32)) -> (u32, u32)
     (width, height)
 }
 
+const PAINT_INTERVAL_WITH_INPUT_PENDING: Duration = Duration::from_millis(16);
+
 static DEFAULT_PROFILE: Smooth = Smooth {
     tau: 0.08,
     brake: 0.025,
@@ -279,6 +281,9 @@ pub struct Engine {
     pairing: NativePairing,
     hover_oracle: HoverOracle,
     pub profile: &'static dyn ScrollProfile,
+    pub(super) last_wheel_tick:
+        Option<(Instant, crate::terminal::MouseKind, u32, u32, crate::terminal::Mods)>,
+    pub(super) wheel_echo_consumed: bool,
     default_menu: bool,
     menu: MenuController,
     inspect_mode: bool,
@@ -381,6 +386,8 @@ impl Engine {
             pairing: NativePairing::new(),
             hover_oracle: HoverOracle::new(),
             profile: &DEFAULT_PROFILE,
+            last_wheel_tick: None,
+            wheel_echo_consumed: false,
             default_menu: false,
             menu: MenuController::default(),
             inspect_mode: false,
@@ -596,6 +603,35 @@ impl Engine {
             .map(|id| (self.focus_view, id))
     }
 
+    fn paint_then_wait(
+        &mut self,
+        out_empty: bool,
+        wait: Option<Duration>,
+    ) -> io::Result<Option<crate::terminal::Event>> {
+        self.frame()?;
+        self.send_due_color_request()?;
+        let mut first_wait = if self.animating() || self.frame_deferred {
+            Some(Duration::from_millis(6))
+        } else if !out_empty {
+            Some(Duration::ZERO)
+        } else {
+            wait
+        };
+        let deadlines = [
+            self.clipboard.osc_deadline(),
+            self.focus_click.as_ref().map(|(deadline, _)| *deadline),
+            self.color_request_at,
+        ];
+        for deadline in deadlines.into_iter().flatten() {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            first_wait = Some(first_wait.map_or(remaining, |w| w.min(remaining)));
+        }
+        if self.term.relayed() {
+            first_wait = Some(first_wait.map_or(RELAYED_RESIZE_POLL, |w| w.min(RELAYED_RESIZE_POLL)));
+        }
+        self.term.poll_event(first_wait)
+    }
+
     pub fn pump(&mut self, wait: Option<Duration>) -> io::Result<Vec<EngineEvent>> {
         if !self.throttle_registered {
             self.throttle_registered = true;
@@ -613,42 +649,11 @@ impl Engine {
             return Ok(out);
         }
         self.check_resize(&mut out)?;
-        self.frame()?;
-        let first_wait = if self.animating() || self.frame_deferred {
-            Some(Duration::from_millis(6))
-        } else if !out.is_empty() {
-            Some(Duration::ZERO)
-        } else {
-            wait
-        };
-        let first_wait = match self.clipboard.osc_deadline() {
-            Some(deadline) => {
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                Some(first_wait.map_or(remaining, |w| w.min(remaining)))
-            }
-            None => first_wait,
-        };
-        let first_wait = match &self.focus_click {
-            Some((deadline, _)) => {
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                Some(first_wait.map_or(remaining, |w| w.min(remaining)))
-            }
-            None => first_wait,
-        };
-        self.send_due_color_request()?;
-        let first_wait = match self.color_request_at {
-            Some(deadline) => {
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                Some(first_wait.map_or(remaining, |w| w.min(remaining)))
-            }
-            None => first_wait,
-        };
-        let first_wait = if self.term.relayed() {
-            Some(first_wait.map_or(RELAYED_RESIZE_POLL, |w| w.min(RELAYED_RESIZE_POLL)))
-        } else {
-            first_wait
-        };
-        let mut event = self.term.poll_event(first_wait)?;
+        let mut event = self.term.poll_event(Some(Duration::ZERO))?;
+        let input_pending = event.is_some();
+        if !input_pending {
+            event = self.paint_then_wait(out.is_empty(), wait)?;
+        }
         while let Some(current) = event {
             self.handle_event(current, &mut out)?;
             event = self.term.poll_event(Some(Duration::ZERO))?;
@@ -684,7 +689,9 @@ impl Engine {
         self.emit_scroll_events(&mut out);
         self.drain_images();
         out.append(&mut self.pending);
-        self.frame()?;
+        if !input_pending || self.last_frame.elapsed() >= PAINT_INTERVAL_WITH_INPUT_PENDING {
+            self.frame()?;
+        }
         self.drain_logs(&mut out);
         Ok(out)
     }
@@ -995,21 +1002,23 @@ impl Engine {
                 let base_px = self.base_px;
                 let view = &mut self.comp.views[i];
                 let region = damage.unwrap_or(Rect::sized(size.0, size.1));
-                crate::profiler::span("canvas.clear", || {
-                    if (view.canvas.width, view.canvas.height) != size {
-                        view.canvas = Canvas::new(size.0, size.1);
-                    }
-                    view.canvas.push_clip(
-                        region.x as f32,
-                        region.y as f32,
-                        region.w as f32,
-                        region.h as f32,
-                    );
-                    view.canvas
-                        .fill_rect(region.x, region.y, region.w, region.h, view.clear_color);
-                });
+                if (view.canvas.width, view.canvas.height) != size {
+                    view.canvas = Canvas::new(size.0, size.1);
+                }
+                view.canvas.push_clip(
+                    region.x as f32,
+                    region.y as f32,
+                    region.w as f32,
+                    region.h as f32,
+                );
                 view.tree.flush_layout(fonts, base_px);
-                paint(&view.tree, &mut view.canvas, fonts, cursor);
+                paint(
+                    &view.tree,
+                    &mut view.canvas,
+                    fonts,
+                    cursor,
+                    Some((region, view.clear_color)),
+                );
                 view.canvas.pop_clip();
                 view.tree.clear_paint_flag();
                 view.damage = Rect::default();

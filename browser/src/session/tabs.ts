@@ -71,7 +71,15 @@ export class TabManager {
   
   create(url: string, activate = true): Tab {
     const tab = { id: this.seq++, state: initialBrowserState(url), targetId: null } as Tab;
-    tab.controller = this.host.createController(url, activate, (state) => {
+    this.attachController(tab, url, activate);
+    this.tabs.push(tab);
+    if (activate) this.activate(tab.id);
+    this.host.onTabsChanged();
+    return tab;
+  }
+
+  private attachController(tab: Tab, url: string, visible: boolean) {
+    tab.controller = this.host.createController(url, visible, (state) => {
       const urlChanged = state.url !== tab.state.url;
       tab.state = state;
       if (tab.id === this.activeId) this.host.onActiveState(state, urlChanged);
@@ -95,14 +103,11 @@ export class TabManager {
     tab.controller.onContextMenu = (params) => {
       if (tab.id === this.activeId) this.host.onPageMenu(params);
     };
-    this.tabs.push(tab);
+    tab.targetId = null;
     void tab.controller.targetId().then((targetId) => {
       tab.targetId = targetId;
       this.host.onTabsChanged();
     });
-    if (activate) this.activate(tab.id);
-    this.host.onTabsChanged();
-    return tab;
   }
 
   activate(id: number) {

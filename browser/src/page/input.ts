@@ -66,6 +66,10 @@ export class PageInput {
       this.pinch(event);
       return;
     }
+    if (!event.precise) {
+      this.wheelTick(event);
+      return;
+    }
     const scale = this.target.scale();
     this.wheelRemainderX += -event.deltaX / scale;
     this.wheelRemainderY += -event.deltaY / scale;
@@ -80,9 +84,29 @@ export class PageInput {
       y: this.lastY,
       deltaX,
       deltaY,
-      wheelTicksX: event.precise ? deltaX / 40 : Math.sign(deltaX),
-      wheelTicksY: event.precise ? deltaY / 40 : Math.sign(deltaY),
-      hasPreciseScrollingDeltas: event.precise,
+      wheelTicksX: deltaX / 40,
+      wheelTicksY: deltaY / 40,
+      hasPreciseScrollingDeltas: true,
+      canScroll: true,
+      modifiers: this.modifiers(event.mods),
+    });
+  }
+
+
+  private wheelTick(event: WheelEvent) {
+    const ticksX = -Math.sign(event.deltaX);
+    const ticksY = -Math.sign(event.deltaY);
+    if (ticksX === 0 && ticksY === 0) return;
+    const step = WHEEL_DETENT_PX;
+    this.target.contents().sendInputEvent({
+      type: "mouseWheel",
+      x: this.lastX,
+      y: this.lastY,
+      deltaX: ticksX * step,
+      deltaY: ticksY * step,
+      wheelTicksX: ticksX,
+      wheelTicksY: ticksY,
+      hasPreciseScrollingDeltas: false,
       canScroll: true,
       modifiers: this.modifiers(event.mods),
     });
@@ -110,7 +134,7 @@ export class PageInput {
       void this.dispatchEnter(event).catch(() => {});
       return;
     }
-    const commands = editingCommands(event);
+    const commands = process.platform === "darwin" ? editingCommands(event) : null;
     if (commands) {
       void this.dispatchEditing(event, commands).catch(() => {});
       return;
@@ -271,6 +295,9 @@ const SELECTION_SNIPPET = `(() => {
   } catch {}
   return String(getSelection() ?? "");
 })()`;
+
+
+const WHEEL_DETENT_PX = process.platform === "darwin" ? 40 : 120;
 
 function wholeDelta(value: number) {
   return value < 0 ? Math.ceil(value) : Math.floor(value);
