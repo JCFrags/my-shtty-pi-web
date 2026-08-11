@@ -15,8 +15,8 @@ pub fn row_bands<R: Send>(
         return Some(work(dst, 0, rows));
     }
     let band = rows.div_ceil(workers);
-    let results = std::thread::scope(|scope| {
-        let mut handles = Vec::new();
+    let results = std::sync::Mutex::new(Vec::new());
+    rayon::in_place_scope(|scope| {
         let mut rest = dst;
         let mut first = 0;
         while first < rows {
@@ -25,15 +25,19 @@ pub fn row_bands<R: Send>(
             let (chunk, tail) = rest.split_at_mut(take);
             rest = tail;
             let work = &work;
-            handles.push(scope.spawn(move || work(chunk, first, band_rows)));
+            let results = &results;
+            scope.spawn(move |_| {
+                let result = work(chunk, first, band_rows);
+                results.lock().unwrap_or_else(|e| e.into_inner()).push(result);
+            });
             first += band_rows;
         }
-        handles
-            .into_iter()
-            .map(|h| h.join().expect("row band panicked"))
-            .collect::<Vec<_>>()
     });
-    results.into_iter().reduce(reduce)
+    results
+        .into_inner()
+        .unwrap_or_else(|e| e.into_inner())
+        .into_iter()
+        .reduce(reduce)
 }
 
 const MAX_WORKERS: usize = 6;

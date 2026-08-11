@@ -20,7 +20,6 @@ export function initOffscreenMode(sharedTextures: boolean): void {
   if (process.platform === "darwin" && !sharedTextures) {
     throw new Error("terminal-browser requires the patched Electron with shared texture support");
   }
-  const mode =
-    process.platform === "darwin" ? "shared-texture" : SHM_FRAMES ? "shm" : "bitmap";
+  const mode = process.platform === "darwin" ? "shared-texture" : SHM_FRAMES ? "shm" : "bitmap";
   appLog("info", "texture", `offscreen mode: ${mode}`);
 }

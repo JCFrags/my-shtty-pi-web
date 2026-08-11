@@ -66,7 +66,12 @@ EOF
 chmod +x "$BIN_HOME/terminal-browser"
 
 if [ "$(uname -s)" = Linux ]; then
-  bash "$APP/scripts/apparmor.sh" || echo "the browser will not start until that profile exists" >&2
+  missing="$(ldd "$APP/electron/electron" 2>/dev/null | awk '/not found/{print $1}' | sort -u)"
+  if [ -n "$missing" ]; then
+    echo "warning: missing system libraries:" >&2
+    printf '  %s\n' $missing >&2
+    echo "sudo apt-get install libnss3 libgtk-3-0 libasound2t64 libgbm1" >&2
+  fi
 fi
 
 AGENT_SKILLS="${AGENT_SKILLS_HOME:-$HOME/.agents/skills}"

@@ -65,7 +65,7 @@ if [ "$TARGET" = darwin-arm64 ]; then
     "$APP/Contents/Info.plist" >/dev/null
   codesign --force --sign - --timestamp=none "$APP" 2>/dev/null
   ELECTRON_EXE="electron/terminal-browser.app/Contents/MacOS/terminal-browser"
-  NATIVE_SCROLL='export NATIVE_SCROLL_HELPER="$ROOT/bin/native-scroll-helper"'
+  NATIVE_SCROLL='export NATIVE_SCROLL_HELPER="${NATIVE_SCROLL_HELPER:-$ROOT/bin/native-scroll-helper}"'
 else
   cp -a "$ELECTRON_DIST/." "$STAGE/electron/"
   ELECTRON_EXE="electron/electron"

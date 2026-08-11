@@ -19,20 +19,25 @@ struct CachedMapping {
     ino: u64,
     len: usize,
     map: Arc<Mapping>,
+    last_used: std::time::Instant,
 }
 
 static MAPPINGS: Mutex<Vec<CachedMapping>> = Mutex::new(Vec::new());
 const MAPPING_CAPACITY: usize = 16;
+const MAPPING_IDLE_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 fn mapping_for(fd: BorrowedFd<'_>, len: usize) -> Result<Arc<Mapping>, String> {
     let stat = rustix::fs::fstat(fd).map_err(|error| format!("shm fstat failed: {error}"))?;
     let (dev, ino) = (stat.st_dev as u64, stat.st_ino as u64);
+    let now = std::time::Instant::now();
     let mut cache = MAPPINGS.lock().unwrap_or_else(|error| error.into_inner());
+    cache.retain(|entry| now.duration_since(entry.last_used) < MAPPING_IDLE_LIMIT);
     if let Some(at) = cache
         .iter()
         .position(|entry| entry.dev == dev && entry.ino == ino && entry.len == len)
     {
-        let entry = cache.remove(at);
+        let mut entry = cache.remove(at);
+        entry.last_used = now;
         let map = entry.map.clone();
         cache.push(entry);
         return Ok(map);
@@ -53,7 +58,7 @@ fn mapping_for(fd: BorrowedFd<'_>, len: usize) -> Result<Arc<Mapping>, String> {
     if cache.len() >= MAPPING_CAPACITY {
         cache.remove(0);
     }
-    cache.push(CachedMapping { dev, ino, len, map: map.clone() });
+    cache.push(CachedMapping { dev, ino, len, map: map.clone(), last_used: now });
     Ok(map)
 }
 

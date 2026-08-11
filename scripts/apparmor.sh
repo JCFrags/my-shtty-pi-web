@@ -11,7 +11,7 @@ if [ ! -x "$BINARY" ]; then
   echo "no electron binary at $BINARY" >&2
   exit 1
 fi
-BINARY="$(cd "$(dirname "$BINARY")" && pwd -P)/$(basename "$BINARY")"
+BINARY="$(readlink -f "$BINARY")"
 
 # When a setuid chrome-sandbox binary sits next to electron, chromium builds its
 # sandbox with that root helper instead of user namespaces, so the profile this

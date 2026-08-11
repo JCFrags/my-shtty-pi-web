@@ -540,7 +540,6 @@ async function main(): Promise<number> {
     await lsCommand((await currentTerminal()).terminal, all, json);
     return 0;
   }
-  // fixme: this should be fully installer responsiibltiy (maybe)
   if (command === "setup") {
     const sandbox = apparmorSetup(electronBinary());
     const editors = setupCommand();
