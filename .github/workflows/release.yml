@@ -11,6 +11,10 @@ on:
         type: choice
         default: none
         options: [none, patch, minor, major]
+      deploy_worker:
+        description: "Deploy the release worker even for a branch build"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -178,7 +182,7 @@ jobs:
         with:
           node-version: 22
       - name: Deploy worker
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || (inputs.bump != '' && inputs.bump != 'none')
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || (inputs.bump != '' && inputs.bump != 'none') || inputs.deploy_worker
         working-directory: release-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
