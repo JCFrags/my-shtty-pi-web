@@ -762,8 +762,6 @@ impl Canvas {
             && src_w > 0
             && src.len() >= src_w as usize * src_h as usize * 4
         {
-            // Surface pixels are opaque by construction, so same-size blits
-            // copy rows instead of blending.
             if let Some(image) = tiny_skia::PixmapRef::from_bytes(src, src_w, src_h) {
                 self.blit_image_rounded_hint(x, y, image, radius, true);
             }
@@ -808,8 +806,6 @@ impl Canvas {
             return;
         }
         crate::profiler::count("surface.resampled", 1);
-        // Resampling every pixel costs far more than copying them, so say once per new
-        // pair of sizes why the cheap path was missed.
         LAST_RESAMPLE.with(|last| {
             let sizes = (src_w, src_h, dst_w, dst_h);
             if last.get() != Some(sizes) {

@@ -208,8 +208,6 @@ fn draw_pixels(
         .map_err(|error| error.to_string())
 }
 
-/// A software frame from the patched Electron: the capturer's read-only
-/// shared memory region. Stride and size are in bytes.
 #[cfg(target_os = "linux")]
 #[napi(object)]
 pub struct SurfaceShm {

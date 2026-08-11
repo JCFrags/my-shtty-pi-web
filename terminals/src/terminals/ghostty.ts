@@ -119,7 +119,7 @@ export const ghostty: Detect = (env, run) => {
       name: "ghostty",
       async split() {
         throw new Error(
-          "Ghostty on Linux doesn't support scripted splits. Run without --split, or use tmux, kitty (with config changes), or WezTerm (partial support).",
+          "--split is not supported inside ghostty on this platform",
         );
       },
     };
