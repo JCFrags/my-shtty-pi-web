@@ -34,8 +34,8 @@ importers:
         specifier: ^18.3.0
         version: 18.3.31
       electron:
-        specifier: 43.1.1
-        version: 43.1.1
+        specifier: 43.3.0
+        version: 43.3.0
       typescript:
         specifier: ^5.5.0
         version: 5.9.3
@@ -913,8 +913,8 @@ packages:
       sqlite3:
         optional: true
 
-  electron@43.1.1:
-    resolution: {integrity: sha512-I5c5vfuVvaXpWx3IZdwvXgxQW44+e7OP1wXGVQkogLeSFSkUZ6sLCcWV05AdEcs65AO5tAIJJwbp7ixw+LdarA==}
+  electron@43.3.0:
+    resolution: {integrity: sha512-nLlvu0WFjftWsSaTkV2B/c4NDuJBspTyXu8vKSQ6vLvFt8uG3NgN49LLKcXddwX0GqVvAQDhciWp+4xOdTdhew==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -1526,7 +1526,7 @@ snapshots:
       '@types/better-sqlite3': 7.6.13
       better-sqlite3: 12.11.1
 
-  electron@43.1.1:
+  electron@43.3.0:
     dependencies:
       '@electron-internal/extract-zip': 1.0.4
       '@electron/get': 5.0.0
