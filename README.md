@@ -9,7 +9,7 @@ A real browser that runs inside your terminal
 
 
 
-### Install:
+### Install (macOS & Linux):
 
 ```bash
 curl -fsSl https://terminal-browser.sh/install | bash
