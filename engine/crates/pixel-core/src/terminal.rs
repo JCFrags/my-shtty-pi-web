@@ -234,6 +234,7 @@ pub struct Terminal {
     pending: Vec<u8>,
     lone_escape_since: Option<Instant>,
     transport: FrameTransport,
+    herdr: Option<crate::herdr::Herdr>,
     frame_files: Vec<FrameFile>,
     frame_seq: u64,
     wrapper: Wrapper,
@@ -345,6 +346,7 @@ impl Terminal {
             pending: Vec::new(),
             lone_escape_since: None,
             transport: FrameTransport::Inline,
+            herdr: None,
             frame_files: Vec::new(),
             frame_seq: 0,
             wrapper,
@@ -367,6 +369,10 @@ impl Terminal {
         }
         terminal.mouse_pixels = !wrapper.relayed() && terminal.probe_mouse_pixels()?;
         terminal.clipboard_data = !wrapper.relayed() && terminal.probe_clipboard_data()?;
+        terminal.herdr = crate::herdr::Herdr::open();
+        if let Some(cell) = terminal.herdr.as_ref().map(crate::herdr::Herdr::cell) {
+            terminal.cell = Some(cell);
+        }
         terminal.transport = terminal.probe_transport()?;
         terminal.color_scheme_updates = terminal.probe_color_scheme()?;
         if terminal.color_scheme_updates {
@@ -512,6 +518,17 @@ impl Terminal {
     }
 
     pub fn draw(&mut self, canvas: &Canvas) -> io::Result<usize> {
+        if let Some(herdr) = self.herdr.as_mut() {
+            match herdr.present(canvas) {
+                Ok(written) => return Ok(written),
+                Err(err) => {
+                    crate::logging::warn("herdr", format!("{err}, drawing it ourselves instead"));
+                    self.herdr = None;
+                    self.last_frame_size = None;
+                    self.placeholders = None;
+                }
+            }
+        }
         let shrank = self
             .last_frame_size
             .is_some_and(|(w, h)| canvas.width < w || canvas.height < h);
@@ -1021,13 +1038,10 @@ impl Terminal {
 
 const SHM_PROBE_ID: u32 = 299;
 const FILE_PROBE_ID: u32 = 300;
-/// tmux adds a hop in each direction, so the answer needs longer than a direct terminal would take.
 const FRAME_PROBE_TIMEOUT_MS: u64 = 300;
 
 const FRAME_SLOTS: u64 = 8;
 
-/// How a frame reaches the terminal, cheapest first. Inline means the pixels travel inside the
-/// escape sequence, which costs a compress and a write proportional to the window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FrameTransport {
     File,
@@ -1050,9 +1064,6 @@ fn frame_image_id(relayed: bool) -> u32 {
     }
 }
 
-/// The needle deliberately omits the `\x1b_` that starts the reply: tmux with extended-keys on
-/// re-encodes the escape pairs of a passed-through reply as key events (`\x1b_` arrives as
-/// `\x1b[27;3;95~`), leaving only the body intact.
 fn parse_probe_reply(buf: &[u8], needle: &[u8]) -> Option<bool> {
     let pos = buf.windows(needle.len()).position(|w| w == needle)?;
     let rest = &buf[pos + needle.len()..];
@@ -1062,11 +1073,8 @@ fn parse_probe_reply(buf: &[u8], needle: &[u8]) -> Option<bool> {
     Some(rest.starts_with(b"OK"))
 }
 
-/// A frame the terminal reads off disk. The mapping is made once and rewritten every frame, so a
-/// frame costs a copy into pages that are already resident rather than faulting in a fresh mapping.
-/// Only worth it because the terminal leaves the file alone, unlike a shared memory object.
 #[allow(unsafe_code)]
-struct FrameFile {
+pub(crate) struct FrameFile {
     path: std::path::PathBuf,
     map: std::ptr::NonNull<u8>,
     len: usize,
@@ -1074,8 +1082,10 @@ struct FrameFile {
 
 #[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
 impl FrameFile {
-    fn create(path: std::path::PathBuf, len: usize) -> io::Result<Self> {
+    pub(crate) fn create(path: std::path::PathBuf, len: usize) -> io::Result<Self> {
+        use std::os::unix::fs::OpenOptionsExt;
         let file = std::fs::File::options()
+            .mode(0o600)
             .read(true)
             .write(true)
             .create(true)
@@ -1098,8 +1108,16 @@ impl FrameFile {
         Ok(Self { path, map, len })
     }
 
-    fn write(&mut self, data: &[u8]) {
+    pub(crate) fn write(&mut self, data: &[u8]) {
         unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), self.map.as_ptr(), self.len) };
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.len
+    }
+
+    pub(crate) fn path(&self) -> &std::path::Path {
+        &self.path
     }
 }
 
