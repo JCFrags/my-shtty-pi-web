@@ -14,6 +14,9 @@ A real browser that runs inside your terminal
 ```bash
 curl -fsSl https://terminal-browser.sh/install | bash
 ```
+
+### Other Installation methods
+- #### [herdr](https://github.com/zenbu-labs/terminal-browser/tree/main/herdr-plugin)
 ### Usage
 ```
 terminal-browser # launches the browser
