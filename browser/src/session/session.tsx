@@ -10,6 +10,7 @@ import type { Pane, Terminal } from "pixel-terminals";
 import { browserSession, configureBrowserSession } from "../page/browser-session";
 import type { DownloadProgress } from "../page/browser-session";
 import { BrowserController } from "../page/controller";
+import { initOffscreenMode } from "../page/offscreen";
 import { initialBrowserState } from "../page/types";
 import type { BrowserState, BrowserSurfaceLayout } from "../page/types";
 import { zoomDirection } from "../page/zoom";
@@ -31,7 +32,7 @@ import type {
   PopupView,
 } from "../ui/types";
 import { normalizeUrl, searchOrUrl } from "../url";
-import { bindingLabel, listStep, matchesBinding, parseKeyBinding } from "./keybindings";
+import { bindingLabel, defaultKeys, listStep, matchesBinding, parseKeyBindings } from "./keybindings";
 import type { KeyBinding } from "./keybindings";
 import { clampDevtoolsFraction, computeLayout, dividerFraction, recordBarHeight } from "./layout";
 import type { DevtoolsPlacement } from "./layout";
@@ -98,10 +99,10 @@ class Session {
   private finding: Promise<Pane | null> | null = null;
   private readonly hideToolbar: boolean;
   private readonly partition: string | null;
-  private paletteBinding: KeyBinding | null = null;
-  private findBinding: KeyBinding | null = null;
-  private devtoolsBinding: KeyBinding | null = null;
-  private consoleBinding: KeyBinding | null = null;
+  private paletteBinding: KeyBinding[] = [];
+  private findBinding: KeyBinding[] = [];
+  private devtoolsBinding: KeyBinding[] = [];
+  private consoleBinding: KeyBinding[] = [];
   private noSuper = false;
   private readonly tabs: TabManager;
   private readonly fallbackState: BrowserState;
@@ -251,15 +252,13 @@ class Session {
         this.shutdown(error ? 1 : 0);
       },
     });
-    if (!this.root.sharedTextures) {
-      throw new Error("terminal-browser requires the patched Electron with shared texture support");
-    }
+    initOffscreenMode(this.root.sharedTextures);
+    this.fontId = await this.root.registerFont(bundledFontPath());
     this.applyKeyBindings(this.root.info.kittyKeyboard);
     this.popupSurface = this.root.createSurface();
     this.devtoolsSurface = this.root.createSurface();
     this.followCellZoom();
     this.recalculateLayout();
-    this.fontId = await this.root.registerFont(bundledFontPath());
     this.root.setPointerShape("default");
     this.windowBg = this.themeBackground();
     this.tabs.create(this.fallbackState.url);
@@ -315,28 +314,35 @@ class Session {
   private applyKeyBindings(kittyKeyboard: boolean) {
     this.noSuper = !kittyKeyboard;
     const binding = (flag: string, fallback: string) =>
-      parseKeyBinding(flagValue(this.ctx.argv, flag) ?? defaultBinding(fallback, this.noSuper));
-    this.paletteBinding = binding("--palette-key", "super+p");
-    this.findBinding = binding("--find-key", "super+shift+f");
+      parseKeyBindings(flagValue(this.ctx.argv, flag) ?? defaultBinding(fallback, this.noSuper));
+    this.paletteBinding = binding("--palette-key", defaultKeys.palette);
+    this.findBinding = binding("--find-key", defaultKeys.find);
     // we should use 2 shortcuts for console, also not sure if console actually works as expected
-    this.devtoolsBinding = binding("--devtools-key", "super+shift+i");
-    this.consoleBinding = binding("--console-key", "super+alt+j");
+    this.devtoolsBinding = binding("--devtools-key", defaultKeys.devtools);
+    this.consoleBinding = binding("--console-key", defaultKeys.console);
   }
 
   private cmdHeld(event: EngineKeyEvent): boolean {
     return event.mods.super || (this.noSuper && event.mods.alt);
   }
 
+  private clipboardHeld(event: EngineKeyEvent): boolean {
+    if (this.cmdHeld(event)) return true;
+    return (
+      process.platform === "linux" && event.mods.ctrl && !event.mods.shift && !event.mods.alt
+    );
+  }
+
   private isPasteKey(event: EngineKeyEvent): boolean {
-    return event.kind === "press" && this.cmdHeld(event) && event.key === "v";
+    return event.kind === "press" && this.clipboardHeld(event) && event.key === "v";
   }
 
   private isCopyKey(event: EngineKeyEvent): boolean {
-    return event.kind === "press" && this.cmdHeld(event) && event.key === "c";
+    return event.kind === "press" && this.clipboardHeld(event) && event.key === "c";
   }
 
   private isCutKey(event: EngineKeyEvent): boolean {
-    return event.kind === "press" && this.cmdHeld(event) && event.key === "x";
+    return event.kind === "press" && this.clipboardHeld(event) && event.key === "x";
   }
 
   private focusedInput(): { selectionText(): Promise<string>; cut(): void } | null {
@@ -669,7 +675,9 @@ class Session {
       return;
     }
     if (event.kind !== "release") {
-      if (event.mods.ctrl && (event.key === "q" || event.key === "c")) {
+      const quitKey =
+        event.key === "q" || (process.platform === "darwin" && event.key === "c");
+      if (event.mods.ctrl && quitKey) {
         this.shutdown();
         return;
       }
@@ -1038,7 +1046,14 @@ class Session {
     if (!this.pageMenu) return null;
     const items: PageMenuItem[] = [
       ...(this.pageMenu.selectionText
-        ? [{ id: "copy", label: "copy", enabled: true, shortcut: "cmd+c" }]
+        ? [
+            {
+              id: "copy",
+              label: "copy",
+              enabled: true,
+              shortcut: process.platform === "darwin" ? "cmd+c" : "ctrl+c",
+            },
+          ]
         : []),
       ...(this.pageMenu.linkURL
         ? [{ id: "copy-link", label: "copy link address", enabled: true, shortcut: "" }]
@@ -1263,7 +1278,8 @@ class Session {
     const explicit = Number(this.ctx.env.TERMINAL_BROWSER_DISPLAY_SCALE);
     if (Number.isFinite(explicit) && explicit > 0) return explicit;
     if (this.terminal?.reportsCssPixels) return 1;
-    return screen.getPrimaryDisplay().scaleFactor;
+    // this is a bit hacky i would like to improve on it
+    return screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).scaleFactor;
   }
 
   private initialUrl(): string {
@@ -1296,10 +1312,15 @@ function isPlainKey(event: EngineKeyEvent, key: string): boolean {
 
 function defaultBinding(spec: string, noSuper: boolean): string {
   if (!noSuper) return spec;
-  const parts = spec.split("+");
-  const key = parts.pop()!;
-  const mods = [...new Set(parts.map((mod) => (mod === "super" ? "alt" : mod)))];
-  return [...mods, key].join("+");
+  return spec
+    .split(/\s+/)
+    .map((chord) => {
+      const parts = chord.split("+");
+      const key = parts.pop()!;
+      const mods = [...new Set(parts.map((mod) => (mod === "super" ? "alt" : mod)))];
+      return [...mods, key].join("+");
+    })
+    .join(" ");
 }
 
 function splitDirection(value: string | null): InstanceRow["splitDir"] {

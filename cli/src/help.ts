@@ -43,6 +43,7 @@ Options:
 Finds the terminals on this machine and fixes any settings that would keep the
 browser from drawing in them. Editors built on vscode ship with terminal images
 switched off, so this turns "terminal.integrated.enableImages" on in each one.
+
 `,
   },
   upgrade: {

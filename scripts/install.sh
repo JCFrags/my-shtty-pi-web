@@ -1,16 +1,29 @@
 #!/bin/bash
 set -euo pipefail
 
-DOWNLOAD_URL="__DOWNLOAD_URL__"
 VERSION="__VERSION__"
 CHANNEL="__CHANNEL__"
-SHA256="__SHA256__"
-SIZE="__SIZE__"
 
-if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
-  echo "terminal-browser currently supports Apple Silicon macOS only" >&2
+PLATFORMS="__PLATFORMS__"
+
+case "$(uname -s)-$(uname -m)" in
+  Darwin-arm64) TARGET=darwin-arm64 ;;
+  Linux-x86_64|Linux-amd64) TARGET=linux-x64 ;;
+  Linux-aarch64|Linux-arm64) TARGET=linux-arm64 ;;
+  *)
+    echo "terminal-browser does not support $(uname -s) $(uname -m)" >&2
+    exit 1
+    ;;
+esac
+
+ROW="$(printf '%s\n' "$PLATFORMS" | awk -v t="$TARGET" '$1 == t')"
+if [ -z "$ROW" ]; then
+  echo "terminal-browser $VERSION has no build for $TARGET" >&2
   exit 1
 fi
+read -r _ DOWNLOAD_URL SHA256 SIZE <<EOF
+$ROW
+EOF
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -19,7 +32,12 @@ TARBALL="$TMP/terminal-browser.tar.gz"
 echo "downloading terminal-browser $VERSION ($((SIZE / 1000000)) MB)"
 curl -fL --retry 3 --retry-delay 2 --progress-bar "$DOWNLOAD_URL" -o "$TARBALL"
 
-echo "$SHA256  $TARBALL" | shasum -a 256 -c - >/dev/null || {
+if command -v sha256sum >/dev/null 2>&1; then
+  CHECK="sha256sum -c -"
+else
+  CHECK="shasum -a 256 -c -"
+fi
+echo "$SHA256  $TARBALL" | $CHECK >/dev/null || {
   echo "download corrupted (checksum mismatch), try again" >&2
   exit 1
 }
@@ -46,6 +64,15 @@ cat > "$BIN_HOME/terminal-browser" <<EOF
 exec "$APP/bin/terminal-browser" "\$@"
 EOF
 chmod +x "$BIN_HOME/terminal-browser"
+
+if [ "$(uname -s)" = Linux ]; then
+  missing="$(ldd "$APP/electron/electron" 2>/dev/null | awk '/not found/{print $1}' | sort -u)"
+  if [ -n "$missing" ]; then
+    echo "warning: missing system libraries:" >&2
+    printf '  %s\n' $missing >&2
+    echo "sudo apt-get install libnss3 libgtk-3-0 libasound2t64 libgbm1" >&2
+  fi
+fi
 
 AGENT_SKILLS="${AGENT_SKILLS_HOME:-$HOME/.agents/skills}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
@@ -118,7 +145,11 @@ case ":$PATH:" in
   *)
     echo
     echo "add $BIN_HOME to your PATH first:"
-    echo "  echo 'export PATH=\"$BIN_HOME:\$PATH\"' >> ~/.zshrc && exec zsh"
+    case "${SHELL:-}" in
+      */zsh) echo "  echo 'export PATH=\"$BIN_HOME:\$PATH\"' >> ~/.zshrc && exec zsh" ;;
+      */bash) echo "  echo 'export PATH=\"$BIN_HOME:\$PATH\"' >> ~/.bashrc && exec bash" ;;
+      *) echo "  export PATH=\"$BIN_HOME:\$PATH\" (add it to your shell's rc file)" ;;
+    esac
     ;;
 esac
 echo

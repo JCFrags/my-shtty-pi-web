@@ -40,6 +40,10 @@ import {
 } from "./devtools/stores";
 import type { LogLevel } from "./devtools/store";
 
+function appLog(level: LogLevel, target: string, text: string): void {
+  engineLogs.push(level, target, text);
+}
+
 export {
   Box,
   Text,
@@ -49,6 +53,7 @@ export {
   Path,
 } from "./components";
 export type { NodeHandle } from "./components";
+export { appLog };
 export { layoutStore, profilerStore } from "./devtools/stores";
 export type { LayoutSnapshot, ProfileSession } from "./devtools/stores";
 export type {
@@ -89,12 +94,19 @@ export type {
   MarkdownRow,
   MarkdownSpan,
   Rgba,
+  SurfaceShm,
   TerminalColors,
 } from "./native";
 export { HIGHLIGHT_CAPTURES, captureFilmstrip, diff, encodeRecording, highlight, parseMarkdown } from "./native";
 export { useTerminalColors } from "./colors";
 export { Surface, SurfaceCapture } from "./surface";
-export type { SurfaceFrame, CaptureStats, CaptureFrameMeta, CaptureIndex } from "./surface";
+export type {
+  SurfaceFrame,
+  SurfaceTexture,
+  CaptureStats,
+  CaptureFrameMeta,
+  CaptureIndex,
+} from "./surface";
 export { Markdown } from "./markdown";
 export type { MarkdownProps, MarkdownTheme } from "./markdown";
 export { openDevtools, closeDevtools, toggleDevtools, requestLayout, engineOp };

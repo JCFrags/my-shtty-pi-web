@@ -5,6 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+rayon = "1"
 rustix = { workspace = true }
 libc = { workspace = true }
 base64 = { workspace = true }
@@ -17,3 +18,5 @@ arboard = { workspace = true }
 
 [lints]
 workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]

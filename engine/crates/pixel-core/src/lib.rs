@@ -9,6 +9,7 @@ pub mod logging;
 mod menu;
 mod native;
 mod paint;
+pub(crate) mod parallel;
 pub mod profiler;
 mod shape;
 mod scroll;
