@@ -326,16 +326,23 @@ class Session {
     return event.mods.super || (this.noSuper && event.mods.alt);
   }
 
+  private clipboardHeld(event: EngineKeyEvent): boolean {
+    if (this.cmdHeld(event)) return true;
+    return (
+      process.platform === "linux" && event.mods.ctrl && !event.mods.shift && !event.mods.alt
+    );
+  }
+
   private isPasteKey(event: EngineKeyEvent): boolean {
-    return event.kind === "press" && this.cmdHeld(event) && event.key === "v";
+    return event.kind === "press" && this.clipboardHeld(event) && event.key === "v";
   }
 
   private isCopyKey(event: EngineKeyEvent): boolean {
-    return event.kind === "press" && this.cmdHeld(event) && event.key === "c";
+    return event.kind === "press" && this.clipboardHeld(event) && event.key === "c";
   }
 
   private isCutKey(event: EngineKeyEvent): boolean {
-    return event.kind === "press" && this.cmdHeld(event) && event.key === "x";
+    return event.kind === "press" && this.clipboardHeld(event) && event.key === "x";
   }
 
   private focusedInput(): { selectionText(): Promise<string>; cut(): void } | null {
@@ -668,7 +675,9 @@ class Session {
       return;
     }
     if (event.kind !== "release") {
-      if (event.mods.ctrl && (event.key === "q" || event.key === "c")) {
+      const quitKey =
+        event.key === "q" || (process.platform === "darwin" && event.key === "c");
+      if (event.mods.ctrl && quitKey) {
         this.shutdown();
         return;
       }
@@ -1037,7 +1046,14 @@ class Session {
     if (!this.pageMenu) return null;
     const items: PageMenuItem[] = [
       ...(this.pageMenu.selectionText
-        ? [{ id: "copy", label: "copy", enabled: true, shortcut: "cmd+c" }]
+        ? [
+            {
+              id: "copy",
+              label: "copy",
+              enabled: true,
+              shortcut: process.platform === "darwin" ? "cmd+c" : "ctrl+c",
+            },
+          ]
         : []),
       ...(this.pageMenu.linkURL
         ? [{ id: "copy-link", label: "copy link address", enabled: true, shortcut: "" }]
