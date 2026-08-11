@@ -3,6 +3,7 @@ import { Box, Text } from "pixel-react";
 import type { Rgba } from "pixel-react";
 import { measureText } from "../record/model";
 import type { InteractionKind, RecordView } from "../record/types";
+import { recordKeyLabel } from "../session/keybindings";
 import { displayUrl } from "../url";
 import { Icon } from "./icons";
 import type { IconName } from "./icons";
@@ -808,7 +809,7 @@ export function ReviewToolbar({
       >
         <Icon icon="close" size={rem * 0.95} color={theme.muted} />
         <Text style={{ fontSize: rem * 0.68, color: theme.disabled, wrap: false, selectable: false }}>
-          ctrl+r
+          {recordKeyLabel}
         </Text>
       </Box>
       <Box
@@ -905,7 +906,7 @@ export function RecordToolbarPill({
           selectable: false,
         }}
       >
-        {stopped ? "ctrl+enter" : "ctrl+r"}
+        {stopped ? "ctrl+enter" : recordKeyLabel}
       </Text>
     </Box>
   );

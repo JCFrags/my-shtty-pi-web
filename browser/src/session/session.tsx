@@ -32,7 +32,7 @@ import type {
   PopupView,
 } from "../ui/types";
 import { normalizeUrl, searchOrUrl } from "../url";
-import { bindingLabel, defaultKeys, listStep, matchesBinding, parseKeyBindings } from "./keybindings";
+import { bindingLabel, defaultKeys, isRecordKey, listStep, matchesBinding, parseKeyBindings, recordKeyLabel } from "./keybindings";
 import type { KeyBinding } from "./keybindings";
 import { clampDevtoolsFraction, computeLayout, dividerFraction, recordBarHeight } from "./layout";
 import type { DevtoolsPlacement } from "./layout";
@@ -325,6 +325,10 @@ class Session {
 
   private cmdHeld(event: EngineKeyEvent): boolean {
     return event.mods.super || (this.noSuper && event.mods.alt);
+  }
+
+  private accelHeld(event: EngineKeyEvent): boolean {
+    return this.cmdHeld(event) || (process.platform === "linux" && event.mods.ctrl);
   }
 
   private clipboardHeld(event: EngineKeyEvent): boolean {
@@ -733,13 +737,7 @@ class Session {
         return;
       }
       if (!this.findOpen && this.activeRecord()?.handleKey(event)) return;
-      if (
-        event.mods.ctrl &&
-        !event.mods.super &&
-        !event.mods.alt &&
-        !event.mods.shift &&
-        event.key === "r"
-      ) {
+      if (isRecordKey(event)) {
         if (!this.activeRecord()) void this.startRecording();
         return;
       }
@@ -751,7 +749,7 @@ class Session {
         this.openPalette();
         return;
       }
-      if (this.cmdHeld(event) && event.key === "l") {
+      if (this.accelHeld(event) && event.key === "l") {
         this.openUrlEdit();
         return;
       }
@@ -775,16 +773,16 @@ class Session {
         browser?.findNext(!event.mods.shift);
         return;
       }
-      if (this.cmdHeld(event) && event.key === "r") {
+      if (this.accelHeld(event) && event.key === "r") {
         this.activeRecord()?.reloaded();
         browser?.reload();
         return;
       }
-      if (this.cmdHeld(event) && event.key === "[") {
+      if (this.accelHeld(event) && event.key === "[") {
         browser?.back();
         return;
       }
-      if (this.cmdHeld(event) && event.key === "]") {
+      if (this.accelHeld(event) && event.key === "]") {
         browser?.forward();
         return;
       }
@@ -1201,7 +1199,7 @@ class Session {
             ? "complete recording"
             : "stop recording"
           : "record page",
-        shortcut: this.activeRecord()?.reviewing ? "ctrl+enter" : "ctrl+r",
+        shortcut: this.activeRecord()?.reviewing ? "ctrl+enter" : recordKeyLabel,
         run: () => {
           const record = this.activeRecord();
           if (!record) void this.startRecording();

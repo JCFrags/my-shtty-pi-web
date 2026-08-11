@@ -39,17 +39,17 @@ terminal-browser action # an agent-browser compatible cli for interacting with o
 | --- | --- | --- |
 | Quit | ctrl+q or ctrl+c | ctrl+q |
 | New tab | cmd+t | ctrl+t |
-| Edit URL | cmd+l | super+l |
+| Edit URL | cmd+l | ctrl+l |
 | Command palette | cmd+p | ctrl+k or alt+k |
 | Find in page | cmd+shift+f | ctrl+shift+f |
 | Next / previous match | enter / shift+enter | enter / shift+enter |
-| Reload | cmd+r | super+r |
-| Back / forward | cmd+[ / cmd+] | super+[ / super+] |
-| Zoom in / out / reset | cmd+= / cmd+- / cmd+0 | super+= / super+- / super+0 |
+| Reload | cmd+r | ctrl+r |
+| Back / forward | cmd+[ / cmd+] | ctrl+[ / ctrl+] |
+| Zoom in / out / reset | cmd+= / cmd+- / cmd+0 | your terminal's zoom keys (browser zoom follows the terminal font size) |
 | Devtools | cmd+shift+i or f12 | ctrl+shift+i or f12 |
 | Devtools console | cmd+alt+j | ctrl+alt+j |
 | Copy / paste / cut | cmd+c / cmd+v / cmd+x | ctrl+c / ctrl+v / ctrl+x |
-| Record page (start/stop) | ctrl+r | ctrl+r |
+| Record page (start/stop) | ctrl+r | ctrl+shift+r |
 | Complete recording review | ctrl+enter | ctrl+enter |
 | Close popup / overlay | escape | escape |
 

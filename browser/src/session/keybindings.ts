@@ -7,6 +7,18 @@ export const defaultKeys =
     ? { palette: "super+p", find: "super+shift+f", devtools: "super+shift+i", console: "super+alt+j" }
     : { palette: "ctrl+k alt+k", find: "ctrl+shift+f", devtools: "ctrl+shift+i", console: "ctrl+alt+j" };
 
+export const recordKeyLabel = process.platform === "darwin" ? "ctrl+r" : "ctrl+shift+r";
+
+export function isRecordKey(event: EngineKeyEvent): boolean {
+  return (
+    event.key.toLowerCase() === "r" &&
+    event.mods.ctrl &&
+    !event.mods.super &&
+    !event.mods.alt &&
+    event.mods.shift === (process.platform !== "darwin")
+  );
+}
+
 export function parseKeyBindings(spec: string): KeyBinding[] {
   if (spec === "none") return [];
   return spec
