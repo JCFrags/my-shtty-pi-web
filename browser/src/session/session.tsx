@@ -355,7 +355,12 @@ class Session {
 
   private async copySelection() {
     const text = await this.focusedInput()?.selectionText();
-    if (text) this.root?.setClipboard(text);
+    if (!text) {
+      if (process.platform === "linux") this.showToast("ctrl+q to quit", "done");
+      return;
+    }
+    this.root?.setClipboard(text);
+    this.showToast("copied to clipboard", "done");
   }
 
 
@@ -879,7 +884,7 @@ class Session {
       this.toast = null;
       this.toastTimer = null;
       this.render();
-    }, 5000);
+    }, 2000);
     this.render();
   }
 
