@@ -97,5 +97,6 @@ export interface ChromeLayout {
     height: number;
     dock: "bottom" | "right";
   } | null;
+  frame: boolean;
   rem: number;
 }

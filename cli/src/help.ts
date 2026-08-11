@@ -18,6 +18,14 @@ Options:
   --split <direction>   Open in a new pane: right, left, down, up
   --size <fraction>     How much of the space the split takes (0.2 to 0.95)
 
+Options for turning off features:
+  --app-mode            All of the flags below at once
+  --no-toolbar          No toolbar or tab strip
+  --no-shortcuts        No browser shortcuts, keys go to the page
+  --no-context-menu     No right-click menu
+  --no-overlays         No toasts or HUDs drawn over the page
+  --no-frame            No border or padding, the page fills the pane
+
 Examples:
   terminal-browser open localhost:3000
   terminal-browser open ./report.html --split right

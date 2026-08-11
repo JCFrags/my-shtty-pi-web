@@ -427,7 +427,12 @@ async function requireGraphics(check: TerminalCheck) {
 }
 
 const BROWSER_FLAGS = [
+  "--app-mode",
   "--no-toolbar",
+  "--no-shortcuts",
+  "--no-context-menu",
+  "--no-overlays",
+  "--no-frame",
   "--partition=",
   "--palette-key=",
   "--find-key=",

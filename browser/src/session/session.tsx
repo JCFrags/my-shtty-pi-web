@@ -70,6 +70,14 @@ export function createSession(ctx: SessionContext): SessionHandle {
 
 const DEFAULT_URL = "https://github.com/zenbu-labs";
 
+const APP_MODE_FLAGS = [
+  "--no-toolbar",
+  "--no-shortcuts",
+  "--no-context-menu",
+  "--no-overlays",
+  "--no-frame",
+];
+
 const FONT_FILE = path.join("assets", "fonts", "JetBrainsMono-Regular.ttf");
 
 function bundledFontPath(): string {
@@ -97,7 +105,12 @@ class Session {
   private readonly marker: string;
   private ownPane: Pane | null = null;
   private finding: Promise<Pane | null> | null = null;
+  private readonly argv: string[];
   private readonly hideToolbar: boolean;
+  private readonly noShortcuts: boolean;
+  private readonly noContextMenu: boolean;
+  private readonly noOverlays: boolean;
+  private readonly noFrame: boolean;
   private readonly partition: string | null;
   private paletteBinding: KeyBinding[] = [];
   private findBinding: KeyBinding[] = [];
@@ -159,8 +172,13 @@ class Session {
     this.ctx = ctx;
     this.terminal = detect(ctx.env);
     this.marker = `terminal-browser:${ctx.key}`;
-    this.hideToolbar = ctx.argv.includes("--no-toolbar");
-    this.partition = flagValue(ctx.argv, "--partition");
+    this.argv = ctx.argv.includes("--app-mode") ? [...ctx.argv, ...APP_MODE_FLAGS] : ctx.argv;
+    this.hideToolbar = this.argv.includes("--no-toolbar");
+    this.noShortcuts = this.argv.includes("--no-shortcuts");
+    this.noContextMenu = this.argv.includes("--no-context-menu");
+    this.noOverlays = this.argv.includes("--no-overlays");
+    this.noFrame = this.argv.includes("--no-frame");
+    this.partition = flagValue(this.argv, "--partition");
     this.fallbackState = initialBrowserState(this.initialUrl());
     configureBrowserSession(this.partition, (progress) => this.showDownload(progress));
     this.tabs = new TabManager(
@@ -275,8 +293,8 @@ class Session {
           pane: pane?.id ?? null,
         };
       },
-      splitDir: splitDirection(flagValue(this.ctx.argv, "--split-dir")),
-      parentTty: flagValue(this.ctx.argv, "--parent-tty"),
+      splitDir: splitDirection(flagValue(this.argv, "--split-dir")),
+      parentTty: flagValue(this.argv, "--parent-tty"),
       state: () => this.tabs.activeState ?? this.fallbackState,
       openTab: (url, cwd) => this.tabs.create(url ? normalizeUrl(url, cwd) : DEFAULT_URL).id,
       activateTab: (id) => {
@@ -316,7 +334,7 @@ class Session {
   private applyKeyBindings(kittyKeyboard: boolean) {
     this.noSuper = !kittyKeyboard;
     const binding = (flag: string, fallback: string) =>
-      parseKeyBindings(flagValue(this.ctx.argv, flag) ?? defaultBinding(fallback, this.noSuper));
+      parseKeyBindings(flagValue(this.argv, flag) ?? defaultBinding(fallback, this.noSuper));
     this.paletteBinding = binding("--palette-key", defaultKeys.palette);
     this.findBinding = binding("--find-key", defaultKeys.find);
     // we should use 2 shortcuts for console, also not sure if console actually works as expected
@@ -665,11 +683,11 @@ class Session {
         browser.popup.close();
         return;
       }
-      if (event.kind !== "release" && event.mods.ctrl && event.key === "q") {
+      if (!this.noShortcuts && event.kind !== "release" && event.mods.ctrl && event.key === "q") {
         this.shutdown();
         return;
       }
-      if (event.kind !== "release" && this.cmdHeld(event)) {
+      if (!this.noShortcuts && event.kind !== "release" && this.cmdHeld(event)) {
         const direction = zoomDirection(event.key);
         if (direction !== null) {
           this.applyZoom(direction);
@@ -688,7 +706,7 @@ class Session {
     if (event.kind !== "release") {
       const quitKey =
         event.key === "q" || (process.platform === "darwin" && event.key === "c");
-      if (event.mods.ctrl && quitKey) {
+      if (!this.noShortcuts && event.mods.ctrl && quitKey) {
         this.shutdown();
         return;
       }
@@ -738,33 +756,35 @@ class Session {
         return;
       }
       if (!this.findOpen && this.activeRecord()?.handleKey(event)) return;
-      if (isRecordKey(event)) {
-        if (!this.activeRecord()) void this.startRecording();
-        return;
-      }
-      if ((this.cmdHeld(event) || event.mods.ctrl) && event.key === "t") {
-        if (!this.activeRecord()?.reviewing) this.openNewTabModal();
-        return;
-      }
-      if (matchesBinding(event, this.paletteBinding)) {
-        this.openPalette();
-        return;
-      }
-      if (this.accelHeld(event) && event.key === "l") {
-        this.openUrlEdit();
-        return;
-      }
-      if (matchesBinding(event, this.findBinding)) {
-        this.openFind();
-        return;
-      }
-      if (matchesBinding(event, this.devtoolsBinding) || isPlainKey(event, "f12")) {
-        this.toggleDevtools();
-        return;
-      }
-      if (matchesBinding(event, this.consoleBinding)) {
-        this.toggleDevtoolsConsole();
-        return;
+      if (!this.noShortcuts) {
+        if (isRecordKey(event)) {
+          if (!this.activeRecord()) void this.startRecording();
+          return;
+        }
+        if ((this.cmdHeld(event) || event.mods.ctrl) && event.key === "t") {
+          if (!this.activeRecord()?.reviewing) this.openNewTabModal();
+          return;
+        }
+        if (matchesBinding(event, this.paletteBinding)) {
+          this.openPalette();
+          return;
+        }
+        if (this.accelHeld(event) && event.key === "l") {
+          this.openUrlEdit();
+          return;
+        }
+        if (matchesBinding(event, this.findBinding)) {
+          this.openFind();
+          return;
+        }
+        if (matchesBinding(event, this.devtoolsBinding) || isPlainKey(event, "f12")) {
+          this.toggleDevtools();
+          return;
+        }
+        if (matchesBinding(event, this.consoleBinding)) {
+          this.toggleDevtoolsConsole();
+          return;
+        }
       }
       if (event.key === "escape" && this.findOpen) {
         this.closeFind();
@@ -774,24 +794,26 @@ class Session {
         browser?.findNext(!event.mods.shift);
         return;
       }
-      if (this.accelHeld(event) && event.key === "r") {
-        this.activeRecord()?.reloaded();
-        browser?.reload();
-        return;
-      }
-      if (this.accelHeld(event) && event.key === "[") {
-        browser?.back();
-        return;
-      }
-      if (this.accelHeld(event) && event.key === "]") {
-        browser?.forward();
-        return;
-      }
-      if (this.cmdHeld(event)) {
-        const direction = zoomDirection(event.key);
-        if (direction !== null) {
-          this.applyZoom(direction);
+      if (!this.noShortcuts) {
+        if (this.accelHeld(event) && event.key === "r") {
+          this.activeRecord()?.reloaded();
+          browser?.reload();
           return;
+        }
+        if (this.accelHeld(event) && event.key === "[") {
+          browser?.back();
+          return;
+        }
+        if (this.accelHeld(event) && event.key === "]") {
+          browser?.forward();
+          return;
+        }
+        if (this.cmdHeld(event)) {
+          const direction = zoomDirection(event.key);
+          if (direction !== null) {
+            this.applyZoom(direction);
+            return;
+          }
         }
       }
     }
@@ -844,6 +866,7 @@ class Session {
   }
 
   private showZoomHud(factor: number) {
+    if (this.noOverlays) return;
     this.zoomHud = factor;
     if (this.zoomHudTimer) clearTimeout(this.zoomHudTimer);
     this.zoomHudTimer = setTimeout(() => {
@@ -855,6 +878,7 @@ class Session {
   }
 
   private showDownload(progress: DownloadProgress) {
+    if (this.noOverlays) return;
     const percent =
       progress.total > 0 ? Math.round((progress.received / progress.total) * 100) : null;
     if (
@@ -878,6 +902,7 @@ class Session {
   }
 
   private showToast(text: string, state: "done" | "failed" | "alert", detail?: string) {
+    if (this.noOverlays) return;
     this.toast = { text, detail, failed: state === "failed", alert: state === "alert" };
     if (this.toastTimer) clearTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => {
@@ -1003,7 +1028,7 @@ class Session {
   }
 
   private openPageMenu(params: Electron.ContextMenuParams) {
-    if (!this.surfaceLayout) return;
+    if (this.noContextMenu || !this.surfaceLayout) return;
     if (this.palette || this.newTab || this.urlEditOpen) return;
     if (this.tabs.activeController?.popup) return;
     const scale = this.surfaceLayout.scale;
@@ -1244,6 +1269,7 @@ class Session {
       this.root.info,
       this.displayScale,
       this.hideToolbar,
+      this.noFrame,
       reviewing ? null : placement,
       reviewing ? recordBarHeight(this.root.info) : 0,
     );
@@ -1288,7 +1314,7 @@ class Session {
   }
 
   private initialUrl(): string {
-    const arg = this.ctx.argv.find((argument) => !argument.startsWith("-"));
+    const arg = this.argv.find((argument) => !argument.startsWith("-"));
     if (arg) return arg;
     try {
       const last = lastUrl()?.trim();
