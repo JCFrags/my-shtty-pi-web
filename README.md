@@ -45,7 +45,7 @@ terminal-browser action # an agent-browser compatible cli for interacting with o
 | Next / previous match | enter / shift+enter | enter / shift+enter |
 | Reload | cmd+r | ctrl+r |
 | Back / forward | cmd+[ / cmd+] | ctrl+[ / ctrl+] |
-| Zoom in / out / reset | cmd+= / cmd+- / cmd+0 | your terminal's zoom keys (browser zoom follows the terminal font size) |
+| Zoom in / out / reset | your terminal's zoom keybind | your terminal's zoom keybind |
 | Devtools | cmd+shift+i or f12 | ctrl+shift+i or f12 |
 | Devtools console | cmd+alt+j | ctrl+alt+j |
 | Copy / paste / cut | cmd+c / cmd+v / cmd+x | ctrl+c / ctrl+v / ctrl+x |
