@@ -66,7 +66,7 @@ export function Chrome({
   popup: PopupView | null;
   zoomHud: number | null;
   download: DownloadView | null;
-  toast: { text: string; detail?: string; failed: boolean } | null;
+  toast: { text: string; detail?: string; failed: boolean; alert: boolean } | null;
   pageMenu: PageMenuView | null;
   dividerEngaged: boolean;
   record: RecordView | null;

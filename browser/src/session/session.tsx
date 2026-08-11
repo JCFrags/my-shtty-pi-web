@@ -148,7 +148,8 @@ class Session {
   private cellFollow: { height: number; basePx: number } | null = null;
   private download: DownloadView | null = null;
   private downloadTimer: ReturnType<typeof setTimeout> | null = null;
-  private toast: { text: string; detail?: string; failed: boolean } | null = null;
+  private toast: { text: string; detail?: string; failed: boolean; alert: boolean } | null =
+    null;
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
   private records = new Map<BrowserController, RecordSession>();
   private shownRecord: RecordSession | null = null;
@@ -356,7 +357,7 @@ class Session {
   private async copySelection() {
     const text = await this.focusedInput()?.selectionText();
     if (!text) {
-      if (process.platform === "linux") this.showToast("ctrl+q to quit", "done");
+      if (process.platform === "linux") this.showToast("ctrl+q to quit", "alert");
       return;
     }
     this.root?.setClipboard(text);
@@ -877,8 +878,8 @@ class Session {
     this.render();
   }
 
-  private showToast(text: string, state: "done" | "failed", detail?: string) {
-    this.toast = { text, detail, failed: state === "failed" };
+  private showToast(text: string, state: "done" | "failed" | "alert", detail?: string) {
+    this.toast = { text, detail, failed: state === "failed", alert: state === "alert" };
     if (this.toastTimer) clearTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => {
       this.toast = null;

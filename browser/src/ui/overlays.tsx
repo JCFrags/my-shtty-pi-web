@@ -3,7 +3,7 @@ import { Box, Input, Text } from "pixel-react";
 import type { BrowserState } from "../page/types";
 import { Icon } from "./icons";
 import type { IconName } from "./icons";
-import type { Theme } from "./theme";
+import { mix, type Theme } from "./theme";
 import type { ChromeActions, ChromeLayout, DownloadView } from "./types";
 
 export function FindBar({
@@ -133,7 +133,7 @@ export function Toast({
   layout,
   theme,
 }: {
-  toast: { text: string; detail?: string; failed: boolean };
+  toast: { text: string; detail?: string; failed: boolean; alert: boolean };
   layout: ChromeLayout;
   theme: Theme;
 }) {
@@ -149,9 +149,9 @@ export function Toast({
         gap: rem * 0.25,
         height: detailLines.length > 0 ? rem * (2.3 + detailLines.length * 1.05) : rem * 2,
         padding: { left: rem * 0.9, right: rem * 0.9 },
-        background: theme.bg,
+        background: toast.alert ? mix(theme.bg, theme.red, 0.22) : theme.bg,
         cornerRadius: rem * 0.5,
-        border: { width: 1, color: theme.fieldBorder },
+        border: { width: 1, color: toast.alert ? mix(theme.bg, theme.red, 0.5) : theme.fieldBorder },
       }}
     >
       <Text
