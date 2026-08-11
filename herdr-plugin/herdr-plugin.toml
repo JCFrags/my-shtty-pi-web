@@ -2,12 +2,12 @@ id = "zenbu-labs.terminal-browser"
 name = "Terminal Browser"
 version = "0.1.0"
 min_herdr_version = "0.7.0"
-description = "Open a real browser split next to your herdr panes"
+description = "A browser that runs inside herdr"
 platforms = ["linux", "macos"]
 
 [[actions]]
 id = "open-split"
 title = "Open terminal-browser (right split)"
-description = "Split the focused pane and open terminal-browser in it"
+description = "Open terminal-browser in a split to the right of your focused pane"
 contexts = ["global"]
 command = ["bash", "open-split.sh"]
