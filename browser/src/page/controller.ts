@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import { BrowserWindow, screen } from "electron";
 import type {
   EngineKeyEvent,
@@ -123,9 +122,6 @@ export class BrowserController {
       },
     });
     this.window.webContents.setFrameRate(frameRate());
-    void this.attachCdp().catch((error) => {
-      fs.writeSync(2, `cdp attach failed: ${String(error)}\n`);
-    });
     screen.on("display-added", this.onDisplayChange);
     screen.on("display-removed", this.onDisplayChange);
     screen.on("display-metrics-changed", this.onDisplayChange);

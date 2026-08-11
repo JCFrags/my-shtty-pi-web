@@ -5,7 +5,7 @@ export type KeyBinding = KeyMods & { key: string };
 export const defaultKeys =
   process.platform === "darwin"
     ? { palette: "super+p", find: "super+shift+f", devtools: "super+shift+i", console: "super+alt+j" }
-    : { palette: "ctrl+shift+k alt+k", find: "ctrl+shift+f", devtools: "ctrl+shift+i", console: "ctrl+alt+j" };
+    : { palette: "ctrl+k alt+k", find: "ctrl+shift+f", devtools: "ctrl+shift+i", console: "ctrl+alt+j" };
 
 export function parseKeyBindings(spec: string): KeyBinding[] {
   if (spec === "none") return [];
