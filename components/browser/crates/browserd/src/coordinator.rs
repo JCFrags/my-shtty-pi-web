@@ -1362,9 +1362,15 @@ impl Coordinator {
             last_activity_at: Utc::now(),
         };
         let queue = host.queue.lock().await;
+        let mut opened_with_requested_url = false;
         let backend_tab_result = if new_host {
             match host.controller.list_tabs(&host.handle).await {
-                Ok(tabs) => if let Some(tab) = tabs.into_iter().next() { Ok(tab) } else { host.controller.open_tab(&host.handle, None).await },
+                Ok(tabs) => if let Some(tab) = tabs.into_iter().next() {
+                    Ok(tab)
+                } else {
+                    opened_with_requested_url = params.url.is_some();
+                    host.controller.open_tab(&host.handle, params.url.as_deref()).await
+                },
                 Err(error) => Err(error),
             }
         } else {
@@ -1384,7 +1390,7 @@ impl Coordinator {
         tab.control = TabControl::Agent;
         tab.state = TabState::Idle;
         let address = BrowserAddress { agent_id: params.agent_id, browser_session_id: session.browser_session_id.clone(), tab_id: tab.tab_id.clone() };
-        if new_host {
+        if new_host && !opened_with_requested_url {
             if let Some(url) = params.url.as_deref() {
                 let result = match host.controller.navigate(&address, url).await {
                     Ok(result) => result,
@@ -2707,6 +2713,58 @@ mod tests {
             viewport_generation: 4, control: TabControl::Human, expected_control_epoch: 7,
         }).await.unwrap();
         assert_eq!(changed["controlEpoch"], 8);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires installed PinchTab 0.15.1 and Chromium"]
+    async fn real_pinchtab_session_create_navigate_observe_and_close() {
+        use tokio::io::AsyncWriteExt as _;
+        use tokio::net::TcpListener as TokioTcpListener;
+
+        let listener = TokioTcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let fixture_url = format!("http://{}/start", listener.local_addr().unwrap());
+        let fixture = tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else { break; };
+                tokio::spawn(async move {
+                    let body = "<!doctype html><title>Browserd PinchTab Fixture</title><main>public deterministic pinchtab fixture</main>";
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(), body
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                });
+            }
+        });
+
+        let (coordinator, root) = test_coordinator().await;
+        let connection = ConnectionContext::with_id("pinchtab-real-connection");
+        assert!(register(&coordinator, &connection, "pinchtab-real", "pinchtab-real-client").await.error.is_none());
+        let created = coordinator.dispatch_connected(&connection, request(2, "session.create", json!({
+            "agentId": "pinchtab-real", "pathId": "pinchtab/chrome", "url": fixture_url,
+            "visible": false, "label": "public fixture"
+        }))).await.result.unwrap();
+        assert_eq!(created["pathId"], "pinchtab/chrome");
+        let session_id = created["browserSession"]["browserSessionId"].as_str().unwrap().to_owned();
+        let tab_id = created["tab"]["tabId"].as_str().unwrap().to_owned();
+
+        let navigated = coordinator.dispatch_connected(&connection, request(3, "browser.navigate", json!({
+            "agentId": "pinchtab-real", "browserSessionId": session_id, "tabId": tab_id,
+            "url": fixture_url, "operationId": "pinchtab-real-navigate"
+        }))).await;
+        assert!(navigated.error.is_none(), "navigate failed: {:?}", navigated.error);
+        let observed = coordinator.dispatch_connected(&connection, request(4, "browser.observe", json!({
+            "agentId": "pinchtab-real", "browserSessionId": session_id, "tabId": tab_id,
+            "view": "main", "maxChars": 4096, "operationId": "pinchtab-real-observe"
+        }))).await.result.unwrap();
+        assert!(observed["content"].as_str().unwrap().contains("public deterministic pinchtab fixture"));
+        let closed = coordinator.dispatch_connected(&connection, request(5, "session.close", json!({
+            "agentId": "pinchtab-real", "browserSessionId": session_id
+        }))).await;
+        assert!(closed.error.is_none(), "close failed: {:?}", closed.error);
+
+        fixture.abort();
         let _ = std::fs::remove_dir_all(root);
     }
 
