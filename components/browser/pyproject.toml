@@ -2,7 +2,7 @@
 members = ["services/reader", "services/docling"]
 
 [dependency-groups]
-dev = ["pytest==9.0.2"]
+dev = ["pytest==9.0.2", "pytest-asyncio==1.4.0"]
 
 [tool.ruff]
 line-length = 100
