@@ -22,7 +22,26 @@ The check does these operations:
 - tests terminal row immutability and repeated recovery idempotency;
 - runs a restart-boundary SQL/application recovery harness for five publication effects.
 
-The check script pins its focused validation dependencies. The M0 integration owner retains ownership of project manifests and lockfiles.
+The root `pnpm-lock.yaml` and `uv.lock` pin the selected generators and their transitive dependencies. `generator-lock.json` records generator licenses, sources, and immutable registry artifact identities.
+
+## Generated types
+
+`generated/typescript/` and `generated/python/` contain deterministic types for all 16 canonical JSON Schemas. Do not edit these files. Do not create hand-written duplicate data transfer objects.
+
+Run generation and drift checks from the repository root:
+
+```bash
+python3 packages/contracts/scripts/generate_types.py
+python3 packages/contracts/scripts/generate_types.py --check
+python3 packages/contracts/tests/generated/check_generated.py
+```
+
+The selected generators are:
+
+- `json-schema-to-typescript` 15.0.4, MIT;
+- `jsonschema-gentypes` 2.12.0, BSD-2-Clause.
+
+`generated/traceability.json` maps each canonical schema and SHA-256 to one TypeScript output and one Python output. The focused check runs two isolated generations, checks clean regeneration, verifies a seeded drift failure and exact diagnostic, compiles the TypeScript smoke, imports every Python module, and checks protected fields.
 
 ## Worker observation authority
 

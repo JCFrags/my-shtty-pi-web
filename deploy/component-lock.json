@@ -61,7 +61,7 @@
     {
       "artifacts": [
         {
-          "digest": "sha256:fb6e56cf0d5134e5d245eb48c5ae882b0cb8020a04a9f2db8dd5fd14007ed28b",
+          "digest": "sha256:4a61c614eeda0460bc81e30b56237cd397488afdc4211ad90fb1497bd5edb4e6",
           "id": "file:pnpm-lock.yaml"
         }
       ],
@@ -214,7 +214,7 @@
     {
       "artifacts": [
         {
-          "digest": "sha256:4d988aa783b2e3c33238bbd380c66dab200996d46c75c2903cded2f5e9fcece7",
+          "digest": "sha256:669076cd76a65e865de31de16c99f44ae2f7567938a30dce5772c036af8ed71e",
           "id": "file:uv.lock"
         }
       ],
@@ -277,23 +277,36 @@
       "version": "UNRESOLVED_WX_M0_012"
     },
     {
-      "artifacts": [],
+      "artifacts": [
+        {
+          "digest": "sha256:a05575d55aafd16288af24a06646ea9dce5738aeb29b9c34a794ec708a04a6b1",
+          "id": "file:packages/contracts/generator-lock.json"
+        },
+        {
+          "digest": "sha512-Su9oK8DR4xCmDsLlyvadkXzX6+GGXJpbhwoLtOGArAG61dvbW4YQmSEno2y66ahpIdmLMg6YUf/QHLgiwvkrHQ==",
+          "id": "npm:json-schema-to-typescript"
+        },
+        {
+          "digest": "sha256:e2a9175fc4be997becb40dce8c360569ac6bf2b09925ce06115bc438dd777749",
+          "id": "pypi:jsonschema-gentypes-wheel"
+        }
+      ],
       "depends_on": [
         "WX-M0-003",
         "WX-M0-004"
       ],
       "enabled": true,
-      "health_fixture": "make contracts-check after WX-M0-004",
+      "health_fixture": "packages/contracts/check.sh",
       "id": "schema-generator-set",
       "kind": "generator-set",
-      "license": "unresolved; selection review required",
+      "license": "MIT AND BSD-2-Clause",
       "rollback": {
         "mode": "git-revert",
         "previous_known_good": null
       },
-      "source": "packages/contracts",
-      "status": "unresolved",
-      "version": "UNRESOLVED_WX_M0_004"
+      "source": "packages/contracts/generator-lock.json",
+      "status": "resolved",
+      "version": "json-schema-to-typescript-15.0.4+jsonschema-gentypes-2.12.0"
     },
     {
       "artifacts": [

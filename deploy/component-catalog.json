@@ -144,13 +144,17 @@
     {
       "id": "schema-generator-set",
       "kind": "generator-set",
-      "source": "packages/contracts",
-      "version": "UNRESOLVED_WX_M0_004",
-      "license": "unresolved; selection review required",
+      "source": "packages/contracts/generator-lock.json",
+      "version": "json-schema-to-typescript-15.0.4+jsonschema-gentypes-2.12.0",
+      "license": "MIT AND BSD-2-Clause",
       "enabled": true,
       "depends_on": ["WX-M0-003", "WX-M0-004"],
-      "artifacts": [],
-      "health_fixture": "make contracts-check after WX-M0-004",
+      "artifacts": [
+        {"id": "npm:json-schema-to-typescript", "digest": "sha512-Su9oK8DR4xCmDsLlyvadkXzX6+GGXJpbhwoLtOGArAG61dvbW4YQmSEno2y66ahpIdmLMg6YUf/QHLgiwvkrHQ=="},
+        {"id": "pypi:jsonschema-gentypes-wheel", "digest": "sha256:e2a9175fc4be997becb40dce8c360569ac6bf2b09925ce06115bc438dd777749"}
+      ],
+      "digest_files": ["packages/contracts/generator-lock.json"],
+      "health_fixture": "packages/contracts/check.sh",
       "rollback": {"mode": "git-revert", "previous_known_good": null}
     },
     {

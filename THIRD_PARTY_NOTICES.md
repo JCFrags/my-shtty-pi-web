@@ -92,13 +92,13 @@ This inventory is an engineering record. It is not legal advice.
 - Use: runtime; bundled: false
 - Notice: Every selected service image and transitive image notice must be inventoried by WX-M0-012 before release.
 
-## Schema generator set UNRESOLVED_WX_M0_004
+## Schema generator set json-schema-to-typescript-15.0.4+jsonschema-gentypes-2.12.0
 
 - Inventory ID: `component:schema-generator-set`
-- License: `UNRESOLVED` (unresolved)
-- Source: packages/contracts
+- License: `MIT AND BSD-2-Clause` (resolved)
+- Source: packages/contracts/generator-lock.json
 - Use: build; bundled: false
-- Notice: Selection, license, and notices must be resolved by WX-M0-004 before release.
+- Notice: Build-only generators. Retain the MIT and BSD-2-Clause notices with distributed tool copies.
 
 ## SearXNG 2026.8.12-54613defc
 
@@ -140,6 +140,14 @@ This inventory is an engineering record. It is not legal advice.
 - Use: development; bundled: false
 - Notice: MIT license; retain copyright and license notice.
 
+## json-schema-to-typescript 15.0.4
+
+- Inventory ID: `npm:json-schema-to-typescript`
+- License: `MIT` (resolved)
+- Source: https://github.com/bcherny/json-schema-to-typescript/tree/v15.0.4
+- Use: development; bundled: false
+- Notice: MIT license; retain copyright and license notice.
+
 ## typescript 6.0.3
 
 - Inventory ID: `npm:typescript`
@@ -163,6 +171,14 @@ This inventory is an engineering record. It is not legal advice.
 - Source: https://github.com/vitest-dev/vitest/tree/v4.1.10/packages/vitest
 - Use: development; bundled: false
 - Notice: MIT license; retain copyright and license notice.
+
+## jsonschema-gentypes 2.12.0
+
+- Inventory ID: `pypi:jsonschema-gentypes`
+- License: `BSD-2-Clause` (resolved)
+- Source: https://github.com/camptocamp/jsonschema-gentypes/tree/2.12.0
+- Use: development; bundled: false
+- Notice: BSD-2-Clause license; retain copyright, conditions, and disclaimer.
 
 ## mypy 2.3.0
 

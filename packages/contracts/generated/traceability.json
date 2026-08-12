@@ -1,0 +1,112 @@
+{
+  "generators": {
+    "python": {
+      "package": "jsonschema-gentypes",
+      "target_python": "3.12",
+      "version": "2.12.0"
+    },
+    "typescript": {
+      "package": "json-schema-to-typescript",
+      "version": "15.0.4"
+    }
+  },
+  "schema_version": "1.0",
+  "schemas": [
+    {
+      "python": "python/artifact_commit_intent.py",
+      "schema": "schemas/artifact-commit-intent.json",
+      "schema_sha256": "ccb00f0ec3844fe59372b8d3cc58a433e00dcfb0128064086d789024d3467d09",
+      "typescript": "typescript/artifact-commit-intent.d.ts"
+    },
+    {
+      "python": "python/artifact_result.py",
+      "schema": "schemas/artifact-result.json",
+      "schema_sha256": "75457c5bfab3ed0210cf63900e09bae4cb4f6749a65d94deaece854fca2e29b3",
+      "typescript": "typescript/artifact-result.d.ts"
+    },
+    {
+      "python": "python/common.py",
+      "schema": "schemas/common.json",
+      "schema_sha256": "9d5ecf9578ca6ef3fc76b6c0556d4ab90d78ecf2f1f3697a30e41d94e951f0b9",
+      "typescript": "typescript/common.d.ts"
+    },
+    {
+      "python": "python/engine_observation.py",
+      "schema": "schemas/engine-observation.json",
+      "schema_sha256": "f596f8a5628ec162274d5814f6fb8943bc9f24a9419ae8e0adc1988ed5ce26c1",
+      "typescript": "typescript/engine-observation.d.ts"
+    },
+    {
+      "python": "python/error.py",
+      "schema": "schemas/error.json",
+      "schema_sha256": "f8b348a97e4e5f037f61e4c1de425f0ad901dbe17ab8889317913c1553e5df0d",
+      "typescript": "typescript/error.d.ts"
+    },
+    {
+      "python": "python/event.py",
+      "schema": "schemas/event.json",
+      "schema_sha256": "04743802e385d2ac52098766d1e5fa5174176ccb1ccfd63c101544e1ecc700ea",
+      "typescript": "typescript/event.d.ts"
+    },
+    {
+      "python": "python/job.py",
+      "schema": "schemas/job.json",
+      "schema_sha256": "d9df14693fdd6291a42edf9538a31f2cdab72825193603ce11c2dfa8b99a244a",
+      "typescript": "typescript/job.d.ts"
+    },
+    {
+      "python": "python/model_runtimes_config.py",
+      "schema": "schemas/model-runtimes-config.json",
+      "schema_sha256": "dc66cb9d2ea242b3aebbdc580bd826156c120e7201c8259e7e383ba1d6d536d3",
+      "typescript": "typescript/model-runtimes-config.d.ts"
+    },
+    {
+      "python": "python/normalized_content_result.py",
+      "schema": "schemas/normalized-content-result.json",
+      "schema_sha256": "b767694dce50f1e95b53af525ebaa2c902d65af54e09c8def16b801b8470c583",
+      "typescript": "typescript/normalized-content-result.d.ts"
+    },
+    {
+      "python": "python/page_record.py",
+      "schema": "schemas/page-record.json",
+      "schema_sha256": "cb2e370ce6954ab02ba15b6b3a6da588c9a2879b050a7da4eebb2fa1c360f188",
+      "typescript": "typescript/page-record.d.ts"
+    },
+    {
+      "python": "python/permissions_config.py",
+      "schema": "schemas/permissions-config.json",
+      "schema_sha256": "32b44e50e5bc8a7a7765554b9b33f85aba71b4bb9d391dfa4f94a1b770c2e8d0",
+      "typescript": "typescript/permissions-config.d.ts"
+    },
+    {
+      "python": "python/retention_config.py",
+      "schema": "schemas/retention-config.json",
+      "schema_sha256": "2f649aa66e54254b640cb9c53177009deaf2dfb87d2e5e80d81a63d22515d2a7",
+      "typescript": "typescript/retention-config.d.ts"
+    },
+    {
+      "python": "python/search_hit.py",
+      "schema": "schemas/search-hit.json",
+      "schema_sha256": "d554b400b47a8d2f3651dfa9b476fe7046df866ce90b2592f2f67ad536395377",
+      "typescript": "typescript/search-hit.d.ts"
+    },
+    {
+      "python": "python/visit_record.py",
+      "schema": "schemas/visit-record.json",
+      "schema_sha256": "9839a9d3ace7dffc0d1ea851c0cf7c968f576534302e62f8097ae44fb72227c9",
+      "typescript": "typescript/visit-record.d.ts"
+    },
+    {
+      "python": "python/webx_config.py",
+      "schema": "schemas/webx-config.json",
+      "schema_sha256": "194fe3032b6c21fd020cc81fb5d611d69e78498157ace09c1e425c41b5d5865a",
+      "typescript": "typescript/webx-config.d.ts"
+    },
+    {
+      "python": "python/wiki_intake.py",
+      "schema": "schemas/wiki-intake.json",
+      "schema_sha256": "39de3790a187b995f13fc0b5e8aee72bea2b7d86f99dd0f621b7413a3bb93420",
+      "typescript": "typescript/wiki-intake.d.ts"
+    }
+  ]
+}

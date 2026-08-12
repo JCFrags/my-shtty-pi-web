@@ -1,4 +1,4 @@
-.PHONY: bootstrap toolchain-check component-lock-check format lint typecheck test-unit
+.PHONY: bootstrap toolchain-check component-lock-check contracts-generate contracts-check format lint typecheck test-unit
 
 LOCK_RESOLVED_AT := 2026-08-12T05:00:00Z
 
@@ -10,6 +10,12 @@ toolchain-check:
 
 component-lock-check:
 	./scripts/toolchain-component-lock --resolved-at $(LOCK_RESOLVED_AT) --check
+
+contracts-generate:
+	python3 packages/contracts/scripts/generate_types.py
+
+contracts-check:
+	packages/contracts/check.sh
 
 format:
 	pnpm exec eslint .

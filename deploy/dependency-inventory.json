@@ -226,20 +226,20 @@
       "component_refs": [
         "schema-generator-set"
       ],
-      "health_fixture": "make contracts-check after WX-M0-004",
+      "health_fixture": "packages/contracts/check.sh",
       "id": "component:schema-generator-set",
-      "kind": "later-selection",
-      "license": "UNRESOLVED",
-      "license_status": "unresolved",
+      "kind": "generator-set",
+      "license": "MIT AND BSD-2-Clause",
+      "license_status": "resolved",
       "name": "Schema generator set",
-      "notice": "Selection, license, and notices must be resolved by WX-M0-004 before release.",
-      "platform_support": "UNRESOLVED",
+      "notice": "Build-only generators. Retain the MIT and BSD-2-Clause notices with distributed tool copies.",
+      "platform_support": "Node.js 24 and Python >=3.12,<3.15",
       "replacement": "No hand-written duplicate DTO path is allowed.",
       "scope": "build",
-      "security_channel": "UNRESOLVED",
-      "source": "packages/contracts",
-      "upgrade_rollback": "Revert the generated-contract tool selection.",
-      "version": "UNRESOLVED_WX_M0_004"
+      "security_channel": "https://github.com/bcherny/json-schema-to-typescript/security and https://github.com/camptocamp/jsonschema-gentypes/security",
+      "source": "packages/contracts/generator-lock.json",
+      "upgrade_rollback": "Revert generator manifests, locks, and generated output.",
+      "version": "json-schema-to-typescript-15.0.4+jsonschema-gentypes-2.12.0"
     },
     {
       "bundled": false,
@@ -347,6 +347,28 @@
     {
       "bundled": false,
       "component_refs": [
+        "node-package-set",
+        "schema-generator-set"
+      ],
+      "health_fixture": "packages/contracts/check.sh",
+      "id": "npm:json-schema-to-typescript",
+      "kind": "npm",
+      "license": "MIT",
+      "license_status": "resolved",
+      "name": "json-schema-to-typescript",
+      "notice": "MIT license; retain copyright and license notice.",
+      "platform_support": "Node.js toolchain",
+      "purl": "pkg:npm/json-schema-to-typescript@15.0.4",
+      "replacement": "Select another reviewed deterministic JSON Schema generator.",
+      "scope": "development",
+      "security_channel": "https://github.com/bcherny/json-schema-to-typescript/security",
+      "source": "https://github.com/bcherny/json-schema-to-typescript/tree/v15.0.4",
+      "upgrade_rollback": "Revert package, lock, generator lock, and generated output.",
+      "version": "15.0.4"
+    },
+    {
+      "bundled": false,
+      "component_refs": [
         "node-package-set"
       ],
       "health_fixture": "pnpm run typecheck",
@@ -406,6 +428,28 @@
       "source": "https://github.com/vitest-dev/vitest/tree/v4.1.10/packages/vitest",
       "upgrade_rollback": "Revert package and lock changes.",
       "version": "4.1.10"
+    },
+    {
+      "bundled": false,
+      "component_refs": [
+        "python-package-set",
+        "schema-generator-set"
+      ],
+      "health_fixture": "packages/contracts/check.sh",
+      "id": "pypi:jsonschema-gentypes",
+      "kind": "pypi",
+      "license": "BSD-2-Clause",
+      "license_status": "resolved",
+      "name": "jsonschema-gentypes",
+      "notice": "BSD-2-Clause license; retain copyright, conditions, and disclaimer.",
+      "platform_support": "Python >=3.9; generated target Python 3.12",
+      "purl": "pkg:pypi/jsonschema-gentypes@2.12.0",
+      "replacement": "Select another reviewed deterministic JSON Schema generator.",
+      "scope": "development",
+      "security_channel": "https://github.com/camptocamp/jsonschema-gentypes/security",
+      "source": "https://github.com/camptocamp/jsonschema-gentypes/tree/2.12.0",
+      "upgrade_rollback": "Revert package, lock, generator lock, and generated output.",
+      "version": "2.12.0"
     },
     {
       "bundled": false,

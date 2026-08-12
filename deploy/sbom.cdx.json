@@ -98,7 +98,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "fb6e56cf0d5134e5d245eb48c5ae882b0cb8020a04a9f2db8dd5fd14007ed28b"
+          "content": "4a61c614eeda0460bc81e30b56237cd397488afdc4211ad90fb1497bd5edb4e6"
         }
       ],
       "licenses": [
@@ -328,7 +328,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "4d988aa783b2e3c33238bbd380c66dab200996d46c75c2903cded2f5e9fcece7"
+          "content": "669076cd76a65e865de31de16c99f44ae2f7567938a30dce5772c036af8ed71e"
         }
       ],
       "licenses": [
@@ -438,14 +438,22 @@
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "packages/contracts"
+          "url": "packages/contracts/generator-lock.json"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a05575d55aafd16288af24a06646ea9dce5738aeb29b9c34a794ec708a04a6b1"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "e2a9175fc4be997becb40dce8c360569ac6bf2b09925ce06115bc438dd777749"
         }
       ],
       "licenses": [
         {
-          "license": {
-            "name": "UNRESOLVED"
-          }
+          "expression": "MIT AND BSD-2-Clause"
         }
       ],
       "name": "Schema generator set",
@@ -460,12 +468,12 @@
         },
         {
           "name": "webx:license-status",
-          "value": "unresolved"
+          "value": "resolved"
         }
       ],
       "scope": "required",
       "type": "library",
-      "version": "UNRESOLVED_WX_M0_004"
+      "version": "json-schema-to-typescript-15.0.4+jsonschema-gentypes-2.12.0"
     },
     {
       "bom-ref": "component:searxng-image",
@@ -659,6 +667,39 @@
       "version": "10.8.1"
     },
     {
+      "bom-ref": "npm:json-schema-to-typescript",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/bcherny/json-schema-to-typescript/tree/v15.0.4"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "json-schema-to-typescript",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "development"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "purl": "pkg:npm/json-schema-to-typescript@15.0.4",
+      "scope": "required",
+      "type": "library",
+      "version": "15.0.4"
+    },
+    {
       "bom-ref": "npm:typescript",
       "externalReferences": [
         {
@@ -756,6 +797,39 @@
       "scope": "required",
       "type": "library",
       "version": "4.1.10"
+    },
+    {
+      "bom-ref": "pypi:jsonschema-gentypes",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/camptocamp/jsonschema-gentypes/tree/2.12.0"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-2-Clause"
+        }
+      ],
+      "name": "jsonschema-gentypes",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "development"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "purl": "pkg:pypi/jsonschema-gentypes@2.12.0",
+      "scope": "required",
+      "type": "library",
+      "version": "2.12.0"
     },
     {
       "bom-ref": "pypi:mypy",
@@ -875,7 +949,7 @@
       ]
     }
   },
-  "serialNumber": "urn:uuid:90295202-2aa8-5fd5-96b0-962df19beae1",
+  "serialNumber": "urn:uuid:6925e0a4-fce3-53dc-a8d1-7937c61c3a67",
   "specVersion": "1.6",
   "version": 1
 }

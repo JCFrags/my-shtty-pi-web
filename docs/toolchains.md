@@ -43,4 +43,4 @@ Official metadata resolves these dependency-closed components:
 
 Metadata came only from the upstream npm registry, Node distribution checksum list, Python download API, GitHub release API or source repository, Microsoft Container Registry, and the publishers' Docker Hub repositories. Resolution did not pull an image or start a container or browser.
 
-Release mode remains red for two explicit later dependencies. `schema-generator-set` depends on merged `WX-M0-003` and the selection owned by `WX-M0-004`. `remaining-deployment-image-set` depends on the final service set owned by `WX-M0-012`. Optional models remain safely disabled until `WX-M10-001` and operator license review.
+`schema-generator-set` is resolved by `WX-M0-004` with pinned, licensed TypeScript and Python generators. Release mode remains red for `remaining-deployment-image-set`, which depends on the final service set owned by `WX-M0-012`. Optional models remain safely disabled until `WX-M10-001` and operator license review.

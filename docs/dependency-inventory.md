@@ -18,9 +18,10 @@ Development mode permits an exact later-owned selection to remain unresolved. Re
 
 The check cross-references every component-lock ID. It also compares every direct npm and Python manifest entry with the inventory. It rejects duplicate IDs, incomplete fields, version drift, unknown component references, secret-like source values, private host paths, and generated output drift.
 
-The current release check must remain red for these later-owned records:
+The schema generator set is resolved by `WX-M0-004`. The inventory records `json-schema-to-typescript` 15.0.4 under MIT and `jsonschema-gentypes` 2.12.0 under BSD-2-Clause. Root package locks and `packages/contracts/generator-lock.json` hold their immutable identities.
 
-- `component:schema-generator-set`, owned by `WX-M0-004`;
+The current release check must remain red only for this later-owned record:
+
 - `component:remaining-deployment-image-set`, owned by `WX-M0-012`.
 
 Image transitive package inventories require the selected image SBOM or equivalent upstream package evidence before release qualification. This M0 pipeline does not pull images or infer package contents.
