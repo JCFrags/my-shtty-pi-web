@@ -81,9 +81,20 @@ class QualificationTest(unittest.TestCase):
         self.assertIn("sleep(2_000)", actual)
         self.assertIn("actualChecks.staleRefused = true", bridge)
         self.assertIn("actualChecks.ownershipRefused = true", bridge)
+        self.assertIn("actualChecks.ownershipRefusalClass = refusalClass", bridge)
         self.assertIn("actualChecks.cancellationRefused = true", bridge)
         self.assertIn("actualChecks.takeoverSucceeded = true", bridge)
         self.assertIn("actualChecks.returnSucceeded = true", bridge)
+
+    def test_ownership_refusal_classes_reject_unrelated_errors(self):
+        script = """import { ownershipRefusalClass } from './apps/pi-webx/qualification/ownership-refusal.mjs';
+const approved = ['browser session not found', 'browser session has a different owner', 'wrong-owner'];
+const unrelated = ['connection reset', 'internal error', 'permission denied', 'timeout'];
+if (approved.some((value) => !ownershipRefusalClass(value))) process.exit(2);
+if (unrelated.some((value) => ownershipRefusalClass(value))) process.exit(3);
+"""
+        result = run("node", "--input-type=module", "--eval", script)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
 
     def test_actual_identity_false_pass_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

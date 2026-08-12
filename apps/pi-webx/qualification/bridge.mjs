@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { WebxFacadeClient } from "../vendor/sdk/facade.js";
 import { QualificationRuntime, PATHS, PNG } from "./runtime.mjs";
+import { ownershipRefusalClass } from "./ownership-refusal.mjs";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const runRoot = join(process.env.XDG_RUNTIME_DIR ?? tmpdir(), `pi-webx-qualification-${process.pid}`);
@@ -165,8 +166,11 @@ async function executeOperation(request, operation, owners, pathIdentities, actu
     if (targetOwner && targetOwner !== owner) {
       const target = sessions.get(targetOwner);
       require(target, "cross-owner target session does not exist");
-      await assertRejects(() => call(owner, "browser.observe", { browserSessionId: target.sessionId, view: operation.view ?? "main" }, operation.step), /not found/i);
+      const refusal = await captureRejection(() => call(owner, "browser.observe", { browserSessionId: target.sessionId, view: operation.view ?? "main" }, operation.step));
+      const refusalClass = ownershipRefusalClass(refusal.message);
+      require(refusalClass, `unexpected ownership refusal: ${refusal.message}`);
       actualChecks.ownershipRefused = true;
+      actualChecks.ownershipRefusalClass = refusalClass;
       return;
     }
     const session = await ensureSession(owner, request, pathIdentities);
@@ -418,7 +422,8 @@ function pointerKind(kind) { return ({ move: "mouse-move", down: "mouse-down", u
 function semanticAction(action, operation) { if (action === "browser.click") return { kind: "click", selector: operation.selector ?? "#fixture" }; if (action === "browser.wait") return { kind: "wait", text: operation.text ?? operation.expect ?? "fixture" }; if (action === "browser.text") return { kind: "text-input", text: operation.text ?? "fixture" }; if (action === "browser.key") return { kind: operation.kind === "down" ? "key-down" : operation.kind === "up" ? "key-up" : "key-press", key: "A" }; const kind = operation.kind ?? "click"; if (["move", "doubleClick", "wheel", "drag"].includes(kind)) return { kind: "click", selector: `#${kind}` }; if (kind === "text") return { kind: "text-input", text: "fixture" }; if (kind === "key") return { kind: "key-press", key: "A" }; return { kind: "click", selector: "#fixture" }; }
 function hasDeveloperLinks(manifest) { return Object.values({ ...manifest.dependencies, ...manifest.optionalDependencies }).some((value) => /^(workspace|file|link):/.test(String(value))); }
 function uniqueToolInventory(source) { const names = [...source.matchAll(/registerTool\(\{ name: "([^"]+)"/g)].map((match) => match[1]); return names.length > 0 && names.length === new Set(names).size; }
-async function assertRejects(operation, pattern) { try { await operation(); } catch (error) { require(pattern.test(error.message), `unexpected refusal: ${error.message}`); if (/abort|cancel/i.test(error.message)) cancellationChecks += 1; return; } throw new Error("operation did not fail closed"); }
+async function captureRejection(operation) { try { await operation(); } catch (error) { return error; } throw new Error("operation did not fail closed"); }
+async function assertRejects(operation, pattern) { const error = await captureRejection(operation); require(pattern.test(error.message), `unexpected refusal: ${error.message}`); if (/abort|cancel/i.test(error.message)) cancellationChecks += 1; }
 function require(value, message) { if (!value) throw new Error(message); }
 function safeMessage(error) { return String(error instanceof Error ? error.message : error).replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]").slice(0, 500); }
 async function treeDigest(root) { const hash = createHash("sha256"); const files = []; async function walk(directory) { for (const entry of await readdir(directory, { withFileTypes: true })) { const path = join(directory, entry.name); if (entry.isSymbolicLink()) throw new Error(`package identity rejects symlink: ${relative(root, path)}`); if (entry.isDirectory()) await walk(path); else if (entry.isFile()) files.push(path); } } await walk(root); for (const path of files.sort()) { hash.update(relative(root, path)); hash.update("\0"); hash.update(await readFile(path)); hash.update("\0"); } return hash.digest("hex"); }
