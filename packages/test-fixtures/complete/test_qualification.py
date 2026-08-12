@@ -19,7 +19,13 @@ PACKAGE = pathlib.Path(__file__).with_name("package-fixture")
 
 
 def run(*values, cwd=ROOT):
-    return subprocess.run([str(item) for item in values], cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    return subprocess.run(
+        [str(item) for item in values],
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
 
 
 def digest(root: pathlib.Path) -> str:
@@ -40,7 +46,20 @@ class QualificationTest(unittest.TestCase):
     def test_complete_fixed_harness_and_five_journeys(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = pathlib.Path(temporary) / "evidence"
-            result = run(HARNESS, "--wiring-only", "--entrypoint", "python3", "--entrypoint-arg", MOCK, "--fixtures", ROOT / "packages/test-fixtures", "--output", output, "--timeout-ms", "5000")
+            result = run(
+                HARNESS,
+                "--wiring-only",
+                "--entrypoint",
+                "python3",
+                "--entrypoint-arg",
+                MOCK,
+                "--fixtures",
+                ROOT / "packages/test-fixtures",
+                "--output",
+                output,
+                "--timeout-ms",
+                "5000",
+            )
             self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
             manifest = json.loads((output / "complete-manifest.json").read_text())
             self.assertTrue(manifest["ok"])
@@ -48,7 +67,9 @@ class QualificationTest(unittest.TestCase):
             self.assertEqual(manifest["requiredPaths"], ["agent-browser/chrome", "pinchtab/chrome"])
             self.assertEqual(manifest["journeys"], ["J1", "J2", "J3", "J4", "J5"])
             self.assertGreaterEqual(manifest["browserCaseCount"], 26)
-            self.assertEqual([case["id"] for case in manifest["cases"]], ["L01", "L02", "L03", "L04", "L05"])
+            self.assertEqual(
+                [case["id"] for case in manifest["cases"]], ["L01", "L02", "L03", "L04", "L05"]
+            )
 
     def test_harness_requires_shipped_entrypoint(self):
         result = run(HARNESS)
@@ -57,13 +78,45 @@ class QualificationTest(unittest.TestCase):
 
     def test_mock_cannot_satisfy_shipped_entrypoint_gate(self):
         with tempfile.TemporaryDirectory() as temporary:
-            result = run(HARNESS, "--profile", "clean-install", "--entrypoint", "python3", "--entrypoint-arg", MOCK, "--package", PACKAGE, "--output", pathlib.Path(temporary) / "evidence", "--timeout-ms", "5000")
+            result = run(
+                HARNESS,
+                "--profile",
+                "clean-install",
+                "--entrypoint",
+                "python3",
+                "--entrypoint-arg",
+                MOCK,
+                "--package",
+                PACKAGE,
+                "--output",
+                pathlib.Path(temporary) / "evidence",
+                "--timeout-ms",
+                "5000",
+            )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("mock wiring cannot satisfy", result.stderr)
 
     def test_false_pass_lifecycle_evidence_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
-            result = run(HARNESS, "--wiring-only", "--profile", "clean-install", "--entrypoint", "python3", "--entrypoint-arg", MOCK, "--entrypoint-arg=--false-pass", "--entrypoint-arg", "L02", "--package", PACKAGE, "--output", pathlib.Path(temporary) / "evidence", "--timeout-ms", "5000")
+            result = run(
+                HARNESS,
+                "--wiring-only",
+                "--profile",
+                "clean-install",
+                "--entrypoint",
+                "python3",
+                "--entrypoint-arg",
+                MOCK,
+                "--entrypoint-arg=--false-pass",
+                "--entrypoint-arg",
+                "L02",
+                "--package",
+                PACKAGE,
+                "--output",
+                pathlib.Path(temporary) / "evidence",
+                "--timeout-ms",
+                "5000",
+            )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("unsafe or false evidence", result.stderr)
 
@@ -87,8 +140,10 @@ class QualificationTest(unittest.TestCase):
         self.assertIn("actualChecks.returnSucceeded = true", bridge)
 
     def test_ownership_refusal_classes_reject_unrelated_errors(self):
-        script = """import { ownershipRefusalClass } from './apps/pi-webx/qualification/ownership-refusal.mjs';
-const approved = ['browser session not found', 'browser session has a different owner', 'wrong-owner'];
+        script = """import { ownershipRefusalClass } from
+  './apps/pi-webx/qualification/ownership-refusal.mjs';
+const approved = ['browser session not found',
+  'browser session has a different owner', 'wrong-owner'];
 const unrelated = ['connection reset', 'internal error', 'permission denied', 'timeout'];
 if (approved.some((value) => !ownershipRefusalClass(value))) process.exit(2);
 if (unrelated.some((value) => ownershipRefusalClass(value))) process.exit(3);
@@ -99,7 +154,21 @@ if (unrelated.some((value) => ownershipRefusalClass(value))) process.exit(3);
     def test_actual_identity_false_pass_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             entrypoint = pathlib.Path(__file__).with_name("false-actual-identity.mjs")
-            result = run(HARNESS, "--profile", "clean-install", "--entrypoint", "node", "--entrypoint-arg", entrypoint, "--package", PACKAGE, "--output", pathlib.Path(temporary) / "evidence", "--timeout-ms", "5000")
+            result = run(
+                HARNESS,
+                "--profile",
+                "clean-install",
+                "--entrypoint",
+                "node",
+                "--entrypoint-arg",
+                entrypoint,
+                "--package",
+                PACKAGE,
+                "--output",
+                pathlib.Path(temporary) / "evidence",
+                "--timeout-ms",
+                "5000",
+            )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("mock wiring cannot satisfy", result.stderr)
 
@@ -112,19 +181,60 @@ if (unrelated.some((value) => ownershipRefusalClass(value))) process.exit(3);
             self.assertTrue((staged / "qualification/bridge.mjs").is_file())
             self.assertFalse((staged / "node_modules").exists())
             output = temporary / "evidence"
-            result = run(HARNESS, "--wiring-only", "--profile", "clean-install", "--entrypoint", staged / "qualification/bridge.mjs", "--package", staged, "--output", output, "--timeout-ms", "5000")
+            result = run(
+                HARNESS,
+                "--wiring-only",
+                "--profile",
+                "clean-install",
+                "--entrypoint",
+                staged / "qualification/bridge.mjs",
+                "--package",
+                staged,
+                "--output",
+                output,
+                "--timeout-ms",
+                "5000",
+            )
             self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
             manifest = json.loads((output / "complete-manifest.json").read_text())
             self.assertFalse(manifest["acceptanceEligible"])
-            self.assertEqual(manifest["package"]["aggregateSha256"], json.loads(stage_result.stdout)["aggregateSha256"])
+            self.assertEqual(
+                manifest["package"]["aggregateSha256"],
+                json.loads(stage_result.stdout)["aggregateSha256"],
+            )
 
             other = temporary / "other"
             shutil.copytree(staged, other)
-            false_pass = run(HARNESS, "--profile", "clean-install", "--entrypoint", staged / "qualification/bridge.mjs", "--package", staged, "--output", temporary / "false-pass", "--timeout-ms", "5000")
+            false_pass = run(
+                HARNESS,
+                "--profile",
+                "clean-install",
+                "--entrypoint",
+                staged / "qualification/bridge.mjs",
+                "--package",
+                staged,
+                "--output",
+                temporary / "false-pass",
+                "--timeout-ms",
+                "5000",
+            )
             self.assertNotEqual(false_pass.returncode, 0)
             self.assertIn("mock wiring cannot satisfy", false_pass.stderr)
 
-            wrong_root = run(HARNESS, "--wiring-only", "--profile", "clean-install", "--entrypoint", staged / "qualification/bridge.mjs", "--package", other, "--output", temporary / "wrong-root", "--timeout-ms", "5000")
+            wrong_root = run(
+                HARNESS,
+                "--wiring-only",
+                "--profile",
+                "clean-install",
+                "--entrypoint",
+                staged / "qualification/bridge.mjs",
+                "--package",
+                other,
+                "--output",
+                temporary / "wrong-root",
+                "--timeout-ms",
+                "5000",
+            )
             self.assertNotEqual(wrong_root.returncode, 0)
             self.assertIn("package root does not match", wrong_root.stderr)
 
@@ -156,11 +266,26 @@ if (unrelated.some((value) => ownershipRefusalClass(value))) process.exit(3);
             candidate = root / "candidate"
             shutil.copytree(PACKAGE, prior)
             shutil.copytree(PACKAGE, candidate)
-            (candidate / "src/index.js").write_text("export default () => ({ fixture: 'candidate' });\n")
+            (candidate / "src/index.js").write_text(
+                "export default () => ({ fixture: 'candidate' });\n"
+            )
             link = root / "registration/pi-web"
             link.parent.mkdir()
             os.symlink(str(prior), link)
-            common = ["--registration-link", link, "--candidate", candidate, "--expected-current-target", str(prior), "--expected-current-sha256", digest(prior), "--candidate-sha256", digest(candidate), "--test-root", root]
+            common = [
+                "--registration-link",
+                link,
+                "--candidate",
+                candidate,
+                "--expected-current-target",
+                str(prior),
+                "--expected-current-sha256",
+                digest(prior),
+                "--candidate-sha256",
+                digest(candidate),
+                "--test-root",
+                root,
+            ]
 
             dry = run(CUTOVER, *common)
             self.assertEqual(dry.returncode, 0, dry.stderr)
@@ -169,11 +294,27 @@ if (unrelated.some((value) => ownershipRefusalClass(value))) process.exit(3);
             self.assertIn("ROLLBACK:", dry.stdout)
             self.assertIn("/reload", dry.stdout)
 
-            drift = run(CUTOVER, *["0" * 64 if value == digest(prior) else value for value in common])
+            drift = run(
+                CUTOVER, *["0" * 64 if value == digest(prior) else value for value in common]
+            )
             self.assertNotEqual(drift.returncode, 0)
             self.assertIn("identity drift", drift.stderr)
 
-            unsafe = run(CUTOVER, "--registration-link", link, "--candidate", candidate, "--expected-current-target", str(prior), "--expected-current-sha256", digest(prior), "--candidate-sha256", digest(candidate), "--test-root", root / "registration")
+            unsafe = run(
+                CUTOVER,
+                "--registration-link",
+                link,
+                "--candidate",
+                candidate,
+                "--expected-current-target",
+                str(prior),
+                "--expected-current-sha256",
+                digest(prior),
+                "--candidate-sha256",
+                digest(candidate),
+                "--test-root",
+                root / "registration",
+            )
             self.assertNotEqual(unsafe.returncode, 0)
             self.assertIn("non-live link", unsafe.stderr)
 

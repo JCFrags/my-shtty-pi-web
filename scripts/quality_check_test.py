@@ -78,6 +78,10 @@ class QualitySeedTests(unittest.TestCase):
     def test_neg_fmt_doc_001(self) -> None:
         self.assert_format_failure("bad.md", "# Title\n\n-item\n", "Markdown")
 
+    def test_fmt_doc_accepts_front_matter_rules_and_bold(self) -> None:
+        path = self.seed("good.md", "---\nname: fixture\n---\n\n**Label:** value\n\n---\n")
+        self.assertEqual(quality.text_failures([path], format_mode=True), [])
+
     def test_neg_lint_ts_001(self) -> None:
         path = self.seed("unused.mjs", "const unused = 1;\nexport {};\n")
         result = subprocess.run(

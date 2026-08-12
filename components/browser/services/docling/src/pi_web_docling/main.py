@@ -9,7 +9,9 @@ try:
     from fastapi import FastAPI, HTTPException
     from pydantic import BaseModel, ConfigDict, Field
 except ImportError as error:  # pragma: no cover
-    raise RuntimeError("install Docling worker dependencies with `uv sync --all-packages`") from error
+    raise RuntimeError(
+        "install Docling worker dependencies with `uv sync --all-packages`"
+    ) from error
 
 
 class ConvertPayload(BaseModel):

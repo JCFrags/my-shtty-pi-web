@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Check the exact WebX routes shipped by the daemon and SDK facade."""
+
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,13 +25,25 @@ ROUTES = {
     ("post", "/browser/sessions"): ("createBrowserSession", "browser.write", True),
     ("get", "/browser/sessions/{session_id}"): ("getBrowserSession", "browser.read", False),
     ("delete", "/browser/sessions/{session_id}"): ("closeBrowserSession", "browser.write", True),
-    ("delete", "/browser/sessions/{session_id}/tabs/{tab_id}"): ("closeBrowserTab", "browser.write", True),
+    ("delete", "/browser/sessions/{session_id}/tabs/{tab_id}"): (
+        "closeBrowserTab",
+        "browser.write",
+        True,
+    ),
     ("post", "/browser/sessions/{session_id}/observe"): ("observeBrowser", "browser.read", True),
-    ("post", "/browser/sessions/{session_id}/frame"): ("getBrowserVisualFrame", "browser.read", True),
+    ("post", "/browser/sessions/{session_id}/frame"): (
+        "getBrowserVisualFrame",
+        "browser.read",
+        True,
+    ),
     ("post", "/browser/sessions/{session_id}/actions"): ("actBrowser", "browser.write", True),
     ("post", "/browser/sessions/{session_id}/debug"): ("debugBrowser", "browser.debug", True),
     ("post", "/browser/workspace"): ("manageBrowserWorkspace", "browser.control", True),
-    ("post", "/browser/operations/{operation_id}/cancel"): ("cancelBrowserOperation", "browser.write", True),
+    ("post", "/browser/operations/{operation_id}/cancel"): (
+        "cancelBrowserOperation",
+        "browser.write",
+        True,
+    ),
 }
 
 for (method, route), (operation_id, scope, idempotent) in ROUTES.items():
@@ -44,7 +58,9 @@ for (method, route), (operation_id, scope, idempotent) in ROUTES.items():
     if limits["max_response_bytes"] != 1_048_576:
         raise AssertionError(f"wrong response limit for {method.upper()} {route}")
     parameters = operation.get("parameters", [])
-    has_key = any(item.get("$ref") == "#/components/parameters/IdempotencyKey" for item in parameters)
+    has_key = any(
+        item.get("$ref") == "#/components/parameters/IdempotencyKey" for item in parameters
+    )
     if has_key != idempotent:
         raise AssertionError(f"wrong idempotency contract for {method.upper()} {route}")
     expected_body_limit = 1_048_576 if "requestBody" in operation else 0
@@ -58,19 +74,49 @@ if schemas["ShippedVersionInfo"]["properties"]["browserProtocolVersion"].get("co
     raise AssertionError("browser protocol identity is not 2.0.0")
 if schemas["BrowserPathId"].get("enum") != ["agent-browser/chrome", "pinchtab/chrome"]:
     raise AssertionError("browser path inventory differs from the two shipped paths")
-if schemas["BrowserWorkspaceRequest"]["properties"]["action"].get("enum") != ["show", "hide", "list", "attach", "takeover", "return"]:
+if schemas["BrowserWorkspaceRequest"]["properties"]["action"].get("enum") != [
+    "show",
+    "hide",
+    "list",
+    "attach",
+    "takeover",
+    "return",
+]:
     raise AssertionError("workspace action inventory differs")
 for name in (
-    "ShippedVersionInfo", "ShippedCapabilityCatalog", "ShippedSearchRequest", "ShippedSearchResponse",
-    "ShippedReadRequest", "BoundedContent", "ResearchRequest", "ResearchResponse", "PageLibrarySearchRequest",
-    "PageLibrarySearchResponse", "PageForgetRequest", "PageForgetResult", "ArtifactExcerptShipped",
-    "BrowserSessionRequestShipped", "BrowserSessionShipped", "BrowserSessionList", "BrowserObserveRequest",
-    "BrowserObservation", "BrowserVisualFrame", "BrowserActionRequest", "BrowserDebugRequest", "BrowserDebugResult",
-    "BrowserWorkspaceRequest", "BrowserWorkspaceResult", "BrowserOperationResult", "EmptyObject",
+    "ShippedVersionInfo",
+    "ShippedCapabilityCatalog",
+    "ShippedSearchRequest",
+    "ShippedSearchResponse",
+    "ShippedReadRequest",
+    "BoundedContent",
+    "ResearchRequest",
+    "ResearchResponse",
+    "PageLibrarySearchRequest",
+    "PageLibrarySearchResponse",
+    "PageForgetRequest",
+    "PageForgetResult",
+    "ArtifactExcerptShipped",
+    "BrowserSessionRequestShipped",
+    "BrowserSessionShipped",
+    "BrowserSessionList",
+    "BrowserObserveRequest",
+    "BrowserObservation",
+    "BrowserVisualFrame",
+    "BrowserActionRequest",
+    "BrowserDebugRequest",
+    "BrowserDebugResult",
+    "BrowserWorkspaceRequest",
+    "BrowserWorkspaceResult",
+    "BrowserOperationResult",
+    "EmptyObject",
 ):
     if schemas[name].get("additionalProperties") is not False:
         raise AssertionError(f"shipped object is not strict: {name}")
 for variant in schemas["BrowserActionShipped"]["oneOf"]:
     if variant.get("additionalProperties") is not False:
         raise AssertionError("browser action variant is not strict")
-print(f"VALID shipped route inventory: {len(ROUTES)} routes, API 1, browser protocol 2, two browser paths")
+print(
+    f"VALID shipped route inventory: {len(ROUTES)} routes, API 1, "
+    "browser protocol 2, two browser paths"
+)

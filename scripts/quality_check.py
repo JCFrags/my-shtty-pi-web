@@ -154,7 +154,11 @@ def text_failures(paths: Iterable[Path], *, format_mode: bool) -> list[str]:
                 failures.append(  # WX-M0-010
                     f"{path}:{number}: TODO/FIXME needs a WX-Mn-NNN backlog ID (WX-M0-010 policy)"
                 )
-        if format_mode and path.suffix.lower() == ".md" and re.search(r"(?m)^[-*+]\S", text):
+        if (
+            format_mode
+            and path.suffix.lower() == ".md"
+            and re.search(r"(?m)^(?:-(?!-)|\*(?!\*)|\+(?!\+))\S", text)
+        ):
             failures.append(f"{path}: Markdown list marker needs one following space")
         if format_mode and path.suffix.lower() in {".ts", ".js", ".mjs"}:
             if re.search(r"\b(?:const|let|var)\s+\w+=\{", text):
@@ -174,7 +178,8 @@ def text_failures(paths: Iterable[Path], *, format_mode: bool) -> list[str]:
         if not format_mode and path.suffix.lower() == ".md":
             if text.count("```") % 2:
                 failures.append(f"{path}: unclosed fenced code block")
-            if re.search(r"(?m)^#+[^ #]", text):
+            outside_fences = "\n".join(text.split("```")[::2])
+            if re.search(r"(?m)^#+[^ #]", outside_fences):
                 failures.append(f"{path}: malformed Markdown heading")
         if not format_mode and has_shell_shebang(path):
             first = text.splitlines()[0] if text.splitlines() else ""
@@ -207,6 +212,12 @@ def has_unquoted_shell_expansion(line: str) -> bool:
                 quote = None
             continue
         if character != "$" or quote is not None or index + 1 >= len(line):
+            continue
+        command_prefix = line[:index].strip()
+        shell_commands = (
+            r"^(?:echo|printf|cat|rm|cp|mv|chmod|chown|curl|sed|grep|awk|tar|install)(?:\s|$)"
+        )
+        if not re.match(shell_commands, command_prefix):
             continue
         following = line[index + 1]
         if following.isalpha() or following == "_" or following == "{":

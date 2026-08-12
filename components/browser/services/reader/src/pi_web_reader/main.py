@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from .pipeline import ReadRequest, ReaderPipeline
+from .pipeline import ReaderPipeline, ReadRequest
 
 try:
     from fastapi import FastAPI, HTTPException

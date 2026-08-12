@@ -69,7 +69,11 @@ def convert_document(request: ConvertRequest) -> dict[str, Any]:
                 }
             )
         tables = [
-            {"index": index, "rows": getattr(table.data, "num_rows", None), "columns": getattr(table.data, "num_cols", None)}
+            {
+                "index": index,
+                "rows": getattr(table.data, "num_rows", None),
+                "columns": getattr(table.data, "num_cols", None),
+            }
             for index, table in enumerate(getattr(document, "tables", []))
         ]
         images = [{"index": index} for index, _ in enumerate(getattr(document, "pictures", []))]
