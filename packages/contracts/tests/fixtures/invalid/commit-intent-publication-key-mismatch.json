@@ -5,7 +5,7 @@
   "attempt_id": "01j4w4j0k7hm9j9tx3jz8s2n5q",
   "intent_kind": "page_version",
   "idempotency_key": "page-version:01j4w4j7mr6c9s7cezz9n5f2qp",
-  "state": "prepared",
+  "state": "published",
   "staging_relative_path": "staging/commit-intents/01j4w4j9a3jpsk9r7jcrg29q01",
   "final_relative_path": "pages/example.org/01j4w4j6v2v4p84n8v7v60m0s7/versions/01j4w4j7mr6c9s7cezz9n5f2qp",
   "manifest_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
@@ -23,5 +23,10 @@
   ],
   "recovery_count": 0,
   "created_at": "2026-08-09T12:00:01Z",
-  "updated_at": "2026-08-09T12:00:01Z"
+  "updated_at": "2026-08-09T12:00:01Z",
+  "renamed_at": "2026-08-09T12:00:02Z",
+  "published_at": "2026-08-09T12:00:03Z",
+  "published_reference_type": "page_version",
+  "published_reference_id": "01j4w4j7mr6c9s7cezz9n5f2qp",
+  "publication_idempotency_key": "commit-intent:01j4w4j9a3jpsk9r7jcrg29q02"
 }

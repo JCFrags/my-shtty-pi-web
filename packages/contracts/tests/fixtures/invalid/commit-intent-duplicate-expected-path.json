@@ -19,6 +19,11 @@
       "relative_path": "record.json",
       "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "size_bytes": 640
+    },
+    {
+      "relative_path": "page.md",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "size_bytes": 999
     }
   ],
   "recovery_count": 0,

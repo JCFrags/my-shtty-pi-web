@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://webx.local/schemas/v1/engine-observation.json",
   "title": "EngineObservation",
+  "$comment": "Worker-produced evidence only. Compatibility traceability: ../compatibility/engine-observation-authority.md. Final acceptance is daemon-owned and is not present in this schema.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -10,7 +11,6 @@
     "state",
     "started_at",
     "completed_at",
-    "accepted",
     "quality"
   ],
   "properties": {
@@ -59,15 +59,6 @@
     },
     "final_url": {
       "$ref": "common.json#/$defs/url"
-    },
-    "accepted": {
-      "type": "boolean"
-    },
-    "rejection_reasons": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
     },
     "quality": {
       "type": "object",

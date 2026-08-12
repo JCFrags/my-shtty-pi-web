@@ -389,6 +389,7 @@ CREATE TABLE engine_observations (
     completed_at        TEXT,
     final_url           TEXT,
     http_status         INTEGER,
+    -- Daemon-owned post-admission state. Never copy a worker observation field.
     accepted            INTEGER CHECK(accepted IS NULL OR accepted IN (0,1)),
     quality_score       REAL CHECK(quality_score IS NULL OR (quality_score >= 0 AND quality_score <= 1)),
     quality_json        TEXT NOT NULL DEFAULT '{}',
@@ -511,6 +512,7 @@ CREATE TABLE artifact_commit_intents (
     expected_files_json TEXT NOT NULL,
     published_reference_type TEXT CHECK(published_reference_type IS NULL OR published_reference_type IN ('visit','page_version','artifact','wiki_delivery')),
     published_reference_id TEXT,
+    publication_idempotency_key TEXT UNIQUE,
     recovery_count      INTEGER NOT NULL DEFAULT 0 CHECK(recovery_count >= 0),
     last_verified_at    TEXT,
     created_at          TEXT NOT NULL,
@@ -520,17 +522,83 @@ CREATE TABLE artifact_commit_intents (
     completed_at        TEXT,
     quarantined_at      TEXT,
     quarantine_paths_json TEXT,
-    quarantine_reason   TEXT,
+    quarantine_reason_code TEXT CHECK(quarantine_reason_code IS NULL OR quarantine_reason_code IN (
+        'STAGING_MISSING','FINAL_MISSING','HASH_MISMATCH','MANIFEST_MISMATCH',
+        'PATH_CONFLICT','AMBIGUOUS_CANDIDATES','UNSAFE_PATH','PUBLICATION_CONFLICT',
+        'RECOVERY_INVARIANT_VIOLATION'
+    )),
+    quarantine_safe_detail TEXT CHECK(
+        quarantine_safe_detail IS NULL OR (
+            length(quarantine_safe_detail) BETWEEN 1 AND 500
+            AND instr(quarantine_safe_detail, char(10)) = 0
+            AND instr(quarantine_safe_detail, char(13)) = 0
+        )
+    ),
     CHECK((published_reference_type IS NULL) = (published_reference_id IS NULL)),
+    CHECK(length(staging_relative_path) = length('staging/commit-intents/') + 26),
+    CHECK(staging_relative_path GLOB 'staging/commit-intents/[0-9a-hjkmnp-tv-z]*'),
+    CHECK(substr(staging_relative_path, length('staging/commit-intents/') + 1) NOT GLOB '*[^0-9a-hjkmnp-tv-z]*'),
+    CHECK(final_relative_path NOT GLOB '*[^A-Za-z0-9._/-]*'),
+    CHECK(final_relative_path NOT LIKE '%/../%' AND final_relative_path NOT LIKE '%/./%'),
+    CHECK(
+        (intent_kind = 'visit_receipt' AND final_relative_path GLOB 'visits/*') OR
+        (intent_kind = 'page_version' AND final_relative_path GLOB 'pages/*') OR
+        (intent_kind = 'artifact_set' AND final_relative_path GLOB 'artifacts/*') OR
+        (intent_kind = 'wiki_envelope' AND final_relative_path GLOB 'wiki/outbox/*')
+    ),
     CHECK(state NOT IN ('renamed','published','completed') OR renamed_at IS NOT NULL),
-    CHECK(state NOT IN ('published','completed') OR (published_at IS NOT NULL AND published_reference_type IS NOT NULL)),
+    CHECK(state NOT IN ('published','completed') OR (
+        published_at IS NOT NULL
+        AND published_reference_type IS NOT NULL
+        AND publication_idempotency_key = 'commit-intent:' || commit_intent_id
+    )),
     CHECK(state <> 'completed' OR completed_at IS NOT NULL),
-    CHECK(state <> 'quarantined' OR (quarantined_at IS NOT NULL AND quarantine_paths_json IS NOT NULL AND quarantine_reason IS NOT NULL))
+    CHECK(state <> 'quarantined' OR (
+        quarantined_at IS NOT NULL
+        AND quarantine_paths_json IS NOT NULL
+        AND quarantine_reason_code IS NOT NULL
+    )),
+    UNIQUE(published_reference_type, published_reference_id)
 ) STRICT;
 CREATE INDEX artifact_commit_intents_recovery_idx
     ON artifact_commit_intents(state, updated_at);
 CREATE INDEX artifact_commit_intents_job_idx
     ON artifact_commit_intents(job_id, created_at);
+
+-- The application applies the same transition table from
+-- semantics/artifact-commit-intent-semantics.json before it writes. These
+-- triggers are defense in depth and reject skipped, reverse, or terminal writes.
+CREATE TRIGGER artifact_commit_intents_initial_state
+BEFORE INSERT ON artifact_commit_intents
+WHEN NEW.state <> 'prepared'
+BEGIN
+    SELECT RAISE(ABORT, 'WEBX_COMMIT_INTENT_INITIAL_STATE_INVALID');
+END;
+
+CREATE TRIGGER artifact_commit_intents_state_transition
+BEFORE UPDATE OF state ON artifact_commit_intents
+WHEN NEW.state <> OLD.state AND NOT (
+    (OLD.state = 'prepared' AND NEW.state IN ('renamed','quarantined')) OR
+    (OLD.state = 'renamed' AND NEW.state IN ('published','quarantined')) OR
+    (OLD.state = 'published' AND NEW.state IN ('completed','quarantined'))
+)
+BEGIN
+    SELECT RAISE(ABORT, 'WEBX_COMMIT_INTENT_TRANSITION_INVALID');
+END;
+
+CREATE TRIGGER artifact_commit_intents_terminal_update
+BEFORE UPDATE ON artifact_commit_intents
+WHEN OLD.state IN ('completed','quarantined')
+BEGIN
+    SELECT RAISE(ABORT, 'WEBX_COMMIT_INTENT_TERMINAL_IMMUTABLE');
+END;
+
+CREATE TRIGGER artifact_commit_intents_terminal_delete
+BEFORE DELETE ON artifact_commit_intents
+WHEN OLD.state IN ('completed','quarantined')
+BEGIN
+    SELECT RAISE(ABORT, 'WEBX_COMMIT_INTENT_TERMINAL_IMMUTABLE');
+END;
 
 CREATE TABLE blobs (
     blob_sha256         TEXT PRIMARY KEY CHECK(length(blob_sha256) = 64),

@@ -3,6 +3,7 @@
   "$id": "https://webx.local/schemas/v1/artifact-commit-intent.json",
   "title": "ArtifactCommitIntent",
   "description": "The durable journal record that bridges a verified same-filesystem artifact tree rename and publication of its SQLite facts and outbox rows.",
+  "$comment": "Application validation MUST apply semantics/artifact-commit-intent-semantics.json. JSON Schema alone cannot enforce unique expected_files.relative_path values or prior-to-next state transitions.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -47,16 +48,18 @@
       "enum": ["prepared", "renamed", "published", "completed", "quarantined"]
     },
     "staging_relative_path": {
-      "$ref": "#/$defs/safeRelativePath"
+      "$ref": "#/$defs/stagingPath"
     },
     "final_relative_path": {
-      "$ref": "#/$defs/safeRelativePath"
+      "$ref": "#/$defs/finalPath"
     },
     "manifest_sha256": {
       "$ref": "common.json#/$defs/sha256"
     },
     "expected_files": {
+      "$comment": "Every relative_path MUST be unique. The mandatory semantic validator rejects duplicates before persistence or recovery.",
       "type": "array",
+      "uniqueItems": true,
       "minItems": 1,
       "maxItems": 100000,
       "items": {
@@ -85,6 +88,10 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 300
+    },
+    "publication_idempotency_key": {
+      "type": "string",
+      "pattern": "^commit-intent:[0-9a-hjkmnp-tv-z]{26}$"
     },
     "recovery_count": {
       "type": "integer",
@@ -117,13 +124,28 @@
       "maxItems": 2,
       "uniqueItems": true,
       "items": {
-        "$ref": "#/$defs/safeRelativePath"
+        "$ref": "#/$defs/quarantinePath"
       }
     },
-    "quarantine_reason": {
+    "quarantine_reason_code": {
+      "type": "string",
+      "enum": [
+        "STAGING_MISSING",
+        "FINAL_MISSING",
+        "HASH_MISMATCH",
+        "MANIFEST_MISMATCH",
+        "PATH_CONFLICT",
+        "AMBIGUOUS_CANDIDATES",
+        "UNSAFE_PATH",
+        "PUBLICATION_CONFLICT",
+        "RECOVERY_INVARIANT_VIOLATION"
+      ]
+    },
+    "quarantine_safe_detail": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 2000
+      "maxLength": 500,
+      "pattern": "^[^\\r\\n\\u0000-\\u001f\\u007f]+$"
     }
   },
   "$defs": {
@@ -132,9 +154,60 @@
       "minLength": 1,
       "maxLength": 2048,
       "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))(?!.*//)[A-Za-z0-9._/-]+$"
+    },
+    "stagingPath": {
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^staging/commit-intents/[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "finalPath": {
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^(?:visits|pages|artifacts|wiki/outbox)/(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))(?!.*//)[A-Za-z0-9._/-]+$"
+    },
+    "quarantinePath": {
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^quarantine/commit-intents/[0-9a-hjkmnp-tv-z]{26}(?:/[A-Za-z0-9._/-]+)?$"
     }
   },
   "allOf": [
+    {
+      "if": {
+        "properties": {"intent_kind": {"const": "visit_receipt"}},
+        "required": ["intent_kind"]
+      },
+      "then": {
+        "properties": {"final_relative_path": {"pattern": "^visits/"}}
+      }
+    },
+    {
+      "if": {
+        "properties": {"intent_kind": {"const": "page_version"}},
+        "required": ["intent_kind"]
+      },
+      "then": {
+        "properties": {"final_relative_path": {"pattern": "^pages/"}}
+      }
+    },
+    {
+      "if": {
+        "properties": {"intent_kind": {"const": "artifact_set"}},
+        "required": ["intent_kind"]
+      },
+      "then": {
+        "properties": {"final_relative_path": {"pattern": "^artifacts/"}}
+      }
+    },
+    {
+      "if": {
+        "properties": {"intent_kind": {"const": "wiki_envelope"}},
+        "required": ["intent_kind"]
+      },
+      "then": {
+        "properties": {"final_relative_path": {"pattern": "^wiki/outbox/"}}
+      }
+    },
     {
       "if": {
         "properties": {
@@ -158,7 +231,12 @@
         "required": ["state"]
       },
       "then": {
-        "required": ["published_at", "published_reference_type", "published_reference_id"]
+        "required": [
+          "published_at",
+          "published_reference_type",
+          "published_reference_id",
+          "publication_idempotency_key"
+        ]
       }
     },
     {
@@ -184,7 +262,7 @@
         "required": ["state"]
       },
       "then": {
-        "required": ["quarantined_at", "quarantine_paths", "quarantine_reason"]
+        "required": ["quarantined_at", "quarantine_paths", "quarantine_reason_code"]
       }
     }
   ]

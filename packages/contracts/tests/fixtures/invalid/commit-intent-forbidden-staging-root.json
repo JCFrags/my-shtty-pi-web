@@ -6,7 +6,7 @@
   "intent_kind": "page_version",
   "idempotency_key": "page-version:01j4w4j7mr6c9s7cezz9n5f2qp",
   "state": "prepared",
-  "staging_relative_path": "staging/commit-intents/01j4w4j9a3jpsk9r7jcrg29q01",
+  "staging_relative_path": "secrets/worker-token",
   "final_relative_path": "pages/example.org/01j4w4j6v2v4p84n8v7v60m0s7/versions/01j4w4j7mr6c9s7cezz9n5f2qp",
   "manifest_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
   "expected_files": [

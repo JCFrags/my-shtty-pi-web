@@ -4,10 +4,10 @@ All schemas use JSON Schema 2020-12. Schema IDs are stable under `https://webx.l
 
 | File | Contract |
 |---|---|
-| `artifact-commit-intent.json` | Durable filesystem and SQLite commit journal |
+| `artifact-commit-intent.json` | Durable filesystem and SQLite commit journal; requires the package semantic contract |
 | `artifact-result.json` | Common artifact-producing operation result |
 | `common.json` | Shared IDs, hashes, timestamps, visibility, warnings, and references |
-| `engine-observation.json` | One retrieval or processing engine observation |
+| `engine-observation.json` | Worker evidence only; final admission is absent and daemon-owned |
 | `error.json` | Stable problem-details error envelope |
 | `event.json` | Versioned event envelope |
 | `job.json` | Durable job record |
@@ -22,3 +22,5 @@ All schemas use JSON Schema 2020-12. Schema IDs are stable under `https://webx.l
 | `wiki-intake.json` | Wiki source delivery envelope |
 
 Run the package validator documented in `../README.md`. The validator resolves references from the local schema registry. It does not fetch a schema from the network.
+
+JSON Schema cannot compare prior and next database rows. It also cannot require uniqueness by one object property. The mandatory rules for those cases are in `../semantics/artifact-commit-intent-semantics.json`. The focused validator applies and tests them.
