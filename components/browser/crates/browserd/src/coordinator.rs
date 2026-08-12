@@ -463,6 +463,7 @@ struct WorkspaceInputParams {
     screenshot_sequence: u64,
     input_sequence: u64,
     action: CuaAction,
+    operation_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -1050,25 +1051,95 @@ impl Coordinator {
         if lease.viewport_id != params.viewport_id || lease.viewport_generation != params.viewport_generation { return Err(workspace_lease_error()); }
         let gate = self.controls.get(&lease.tab_id).map(|entry| Arc::clone(entry.value())).ok_or_else(|| RpcError::not_found("control", lease.tab_id.as_ref()))?;
         if gate.current() != TabControl::Human || gate.epoch() != params.control_epoch { return Err(RpcError::conflict("control epoch changed", json!({ "code": "control_conflict" }))); }
-        let binding = lease.current_binding.clone().filter(|binding| {
+        let valid_binding = |lease: &WorkspaceViewportLease| lease.current_binding.clone().filter(|binding| {
             binding.sequence == params.screenshot_sequence
                 && binding.screenshot_sha256 == params.screenshot_sha256
                 && Utc::now() - binding.captured_at <= Duration::seconds(5)
-        }).ok_or_else(|| RpcError { code: -32011, message: "stale visual evidence".into(), data: Some(json!({ "code": "geometry_changed" })) })?;
+        }).ok_or_else(|| RpcError { code: -32011, message: "stale visual evidence".into(), data: Some(json!({ "code": "geometry_changed" })) });
+        valid_binding(&lease)?;
         if params.input_sequence <= lease.last_input_sequence { return Err(RpcError::conflict("input sequence is stale", json!({ "code": "control_conflict" }))); }
-        if let Some(mut current) = self.workspace_leases.get_mut(&params.lease_id) {
-            if current.last_input_sequence != lease.last_input_sequence { return Err(RpcError::conflict("input sequence changed", json!({ "code": "control_conflict" }))); }
-            current.last_input_sequence = params.input_sequence;
-            current.current_binding = None;
+
+        let resolved = self.resolve_address(&principal.agent_id, &lease.browser_session_id, &lease.tab_id)?;
+        let operation = self.operations.begin(params.operation_id, principal.agent_id.clone(), "workspace-input")?;
+        let operation_id = operation.id();
+        let mut cancellation = operation.cancellation();
+        let _queue = tokio::select! {
+            queue = resolved.host.queue.lock() => queue,
+            _ = cancelled(&mut cancellation) => {
+                operation.cancelled();
+                self.emit_operation(&operation);
+                return Err(cancelled_error(&operation_id));
+            }
+        };
+
+        let current = match self.workspace_lease(principal, &params.scope_id, &params.lease_id) {
+            Ok(current) => current,
+            Err(error) => { operation.fail("workspace lease changed before input dispatch"); self.emit_operation(&operation); return Err(error); }
+        };
+        if current.viewport_id != params.viewport_id || current.viewport_generation != params.viewport_generation {
+            operation.fail("workspace viewport changed before input dispatch"); self.emit_operation(&operation); return Err(workspace_lease_error());
         }
-        let address = BrowserAddress { agent_id: principal.agent_id.clone(), browser_session_id: lease.browser_session_id, tab_id: lease.tab_id.clone() };
-        let result = self.agent_browser.cua_action(&address, &binding, params.action, &CuaCancellation::default()).await.map_err(backend_rpc_error)?;
+        if gate.current() != TabControl::Human || gate.epoch() != params.control_epoch {
+            operation.fail("workspace control changed before input dispatch"); self.emit_operation(&operation);
+            return Err(RpcError::conflict("control epoch changed", json!({ "code": "control_conflict" })));
+        }
+        let binding = match valid_binding(&current) {
+            Ok(binding) => binding,
+            Err(error) => { operation.fail("visual binding changed before input dispatch"); self.emit_operation(&operation); return Err(error); }
+        };
+        let refreshed = match self.agent_browser.capture_visual_binding(&resolved.address).await {
+            Ok(refreshed) => refreshed,
+            Err(error) => { operation.fail("current visual frame capture failed"); self.emit_operation(&operation); return Err(backend_rpc_error(error)); }
+        };
+        if operation.is_cancelled() {
+            operation.cancelled(); self.emit_operation(&operation);
+            return Err(cancelled_error(&operation_id));
+        }
+        if refreshed.screenshot_sha256 != binding.screenshot_sha256 || refreshed.geometry != binding.geometry {
+            operation.fail("visual frame changed before input dispatch"); self.emit_operation(&operation);
+            return Err(RpcError { code: -32011, message: "stale visual evidence".into(), data: Some(json!({ "code": "geometry_changed" })) });
+        }
+        if params.input_sequence <= current.last_input_sequence {
+            operation.fail("input sequence changed before input dispatch"); self.emit_operation(&operation);
+            return Err(RpcError::conflict("input sequence is stale", json!({ "code": "control_conflict" })));
+        }
+        if let Some(mut active) = self.workspace_leases.get_mut(&params.lease_id) {
+            if active.last_input_sequence != current.last_input_sequence {
+                operation.fail("input sequence changed before input commit"); self.emit_operation(&operation);
+                return Err(RpcError::conflict("input sequence changed", json!({ "code": "control_conflict" })));
+            }
+            active.last_input_sequence = params.input_sequence;
+            active.current_binding = None;
+        } else {
+            operation.fail("workspace lease expired before input commit"); self.emit_operation(&operation);
+            return Err(workspace_lease_error());
+        }
+
+        operation.start();
+        self.emit_operation(&operation);
+        let cua_cancellation = CuaCancellation::default();
+        let backend = self.agent_browser.cua_action(&resolved.address, &refreshed, params.action, &cua_cancellation);
+        let result = tokio::select! {
+            result = backend => result.map_err(backend_rpc_error),
+            _ = cancelled(&mut cancellation) => Err(cancelled_error(&operation_id)),
+        };
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                if error.code == -32010 { operation.cancelled(); } else { operation.fail("workspace input failed"); }
+                self.emit_operation(&operation);
+                return Err(error);
+            }
+        };
+        operation.commit();
         if let Some(mut tab) = self.tabs.get_mut(&lease.tab_id) {
             if !result.title.is_empty() { tab.title = result.title; }
             if !result.url.is_empty() { tab.url = result.url; }
             tab.last_action_at = Some(Utc::now());
         }
-        Ok(json!({ "accepted": true, "bindingSequence": result.binding_sequence }))
+        operation.succeed();
+        self.emit_operation(&operation);
+        Ok(json!({ "accepted": true, "bindingSequence": result.binding_sequence, "operationId": operation_id }))
     }
 
     fn workspace_cancel_operation(&self, principal: &Principal, params: OperationAddressParams) -> Result<Value, RpcError> {

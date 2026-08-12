@@ -58,6 +58,15 @@ interface PendingVisualFrame {
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
+interface PreparedWorkspaceInput {
+  readonly binding: SessionBinding;
+  readonly action: BrowserAction;
+  readonly operationId: string;
+  readonly workspace: WorkspaceContext;
+  readonly frame: WorkspaceFrameShape;
+  readonly humanEpoch: number;
+}
+
 interface WorkspaceFrameShape {
   readonly viewportId: string;
   readonly viewportGeneration: number;
@@ -201,24 +210,34 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
   }
 
   async act(actor: AuthorityActor, sessionId: string, action: BrowserAction, operationId: string, signal?: AbortSignal): Promise<BrowserOperationResult> {
-    return this.withSessionLane(sessionId, async () => {
+    if (isWorkspaceCuaAction(action)) {
+      const prepared = await this.withSessionLane(sessionId, async () => {
+        const binding = this.owned(actor, sessionId);
+        assertCapability(binding.session.capabilities, action.kind);
+        return this.prepareWorkspaceAct(actor, binding, action, operationId, signal);
+      });
+      return this.dispatchWorkspaceAct(prepared, signal);
+    }
+    const prepared = await this.withSessionLane(sessionId, async () => {
       const binding = this.owned(actor, sessionId);
       assertCapability(binding.session.capabilities, action.kind);
-      if (isWorkspaceCuaAction(action)) return this.workspaceAct(actor, binding, action, operationId, signal);
       const candidate = actionDestination(action);
       const dispatchedAction = candidate === undefined
         ? action
         : { ...action, url: (await this.destinationAuthority.authorize({ actor, operationId, ...candidate }, signal)).normalizedUrl };
-      await this.invalidatePendingFrame(sessionId);
-      const raw = record(await (await this.connection(actor)).call("browser.act", {
-        browserSessionId: sessionId,
-        tabId: binding.session.tabId,
-        action: legacyAction(dispatchedAction),
-        operationId,
-      }, signal));
-      if (raw.ok !== true) throw new BrowserPortError("backend-failure", "browser action did not succeed", 502, true);
-      return { operationId: text(raw.operationId, "operationId"), state: "succeeded" };
+      // A pure wait does not dispatch input or navigation. Browserd still recaptures
+      // and compares the exact frame before any later screenshot-bound input.
+      if (action.kind !== "wait") await this.invalidatePendingFrame(sessionId);
+      return { binding, dispatchedAction, connection: await this.connection(actor) };
     });
+    const raw = record(await prepared.connection.call("browser.act", {
+      browserSessionId: sessionId,
+      tabId: prepared.binding.session.tabId,
+      action: legacyAction(prepared.dispatchedAction),
+      operationId,
+    }, signal));
+    if (raw.ok !== true) throw new BrowserPortError("backend-failure", "browser action did not succeed", 502, true);
+    return { operationId: text(raw.operationId, "operationId"), state: "succeeded" };
   }
 
   async debug(actor: AuthorityActor, sessionId: string, request: BrowserDebugRequest, operationId: string, signal?: AbortSignal): Promise<BrowserDebugResult> {
@@ -327,7 +346,7 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     await Promise.allSettled(connections.map(async (connection) => (await connection).close()));
   }
 
-  private async workspaceAct(actor: AuthorityActor, binding: SessionBinding, action: BrowserAction, operationId: string, signal?: AbortSignal): Promise<BrowserOperationResult> {
+  private async prepareWorkspaceAct(actor: AuthorityActor, binding: SessionBinding, action: BrowserAction, operationId: string, signal?: AbortSignal): Promise<PreparedWorkspaceInput> {
     if (binding.session.pathId !== "agent-browser/chrome") throw new BrowserPortError("unsupported", `visual input is not supported by ${binding.session.pathId}`, 400);
     const guard = visualGuard(action);
     if (guard === undefined) throw new BrowserPortError("stale-visual", "visual input requires an exact captured frame guard", 409);
@@ -343,22 +362,33 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
         control: "human",
         expectedControlEpoch: frame.controlEpoch,
       }, signal));
-      const humanEpoch = positive(controlled.controlEpoch, "controlEpoch");
+      return { binding, action, operationId, workspace, frame, humanEpoch: positive(controlled.controlEpoch, "controlEpoch") };
+    } catch (error) {
+      await this.releaseWorkspace(workspace);
+      throw error;
+    }
+  }
+
+  private async dispatchWorkspaceAct(prepared: PreparedWorkspaceInput, signal?: AbortSignal): Promise<BrowserOperationResult> {
+    const { binding, action, operationId, workspace, frame, humanEpoch } = prepared;
+    try {
+      const result = record(await workspace.connection.call("workspace.input", {
+        scopeId: workspace.scopeId,
+        leaseId: workspace.leaseId,
+        viewportId: frame.viewportId,
+        viewportGeneration: frame.viewportGeneration,
+        controlEpoch: humanEpoch,
+        screenshotSha256: frame.screenshotSha256,
+        screenshotSequence: frame.sequence,
+        inputSequence: 1,
+        action: cuaAction(action),
+        operationId,
+      }, signal));
+      if (result.accepted !== true) throw new BrowserPortError("backend-failure", "workspace input was not accepted", 502, true);
+      if (text(result.operationId, "operationId") !== operationId) throw new BrowserPortError("backend-failure", "workspace input operation identity changed", 502, true);
+      return { operationId, state: "succeeded" };
+    } finally {
       try {
-        const result = record(await workspace.connection.call("workspace.input", {
-          scopeId: workspace.scopeId,
-          leaseId: workspace.leaseId,
-          viewportId: frame.viewportId,
-          viewportGeneration: frame.viewportGeneration,
-          controlEpoch: humanEpoch,
-          screenshotSha256: frame.screenshotSha256,
-          screenshotSequence: frame.sequence,
-          inputSequence: 1,
-          action: cuaAction(action),
-        }, signal));
-        if (result.accepted !== true) throw new BrowserPortError("backend-failure", "workspace input was not accepted", 502, true);
-        return { operationId, state: "succeeded" };
-      } finally {
         const returned = record(await workspace.connection.call("workspace.compareSetControl", {
           scopeId: workspace.scopeId,
           leaseId: workspace.leaseId,
@@ -369,9 +399,9 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
         }));
         const agentEpoch = positive(returned.controlEpoch, "controlEpoch");
         this.#sessions.set(binding.session.sessionId, { ...binding, controlEpoch: agentEpoch });
+      } finally {
+        await this.releaseWorkspace(workspace);
       }
-    } finally {
-      await this.releaseWorkspace(workspace);
     }
   }
 

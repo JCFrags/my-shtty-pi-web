@@ -35,7 +35,7 @@ function workspaceSnapshot() {
 
 function rpc(pathId: "agent-browser/chrome" | "pinchtab/chrome" = "agent-browser/chrome", failInput = false, failFrame = false, leaseMs = 30_000) {
   let controlCall = 0;
-  const call = vi.fn(async (method: string) => {
+  const call = vi.fn(async (method: string, params: Readonly<Record<string, unknown>> = {}) => {
     if (method === "system.capabilities") return capabilities;
     if (method === "session.create") return sessionResponse(pathId);
     if (method === "workspace.focusTab" || method === "workspace.show") return { agentId: "agent-a", browserSessionId: "session-1", tabId: "tab-1", visible: true };
@@ -50,7 +50,7 @@ function rpc(pathId: "agent-browser/chrome" | "pinchtab/chrome" = "agent-browser
     if (method === "workspace.compareSetControl") return { controlEpoch: ++controlCall + 1 };
     if (method === "workspace.input") {
       if (failInput) throw new Error("input failed");
-      return { accepted: true, bindingSequence: 7 };
+      return { accepted: true, bindingSequence: 7, operationId: params.operationId };
     }
     if (method === "workspace.releaseViewportLease") return { released: true };
     if (method === "session.list") return { hosts: [], sessions: [{ ...sessionResponse(pathId).browserSession, pathId }], tabs: [{ ...sessionResponse(pathId).tab, pathId, controlEpoch: 1 }] };
@@ -131,11 +131,33 @@ describe("BrowserDaemonRpcPort frozen browserd seam", () => {
     expect(connection.call).toHaveBeenCalledWith("workspace.input", {
       scopeId: "scope-1", leaseId: "lease-1", viewportId: "viewport-tab-1", viewportGeneration: 2,
       controlEpoch: 2, screenshotSha256: digest, screenshotSequence: 7, inputSequence: 1,
-      action: { type: "mouse_move", x: 12, y: 34 },
+      action: { type: "mouse_move", x: 12, y: 34 }, operationId: "operation-cua",
     }, undefined);
     expect(methods).not.toContain("browser.act");
     expect(methods.filter((method) => method === "workspace.acquireViewportLease")).toHaveLength(1);
     expect(methods.filter((method) => method === "workspace.getFrame")).toHaveLength(1);
+  });
+
+  it("dispatches a bound input operation while a pure wait is still running on the same session", async () => {
+    const connection = rpc();
+    const original = connection.call.getMockImplementation();
+    let finishWait: ((value: unknown) => void) | undefined;
+    const heldWait = new Promise((resolve) => { finishWait = resolve; });
+    connection.call.mockImplementation(async (method, params, signal) => {
+      if (method === "browser.act" && (params.action as { kind?: string }).kind === "wait") return heldWait;
+      if (original === undefined) throw new Error("missing RPC fixture implementation");
+      return original(method, params, signal);
+    });
+    const port = new BrowserDaemonRpcPort(async () => connection);
+    await create(port);
+    await port.captureFrame(owner, "session-1", "operation-frame");
+    const waiting = port.act(owner, "session-1", { kind: "wait", milliseconds: 15_000 }, "operation-wait");
+    await vi.waitFor(() => expect(connection.call.mock.calls.some(([method]) => method === "browser.act")).toBe(true));
+    const input = port.act(owner, "session-1", { kind: "mouse-move", x: 12, y: 34, visualGuard: { viewportId: "viewport-tab-1", viewportGeneration: 2, screenshotSha256: digest, screenshotSequence: 7 } }, "operation-cua");
+    await vi.waitFor(() => expect(connection.call.mock.calls.some(([method]) => method === "workspace.input")).toBe(true));
+    await expect(input).resolves.toEqual({ operationId: "operation-cua", state: "succeeded" });
+    finishWait?.({ ok: true, operationId: "operation-wait" });
+    await expect(waiting).resolves.toEqual({ operationId: "operation-wait", state: "succeeded" });
   });
 
   it("returns control to the agent and releases the lease after input failure", async () => {

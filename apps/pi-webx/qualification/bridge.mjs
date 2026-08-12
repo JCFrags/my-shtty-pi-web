@@ -280,6 +280,14 @@ async function executeOperation(request, operation, owners, pathIdentities, actu
     await cancelActiveBrowserOperation(request, operation, owner, pathIdentities, actualChecks);
     return;
   }
+  if (action === "operation.cancel-queued-pinchtab") {
+    await cancelQueuedPinchtabOperation(request, operation, owner, pathIdentities, actualChecks);
+    return;
+  }
+  if (action === "operation.cancel-queued-visual") {
+    await cancelQueuedVisualInput(request, operation, owner, pathIdentities, actualChecks);
+    return;
+  }
   if (action === "evidence.assert-clean") {
     await assertActualCaseCleanup(request, owners, actualChecks);
     return;
@@ -391,6 +399,99 @@ async function proveVisualControlAndLeaseRelease(request, owner, pathIdentities,
   require(actualChecks.visualRelease.controlReturned, "J4 visual input did not return agent control");
 }
 
+async function cancelQueuedPinchtabOperation(request, operation, owner, pathIdentities, actualChecks) {
+  const pathId = PATHS[1];
+  if (!actualRuntime) {
+    (actualChecks.activeCancellations ??= []).push({ pathId, phase: "queued", queueBoundary: "browserd-host", initialState: "queued", finalState: "cancelled", fixtureOnly: true });
+    pathIdentities.add(pathId);
+    return;
+  }
+  const session = await ensureSession(owner, request, pathIdentities, pathId);
+  const prefix = `qualification-active-${request.caseId.toLowerCase()}-queued-pinchtab`;
+  const blockerId = `op-${prefix}-blocker`;
+  const targetId = `op-${prefix}-target`;
+  let blockerSettlement;
+  const blocker = callWithKey(owner, "browser.act", { browserSessionId: session.sessionId, action: { kind: "navigate", url: fixtureUrl(request, "/api/never") } }, `${prefix}-blocker`)
+    .then((value) => (blockerSettlement = { value }), (error) => (blockerSettlement = { error }));
+  await sleep(600);
+  require(!blockerSettlement, `PinchTab queue blocker settled before target dispatch: ${blockerSettlement?.error ? safeMessage(blockerSettlement.error) : "succeeded"}`);
+  let targetSettlement;
+  const target = callWithKey(owner, "browser.act", { browserSessionId: session.sessionId, action: { kind: "navigate", url: fixtureUrl(request, "/static") } }, `${prefix}-target`)
+    .then((value) => (targetSettlement = { value }), (error) => (targetSettlement = { error }));
+  await sleep(150);
+  require(!targetSettlement, `PinchTab queued target settled before cancellation: ${targetSettlement?.error ? safeMessage(targetSettlement.error) : "succeeded"}`);
+  const first = await call(owner, "browser.cancel", { operationId: targetId }, `${operation.step}-cancel`);
+  require(first.data?.state === "queued", `PinchTab host-queue cancellation started from ${first.data?.state ?? "unknown"}`);
+  const settled = await Promise.race([target, sleep(5_000).then(() => ({ timeout: true }))]);
+  require(!settled.timeout && settled.error && /cancel/i.test(safeMessage(settled.error)), "PinchTab queued target did not reject as cancelled");
+  const final = await call(owner, "browser.cancel", { operationId: targetId }, `${operation.step}-final`);
+  require(final.data?.state === "cancelled", "PinchTab queued target final state is not cancelled");
+  const blockerFirst = await call(owner, "browser.cancel", { operationId: blockerId }, `${operation.step}-blocker-cancel`);
+  require(blockerFirst.data?.state === "running", `PinchTab queue blocker was not running: ${blockerFirst.data?.state ?? "unknown"}`);
+  const blockerSettled = await Promise.race([blocker, sleep(5_000).then(() => ({ timeout: true }))]);
+  require(!blockerSettled.timeout && blockerSettled.error && /cancel/i.test(safeMessage(blockerSettled.error)), "PinchTab queue blocker did not reject as cancelled");
+  const blockerFinal = await call(owner, "browser.cancel", { operationId: blockerId }, `${operation.step}-blocker-final`);
+  require(blockerFinal.data?.state === "cancelled", "PinchTab queue blocker final state is not cancelled");
+  const observation = (await call(owner, "browser.observe", { browserSessionId: session.sessionId, view: "main" }, `${operation.step}-no-dispatch`)).data;
+  require(!String(observation.url ?? "").endsWith("/static"), "cancelled PinchTab queued navigation changed the page");
+  (actualChecks.activeCancellations ??= []).push({ pathId, phase: "queued", queueBoundary: "browserd-host", operationId: targetId, initialState: first.data.state, finalState: final.data.state, actionRejectedAsCancelled: true, noNavigationSideEffect: true });
+  (actualChecks.queueBlockerCancellations ??= []).push({ pathId, phase: "running", operationId: blockerId, initialState: blockerFirst.data.state, finalState: blockerFinal.data.state, actionRejectedAsCancelled: true });
+}
+
+async function cancelQueuedVisualInput(request, operation, owner, pathIdentities, actualChecks) {
+  const pathId = PATHS[0];
+  if (!actualRuntime) {
+    (actualChecks.activeCancellations ??= []).push({ pathId, phase: "queued", operationKind: "workspace-input", queueBoundary: "browserd-host", initialState: "queued", finalState: "cancelled", fixtureOnly: true });
+    pathIdentities.add(pathId);
+    return;
+  }
+  const session = await ensurePrimary(owner, request, pathIdentities);
+  await call(owner, "browser.act", { browserSessionId: session.sessionId, action: { kind: "navigate", url: fixtureUrl(request, "/visual-controls") } }, `${operation.step}-fixture`);
+  const before = (await call(owner, "browser.observe", { browserSessionId: session.sessionId, view: "main" }, `${operation.step}-before`)).data;
+  require(String(before.title ?? "").includes("0 clicks") && String(before.content ?? "").includes('"click":0'), "visual cancellation fixture did not start at zero clicks");
+  const binding = (await call(owner, "browser.observe", { browserSessionId: session.sessionId, view: "visual" }, `${operation.step}-frame`)).data;
+  const visualArtifactBaseline = await artifactFileCount();
+  const prefix = `qualification-active-${request.caseId.toLowerCase()}-queued-visual`;
+  const blockerId = `op-${prefix}-blocker`;
+  const targetId = `op-${prefix}-target`;
+  let blockerSettlement;
+  const blocker = callWithKey(owner, "browser.act", { browserSessionId: session.sessionId, action: { kind: "wait", milliseconds: 15_000 } }, `${prefix}-blocker`)
+    .then((value) => (blockerSettlement = { value }), (error) => (blockerSettlement = { error }));
+  await sleep(600);
+  require(!blockerSettlement, `visual queue blocker settled before target dispatch: ${blockerSettlement?.error ? safeMessage(blockerSettlement.error) : "succeeded"}`);
+  const visualAction = { kind: "mouse-click", observationId: binding.observationId, viewportId: binding.viewportId, x: 320, y: 220, startX: 0, startY: 0, endX: 0, endY: 0, deltaX: 0, deltaY: 1 };
+  let targetSettlement;
+  const target = callWithKey(owner, "browser.act", { browserSessionId: session.sessionId, action: visualAction }, `${prefix}-target`)
+    .then((value) => (targetSettlement = { value }), (error) => (targetSettlement = { error }));
+  await sleep(150);
+  require(!targetSettlement, `queued visual input settled before cancellation: ${targetSettlement?.error ? safeMessage(targetSettlement.error) : "succeeded"}`);
+  const first = await call(owner, "browser.cancel", { operationId: targetId }, `${operation.step}-cancel`);
+  require(first.data?.state === "queued", `visual input cancellation started from ${first.data?.state ?? "unknown"}`);
+  const settled = await Promise.race([target, sleep(5_000).then(() => ({ timeout: true }))]);
+  require(!settled.timeout && settled.error && /cancel/i.test(safeMessage(settled.error)), "queued visual input did not reject as cancelled");
+  const final = await call(owner, "browser.cancel", { operationId: targetId }, `${operation.step}-final`);
+  require(final.data?.state === "cancelled", "queued visual input final state is not cancelled");
+  const blockerFirst = await call(owner, "browser.cancel", { operationId: blockerId }, `${operation.step}-blocker-cancel`);
+  require(blockerFirst.data?.state === "running", `visual queue blocker was not running: ${blockerFirst.data?.state ?? "unknown"}`);
+  const blockerSettled = await Promise.race([blocker, sleep(5_000).then(() => ({ timeout: true }))]);
+  require(!blockerSettled.timeout && blockerSettled.error && /cancel/i.test(safeMessage(blockerSettled.error)), "visual queue blocker did not reject as cancelled");
+  const blockerFinal = await call(owner, "browser.cancel", { operationId: blockerId }, `${operation.step}-blocker-final`);
+  require(blockerFinal.data?.state === "cancelled", "visual queue blocker final state is not cancelled");
+  const noSideEffect = await call(owner, "browser.act", { browserSessionId: session.sessionId, action: { kind: "wait", text: '"click":0' } }, `${operation.step}-no-side-effect`);
+  require(noSideEffect.data?.state === "succeeded", "cancelled visual input caused a click side effect");
+  const visualArtifactAfterCancellation = await artifactFileCount();
+  require(visualArtifactAfterCancellation === visualArtifactBaseline, "visual cancellation changed the artifact file count");
+  const rebound = (await call(owner, "browser.observe", { browserSessionId: session.sessionId, view: "visual" }, `${operation.step}-reacquire-frame`)).data;
+  const reboundAction = { ...visualAction, observationId: rebound.observationId, viewportId: rebound.viewportId, x: 60, y: 20 };
+  const reacquired = await call(owner, "browser.act", { browserSessionId: session.sessionId, action: reboundAction }, `${operation.step}-reacquire-input`);
+  require(reacquired.data?.state === "succeeded", "visual lease could not be reacquired after cancellation");
+  const returned = await call(owner, "browser.workspace", { action: "return", browserSessionId: session.sessionId }, `${operation.step}-return`);
+  require(returned.data?.data?.controller === "agent", "visual cancellation did not return agent control");
+  actualChecks.cancellationArtifactBaseline = await artifactFileCount();
+  (actualChecks.activeCancellations ??= []).push({ pathId, phase: "queued", operationKind: "workspace-input", queueBoundary: "browserd-host", operationId: targetId, initialState: first.data.state, finalState: final.data.state, actionRejectedAsCancelled: true, noInputSideEffect: true, controlReturned: true, leaseReleasedAndReacquired: true, remainingArtifactFilesAboveBaseline: 0, artifactFileBaseline: visualArtifactBaseline, artifactFileCount: visualArtifactAfterCancellation });
+  (actualChecks.queueBlockerCancellations ??= []).push({ pathId, phase: "running", operationId: blockerId, initialState: blockerFirst.data.state, finalState: blockerFinal.data.state, actionRejectedAsCancelled: true });
+}
+
 async function cancelActiveBrowserOperation(request, operation, owner, pathIdentities, actualChecks) {
   const pathId = operation.pathId;
   require(PATHS.includes(pathId), "active cancellation requires an accepted path");
@@ -435,7 +536,7 @@ async function assertActualCaseCleanup(request, owners, actualChecks) {
   require(count === markerProcessBaseline, `J4 left ${count - markerProcessBaseline} qualification-owned processes`);
   const artifactFiles = await artifactFileCount();
   require(artifactFiles === actualChecks.cancellationArtifactBaseline, "J4 cancellation retained an unexpected artifact file");
-  for (const cancellation of actualChecks.activeCancellations ?? []) cancellation.processTerminationProvedByCaseCleanup = true;
+  for (const cancellation of [...(actualChecks.activeCancellations ?? []), ...(actualChecks.queueBlockerCancellations ?? [])]) cancellation.processTerminationProvedByCaseCleanup = true;
   actualChecks.caseCleanup = { remainingSessions: 0, remainingTabs: 0, remainingProcessesAboveBaseline: 0, remainingArtifactFilesAboveBaseline: 0, markerProcessBaseline, markerProcessCount: count, artifactFileBaseline: artifactFiles, artifactFileCount: artifactFiles };
 }
 

@@ -94,7 +94,7 @@ class FakeBrowserd {
     if (method === "workspace.acquireViewportLease") return { leaseId: "lease-runtime", identity: { pathId: "agent-browser/chrome", browserSessionId: "session-runtime", tabId: "tab-runtime", viewportId: "viewport-runtime", viewportGeneration: 2, controlEpoch: 1 } };
     if (method === "workspace.getFrame") return { viewportId: "viewport-runtime", viewportGeneration: 2, sequence: 7, screenshotSha256: "a".repeat(64), controlEpoch: 1, mediaType: "image/png", width: 640, height: 480, payload: "cG5n", coordinateSpace: "css-viewport" };
     if (method === "workspace.compareSetControl") return { controlEpoch: params.control === "human" ? 2 : 3 };
-    if (method === "workspace.input") return { accepted: true, bindingSequence: 7 };
+    if (method === "workspace.input") return { accepted: true, bindingSequence: 7, operationId: params.operationId };
     if (method === "workspace.releaseViewportLease") return { released: true };
     if (method === "browser.observe") return { operationId: params.operationId, view: params.view, title: "Runtime", url: "https://fixture.invalid", content: "visual", truncated: false, metadata: {} };
     if (method === "browser.act") return { operationId: params.operationId, ok: true };

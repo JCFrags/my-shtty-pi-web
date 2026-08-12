@@ -15,6 +15,8 @@ test("J4 requires active queued and running cancellation with terminal and clean
     'phase: "queued"', 'phase: "running"', 'pathId: PATHS[0]', 'pathId: PATHS[1]',
     'actionRejectedAsCancelled: true', 'final.data?.state === "cancelled"',
     'remainingProcessesAboveBaseline: 0', 'remainingArtifactFilesAboveBaseline: 0', 'leaseReleasedAndReacquired: true',
+    'operation.cancel-queued-pinchtab', 'operation.cancel-queued-visual', 'operationKind: "workspace-input"',
+    'queueBoundary: "browserd-host"', 'noInputSideEffect: true', 'noNavigationSideEffect: true',
   ]) assert.ok(`${plan}\n${bridge}`.includes(value), value);
   assert.doesNotMatch(bridge, /controller\.abort\(\);\s*await assertRejects\(\(\) => call\(owner, "web\.search"/u);
 });
