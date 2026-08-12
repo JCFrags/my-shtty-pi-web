@@ -72,6 +72,8 @@ class QualificationTest(unittest.TestCase):
         bridge = (ROOT / "apps/pi-webx/qualification/bridge.mjs").read_text()
         self.assertIn('op("wait", "browser.wait", { text: "Pi Web main-content fixture" })', actual)
         self.assertNotIn('selector: "#fixture"', actual)
+        self.assertIn('op("click", "browser.click", { selector: "#root" })', actual)
+        self.assertNotIn('op("wait", "browser.wait", { text: "48 connected clients" })', actual)
         self.assertIn('op("hide", "workspace.hide")', actual)
         self.assertIn('op("workspace", "workspace.open")', actual)
         self.assertIn("staleRefused", actual)
