@@ -104,7 +104,6 @@ const action = Type.Union([
   Type.Object({ kind: Type.Literal("coordinate-drag"), ...binding, startX: Type.Number({ minimum: 0 }), startY: Type.Number({ minimum: 0 }), endX: Type.Number({ minimum: 0 }), endY: Type.Number({ minimum: 0 }), coordinateSpace: Type.Optional(StringEnum(["viewport", "image"] as const)), button: pointerButton }, strict),
   Type.Object({ kind: StringEnum(["key-press", "key-down", "key-up"] as const), ...binding, key: Type.String({ minLength: 1, maxLength: 128 }) }, strict),
   Type.Object({ kind: Type.Literal("text-input"), ...binding, text: Type.String({ maxLength: 100_000 }) }, strict),
-  Type.Object({ kind: Type.Literal("upload"), ...target, uploadHandle: id() }, strict),
   Type.Object({ kind: Type.Literal("download"), ...target }, strict),
   Type.Object({ kind: StringEnum(["back", "forward", "reload"] as const) }, strict),
   Type.Object({ kind: Type.Literal("wait"), milliseconds: Type.Optional(Type.Integer({ minimum: 0, maximum: 30_000 })), selector: Type.Optional(Type.String({ maxLength: 4096 })), text: Type.Optional(Type.String({ maxLength: 4096 })) }, strict),

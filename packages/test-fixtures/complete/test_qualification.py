@@ -138,6 +138,10 @@ class QualificationTest(unittest.TestCase):
         self.assertIn("actualChecks.cancellationRefused = true", bridge)
         self.assertIn("actualChecks.takeoverSucceeded = true", bridge)
         self.assertIn("actualChecks.returnSucceeded = true", bridge)
+        runtime = (ROOT / "apps/pi-webx/qualification/runtime.mjs").read_text()
+        self.assertNotIn('"upload", "download"', runtime)
+        self.assertIn("uploads: false", runtime)
+        self.assertIn('browser.upload is not exposed by the singular Pi action contract', bridge)
 
     def test_ownership_refusal_classes_reject_unrelated_errors(self):
         script = """import { ownershipRefusalClass } from

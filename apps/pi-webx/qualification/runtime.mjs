@@ -6,7 +6,7 @@ import { dirname } from "node:path";
 export const PATHS = ["agent-browser/chrome", "pinchtab/chrome"];
 export const PNG = await readFile(new URL("./public-fixture.png", import.meta.url));
 const PNG_SHA256 = createHash("sha256").update(PNG).digest("hex");
-const ACTIONS = ["navigate", "click", "fill", "type", "press", "hover", "scroll", "semantic-drag", "select", "wait", "tab-new", "tab-close", "tab-focus", "back", "forward", "reload", "mouse-move", "mouse-down", "mouse-up", "double-click", "wheel", "drag", "key-press", "key-down", "key-up", "text-input", "upload", "download"];
+const ACTIONS = ["navigate", "click", "fill", "type", "press", "hover", "scroll", "semantic-drag", "select", "wait", "tab-new", "tab-close", "tab-focus", "back", "forward", "reload", "mouse-move", "mouse-down", "mouse-up", "double-click", "wheel", "drag", "key-press", "key-down", "key-up", "text-input", "download"];
 
 export class QualificationRuntime {
   constructor(socketPath) {
@@ -90,7 +90,7 @@ export class QualificationRuntime {
   route(owner, request) {
     const path = request.path;
     if (request.method === "GET" && path === "/v1/version") return this.ok({ apiVersion: this.apiVersion, webxVersion: "0.1.0", browserProtocolVersion: "2.0.0" });
-    if (request.method === "GET" && path === "/v1/capabilities") return this.ok({ apiVersion: this.apiVersion, capabilities: ["search", "read", "research", "pages", "artifacts", "browser"], browserPaths: PATHS.map((pathId) => ({ pathId, actions: ACTIONS, observations: ["main", "interactive", "visual", "full", "diff"], visual: pathId === PATHS[0], touch: false, uploads: true, downloads: true })) });
+    if (request.method === "GET" && path === "/v1/capabilities") return this.ok({ apiVersion: this.apiVersion, capabilities: ["search", "read", "research", "pages", "artifacts", "browser"], browserPaths: PATHS.map((pathId) => ({ pathId, actions: ACTIONS, observations: ["main", "interactive", "visual", "full", "diff"], visual: pathId === PATHS[0], touch: false, uploads: false, downloads: true })) });
     if (request.method === "POST" && path === "/v1/search") return this.ok({ results: [{ title: "WebX public fixture", url: "https://fixture.invalid/public", excerpt: `result:${request.body?.query ?? ""}`, artifactId: "artifact-public" }] });
     if (request.method === "POST" && path === "/v1/read") return this.ok({ title: "Public fixture", url: request.body?.url ?? "https://fixture.invalid/public", excerpt: "Public deterministic content", artifactId: "artifact-public" });
     if (request.method === "POST" && path === "/v1/research") return this.ok({ claims: [{ text: "The fixture route was reached.", artifactId: "artifact-public" }] });
@@ -113,7 +113,7 @@ export class QualificationRuntime {
   createSession(owner, body = {}) {
     if (!PATHS.includes(body.pathId)) return this.failure(400, "unsupported-path", "unsupported path");
     const sessionId = `session-${++this.counter}`;
-    const session = { sessionId, tabId: `tab-${this.counter}`, pathId: body.pathId, ownerPrincipalId: owner, ownerAgentId: owner, state: "ready", controller: "agent", controlEpoch: 1, sequence: 1, viewportGeneration: 1, url: body.url ?? "about:blank", capabilities: { pathId: body.pathId, actions: ACTIONS, observations: ["main", "interactive", "visual", "full", "diff"], visual: body.pathId === PATHS[0], touch: false, uploads: true, downloads: true } };
+    const session = { sessionId, tabId: `tab-${this.counter}`, pathId: body.pathId, ownerPrincipalId: owner, ownerAgentId: owner, state: "ready", controller: "agent", controlEpoch: 1, sequence: 1, viewportGeneration: 1, url: body.url ?? "about:blank", capabilities: { pathId: body.pathId, actions: ACTIONS, observations: ["main", "interactive", "visual", "full", "diff"], visual: body.pathId === PATHS[0], touch: false, uploads: false, downloads: true } };
     this.sessions.set(sessionId, session);
     return this.ok(session);
   }

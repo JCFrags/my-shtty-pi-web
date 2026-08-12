@@ -40,7 +40,7 @@
         }
       ],
       "document": "openapi.yaml",
-      "document_sha256": "d2092579cbebcf0eb751267d7c50eec160dd9ff775275a7c223aa805f8592157",
+      "document_sha256": "1a487a4a69b65194f0bc054c8b4c858dc1a6507614e56ee4484e97b1b2c0ffff",
       "operation_count": 97,
       "operation_ids": [
         "acknowledgeWikiDelivery",

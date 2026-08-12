@@ -121,6 +121,8 @@ test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
     action: { kind: "mouse-click", observationId: "o", viewportId: "v", x: 1, y: 2, extra: true },
   }), false);
   assert.equal(Value.Check(BrowserActSchema, { action: { kind: "mouse-click", x: 1, y: 2 } }), false);
+  assert.equal(Value.Check(BrowserActSchema, { action: { kind: "upload", ref: "e1", uploadHandle: "handle-1" } }), false);
+  assert.equal(Value.Check(BrowserActSchema, { action: { kind: "upload", ref: "e1", uploadHandleIds: ["handle-1"] } }), false);
   assert.equal(Value.Check(WebRecallForgetSchema, { versionId: "v", extra: true }), false);
 });
 
@@ -154,13 +156,13 @@ test("approval UI offers only allow-once or deny and returns the SDK decision", 
   sdk.result = {
     summary: "approval required",
     approval: {
-      id: "approval-1", operation: "upload", target: "public fixture", capability: "browser.upload",
+      id: "approval-1", operation: "download", target: "public fixture", capability: "browser.download",
       budget: "one file", credentialRef: "fixture-ref", reason: "test", duration: "one operation",
     },
   };
   const fx = harness(sdk);
   await fx.events.get("session_start")?.({}, fx.ctx);
-  const result = await fx.execute("browser_act", { action: { kind: "upload", ref: "e1", uploadHandle: "handle-1" } });
+  const result = await fx.execute("browser_act", { action: { kind: "download", ref: "e1" } });
   assert.deepEqual(sdk.decisions, [{ approvalId: "approval-1", decision: "allow-once" }]);
   assert.match(result.content[0].text, /approved/);
   await fx.events.get("session_shutdown")?.();

@@ -4,7 +4,7 @@ import { PUBLIC_ARTIFACTS, PUBLIC_SOURCES } from "../src/fixtures.js";
 import type { AuthorityActor, BrowserDaemonPort } from "../src/ports.js";
 
 const paths = [
-  { pathId: "agent-browser/chrome", actions: ["navigate", "click"], observations: ["main", "visual"], visual: true, touch: false, uploads: true, downloads: true },
+  { pathId: "agent-browser/chrome", actions: ["navigate", "click"], observations: ["main", "visual"], visual: true, touch: false, uploads: false, downloads: true },
   { pathId: "pinchtab/chrome", actions: ["navigate", "fill", "wait"], observations: ["main", "interactive"], visual: false, touch: false, uploads: false, downloads: false },
 ] as const;
 

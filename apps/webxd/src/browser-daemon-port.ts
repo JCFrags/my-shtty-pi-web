@@ -537,7 +537,6 @@ function legacyAction(action: BrowserAction): Readonly<Record<string, unknown>> 
   if (action.kind === "tab-new") return action;
   if (action.kind === "tab-close") return action;
   if (action.kind === "tab-focus") return action;
-  if (action.kind === "upload") throw new BrowserPortError("unsupported", "typed upload handles require the browser transfer seam", 400);
   throw new BrowserPortError("unsupported", `${action.kind} is not supported by the frozen browser.act shape`, 400);
 }
 
@@ -560,7 +559,7 @@ function workspaceFrame(value: unknown): WorkspaceFrameShape {
 }
 
 function assertCapability(capability: BrowserPathCapability, action: string): void { if (!capability.actions.includes(action)) throw new BrowserPortError("unsupported", `${action} is not supported by ${capability.pathId}`, 400); }
-function pathCapability(value: unknown): BrowserPathCapability { const item = record(value); return { pathId: browserPath(item.pathId), actions: stringArray(item.actions), observations: stringArray(item.observations), visual: boolean(item.visual, "visual"), touch: false, uploads: boolean(item.uploads, "uploads"), downloads: boolean(item.downloads, "downloads") }; }
+function pathCapability(value: unknown): BrowserPathCapability { const item = record(value); return { pathId: browserPath(item.pathId), actions: stringArray(item.actions).filter((action) => action !== "upload"), observations: stringArray(item.observations), visual: boolean(item.visual, "visual"), touch: false, uploads: false, downloads: boolean(item.downloads, "downloads") }; }
 function browserPath(value: unknown): BrowserPathId { if (value === "agent-browser/chrome" || value === "pinchtab/chrome") return value; throw new TypeError("unsupported browser path identity"); }
 function record(value: unknown): Record<string, unknown> { if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError("browser daemon returned a non-object"); return value as Record<string, unknown>; }
 function optionalRecord(value: unknown): Record<string, unknown> | undefined { return value === undefined ? undefined : record(value); }

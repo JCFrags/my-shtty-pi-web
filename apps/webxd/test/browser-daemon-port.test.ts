@@ -70,7 +70,9 @@ describe("BrowserDaemonRpcPort frozen browserd seam", () => {
   it("preserves the exact two path IDs and frozen session.create shape", async () => {
     const connection = rpc("pinchtab/chrome");
     const port = new BrowserDaemonRpcPort(async () => connection);
-    expect((await port.capabilities()).map((item) => item.pathId)).toEqual(["agent-browser/chrome", "pinchtab/chrome"]);
+    const reported = await port.capabilities();
+    expect(reported.map((item) => item.pathId)).toEqual(["agent-browser/chrome", "pinchtab/chrome"]);
+    expect(reported.every((item) => item.uploads === false && !item.actions.includes("upload"))).toBe(true);
     const session = await create(port, "pinchtab/chrome");
     expect(session).toMatchObject({ pathId: "pinchtab/chrome", ownerPrincipalId: "principal-a", ownerAgentId: "agent-a" });
     expect(connection.call).toHaveBeenCalledWith("session.create", { pathId: "pinchtab/chrome" }, undefined);

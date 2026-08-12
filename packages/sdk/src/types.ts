@@ -207,7 +207,6 @@ export type BrowserAction =
   | { readonly kind: "scroll"; readonly direction: "up" | "down" | "left" | "right"; readonly amount?: number }
   | { readonly kind: "semantic-drag"; readonly ref: string; readonly targetRef: string }
   | { readonly kind: "select"; readonly ref?: string; readonly selector?: string; readonly values: readonly string[] }
-  | { readonly kind: "upload"; readonly ref: string; readonly uploadHandleIds: readonly string[] }
   | { readonly kind: "download"; readonly ref: string }
   | { readonly kind: "wait"; readonly milliseconds?: number; readonly selector?: string; readonly text?: string }
   | { readonly kind: "tab-new"; readonly url?: string }

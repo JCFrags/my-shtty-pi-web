@@ -259,10 +259,10 @@ async function executeOperation(request, operation, owners, pathIdentities, actu
     require(result.artifactPayload?.dataBase64, "exact artifact bytes were not recovered");
     return;
   }
-  if (action === "browser.upload" || action === "browser.download") {
+  if (action === "browser.upload") throw new Error("browser.upload is not exposed by the singular Pi action contract");
+  if (action === "browser.download") {
     const session = await ensurePrimary(owner, request, pathIdentities);
-    const kind = action.endsWith("upload") ? "upload" : "download";
-    await assertRejects(() => call(owner, "browser.act", { browserSessionId: session.sessionId, action: kind === "upload" ? { kind, ref: "public-upload", uploadHandle: "fixture-handle" } : { kind, ref: "public-download" } }, operation.step), /unavailable|not supported/i);
+    await assertRejects(() => call(owner, "browser.act", { browserSessionId: session.sessionId, action: { kind: "download", ref: "public-download" } }, operation.step), /unavailable|not supported/i);
     unsupportedChecks += 1;
     return;
   }

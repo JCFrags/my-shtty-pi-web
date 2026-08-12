@@ -8,7 +8,7 @@ import { WebxClient, WebxError, WebxFacadeClient, UnixSocketTransport, nodeNdjso
 import { WebxdRuntime, sameUserPiActorAuthenticator } from "../src/runtime.js";
 
 const paths = [
-  { pathId: "agent-browser/chrome", actions: ["navigate", "click", "mouse-move", "mouse-down", "mouse-up", "double-click", "wheel", "drag", "fill", "type", "press", "hover", "scroll", "semantic-drag", "wait", "tab-new", "tab-close", "tab-focus"], observations: ["main", "visual"], visual: true, touch: false, uploads: true, downloads: true },
+  { pathId: "agent-browser/chrome", actions: ["navigate", "click", "mouse-move", "mouse-down", "mouse-up", "double-click", "wheel", "drag", "fill", "type", "press", "hover", "scroll", "semantic-drag", "wait", "tab-new", "tab-close", "tab-focus"], observations: ["main", "visual"], visual: true, touch: false, uploads: false, downloads: true },
   { pathId: "pinchtab/chrome", actions: ["navigate", "fill"], observations: ["main", "interactive"], visual: false, touch: false, uploads: false, downloads: false },
 ];
 
@@ -122,7 +122,9 @@ describe("actual WebX Unix runtime", () => {
     const forged = new WebxClient(new UnixSocketTransport(webxPath, forgedFactory));
     await expect(forged.version()).rejects.toMatchObject<WebxError>({ status: 400 });
     expect((await client.search({ query: "WebX" }, { idempotencyKey: "runtime-search-001" })).hits).toHaveLength(1);
-    expect((await client.capabilities()).browserPaths.map((item) => item.pathId)).toEqual(["agent-browser/chrome", "pinchtab/chrome"]);
+    const publicPaths = (await client.capabilities()).browserPaths;
+    expect(publicPaths.map((item) => item.pathId)).toEqual(["agent-browser/chrome", "pinchtab/chrome"]);
+    expect(publicPaths.every((item) => item.uploads === false && !item.actions.includes("upload"))).toBe(true);
     await client.createBrowserSession({ pathId: "agent-browser/chrome" }, { idempotencyKey: "runtime-browser-001" });
     expect(browser.registrations).toBe(2);
     expect(browser.methods.filter((method) => method === "agent.register")).toHaveLength(2);
@@ -133,6 +135,7 @@ describe("actual WebX Unix runtime", () => {
     await expect(facade.request("browser.workspace", { action: "show" }, { signal: facadeSignal.signal, idempotencyKey: "facade-workspace-1", ownerId: "facade-owner", cwd: "/deterministic/project" })).resolves.toMatchObject({ summary: "Browser workspace show" });
     await expect(facade.request("browser.tabs", { action: "discard-tab", browserSessionId: "session-runtime", tabId: "tab-runtime" }, { signal: facadeSignal.signal, idempotencyKey: "facade-tabs-0001", ownerId: "facade-owner", cwd: "/deterministic/project" })).rejects.toThrow("no safe Pi 0.84.1 equivalent");
     await expect(facade.request("browser.act", { browserSessionId: "session-runtime", action: { kind: "hover", ref: "e1" } }, { signal: facadeSignal.signal, idempotencyKey: "facade-action-001", ownerId: "facade-owner", cwd: "/deterministic/project" })).rejects.toBeInstanceOf(WebxError);
+    await expect(facade.request("browser.act", { browserSessionId: "session-runtime", action: { kind: "upload", ref: "e1", uploadHandleIds: ["handle-1"] } }, { signal: facadeSignal.signal, idempotencyKey: "facade-upload-0001", ownerId: "facade-owner", cwd: "/deterministic/project" })).rejects.toThrow("upload is not supported by the frozen daemon action shape");
     const opened = await facade.request("browser.open", { pathId: "agent-browser/chrome" }, { signal: facadeSignal.signal, idempotencyKey: "facade-open-00001", ownerId: "facade-owner", cwd: "/deterministic/project" });
     expect(opened).toMatchObject({ data: { sessionId: "session-runtime" } });
     const visual = await facade.request("browser.observe", { browserSessionId: "session-runtime", view: "visual" }, { signal: facadeSignal.signal, idempotencyKey: "facade-observe-01", ownerId: "facade-owner", cwd: "/deterministic/project" });

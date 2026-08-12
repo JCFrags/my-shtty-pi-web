@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApiVersionError, FACADE_OPERATION_INVENTORY, HttpTransport, ResponseLimitError, WebxClient } from "../src/index.js";
+import type { BrowserAction } from "../src/types.js";
 
 function transport(version = "1.0.0") {
   const request = vi.fn(async (input) => {
@@ -62,6 +63,12 @@ describe("WebxClient", () => {
       "POST /v1/browser/sessions/session-1/actions", "POST /v1/browser/sessions/session-1/debug", "POST /v1/browser/sessions/session-1/control",
       "POST /v1/browser/operations/operation-1/cancel", "DELETE /v1/browser/sessions/session-1",
     ]));
+  });
+
+  it("keeps upload out of the SDK-facing browser action union", () => {
+    // @ts-expect-error Upload has no complete singular Pi typed-handle seam.
+    const upload: BrowserAction = { kind: "upload", ref: "e1", uploadHandleIds: ["handle-1"] };
+    expect(upload.kind).toBe("upload");
   });
 
   it("bounds HTTP response bytes before JSON parsing", async () => {

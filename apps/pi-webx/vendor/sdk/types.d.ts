@@ -235,10 +235,6 @@ export type BrowserAction = {
     readonly selector?: string;
     readonly values: readonly string[];
 } | {
-    readonly kind: "upload";
-    readonly ref: string;
-    readonly uploadHandleIds: readonly string[];
-} | {
     readonly kind: "download";
     readonly ref: string;
 } | {

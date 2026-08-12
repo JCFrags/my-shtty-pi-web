@@ -5121,25 +5121,6 @@ components:
         required:
         - kind
         - ref
-        - uploadHandleIds
-        properties:
-          kind:
-            const: upload
-          ref:
-            type: string
-            minLength: 1
-            maxLength: 256
-          uploadHandleIds:
-            type: array
-            items:
-              type: string
-              minLength: 1
-              maxLength: 256
-      - type: object
-        additionalProperties: false
-        required:
-        - kind
-        - ref
         properties:
           kind:
             const: download
