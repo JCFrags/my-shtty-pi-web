@@ -1,0 +1,10 @@
+{
+  "name": "@webx/test-fixtures",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/cli.mjs",
+    "test": "node --test test/*.test.mjs"
+  }
+}
