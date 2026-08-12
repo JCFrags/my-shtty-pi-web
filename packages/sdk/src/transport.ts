@@ -82,16 +82,38 @@ export type NdjsonConnectionFactory = (socketPath: string) => Promise<NdjsonConn
  * Unix transport uses a supplied NDJSON socket connector. This keeps host-path
  * and socket access outside the SDK while retaining strict framing and bounds.
  */
+export interface UnixActorIdentity {
+  readonly principalId: string;
+  readonly agentId: string;
+}
+
+export interface UnixActorBinding { readonly bindingId: string; readonly bindingSecret: string }
+
 export class UnixSocketTransport implements WebxTransport {
+  #binding?: UnixActorBinding;
   constructor(
     private readonly socketPath: string,
     private readonly connect: NdjsonConnectionFactory,
+    private readonly actor?: UnixActorIdentity,
   ) {}
+
+  async bind(ownerId: string, signal?: AbortSignal): Promise<void> {
+    if (this.#binding !== undefined) return;
+    const connection = await this.connect(this.socketPath);
+    try {
+      const line = await connection.send(JSON.stringify({ bind: { ownerId } }), signal);
+      const response = JSON.parse(line) as { bindingId?: unknown; bindingSecret?: unknown };
+      if (typeof response.bindingId !== "string" || typeof response.bindingSecret !== "string") throw new TypeError("invalid Unix actor binding response");
+      this.#binding = { bindingId: response.bindingId, bindingSecret: response.bindingSecret };
+    } finally { await connection.close(); }
+  }
 
   async request(request: TransportRequest): Promise<TransportResponse> {
     const connection = await this.connect(this.socketPath);
     try {
-      const line = await connection.send(JSON.stringify(request), request.signal);
+      const serializable = { ...request, signal: undefined };
+      const wire = this.#binding === undefined ? this.actor === undefined ? serializable : { actor: this.actor, request: serializable } : { binding: this.#binding, request: serializable };
+      const line = await connection.send(JSON.stringify(wire), request.signal);
       if (new TextEncoder().encode(line).byteLength > request.maxResponseBytes) {
         throw new ResponseLimitError(request.maxResponseBytes);
       }

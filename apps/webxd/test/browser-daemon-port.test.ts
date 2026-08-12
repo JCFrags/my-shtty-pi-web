@@ -38,7 +38,9 @@ function rpc(pathId: "agent-browser/chrome" | "pinchtab/chrome" = "agent-browser
   const call = vi.fn(async (method: string) => {
     if (method === "system.capabilities") return capabilities;
     if (method === "session.create") return sessionResponse(pathId);
-    if (method === "workspace.focusTab") return { agentId: "agent-a", browserSessionId: "session-1", tabId: "tab-1", visible: true };
+    if (method === "workspace.focusTab" || method === "workspace.show") return { agentId: "agent-a", browserSessionId: "session-1", tabId: "tab-1", visible: true };
+    if (method === "workspace.hide") return { agentId: "agent-a", tabId: "tab-1", visible: false };
+    if (method === "tab.close") return { closed: true };
     if (method === "workspace.openScoped" || method === "workspace.selectOwnedTab") return workspaceSnapshot();
     if (method === "workspace.acquireViewportLease") return { leaseId: "lease-1", expiresAt: "2026-08-12T00:00:30Z", transport: "polled-frames", identity: workspaceSnapshot().selected, geometry: { imageWidth: 1, imageHeight: 1, viewportWidth: 1, viewportHeight: 1, deviceScaleFactor: 1 }, inputSupported: true };
     if (method === "workspace.getFrame") return { viewportId: "viewport-tab-1", viewportGeneration: 2, sequence: 7, capturedAt: "2026-08-12T00:00:01Z", mediaType: "image/png", width: 640, height: 480, coordinateSpace: "css-viewport", payload: "cG5n", screenshotSha256: digest, controlEpoch: 1, geometry: { imageWidth: 640, imageHeight: 480, viewportWidth: 640, viewportHeight: 480, deviceScaleFactor: 1 } };
@@ -48,11 +50,13 @@ function rpc(pathId: "agent-browser/chrome" | "pinchtab/chrome" = "agent-browser
       return { accepted: true, bindingSequence: 7 };
     }
     if (method === "workspace.releaseViewportLease") return { released: true };
+    if (method === "session.list") return { hosts: [], sessions: [{ ...sessionResponse(pathId).browserSession, pathId }], tabs: [{ ...sessionResponse(pathId).tab, pathId, controlEpoch: 1 }] };
     if (method === "browser.observe") return { view: "full", title: "Fixture", url: "https://fixture.invalid", content: "bounded", controls: [], changed: [], artifactId: "screenshot-artifact", truncated: true, metadata: { contentArtifactId: "content-artifact" }, operationId: "operation-observe" };
     if (method === "browser.act") return { ok: true, action: "fill", changed: ["input"], backend: {}, operationId: "operation-fill" };
+    if (method === "browser.debug") return { ok: true, operation: "console", data: { entries: [] }, artifactId: "debug-artifact", operationId: "operation-debug" };
     return {};
   });
-  return { call };
+  return { call, close: vi.fn(async () => undefined) };
 }
 
 async function create(port: BrowserDaemonRpcPort, pathId: "agent-browser/chrome" | "pinchtab/chrome" = "agent-browser/chrome") {
@@ -67,6 +71,28 @@ describe("BrowserDaemonRpcPort frozen browserd seam", () => {
     const session = await create(port, "pinchtab/chrome");
     expect(session).toMatchObject({ pathId: "pinchtab/chrome", ownerPrincipalId: "principal-a", ownerAgentId: "agent-a" });
     expect(connection.call).toHaveBeenCalledWith("session.create", { pathId: "pinchtab/chrome" }, undefined);
+  });
+
+  it("lists owned frozen sessions and routes safe debug", async () => {
+    const connection = rpc();
+    const port = new BrowserDaemonRpcPort(async () => connection);
+    expect(await port.listSessions(owner)).toEqual([expect.objectContaining({ sessionId: "session-1", tabId: "tab-1", pathId: "agent-browser/chrome" })]);
+    expect(await port.debug(owner, "session-1", { operation: "console", maxChars: 100 }, "operation-debug")).toMatchObject({ ok: true, operation: "console", artifactId: "debug-artifact" });
+    expect(connection.call).toHaveBeenCalledWith("browser.debug", { browserSessionId: "session-1", tabId: "tab-1", operation: "console", args: {}, maxChars: 100, operationId: "operation-debug" }, undefined);
+    await port.shutdown();
+    expect(connection.close).toHaveBeenCalledTimes(2);
+  });
+
+  it("maps workspace takeover and return plus close-tab to frozen methods", async () => {
+    const connection = rpc();
+    const port = new BrowserDaemonRpcPort(async () => connection);
+    await create(port);
+    await port.workspace(owner, { action: "takeover", sessionId: "session-1" }, "workspace-1");
+    await port.workspace(owner, { action: "return", sessionId: "session-1" }, "workspace-2");
+    await port.closeTab(owner, "session-1", "tab-1");
+    const controls = connection.call.mock.calls.filter(([method]) => method === "workspace.compareSetControl").map(([, params]) => params.control);
+    expect(controls).toEqual(["human", "agent"]);
+    expect(connection.call).toHaveBeenCalledWith("tab.close", { browserSessionId: "session-1", tabId: "tab-1" }, undefined);
   });
 
   it("parses the frozen legacy Observation shape after artifact ingestion", async () => {

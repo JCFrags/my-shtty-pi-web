@@ -9,12 +9,13 @@ const paths = [
 ] as const;
 
 function actor(principalId = "principal-a", agentId = "agent-a"): AuthorityActor {
-  return { principalId, agentId, scopes: new Set(["system.read", "search.write", "retrieval.read", "research.write", "pages.read", "artifacts.read", "browser.read", "browser.write", "browser.control"]) };
+  return { principalId, agentId, scopes: new Set(["system.read", "search.write", "retrieval.read", "research.write", "pages.read", "pages.write", "artifacts.read", "browser.read", "browser.write", "browser.control", "browser.debug"]) };
 }
 
 function browser(): BrowserDaemonPort {
   return {
     capabilities: vi.fn(async () => paths),
+    listSessions: vi.fn(async () => []),
     createSession: vi.fn(async (owner, request) => {
       const capabilities = paths.find((item) => item.pathId === request.pathId);
       if (capabilities === undefined) throw new Error("unsupported path");
@@ -24,9 +25,13 @@ function browser(): BrowserDaemonPort {
     observe: vi.fn(async () => ({ operationId: "op-observe", address: { sessionId: "session-1", tabId: "tab-1", pathId: "agent-browser/chrome", hostGeneration: 1, engineGeneration: 1, controlEpoch: 1 }, title: "Fixture", url: "https://fixture.invalid", content: "bounded", truncated: false })),
     captureFrame: vi.fn(async () => ({ address: { sessionId: "session-1", tabId: "tab-1", pathId: "agent-browser/chrome", hostGeneration: 1, engineGeneration: 1, controlEpoch: 1 }, mediaType: "image/png", width: 1, height: 1, payloadBase64: "", screenshotSha256: "a".repeat(64), screenshotSequence: 1, viewportId: "viewport-1", viewportGeneration: 1 })),
     act: vi.fn(async (_owner, _session, _action, operationId) => ({ operationId, state: "succeeded" })),
+    debug: vi.fn(async (_owner, _sessionId, request, operationId) => ({ operationId, operation: request.operation, ok: true, data: {} })),
+    workspace: vi.fn(async (_owner, request) => ({ action: request.action, data: {} })),
     setControl: vi.fn(async (_owner, sessionId, controller) => ({ sessionId, tabId: "tab-1", controller, controlEpoch: 2 })),
     cancel: vi.fn(async (_owner, operationId) => ({ operationId, state: "cancelled" })),
+    closeTab: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
+    shutdown: vi.fn(async () => undefined),
   };
 }
 
@@ -48,6 +53,18 @@ describe("WebxAuthority", () => {
     expect((await call(instance, actor(), "GET", "/v1/pages/page-webx-001")).status).toBe(200);
     const artifact = await call(instance, actor(), "GET", "/v1/artifacts/artifact-webx-001/excerpt?offset=0&max_bytes=4");
     expect(artifact.body).toMatchObject({ excerpt: "WebX", integrityVerified: true, nextOffset: 4 });
+  });
+
+  it("searches and forgets only owner-visible public page-library records", async () => {
+    const fixture = PUBLIC_SOURCES[0];
+    if (fixture === undefined) throw new Error("fixture source is missing");
+    const source = { ...fixture, ownerPrincipalId: "principal-a", pageId: "owned-page", artifactId: "owned-artifact" };
+    const instance = new WebxAuthority({ browser: browser(), sources: [source], artifacts: [], clock: { now: () => "" }, ids: { next: () => "" } });
+    const found = await call(instance, actor(), "POST", "/v1/pages/search", { query: "WebX" }, "pages-search-001");
+    expect(found).toMatchObject({ status: 200, body: { pages: [{ pageId: "owned-page", visibility: "public" }] } });
+    expect(await call(instance, actor(), "DELETE", "/v1/pages", { pageId: "owned-page" }, "pages-forget-001")).toMatchObject({ status: 200, body: { forgotten: true, pageId: "owned-page" } });
+    expect(await call(instance, actor(), "GET", "/v1/pages/owned-page")).toMatchObject({ status: 404, body: { code: "not-found" } });
+    expect(await call(instance, actor(), "POST", "/v1/pages/search", { query: "WebX", includeHistory: true }, "pages-history-001")).toMatchObject({ status: 501, body: { code: "unavailable" } });
   });
 
   it("rejects private content for the wrong principal without revealing it", async () => {
@@ -78,6 +95,26 @@ describe("WebxAuthority", () => {
     const denied = await call(instance, actor("principal-b", "agent-b"), "GET", "/v1/browser/sessions/session-1");
     expect(denied).toMatchObject({ status: 403, body: { code: "wrong-owner" } });
     expect(port.getSession).not.toHaveBeenCalled();
+  });
+
+  it("routes workspace control and close-tab through owned browser state", async () => {
+    const port = browser();
+    const instance = authority(port);
+    await call(instance, actor(), "POST", "/v1/browser/sessions", { pathId: "agent-browser/chrome" }, "browser-create-workspace");
+    expect(await call(instance, actor(), "POST", "/v1/browser/workspace", { action: "takeover", sessionId: "session-1" }, "browser-workspace-1")).toMatchObject({ status: 200, body: { action: "takeover" } });
+    expect(await call(instance, actor(), "DELETE", "/v1/browser/sessions/session-1/tabs/tab-1", undefined, "browser-tab-close-1")).toMatchObject({ status: 204 });
+    expect(port.workspace).toHaveBeenCalledTimes(1);
+    expect(port.closeTab).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes browser list and safe debug while refusing secret debug before dispatch", async () => {
+    const port = browser();
+    const instance = authority(port);
+    expect(await call(instance, actor(), "GET", "/v1/browser/sessions")).toMatchObject({ status: 200, body: { sessions: [] } });
+    await call(instance, actor(), "POST", "/v1/browser/sessions", { pathId: "agent-browser/chrome" }, "browser-create-debug");
+    expect(await call(instance, actor(), "POST", "/v1/browser/sessions/session-1/debug", { operation: "console", maxChars: 100 }, "browser-debug-001")).toMatchObject({ status: 200, body: { operation: "console", ok: true } });
+    expect(await call(instance, actor(), "POST", "/v1/browser/sessions/session-1/debug", { operation: "cookies" }, "browser-debug-002")).toMatchObject({ status: 403, body: { code: "debug-refused" } });
+    expect(port.debug).toHaveBeenCalledTimes(1);
   });
 
   it("routes visual frame capture through the browser daemon port", async () => {

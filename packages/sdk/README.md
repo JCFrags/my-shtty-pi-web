@@ -1,15 +1,18 @@
 # WebX SDK
 
-`@webx/sdk` is the stable typed client boundary for WebX API major 1.
+The SDK provides strict types and one stable client for the local WebX API.
 
-It provides:
+It includes:
 
 - API-major negotiation;
-- bounded authenticated HTTP and injected Unix NDJSON transports;
-- stable search, read, research, page, artifact, capability, browser frame, and browser action methods;
-- one idempotency key for each mutation;
-- `AbortSignal` propagation;
-- explicit untrusted-content fields;
-- exactly two browser path IDs.
+- bounded responses and cancellation;
+- required mutation idempotency;
+- search, read, and research;
+- public page-library search, get, and forget;
+- artifact excerpt reads;
+- browser create, list, get, observe, frame, act, safe debug, workspace, control, cancel, close-tab, and close-session;
+- exactly `agent-browser/chrome` and `pinchtab/chrome`;
+- a real Node Unix NDJSON connector;
+- an exact singular-facade operation adapter and inventory.
 
-The SDK has no policy, direct data access, browser provider access, or fallback path.
+`FACADE_OPERATION_INVENTORY` states each facade mapping and each explicit gap. Visual observe captures a frame and returns an owner/session-scoped `observationId` and `viewportId`. A later visual action consumes that binding and creates the exact SDK visual guard. Browser workspace show, hide, list, attach, takeover, and return are mapped. Browser tab close works. Discard and restore remain unavailable because Pi 0.84.1 has no safe equivalent in this product. There is no silent fallback.

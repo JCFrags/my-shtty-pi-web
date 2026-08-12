@@ -1,16 +1,26 @@
 import { ApiVersionError, asWebxError } from "./errors.js";
+import type { UnixSocketTransport } from "./transport.js";
 import {
   WEBX_API_MAJOR,
   type ArtifactExcerpt,
   type BoundedContent,
   type BrowserAction,
   type BrowserControlResult,
+  type BrowserDebugRequest,
+  type BrowserDebugResult,
   type BrowserObservation,
   type BrowserOperationResult,
   type BrowserSession,
   type BrowserSessionRequest,
+  type BrowserSessionList,
   type BrowserVisualFrame,
+  type BrowserWorkspaceRequest,
+  type BrowserWorkspaceResult,
   type CapabilityCatalog,
+  type PageForgetRequest,
+  type PageForgetResult,
+  type PageLibrarySearchRequest,
+  type PageLibrarySearchResponse,
   type ReadRequest,
   type RequestOptions,
   type ResearchRequest,
@@ -37,6 +47,11 @@ export class WebxClient {
     options: WebxClientOptions = {},
   ) {
     this.#maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+  }
+
+  bind(ownerId: string, signal?: AbortSignal): Promise<void> {
+    const transport = this.transport as WebxTransport & Partial<Pick<UnixSocketTransport, "bind">>;
+    return transport.bind === undefined ? Promise.resolve() : transport.bind(ownerId, signal);
   }
 
   version(signal?: AbortSignal): Promise<VersionInfo> {
@@ -71,8 +86,16 @@ export class WebxClient {
     return this.call("POST", "/v1/research", request, requireIdempotency(options));
   }
 
+  searchPages(request: PageLibrarySearchRequest, options: RequestOptions): Promise<PageLibrarySearchResponse> {
+    return this.call("POST", "/v1/pages/search", request, requireIdempotency(options));
+  }
+
   getPage(pageId: string, options: RequestOptions = {}): Promise<BoundedContent> {
     return this.call("GET", `/v1/pages/${encodeURIComponent(pageId)}`, undefined, options);
+  }
+
+  forgetPage(request: PageForgetRequest, options: RequestOptions): Promise<PageForgetResult> {
+    return this.call("DELETE", "/v1/pages", request, requireIdempotency(options));
   }
 
   getArtifactExcerpt(artifactId: string, offset = 0, maxBytes = 16_384, options: RequestOptions = {}): Promise<ArtifactExcerpt> {
@@ -82,6 +105,18 @@ export class WebxClient {
 
   createBrowserSession(request: BrowserSessionRequest, options: RequestOptions): Promise<BrowserSession> {
     return this.call("POST", "/v1/browser/sessions", request, requireIdempotency(options));
+  }
+
+  listBrowserSessions(options: RequestOptions = {}): Promise<BrowserSessionList> {
+    return this.call("GET", "/v1/browser/sessions", undefined, options);
+  }
+
+  manageBrowserWorkspace(request: BrowserWorkspaceRequest, options: RequestOptions): Promise<BrowserWorkspaceResult> {
+    return this.call("POST", "/v1/browser/workspace", request, requireIdempotency(options));
+  }
+
+  closeBrowserTab(sessionId: string, tabId: string, options: RequestOptions): Promise<void> {
+    return this.call("DELETE", `/v1/browser/sessions/${encodeURIComponent(sessionId)}/tabs/${encodeURIComponent(tabId)}`, undefined, requireIdempotency(options));
   }
 
   getBrowserSession(sessionId: string, options: RequestOptions = {}): Promise<BrowserSession> {
@@ -98,6 +133,10 @@ export class WebxClient {
 
   actBrowser(sessionId: string, action: BrowserAction, options: RequestOptions): Promise<BrowserOperationResult> {
     return this.call("POST", `/v1/browser/sessions/${encodeURIComponent(sessionId)}/actions`, { action }, requireIdempotency(options));
+  }
+
+  debugBrowser(sessionId: string, request: BrowserDebugRequest, options: RequestOptions): Promise<BrowserDebugResult> {
+    return this.call("POST", `/v1/browser/sessions/${encodeURIComponent(sessionId)}/debug`, request, requireIdempotency(options));
   }
 
   setBrowserControl(sessionId: string, controller: "human" | "agent", options: RequestOptions): Promise<BrowserControlResult> {

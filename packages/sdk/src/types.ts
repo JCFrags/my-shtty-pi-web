@@ -115,6 +115,28 @@ export interface ResearchResponse {
   readonly artifactId?: string;
 }
 
+export interface PageLibrarySearchRequest {
+  readonly query: string;
+  readonly limit?: number;
+  readonly includeHistory?: boolean;
+}
+
+export interface PageLibrarySearchResponse {
+  readonly query: string;
+  readonly pages: readonly PageRecord[];
+  readonly truncated: boolean;
+}
+
+export interface PageForgetRequest {
+  readonly pageId?: string;
+  readonly url?: string;
+}
+
+export interface PageForgetResult {
+  readonly forgotten: boolean;
+  readonly pageId: string;
+}
+
 export interface PageRecord {
   readonly pageId: string;
   readonly ownerPrincipalId: string;
@@ -179,15 +201,56 @@ export type BrowserAction =
   | { readonly kind: "key-press"; readonly key: string }
   | { readonly kind: "key-down" | "key-up"; readonly key: string; readonly code?: string; readonly modifiers?: number }
   | { readonly kind: "text-input"; readonly text: string }
-  | { readonly kind: "fill"; readonly ref?: string; readonly text: string }
-  | { readonly kind: "select"; readonly ref: string; readonly values: readonly string[] }
+  | { readonly kind: "fill" | "type"; readonly ref?: string; readonly selector?: string; readonly text: string }
+  | { readonly kind: "press"; readonly key: string }
+  | { readonly kind: "hover"; readonly ref?: string; readonly selector?: string }
+  | { readonly kind: "scroll"; readonly direction: "up" | "down" | "left" | "right"; readonly amount?: number }
+  | { readonly kind: "semantic-drag"; readonly ref: string; readonly targetRef: string }
+  | { readonly kind: "select"; readonly ref?: string; readonly selector?: string; readonly values: readonly string[] }
   | { readonly kind: "upload"; readonly ref: string; readonly uploadHandleIds: readonly string[] }
   | { readonly kind: "download"; readonly ref: string }
-  | { readonly kind: "wait"; readonly milliseconds: number }
+  | { readonly kind: "wait"; readonly milliseconds?: number; readonly selector?: string; readonly text?: string }
+  | { readonly kind: "tab-new"; readonly url?: string }
+  | { readonly kind: "tab-close"; readonly tabId?: string }
+  | { readonly kind: "tab-focus"; readonly tabId: string }
   | { readonly kind: "back" | "forward" | "reload" };
+
+export interface BrowserSessionList {
+  readonly sessions: readonly BrowserSession[];
+}
+
+export type BrowserWorkspaceAction = "show" | "hide" | "list" | "attach" | "takeover" | "return";
+
+export interface BrowserWorkspaceRequest {
+  readonly action: BrowserWorkspaceAction;
+  readonly sessionId?: string;
+  readonly tabId?: string;
+}
+
+export interface BrowserWorkspaceResult {
+  readonly action: BrowserWorkspaceAction;
+  readonly data: unknown;
+}
+
+export type SafeBrowserDebugOperation = "console" | "network" | "html" | "pdf" | "record-start" | "record-stop";
+
+export interface BrowserDebugRequest {
+  readonly operation: SafeBrowserDebugOperation;
+  readonly args?: Readonly<Record<string, unknown>>;
+  readonly maxChars?: number;
+}
+
+export interface BrowserDebugResult {
+  readonly operationId: string;
+  readonly operation: SafeBrowserDebugOperation;
+  readonly ok: boolean;
+  readonly data: unknown;
+  readonly artifactId?: string;
+}
 
 export interface BrowserObservation {
   readonly operationId: string;
+  readonly observationId?: string;
   readonly address: BrowserAddress;
   readonly title: string;
   readonly url: string;

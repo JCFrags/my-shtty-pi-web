@@ -5,6 +5,8 @@
   "type": "module",
   "exports": "./src/index.ts",
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "pnpm run build && node dist/apps/webxd/src/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   }

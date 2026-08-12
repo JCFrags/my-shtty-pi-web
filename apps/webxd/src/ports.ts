@@ -1,6 +1,8 @@
 import type {
   BrowserAction,
   BrowserControlResult,
+  BrowserDebugRequest,
+  BrowserDebugResult,
   BrowserObservation,
   BrowserOperationResult,
   BrowserPathCapability,
@@ -8,6 +10,8 @@ import type {
   BrowserSession,
   BrowserSessionRequest,
   BrowserVisualFrame,
+  BrowserWorkspaceRequest,
+  BrowserWorkspaceResult,
   Visibility,
 } from "../../../packages/sdk/src/index.js";
 
@@ -43,13 +47,18 @@ export class BrowserPortError extends Error {
 export interface BrowserDaemonPort {
   capabilities(signal?: AbortSignal): Promise<readonly BrowserPathCapability[]>;
   createSession(actor: AuthorityActor, request: BrowserSessionRequest, operationId: string, signal?: AbortSignal): Promise<BrowserSession>;
+  listSessions(actor: AuthorityActor, signal?: AbortSignal): Promise<readonly BrowserSession[]>;
   getSession(actor: AuthorityActor, sessionId: string, signal?: AbortSignal): Promise<BrowserSession>;
   observe(actor: AuthorityActor, sessionId: string, view: string, maxChars: number, operationId: string, signal?: AbortSignal): Promise<BrowserObservation>;
   captureFrame(actor: AuthorityActor, sessionId: string, operationId: string, signal?: AbortSignal): Promise<BrowserVisualFrame>;
   act(actor: AuthorityActor, sessionId: string, action: BrowserAction, operationId: string, signal?: AbortSignal): Promise<BrowserOperationResult>;
+  debug(actor: AuthorityActor, sessionId: string, request: BrowserDebugRequest, operationId: string, signal?: AbortSignal): Promise<BrowserDebugResult>;
+  workspace(actor: AuthorityActor, request: BrowserWorkspaceRequest, operationId: string, signal?: AbortSignal): Promise<BrowserWorkspaceResult>;
   setControl(actor: AuthorityActor, sessionId: string, controller: "human" | "agent", operationId: string, signal?: AbortSignal): Promise<BrowserControlResult>;
   cancel(actor: AuthorityActor, operationId: string, signal?: AbortSignal): Promise<BrowserOperationResult>;
+  closeTab(actor: AuthorityActor, sessionId: string, tabId: string, signal?: AbortSignal): Promise<void>;
   close(actor: AuthorityActor, sessionId: string, signal?: AbortSignal): Promise<void>;
+  shutdown(): Promise<void>;
 }
 
 export interface AuthorityClock {

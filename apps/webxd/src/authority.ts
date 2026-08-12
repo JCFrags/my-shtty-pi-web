@@ -2,8 +2,13 @@ import type {
   ArtifactExcerpt,
   BoundedContent,
   BrowserAction,
+  BrowserDebugRequest,
   BrowserSessionRequest,
+  BrowserWorkspaceRequest,
   CapabilityCatalog,
+  PageForgetRequest,
+  PageLibrarySearchRequest,
+  PageLibrarySearchResponse,
   ReadRequest,
   ResearchRequest,
   SearchHit,
@@ -47,6 +52,7 @@ export interface WebxAuthorityOptions {
 export class WebxAuthority {
   readonly #idempotency = new Map<string, CachedResult>();
   readonly #browserOwners = new Map<string, { principalId: string; agentId: string }>();
+  readonly #forgottenPages = new Set<string>();
 
   constructor(private readonly options: WebxAuthorityOptions) {}
 
@@ -100,6 +106,8 @@ export class WebxAuthority {
     if (request.method === "POST" && url.pathname === "/v1/search") return ok(this.search(actor, body<SearchRequest>(request), "search.write"));
     if (request.method === "POST" && url.pathname === "/v1/read") return ok(this.read(actor, body<ReadRequest>(request)));
     if (request.method === "POST" && url.pathname === "/v1/research") return ok(this.research(actor, body<ResearchRequest>(request)));
+    if (request.method === "POST" && url.pathname === "/v1/pages/search") return ok(this.searchPages(actor, body<PageLibrarySearchRequest>(request)));
+    if (request.method === "DELETE" && url.pathname === "/v1/pages") return ok(this.forgetPage(actor, body<PageForgetRequest>(request)));
     if (request.method === "GET" && segments[1] === "pages" && segments.length === 3) return ok(this.page(actor, segments[2] ?? ""));
     if (request.method === "GET" && segments[1] === "artifacts" && segments[3] === "excerpt") {
       return ok(this.artifact(actor, segments[2] ?? "", numberQuery(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER), numberQuery(url, "max_bytes", 16_384, 1, MAX_ARTIFACT_BYTES)));
@@ -142,8 +150,32 @@ export class WebxAuthority {
     return { question: request.question, summary: bounded.text, sources: search.hits, truncated: bounded.truncated || search.truncated };
   }
 
+  private searchPages(actor: AuthorityActor, request: PageLibrarySearchRequest): PageLibrarySearchResponse {
+    requireScope(actor, "pages.read");
+    if (typeof request.query !== "string" || request.query.trim().length === 0 || request.query.length > 8_192) throw problem(400, "invalid-request", "query must contain 1 to 8192 characters", false);
+    if (request.includeHistory === true) throw problem(501, "unavailable", "page history search is not available in this runtime", false);
+    const limit = integer(request.limit ?? 10, "limit", 1, 100);
+    const query = request.query.toLocaleLowerCase();
+    const matches = this.options.sources.filter((source) => source.visibility === "public" && !this.#forgottenPages.has(source.pageId) && `${source.title} ${source.content} ${source.url}`.toLocaleLowerCase().includes(query));
+    return {
+      query: request.query,
+      pages: matches.slice(0, limit).map((source) => ({ pageId: source.pageId, ownerPrincipalId: source.ownerPrincipalId, title: source.title, url: source.url, visibility: source.visibility, artifactId: source.artifactId })),
+      truncated: matches.length > limit,
+    };
+  }
+
+  private forgetPage(actor: AuthorityActor, request: PageForgetRequest): { forgotten: true; pageId: string } {
+    requireScope(actor, "pages.write");
+    if ((request.pageId === undefined) === (request.url === undefined)) throw problem(400, "invalid-request", "supply exactly one pageId or url", false);
+    const source = request.pageId === undefined ? this.options.sources.find((item) => item.url === request.url) : this.options.sources.find((item) => item.pageId === request.pageId);
+    if (source === undefined || source.visibility !== "public" || source.ownerPrincipalId !== actor.principalId || this.#forgottenPages.has(source.pageId)) throw problem(404, "not-found", "page was not found", false);
+    this.#forgottenPages.add(source.pageId);
+    return { forgotten: true, pageId: source.pageId };
+  }
+
   private page(actor: AuthorityActor, pageId: string): BoundedContent {
     requireScope(actor, "pages.read");
+    if (this.#forgottenPages.has(pageId)) throw problem(404, "not-found", "page was not found", false);
     return this.read({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, { pageId });
   }
 
@@ -159,6 +191,16 @@ export class WebxAuthority {
 
   private async browser(actor: AuthorityActor, request: TransportRequest, segments: readonly string[]): Promise<TransportResponse> {
     const sessionId = segments[3];
+    if (request.method === "POST" && segments.length === 3 && segments[2] === "workspace") {
+      requireScope(actor, "browser.control");
+      return ok(await this.options.browser.workspace(actor, body<BrowserWorkspaceRequest>(request), operationId(request), request.signal));
+    }
+    if (request.method === "GET" && segments.length === 3 && segments[2] === "sessions") {
+      requireScope(actor, "browser.read");
+      const sessions = await this.options.browser.listSessions(actor, request.signal);
+      for (const session of sessions) this.#browserOwners.set(session.sessionId, { principalId: actor.principalId, agentId: actor.agentId });
+      return ok({ sessions });
+    }
     if (request.method === "POST" && segments.length === 3 && segments[2] === "sessions") {
       requireScope(actor, "browser.write");
       const input = body<BrowserSessionRequest>(request);
@@ -172,6 +214,7 @@ export class WebxAuthority {
       this.assertBrowserOwner(actor, sessionId);
       if (request.method === "GET" && segments.length === 4) { requireScope(actor, "browser.read"); return ok(await this.options.browser.getSession(actor, sessionId, request.signal)); }
       if (request.method === "DELETE" && segments.length === 4) { requireScope(actor, "browser.write"); await this.options.browser.close(actor, sessionId, request.signal); this.#browserOwners.delete(sessionId); return { status: 204, headers: jsonHeaders() }; }
+      if (request.method === "DELETE" && segments[4] === "tabs" && segments[5] !== undefined) { requireScope(actor, "browser.write"); await this.options.browser.closeTab(actor, sessionId, segments[5], request.signal); return { status: 204, headers: jsonHeaders() }; }
       if (request.method === "POST" && segments[4] === "observe") {
         requireScope(actor, "browser.read");
         const input = body<{ view?: string; maxChars?: number }>(request);
@@ -184,6 +227,12 @@ export class WebxAuthority {
       if (request.method === "POST" && segments[4] === "actions") {
         requireScope(actor, "browser.write");
         return ok(await this.options.browser.act(actor, sessionId, body<{ action: BrowserAction }>(request).action, operationId(request), request.signal));
+      }
+      if (request.method === "POST" && segments[4] === "debug") {
+        requireScope(actor, "browser.debug");
+        const input = body<BrowserDebugRequest>(request);
+        if (!isSafeDebugOperation(input.operation)) throw problem(403, "debug-refused", "secret-bearing browser debug operations are refused", false);
+        return ok(await this.options.browser.debug(actor, sessionId, input, operationId(request), request.signal));
       }
       if (request.method === "POST" && segments[4] === "control") {
         requireScope(actor, "browser.control");
@@ -203,6 +252,10 @@ export class WebxAuthority {
     const owner = this.#browserOwners.get(sessionId);
     if (owner !== undefined && (owner.principalId !== actor.principalId || owner.agentId !== actor.agentId)) throw problem(403, "wrong-owner", "browser session has a different owner", false);
   }
+}
+
+function isSafeDebugOperation(value: unknown): value is BrowserDebugRequest["operation"] {
+  return value === "console" || value === "network" || value === "html" || value === "pdf" || value === "record-start" || value === "record-stop";
 }
 
 function body<T>(request: TransportRequest): T {

@@ -1,6 +1,8 @@
 import type {
   BrowserAction,
   BrowserControlResult,
+  BrowserDebugRequest,
+  BrowserDebugResult,
   BrowserObservation,
   BrowserOperationResult,
   BrowserPathCapability,
@@ -8,12 +10,15 @@ import type {
   BrowserSession,
   BrowserSessionRequest,
   BrowserVisualFrame,
+  BrowserWorkspaceRequest,
+  BrowserWorkspaceResult,
   VisualGuard,
 } from "../../../packages/sdk/src/index.js";
 import { BrowserPortError, type AuthorityActor, type BrowserDaemonPort } from "./ports.js";
 
 export interface BrowserRpcConnection {
   call(method: string, params: Readonly<Record<string, unknown>>, signal?: AbortSignal): Promise<unknown>;
+  close(): Promise<void>;
 }
 
 /** The factory must authenticate and register the actor on one persistent Unix NDJSON connection. */
@@ -91,6 +96,34 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     return session;
   }
 
+  async listSessions(actor: AuthorityActor, signal?: AbortSignal): Promise<readonly BrowserSession[]> {
+    const connection = await this.connection(actor);
+    const raw = record(await connection.call("session.list", {}, signal));
+    const capabilities = await this.capabilities(signal);
+    const tabs = array(raw.tabs).map(record);
+    const sessions = array(raw.sessions).map((value) => {
+      const daemonSession = record(value);
+      const sessionId = text(daemonSession.browserSessionId, "browserSessionId");
+      const pathId = browserPath(daemonSession.pathId);
+      const tab = tabs.find((item) => item.browserSessionId === sessionId);
+      if (tab === undefined) throw new TypeError("browser daemon session has no tab");
+      const capability = capabilities.find((item) => item.pathId === pathId);
+      if (capability === undefined) throw new TypeError("browser daemon session has an unsupported path");
+      const session: BrowserSession = {
+        sessionId,
+        tabId: text(tab.tabId, "tabId"),
+        pathId,
+        ownerPrincipalId: actor.principalId,
+        ownerAgentId: actor.agentId,
+        state: "ready",
+        capabilities: capability,
+      };
+      this.#sessions.set(sessionId, { session, hostGeneration: 1, engineGeneration: 1, controlEpoch: positive(tab.controlEpoch, "controlEpoch") });
+      return session;
+    });
+    return sessions;
+  }
+
   async getSession(actor: AuthorityActor, sessionId: string): Promise<BrowserSession> {
     return this.owned(actor, sessionId).session;
   }
@@ -150,6 +183,45 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     return { operationId: text(raw.operationId, "operationId"), state: "succeeded" };
   }
 
+  async debug(actor: AuthorityActor, sessionId: string, request: BrowserDebugRequest, operationId: string, signal?: AbortSignal): Promise<BrowserDebugResult> {
+    const binding = this.owned(actor, sessionId);
+    const raw = record(await (await this.connection(actor)).call("browser.debug", {
+      browserSessionId: sessionId,
+      tabId: binding.session.tabId,
+      operation: request.operation,
+      args: request.args ?? {},
+      ...(request.maxChars === undefined ? {} : { maxChars: request.maxChars }),
+      operationId,
+    }, signal));
+    const artifactId = optionalText(raw.artifactId);
+    return {
+      operationId: text(raw.operationId, "operationId"),
+      operation: request.operation,
+      ok: boolean(raw.ok, "ok"),
+      data: raw.data,
+      ...(artifactId === undefined ? {} : { artifactId }),
+    };
+  }
+
+  async workspace(actor: AuthorityActor, request: BrowserWorkspaceRequest, _operationId: string, signal?: AbortSignal): Promise<BrowserWorkspaceResult> {
+    const connection = await this.connection(actor);
+    if (request.action === "list") return { action: request.action, data: await connection.call("workspace.openScoped", {}, signal) };
+    if (request.action === "hide") return { action: request.action, data: await connection.call("workspace.hide", {}, signal) };
+    const sessionId = request.sessionId;
+    if (sessionId === undefined) {
+      if (request.action === "show") return { action: request.action, data: await connection.call("workspace.show", {}, signal) };
+      throw new BrowserPortError("invalid-request", `${request.action} requires a sessionId`, 400);
+    }
+    const binding = this.owned(actor, sessionId);
+    if (request.tabId !== undefined && request.tabId !== binding.session.tabId) throw new BrowserPortError("wrong-owner", "tab does not belong to the owned session", 403);
+    if (request.action === "show" || request.action === "attach") {
+      return { action: request.action, data: await connection.call("workspace.focusTab", { browserSessionId: sessionId, tabId: binding.session.tabId }, signal) };
+    }
+    const controller = request.action === "takeover" ? "human" : "agent";
+    if (request.action === "takeover" || request.action === "return") return { action: request.action, data: await this.setControl(actor, sessionId, controller, _operationId, signal) };
+    throw new BrowserPortError("unsupported", `workspace action ${request.action} is unsupported`, 400);
+  }
+
   async setControl(actor: AuthorityActor, sessionId: string, controller: "human" | "agent", _operationId: string, signal?: AbortSignal): Promise<BrowserControlResult> {
     const binding = this.owned(actor, sessionId);
     const workspace = await this.openWorkspace(actor, binding, signal);
@@ -177,10 +249,23 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     return { operationId, state };
   }
 
+  async closeTab(actor: AuthorityActor, sessionId: string, tabId: string, signal?: AbortSignal): Promise<void> {
+    const binding = this.owned(actor, sessionId);
+    if (binding.session.tabId !== tabId) throw new BrowserPortError("wrong-owner", "tab does not belong to the owned session", 403);
+    await (await this.connection(actor)).call("tab.close", { browserSessionId: sessionId, tabId }, signal);
+  }
+
   async close(actor: AuthorityActor, sessionId: string, signal?: AbortSignal): Promise<void> {
     const binding = this.owned(actor, sessionId);
     await (await this.connection(actor)).call("session.close", { browserSessionId: sessionId }, signal);
     this.#sessions.set(sessionId, { ...binding, session: { ...binding.session, state: "closed" } });
+  }
+
+  async shutdown(): Promise<void> {
+    const connections = [...this.#connections.values()];
+    this.#connections.clear();
+    this.#sessions.clear();
+    await Promise.allSettled(connections.map(async (connection) => (await connection).close()));
   }
 
   private async workspaceAct(actor: AuthorityActor, binding: SessionBinding, action: BrowserAction, operationId: string, signal?: AbortSignal): Promise<BrowserOperationResult> {
@@ -261,7 +346,14 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
   private connection(actor: AuthorityActor): Promise<BrowserRpcConnection> {
     const key = `${actor.principalId}\0${actor.agentId}`;
     let connection = this.#connections.get(key);
-    if (connection === undefined) { connection = this.connect(actor); this.#connections.set(key, connection); }
+    if (connection === undefined) {
+      const created = this.connect(actor).catch((error: unknown) => {
+        if (this.#connections.get(key) === created) this.#connections.delete(key);
+        throw error;
+      });
+      connection = created;
+      this.#connections.set(key, connection);
+    }
     return connection;
   }
 
@@ -306,11 +398,16 @@ function cuaAction(action: BrowserAction): Readonly<Record<string, unknown>> {
 function legacyAction(action: BrowserAction): Readonly<Record<string, unknown>> {
   if (action.kind === "navigate") return action;
   if (action.kind === "click" && !("x" in action)) return { kind: "click", ...(action.ref === undefined ? {} : { ref: action.ref }), ...(action.selector === undefined ? {} : { selector: action.selector }) };
-  if (action.kind === "fill") return action;
+  if (action.kind === "fill" || action.kind === "type") return action;
+  if (action.kind === "press" || action.kind === "hover" || action.kind === "scroll") return action;
+  if (action.kind === "semantic-drag") return { kind: "drag", ref: action.ref, targetRef: action.targetRef };
   if (action.kind === "select") return { ...action, values: [...action.values] };
   if (action.kind === "download") return action;
   if (action.kind === "back" || action.kind === "forward" || action.kind === "reload") return action;
-  if (action.kind === "wait") return { kind: "wait", milliseconds: action.milliseconds };
+  if (action.kind === "wait") return action;
+  if (action.kind === "tab-new") return action;
+  if (action.kind === "tab-close") return action;
+  if (action.kind === "tab-focus") return action;
   if (action.kind === "upload") throw new BrowserPortError("unsupported", "typed upload handles require the browser transfer seam", 400);
   throw new BrowserPortError("unsupported", `${action.kind} is not supported by the frozen browser.act shape`, 400);
 }

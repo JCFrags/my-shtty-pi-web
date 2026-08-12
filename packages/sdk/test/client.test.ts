@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiVersionError, HttpTransport, ResponseLimitError, WebxClient } from "../src/index.js";
+import { ApiVersionError, FACADE_OPERATION_INVENTORY, HttpTransport, ResponseLimitError, WebxClient } from "../src/index.js";
 
 function transport(version = "1.0.0") {
   const request = vi.fn(async (input) => {
@@ -28,6 +28,40 @@ describe("WebxClient", () => {
     const client = new WebxClient(transport());
     expect(() => client.createBrowserSession({ pathId: "agent-browser/chrome" }, {})).toThrow("idempotency key");
     expect(() => client.getBrowserVisualFrame("session-1", {})).toThrow("idempotency key");
+  });
+
+  it("maps the complete facade inventory to SDK methods or explicit unavailable results", async () => {
+    expect(Object.keys(FACADE_OPERATION_INVENTORY)).toEqual([
+      "web.search", "web.read", "web.research", "library.search", "library.get", "library.forget", "artifact.read",
+      "browser.open", "browser.tabs", "browser.observe", "browser.act", "browser.debug", "browser.workspace",
+    ]);
+    expect(FACADE_OPERATION_INVENTORY["browser.workspace"]).toBe("manageBrowserWorkspace");
+    expect(FACADE_OPERATION_INVENTORY["browser.tabs"]).toContain("closeBrowserTab");
+    expect(FACADE_OPERATION_INVENTORY["browser.act"]).toContain("bound visual actions");
+
+    const wire = transport();
+    const client = new WebxClient(wire);
+    await client.searchPages({ query: "q" }, { idempotencyKey: "library-search-1" });
+    await client.getPage("page-1");
+    await client.forgetPage({ pageId: "page-1" }, { idempotencyKey: "library-forget-1" });
+    await client.getArtifactExcerpt("artifact-1");
+    await client.listBrowserSessions();
+    await client.manageBrowserWorkspace({ action: "list" }, { idempotencyKey: "workspace-list-1" });
+    await client.closeBrowserTab("session-1", "tab-1", { idempotencyKey: "browser-tab-close" });
+    await client.getBrowserSession("session-1");
+    await client.observeBrowser("session-1", "main", 100, { idempotencyKey: "browser-observe-1" });
+    await client.getBrowserVisualFrame("session-1", { idempotencyKey: "browser-frame-01" });
+    await client.actBrowser("session-1", { kind: "reload" }, { idempotencyKey: "browser-action-01" });
+    await client.debugBrowser("session-1", { operation: "console" }, { idempotencyKey: "browser-debug-001" });
+    await client.setBrowserControl("session-1", "agent", { idempotencyKey: "browser-control-1" });
+    await client.cancelBrowserOperation("operation-1", { idempotencyKey: "browser-cancel-01" });
+    await client.closeBrowserSession("session-1", { idempotencyKey: "browser-close-01" });
+    expect(wire.request.mock.calls.map(([request]) => `${request.method} ${request.path}`)).toEqual(expect.arrayContaining([
+      "POST /v1/pages/search", "GET /v1/pages/page-1", "DELETE /v1/pages", "GET /v1/artifacts/artifact-1/excerpt?offset=0&max_bytes=16384",
+      "GET /v1/browser/sessions", "POST /v1/browser/workspace", "DELETE /v1/browser/sessions/session-1/tabs/tab-1", "GET /v1/browser/sessions/session-1", "POST /v1/browser/sessions/session-1/observe", "POST /v1/browser/sessions/session-1/frame",
+      "POST /v1/browser/sessions/session-1/actions", "POST /v1/browser/sessions/session-1/debug", "POST /v1/browser/sessions/session-1/control",
+      "POST /v1/browser/operations/operation-1/cancel", "DELETE /v1/browser/sessions/session-1",
+    ]));
   });
 
   it("bounds HTTP response bytes before JSON parsing", async () => {

@@ -1,7 +1,35 @@
 # webxd
 
-`webxd` is the local WebX business authority.
+`webxd` is the single local WebX authority and runnable same-user Unix API.
 
-This package admits authenticated actors, checks scopes and visibility, enforces idempotency and output bounds, and serves deterministic search, read, research, page-library, artifact, capability, and browser operations.
+## Runtime
 
-Browser operations use only `BrowserDaemonPort`. `BrowserDaemonRpcPort` maps semantic actions to the frozen `browser.act` shape. It maps visual CUA to the frozen scoped workspace lease, frame, control, and input methods. It preserves the selected path, owner, operation ID, cancellation, screenshot binding, capability truth, and human control epoch. It does not start a provider or use a direct fallback.
+Build and start it with:
+
+```bash
+pnpm --dir apps/webxd start
+```
+
+The runtime requires `XDG_RUNTIME_DIR`. It listens at `$XDG_RUNTIME_DIR/pi-web/webxd.sock` by default. It connects to `$XDG_RUNTIME_DIR/pi-web/browserd.sock` by default. `WEBXD_SOCKET` and `BROWSERD_SOCKET` can replace these paths.
+
+The server:
+
+- creates `WebxAuthority`;
+- accepts only bounded JSON lines on a mode `0600` Unix socket;
+- uses socket mode `0600` for the same-UID boundary;
+- issues one random runtime binding secret during facade start;
+- requires the binding ID and secret on later requests;
+- rejects forged binding secrets and does not let one request change actor identity;
+- uses one persistent browser connection per bound actor;
+- sends `agent.register` once before protected browser RPCs;
+- reconnects after a browser daemon outage;
+- removes its Unix socket and closes upstream connections during shutdown;
+- fails closed. It has no direct browser-provider fallback.
+
+Browser operations use only `BrowserDaemonPort`. Semantic actions use the frozen `browser.act` shape. Visual CUA uses the frozen scoped workspace lease, frame, control, and input methods.
+
+## Public routes
+
+The authority has tested routes for search, read, research, public page-library search/get/forget, artifact excerpt, capabilities, browser workspace, and browser create/list/get/observe/frame/act/debug/control/cancel/close-session/close-tab.
+
+Page history search returns explicit `501 unavailable`. Safe browser debug permits `console`, `network`, `html`, `pdf`, `record-start`, and `record-stop`. Secret-bearing `evaluate`, `cookies`, and `storage` operations are refused.
