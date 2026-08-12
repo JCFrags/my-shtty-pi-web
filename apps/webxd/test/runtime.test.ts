@@ -2,6 +2,7 @@ import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server, type Socket } from "node:net";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { NdjsonConnectionFactory } from "../../../packages/sdk/src/index.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebxClient, WebxError, WebxFacadeClient, UnixSocketTransport, nodeNdjsonConnectionFactory } from "../../../packages/sdk/src/index.js";
@@ -19,6 +20,8 @@ class FakeBrowserd {
   readonly methods: string[] = [];
   registrations = 0;
   unregisters = 0;
+  readonly activeOperations = new Map<string, { socket: Socket; id: number }>();
+  readonly cancelledOperations = new Set<string>();
 
   constructor(readonly path: string) {}
 
@@ -38,6 +41,21 @@ class FakeBrowserd {
           this.methods.push(request.method);
           if (request.method === "agent.register") this.registrations += 1;
           if (request.method === "agent.unregister") this.unregisters += 1;
+          if (request.method === "browser.act" && (request.params.action as { kind?: string } | undefined)?.kind === "wait") {
+            this.activeOperations.set(String(request.params.operationId), { socket, id: request.id });
+            continue;
+          }
+          if (request.method === "operation.cancel") {
+            const operationId = String(request.params.operationId);
+            const active = this.activeOperations.get(operationId);
+            socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { operationId, state: active ? "running" : this.cancelledOperations.has(operationId) ? "cancelled" : "failed" } })}\n`);
+            if (active) {
+              this.activeOperations.delete(operationId);
+              this.cancelledOperations.add(operationId);
+              active.socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: active.id, error: { code: -32010, message: "operation cancelled" } })}\n`);
+            }
+            continue;
+          }
           socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: this.result(request.method, request.params) })}\n`);
         }
       });
@@ -61,6 +79,7 @@ class FakeBrowserd {
   result(method: string, params: Record<string, unknown>): unknown {
     if (method === "agent.register") return { agentId: params.agentId, clientId: params.clientId };
     if (method === "agent.unregister") return { removed: true };
+    if (method === "agent.heartbeat") return { ok: true };
     if (method === "system.capabilities") return { protocolVersion: "2.0.0", supportedPathIds: paths.map((item) => item.pathId), paths };
     if (method === "session.create") return {
       pathId: params.pathId,
@@ -139,6 +158,11 @@ describe("actual WebX Unix runtime", () => {
     await expect(facade.request("browser.act", { browserSessionId: "session-runtime", action: { kind: "upload", ref: "e1", uploadHandleIds: ["handle-1"] } }, { signal: facadeSignal.signal, idempotencyKey: "facade-upload-0001", ownerId: "facade-owner", cwd: "/deterministic/project" })).rejects.toThrow("upload is not supported by the frozen daemon action shape");
     const opened = await facade.request("browser.open", { pathId: "agent-browser/chrome" }, { signal: facadeSignal.signal, idempotencyKey: "facade-open-00001", ownerId: "facade-owner", cwd: "/deterministic/project" });
     expect(opened).toMatchObject({ data: { sessionId: "session-runtime" } });
+    const active = facade.request("browser.act", { browserSessionId: "session-runtime", action: { kind: "wait", milliseconds: 15_000 } }, { signal: facadeSignal.signal, idempotencyKey: "runtime-active-wait", ownerId: "facade-owner", cwd: "/deterministic/project" });
+    await sleep(20);
+    await expect(facade.request("browser.cancel", { operationId: "op-runtime-active-wait" }, { signal: facadeSignal.signal, idempotencyKey: "runtime-active-cancel", ownerId: "facade-owner", cwd: "/deterministic/project" })).resolves.toMatchObject({ data: { state: "running" } });
+    await expect(active).rejects.toThrow("operation cancelled");
+    await expect(facade.request("browser.cancel", { operationId: "op-runtime-active-wait" }, { signal: facadeSignal.signal, idempotencyKey: "runtime-active-final", ownerId: "facade-owner", cwd: "/deterministic/project" })).resolves.toMatchObject({ data: { state: "cancelled" } });
     const visual = await facade.request("browser.observe", { browserSessionId: "session-runtime", view: "visual" }, { signal: facadeSignal.signal, idempotencyKey: "facade-observe-01", ownerId: "facade-owner", cwd: "/deterministic/project" });
     const observation = visual.data as { observationId: string; viewportId: string };
     await expect(facade.request("browser.act", { browserSessionId: "session-runtime", action: { kind: "mouse-click", observationId: observation.observationId, viewportId: observation.viewportId, x: 10, y: 20 } }, { signal: facadeSignal.signal, idempotencyKey: "facade-visual-act", ownerId: "facade-owner", cwd: "/deterministic/project" })).resolves.toMatchObject({ summary: "Browser action completed" });

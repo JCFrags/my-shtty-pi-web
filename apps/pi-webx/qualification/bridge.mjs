@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
+import { setTimeout as sleep } from "node:timers/promises";
 import { WebxFacadeClient } from "../vendor/sdk/facade.js";
 import { QualificationRuntime, PATHS, PNG } from "./runtime.mjs";
 import { ownershipRefusalClass } from "./ownership-refusal.mjs";
@@ -19,6 +20,7 @@ const runtime = actualRuntime ? undefined : new QualificationRuntime(socketPath)
 const clients = new Map();
 const sessions = new Map();
 const visualBindings = new Map();
+const sessionMarkers = new Map();
 let packageRoot = PACKAGE_ROOT;
 let cleanRoot = runRoot;
 let startupCount = 0;
@@ -27,6 +29,7 @@ let activeRequests = 0;
 let cancellationChecks = 0;
 let unsupportedChecks = 0;
 let requestSequence = 0;
+let markerProcessBaseline;
 if (runtime) await runtime.start();
 
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -101,23 +104,28 @@ async function call(owner, operation, input, step, signal) {
   return facade.request(operation, input, options(owner, step, signal));
 }
 
+async function callWithKey(owner, operation, input, idempotencyKey, signal = new AbortController().signal) {
+  const facade = await client(owner);
+  return facade.request(operation, input, { signal, ownerId: owner, cwd: "/deterministic/public-fixtures", idempotencyKey });
+}
+
 async function browserCase(request) {
   const owners = request.principals ?? ["fixture-agent-a"];
   const executed = [];
   const pathIdentities = new Set();
   let negativeSelector;
-  let visual;
+  const caseContext = { visual: undefined };
   const actualChecks = {};
   for (const operation of request.operations) {
     try {
-      await executeOperation(request, operation, owners, pathIdentities, actualChecks);
+      await executeOperation(request, operation, owners, pathIdentities, actualChecks, caseContext);
     } catch (error) {
       throw new Error(`${request.caseId}:${operation.step}: ${safeMessage(error)}`);
     }
     executed.push(operation.step);
     if (operation.selector === request.seededNegativeSelector) negativeSelector = { selector: operation.selector, dispatched: false, code: "invalid-selector-not-found" };
   }
-  if (needsVisual(request)) visual = await retainVisual(request, owners[0], pathIdentities);
+  if (needsVisual(request)) require(caseContext.visual, `${request.caseId} did not retain its journey-bound visual frame before close`);
   for (const [index, pathId] of (request.requiredPaths ?? []).entries()) {
     if (!pathIdentities.has(pathId)) {
       const probeOwner = `probe-${request.caseId.toLowerCase()}-${index}`;
@@ -145,12 +153,12 @@ async function browserCase(request) {
       cleanupRequired: true,
       ...(actualRuntime ? { actualChecks } : {}),
       ...(negativeSelector ? { negativeSelector } : {}),
-      ...(visual ? { visual } : {}),
+      ...(caseContext.visual ? { visual: caseContext.visual } : {}),
     },
   };
 }
 
-async function executeOperation(request, operation, owners, pathIdentities, actualChecks) {
+async function executeOperation(request, operation, owners, pathIdentities, actualChecks, caseContext) {
   const owner = operation.principal ?? owners[0];
   const action = operation.action;
   if (action === "browser.create" || action === "browser.create-owned") {
@@ -177,6 +185,10 @@ async function executeOperation(request, operation, owners, pathIdentities, actu
     const view = operation.view ?? "main";
     const result = await call(owner, "browser.observe", { browserSessionId: session.sessionId, view }, operation.step);
     if (view === "visual") visualBindings.set(owner, result.data);
+    if (operation.marker) {
+      if (String(result.data.content ?? "").includes(operation.marker)) sessionMarkers.set(session.sessionId, operation.marker);
+      else require(view === "visual" && sessionMarkers.get(session.sessionId) === operation.marker, `journey marker was not observed: ${operation.marker}`);
+    }
     if (operation.expect && operation.expect !== "stale") require(JSON.stringify(result.data).includes("public fixture") || JSON.stringify(result.data).includes("path:"), "observation expectation was not reached");
     return;
   }
@@ -199,7 +211,8 @@ async function executeOperation(request, operation, owners, pathIdentities, actu
     require(binding, "visual action lacks an observation binding");
     visualBindings.set(owner, binding);
     const kind = pointerKind(operation.kind);
-    const visualAction = { kind, observationId: binding.observationId, viewportId: binding.viewportId, x: 0, y: 0, startX: 0, startY: 0, endX: 0, endY: 0, deltaX: 0, deltaY: 1 };
+    const visualAction = { kind, observationId: binding.observationId, viewportId: binding.viewportId, x: operation.x ?? 60, y: operation.y ?? 60, startX: 0, startY: 0, endX: 0, endY: 0, deltaX: 0, deltaY: 1 };
+    if (operation.retainBoundFrame) caseContext.visual = await retainBinding(request, owner, session, binding, { step: operation.step, kind, x: visualAction.x, y: visualAction.y });
     try { await call(owner, "browser.act", { browserSessionId: session.sessionId, action: visualAction }, operation.step); }
     catch (error) {
       if (operation.expect !== "stale" && !operation.useOldObservation) throw error;
@@ -248,10 +261,27 @@ async function executeOperation(request, operation, owners, pathIdentities, actu
   }
   if (action === "workspace.close") return;
   if (action === "browser.act-unrelated") { await ensureSession(owners[1] ?? owner, request, pathIdentities, request.requiredPaths?.[1]); return; }
-  if (action === "operation.cancel") {
-    const controller = new AbortController(); controller.abort();
-    await assertRejects(() => call(owner, "web.search", { query: "cancel fixture" }, operation.step, controller.signal), /abort|cancel/i);
-    actualChecks.cancellationRefused = true;
+  if (action === "evidence.visual-release") {
+    await proveVisualControlAndLeaseRelease(request, owner, pathIdentities, actualChecks);
+    return;
+  }
+  if (action === "evidence.cancellation-baseline") {
+    actualChecks.cancellationArtifactBaseline = await artifactFileCount();
+    return;
+  }
+  if (action === "evidence.retain-visual") {
+    const session = await ensurePrimary(owner, request, pathIdentities);
+    const binding = visualBindings.get(owner);
+    require(binding, "journey visual retention lacks a current binding");
+    caseContext.visual = await retainBinding(request, owner, session, binding, operation.testedAction);
+    return;
+  }
+  if (action === "operation.cancel-active") {
+    await cancelActiveBrowserOperation(request, operation, owner, pathIdentities, actualChecks);
+    return;
+  }
+  if (action === "evidence.assert-clean") {
+    await assertActualCaseCleanup(request, owners, actualChecks);
     return;
   }
   if (action === "artifact.read" || action === "artifact.read-pages" || action === "artifact.view" || action === "artifact.verify") {
@@ -338,22 +368,123 @@ async function closeOwner(owner) {
   }
   sessions.delete(owner);
   visualBindings.delete(owner);
+  if (session) sessionMarkers.delete(session.sessionId);
   if (failure) throw failure;
 }
 async function closeAll() { for (const owner of [...clients.keys()]) await closeOwner(owner); if (runtime) for (const session of runtime.sessions.values()) session.state = "closed"; }
 async function shutdown() { await closeAll(); if (runtime) await runtime.stop(); await rm(runRoot, { recursive: true, force: true }); }
 
-async function retainVisual(request, owner, paths) {
-  const session = await ensurePrimary(owner, request, paths);
-  const result = await call(owner, "browser.observe", { browserSessionId: session.sessionId, view: "visual" }, `visual-${request.caseId}`);
-  const shot = result.data.screenshot;
+async function proveVisualControlAndLeaseRelease(request, owner, pathIdentities, actualChecks) {
+  const session = await ensurePrimary(owner, request, pathIdentities);
+  const first = (await call(owner, "browser.observe", { browserSessionId: session.sessionId, view: "visual" }, "j4-visual-first")).data;
+  const action = { kind: "mouse-click", observationId: first.observationId, viewportId: first.viewportId, x: 60, y: 60, startX: 0, startY: 0, endX: 0, endY: 0, deltaX: 0, deltaY: 1 };
+  const completed = await call(owner, "browser.act", { browserSessionId: session.sessionId, action }, "j4-visual-bound");
+  require(completed.data?.state === "succeeded", "J4 visual input did not succeed");
+  const stale = await captureRejection(() => call(owner, "browser.act", { browserSessionId: session.sessionId, action }, "j4-visual-stale"));
+  require(/stale|unknown/i.test(stale.message), "J4 reused visual binding did not fail closed");
+  const second = (await call(owner, "browser.observe", { browserSessionId: session.sessionId, view: "visual" }, "j4-visual-second")).data;
+  const secondAction = { ...action, observationId: second.observationId, viewportId: second.viewportId };
+  const reacquired = await call(owner, "browser.act", { browserSessionId: session.sessionId, action: secondAction }, "j4-visual-reacquired");
+  require(reacquired.data?.state === "succeeded", "J4 could not reacquire a released visual lease");
+  const returned = await call(owner, "browser.workspace", { action: "return", browserSessionId: session.sessionId }, "j4-control-return");
+  actualChecks.visualRelease = { staleRefused: true, controlReturned: returned.data?.data?.controller === "agent", leaseReleasedAndReacquired: true, firstGuardSha256: first.screenshot.screenshotSha256, secondGuardSha256: second.screenshot.screenshotSha256 };
+  require(actualChecks.visualRelease.controlReturned, "J4 visual input did not return agent control");
+}
+
+async function cancelActiveBrowserOperation(request, operation, owner, pathIdentities, actualChecks) {
+  const pathId = operation.pathId;
+  require(PATHS.includes(pathId), "active cancellation requires an accepted path");
+  if (!actualRuntime) {
+    (actualChecks.activeCancellations ??= []).push({ pathId, phase: operation.phase, initialState: operation.phase, finalState: "cancelled", fixtureOnly: true });
+    pathIdentities.add(pathId);
+    return;
+  }
+  const session = await ensureSession(owner, request, pathIdentities, pathId);
+  if (operation.phase === "queued") {
+    require(pathId === PATHS[0], "queued human-control cancellation is supported only on agent-browser/chrome");
+    await call(owner, "browser.workspace", { action: "takeover", browserSessionId: session.sessionId }, `${operation.step}-takeover`);
+  }
+  const actionKey = `qualification-active-${request.caseId.toLowerCase()}-${operation.phase}-${pathId.replace(/[^a-z]/gu, "-")}`;
+  const browserAction = operation.kind === "navigate"
+    ? { kind: "navigate", url: fixtureUrl(request, "/api/never") }
+    : { kind: "wait", milliseconds: 15_000 };
+  let earlySettlement;
+  const action = callWithKey(owner, "browser.act", { browserSessionId: session.sessionId, action: browserAction }, actionKey)
+    .then((value) => (earlySettlement = { value }), (error) => (earlySettlement = { error }));
+  await sleep(operation.phase === "queued" ? 150 : 750);
+  require(!earlySettlement, `${pathId} ${operation.phase} action settled before cancellation: ${earlySettlement?.error ? safeMessage(earlySettlement.error) : "succeeded"}`);
+  const operationId = `op-${actionKey}`;
+  const first = await call(owner, "browser.cancel", { operationId }, `${operation.step}-cancel`);
+  require(first.data?.state === operation.phase, `${pathId} ${operation.phase} cancellation started from ${first.data?.state ?? "unknown"}`);
+  const settled = await Promise.race([action, sleep(5_000).then(() => ({ timeout: true }))]);
+  require(!settled.timeout && settled.error && /cancel/i.test(safeMessage(settled.error)), `${pathId} ${operation.phase} action did not settle cancelled`);
+  const final = await call(owner, "browser.cancel", { operationId }, `${operation.step}-final`);
+  require(final.data?.state === "cancelled", `${pathId} ${operation.phase} final state is not cancelled`);
+  if (operation.phase === "queued") await call(owner, "browser.workspace", { action: "return", browserSessionId: session.sessionId }, `${operation.step}-return`);
+  (actualChecks.activeCancellations ??= []).push({ pathId, phase: operation.phase, operationId, initialState: first.data.state, finalState: final.data.state, actionRejectedAsCancelled: true });
+}
+
+async function assertActualCaseCleanup(request, owners, actualChecks) {
+  if (!actualRuntime) { actualChecks.caseCleanup = { remainingSessions: 0, remainingTabs: 0, markerProcessesAtBaseline: true }; return; }
+  for (const owner of owners) {
+    const listing = await call(owner, "browser.tabs", { action: "list" }, `clean-${request.caseId}-${owner}`);
+    require((listing.data?.sessions ?? []).length === 0, `${owner} retains a browser session after J4 cleanup`);
+  }
+  let count = await markerProcessCount();
+  for (let attempt = 0; count > markerProcessBaseline && attempt < 40; attempt += 1) { await sleep(100); count = await markerProcessCount(); }
+  require(count === markerProcessBaseline, `J4 left ${count - markerProcessBaseline} qualification-owned processes`);
+  const artifactFiles = await artifactFileCount();
+  require(artifactFiles === actualChecks.cancellationArtifactBaseline, "J4 cancellation retained an unexpected artifact file");
+  for (const cancellation of actualChecks.activeCancellations ?? []) cancellation.processTerminationProvedByCaseCleanup = true;
+  actualChecks.caseCleanup = { remainingSessions: 0, remainingTabs: 0, remainingProcessesAboveBaseline: 0, remainingArtifactFilesAboveBaseline: 0, markerProcessBaseline, markerProcessCount: count, artifactFileBaseline: artifactFiles, artifactFileCount: artifactFiles };
+}
+
+async function artifactFileCount() {
+  const dataRoot = process.env.XDG_DATA_HOME;
+  if (!dataRoot) return 0;
+  const root = join(dataRoot, "pi-web", "artifacts");
+  let count = 0;
+  async function walk(directory) {
+    let entries;
+    try { entries = await readdir(directory, { withFileTypes: true }); } catch (error) { if (error?.code === "ENOENT") return; throw error; }
+    for (const entry of entries) {
+      const path = join(directory, entry.name);
+      require(!entry.isSymbolicLink(), "artifact evidence root contains a symlink");
+      if (entry.isDirectory()) await walk(path);
+      else if (entry.isFile()) count += 1;
+    }
+  }
+  await walk(root);
+  return count;
+}
+
+async function markerProcessCount() {
+  const marker = process.env.PI_WEB_QUALIFICATION_ROOT;
+  if (!marker) return 0;
+  let count = 0;
+  for (const entry of await readdir("/proc", { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^\d+$/u.test(entry.name)) continue;
+    try {
+      const environment = await readFile(`/proc/${entry.name}/environ`);
+      if (environment.includes(Buffer.from(`PI_WEB_QUALIFICATION_ROOT=${marker}\0`))) count += 1;
+    } catch {}
+  }
+  return count;
+}
+
+async function retainBinding(request, owner, session, binding, testedAction) {
+  const shot = binding.screenshot;
   const bytes = Buffer.from(shot.payloadBase64, "base64");
-  require(createHash("sha256").update(bytes).digest("hex") === shot.screenshotSha256, "visual payload hash mismatch");
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  const marker = sessionMarkers.get(session.sessionId);
+  require(marker?.startsWith(`PI-WEB-JOURNEY:${request.caseId}:`), `retained frame lacks a same-session semantic journey marker`);
+  require(hash === shot.screenshotSha256, "visual payload hash mismatch");
+  const visualGuard = { viewportId: binding.viewportId, viewportGeneration: shot.viewportGeneration, screenshotSha256: shot.screenshotSha256, screenshotSequence: shot.screenshotSequence };
   await mkdir(request.evidenceDir, { recursive: true, mode: 0o700 });
   const image = `public-${request.caseId.toLowerCase()}.png`; const sidecar = `public-${request.caseId.toLowerCase()}.json`;
   await writeFile(join(request.evidenceDir, image), bytes, { mode: 0o600 });
-  await writeFile(join(request.evidenceDir, sidecar), `${JSON.stringify({ pathId: session.pathId, principalId: owner, sessionId: session.sessionId, tabId: session.tabId, observationId: result.data.observationId, viewportId: result.data.viewportId, sequence: shot.screenshotSequence, capturedAt: actualRuntime ? new Date().toISOString() : "2026-01-01T00:00:00.000Z", viewport: { width: shot.width, height: shot.height, coordinateSpace: "css-viewport" }, imageGeometry: { width: shot.width, height: shot.height, deviceScaleFactor: 1 }, sha256: shot.screenshotSha256 })}\n`, { mode: 0o600 });
-  return { image, sidecar };
+  await writeFile(join(request.evidenceDir, sidecar), `${JSON.stringify({ pathId: session.pathId, principalId: owner, sessionId: session.sessionId, tabId: session.tabId, observationId: binding.observationId, marker, viewportId: binding.viewportId, sequence: shot.screenshotSequence, capturedAt: actualRuntime ? new Date().toISOString() : "2026-01-01T00:00:00.000Z", viewport: { width: shot.width, height: shot.height, coordinateSpace: "css-viewport" }, imageGeometry: { width: shot.width, height: shot.height, deviceScaleFactor: 1 }, sha256: shot.screenshotSha256, visualGuard, ...(testedAction ? { testedAction: { ...testedAction, visualGuard } } : {}) })}\n`, { mode: 0o600 });
+  return { image, sidecar, marker, visualGuard, retainedBeforeClose: session.state !== "closed", testedAction: testedAction ? { ...testedAction, visualGuard } : undefined };
 }
 
 async function actualHandshake(binding) {
@@ -367,6 +498,7 @@ async function actualHandshake(binding) {
   const capabilities = await (await client("qualification-handshake")).capabilities({ signal: new AbortController().signal, ownerId: "qualification-handshake" });
   require(capabilities.daemon === "ready" && capabilities.browserPathIds.join("|") === PATHS.join("|"), "actual runtime capabilities are not ready");
   await closeOwner("qualification-handshake");
+  markerProcessBaseline = await markerProcessCount();
   return {
     ok: true,
     protocol: "pi-web-qualification/1",

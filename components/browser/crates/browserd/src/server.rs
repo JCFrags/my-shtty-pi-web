@@ -18,6 +18,7 @@ use std::os::unix::fs::PermissionsExt;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, UnixListener, UnixStream},
+    sync::{mpsc, Semaphore},
     task::JoinSet,
 };
 use uuid::Uuid;
@@ -263,21 +264,56 @@ async fn unix_client(stream: UnixStream, coordinator: Arc<Coordinator>) -> Resul
     let connection = ConnectionContext::new();
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
+    let (responses, mut response_receiver) = mpsc::unbounded_channel::<JsonRpcResponse>();
+    let writer_task = tokio::spawn(async move {
+        while let Some(response) = response_receiver.recv().await {
+            let mut encoded = serde_json::to_vec(&response).context("encode Unix response")?;
+            encoded.push(b'\n');
+            writer.write_all(&encoded).await.context("write Unix response")?;
+            writer.flush().await.context("flush Unix response")?;
+        }
+        Ok::<(), anyhow::Error>(())
+    });
+    let mut requests = JoinSet::new();
+    let request_limit = Arc::new(Semaphore::new(32));
+    let control_limit = Arc::new(Semaphore::new(8));
     while let Some(line) = lines.next_line().await.context("read Unix request")? {
         if line.trim().is_empty() { continue; }
-        let response = match serde_json::from_str::<JsonRpcRequest>(&line) {
-            Ok(request) => coordinator.dispatch_connected(&connection, request).await,
-            Err(error) => JsonRpcResponse::failure(Value::Null, RpcError {
-                code: -32700,
-                message: "parse error".into(),
-                data: Some(json!({ "detail": error.to_string() })),
-            }),
+        let request = match serde_json::from_str::<JsonRpcRequest>(&line) {
+            Ok(request) => request,
+            Err(error) => {
+                let _ = responses.send(JsonRpcResponse::failure(Value::Null, RpcError {
+                    code: -32700,
+                    message: "parse error".into(),
+                    data: Some(json!({ "detail": error.to_string() })),
+                }));
+                continue;
+            }
         };
-        let mut encoded = serde_json::to_vec(&response).context("encode Unix response")?;
-        encoded.push(b'\n');
-        writer.write_all(&encoded).await.context("write Unix response")?;
-        writer.flush().await.context("flush Unix response")?;
+        let control_lane = matches!(request.method.as_str(), "operation.cancel" | "operation.get" | "agent.heartbeat" | "agent.unregister");
+        let lane = if control_lane { &control_limit } else { &request_limit };
+        let permit = match Arc::clone(lane).try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => {
+                let _ = responses.send(JsonRpcResponse::failure(
+                    request.id,
+                    RpcError { code: -32000, message: "connection request limit reached".into(), data: None },
+                ));
+                continue;
+            }
+        };
+        let coordinator = Arc::clone(&coordinator);
+        let connection = connection.clone();
+        let responses = responses.clone();
+        requests.spawn(async move {
+            let _permit = permit;
+            let response = coordinator.dispatch_connected(&connection, request).await;
+            let _ = responses.send(response);
+        });
     }
+    while requests.join_next().await.is_some() {}
+    drop(responses);
+    writer_task.await.context("join Unix response writer")??;
     Ok(())
 }
 

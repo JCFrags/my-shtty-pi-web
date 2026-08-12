@@ -168,9 +168,9 @@ class PersistentBrowserConnection implements BrowserRpcConnection {
   #buffer = "";
   #nextId = 1;
   #pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
-  #tail = Promise.resolve<unknown>(undefined);
   #closed = false;
   #connecting?: Promise<void>;
+  #heartbeat?: ReturnType<typeof setInterval>;
 
   constructor(private readonly socketPath: string, private readonly actor: AuthorityActor, private readonly cwd: string) {}
 
@@ -189,13 +189,13 @@ class PersistentBrowserConnection implements BrowserRpcConnection {
         throw error;
       }
     };
-    const result = this.#tail.then(execute, execute);
-    this.#tail = result.catch(() => undefined);
-    return result;
+    return execute();
   }
 
   async close(): Promise<void> {
     if (this.#closed) return;
+    if (this.#heartbeat !== undefined) clearInterval(this.#heartbeat);
+    this.#heartbeat = undefined;
     if (this.#socket !== undefined) await this.call("agent.unregister", {}).catch(() => undefined);
     this.#closed = true;
     this.#socket?.end();
@@ -219,14 +219,20 @@ class PersistentBrowserConnection implements BrowserRpcConnection {
       socket.on("data", (chunk) => this.receive(chunk));
       socket.on("error", (error) => this.disconnected(socket, error));
       socket.on("close", () => this.disconnected(socket, new Error("browser daemon connection closed")));
+      const clientId = `webxd-${this.actor.agentId}`;
       await this.exchange("agent.register", {
         agentId: this.actor.agentId,
-        clientId: `webxd-${this.actor.agentId}`,
+        clientId,
         piSessionId: this.actor.principalId,
         cwd: this.cwd,
         pid,
         mode: "rpc",
       });
+      this.#heartbeat = setInterval(() => {
+        if (this.#socket !== socket) return;
+        void this.exchange("agent.heartbeat", { agentId: this.actor.agentId, clientId }).catch(() => undefined);
+      }, 2_000);
+      (this.#heartbeat as unknown as { unref(): void }).unref();
     } catch (error) {
       if (this.#socket === socket) this.#socket = undefined;
       socket.destroy();
@@ -279,6 +285,8 @@ class PersistentBrowserConnection implements BrowserRpcConnection {
 
   private disconnected(socket: Socket, error: Error): void {
     if (this.#socket !== socket) return;
+    if (this.#heartbeat !== undefined) clearInterval(this.#heartbeat);
+    this.#heartbeat = undefined;
     this.#socket = undefined;
     this.rejectPending(error);
   }

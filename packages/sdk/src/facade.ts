@@ -15,6 +15,7 @@ export const FACADE_OPERATION_INVENTORY = {
   "browser.tabs": "list/closeBrowserTab/closeBrowserSession; discard and restore unavailable",
   "browser.observe": "observeBrowser plus getBrowserVisualFrame for visual binding",
   "browser.act": "actBrowser with semantic or bound visual actions",
+  "browser.cancel": "cancelBrowserOperation",
   "browser.debug": "debugBrowser; secret-bearing operations refused",
   "browser.workspace": "manageBrowserWorkspace",
 } as const;
@@ -75,6 +76,7 @@ export class WebxFacadeClient {
     if (operation === "browser.tabs") return this.browserTabs(client, value, requestOptions);
     if (operation === "browser.observe") return this.observe(client, value, options, requestOptions);
     if (operation === "browser.act") return local("Browser action completed", await client.actBrowser(requiredString(value.browserSessionId, "browserSessionId"), this.browserAction(value.action, options.ownerId, requiredString(value.browserSessionId, "browserSessionId")), requestOptions));
+    if (operation === "browser.cancel") return local("Browser cancellation requested", await client.cancelBrowserOperation(requiredString(value.operationId, "operationId"), requestOptions));
     if (operation === "browser.debug") return local("Browser diagnostic completed", await client.debugBrowser(requiredString(value.browserSessionId, "browserSessionId"), { operation: debugOperation(value.operation), args: optionalObject(value.args), maxChars: optionalNumber(value.maxChars) }, requestOptions));
     if (operation === "browser.workspace") return this.workspace(client, value, requestOptions);
     throw unavailable(operation, "operation is not in the facade inventory");
