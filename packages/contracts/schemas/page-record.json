@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://webx.local/schemas/v1/page-record.json",
+  "title": "PageRecord",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "page_id",
+    "canonical_url",
+    "url_key",
+    "collection",
+    "visibility",
+    "created_at",
+    "updated_at",
+    "tombstoned"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "page_id": {
+      "type": "string",
+      "pattern": "^[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "canonical_url": {
+      "$ref": "common.json#/$defs/url"
+    },
+    "url_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8192
+    },
+    "domain": {
+      "type": "string",
+      "maxLength": 253
+    },
+    "collection": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+    },
+    "visibility": {
+      "type": "string",
+      "enum": [
+        "public",
+        "internal",
+        "private",
+        "secret"
+      ]
+    },
+    "current_version_id": {
+      "type": "string",
+      "pattern": "^[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "first_visit_id": {
+      "type": "string",
+      "pattern": "^[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "last_visit_id": {
+      "type": "string",
+      "pattern": "^[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "version_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "common.json#/$defs/tag"
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "tombstoned": {
+      "type": "boolean"
+    },
+    "tombstoned_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "tombstone_reason": {
+      "type": "string",
+      "maxLength": 2000
+    }
+  }
+}

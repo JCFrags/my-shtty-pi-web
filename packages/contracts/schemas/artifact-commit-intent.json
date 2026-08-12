@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://webx.local/schemas/v1/artifact-commit-intent.json",
+  "title": "ArtifactCommitIntent",
+  "description": "The durable journal record that bridges a verified same-filesystem artifact tree rename and publication of its SQLite facts and outbox rows.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "commit_intent_id",
+    "job_id",
+    "intent_kind",
+    "idempotency_key",
+    "state",
+    "staging_relative_path",
+    "final_relative_path",
+    "manifest_sha256",
+    "expected_files",
+    "recovery_count",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "commit_intent_id": {
+      "$ref": "common.json#/$defs/ulid"
+    },
+    "job_id": {
+      "$ref": "common.json#/$defs/ulid"
+    },
+    "attempt_id": {
+      "$ref": "common.json#/$defs/ulid"
+    },
+    "intent_kind": {
+      "type": "string",
+      "enum": ["visit_receipt", "page_version", "artifact_set", "wiki_envelope"]
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 300
+    },
+    "state": {
+      "type": "string",
+      "enum": ["prepared", "renamed", "published", "completed", "quarantined"]
+    },
+    "staging_relative_path": {
+      "$ref": "#/$defs/safeRelativePath"
+    },
+    "final_relative_path": {
+      "$ref": "#/$defs/safeRelativePath"
+    },
+    "manifest_sha256": {
+      "$ref": "common.json#/$defs/sha256"
+    },
+    "expected_files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["relative_path", "sha256", "size_bytes"],
+        "properties": {
+          "relative_path": {
+            "$ref": "#/$defs/safeRelativePath"
+          },
+          "sha256": {
+            "$ref": "common.json#/$defs/sha256"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "published_reference_type": {
+      "type": "string",
+      "enum": ["visit", "page_version", "artifact", "wiki_delivery"]
+    },
+    "published_reference_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "recovery_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "last_verified_at": {
+      "$ref": "common.json#/$defs/timestamp"
+    },
+    "created_at": {
+      "$ref": "common.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.json#/$defs/timestamp"
+    },
+    "renamed_at": {
+      "$ref": "common.json#/$defs/timestamp"
+    },
+    "published_at": {
+      "$ref": "common.json#/$defs/timestamp"
+    },
+    "completed_at": {
+      "$ref": "common.json#/$defs/timestamp"
+    },
+    "quarantined_at": {
+      "$ref": "common.json#/$defs/timestamp"
+    },
+    "quarantine_paths": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/safeRelativePath"
+      }
+    },
+    "quarantine_reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    }
+  },
+  "$defs": {
+    "safeRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))(?!.*//)[A-Za-z0-9._/-]+$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "enum": ["renamed", "published", "completed"]
+          }
+        },
+        "required": ["state"]
+      },
+      "then": {
+        "required": ["renamed_at"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "enum": ["published", "completed"]
+          }
+        },
+        "required": ["state"]
+      },
+      "then": {
+        "required": ["published_at", "published_reference_type", "published_reference_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "completed"
+          }
+        },
+        "required": ["state"]
+      },
+      "then": {
+        "required": ["completed_at"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "quarantined"
+          }
+        },
+        "required": ["state"]
+      },
+      "then": {
+        "required": ["quarantined_at", "quarantine_paths", "quarantine_reason"]
+      }
+    }
+  ]
+}

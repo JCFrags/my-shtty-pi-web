@@ -1,0 +1,456 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://webx.local/schemas/v1/permissions-config.json",
+  "title": "WebX permissions configuration",
+  "$comment": "Normative structural schema generated from the canonical example. The typed loader also enforces documented cross-field semantic rules.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "integer"
+    },
+    "default_effect": {
+      "type": "string"
+    },
+    "roles": {
+      "type": "object",
+      "properties": {
+        "reader": {
+          "type": "object",
+          "properties": {
+            "scopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "scopes"
+          ],
+          "additionalProperties": false
+        },
+        "operator": {
+          "type": "object",
+          "properties": {
+            "inherits": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "inherits",
+            "scopes"
+          ],
+          "additionalProperties": false
+        },
+        "elevated_operator": {
+          "type": "object",
+          "properties": {
+            "inherits": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "inherits",
+            "scopes"
+          ],
+          "additionalProperties": false
+        },
+        "administrator": {
+          "type": "object",
+          "properties": {
+            "inherits": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "inherits",
+            "scopes"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "reader",
+        "operator",
+        "elevated_operator",
+        "administrator"
+      ],
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "actors": {
+      "type": "object",
+      "properties": {
+        "local-user": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string"
+            },
+            "max_visibility": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "role",
+            "max_visibility"
+          ],
+          "additionalProperties": false
+        },
+        "pi-agent": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string"
+            },
+            "max_visibility": {
+              "type": "string"
+            },
+            "denied_scopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "role",
+            "max_visibility",
+            "denied_scopes"
+          ],
+          "additionalProperties": false
+        },
+        "llm-wiki": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string"
+            },
+            "max_visibility": {
+              "type": "string"
+            },
+            "allowed_scopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "role",
+            "max_visibility",
+            "allowed_scopes"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "local-user",
+        "pi-agent",
+        "llm-wiki"
+      ],
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "approval_rules": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "when_scope": {
+                "type": "string"
+              },
+              "approval": {
+                "type": "string"
+              },
+              "maximum_duration_seconds": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "when_scope",
+              "approval",
+              "maximum_duration_seconds"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "when_scope": {
+                "type": "string"
+              },
+              "approval": {
+                "type": "string"
+              },
+              "display_fields": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "id",
+              "when_scope",
+              "approval",
+              "display_fields"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "when_scope": {
+                "type": "string"
+              },
+              "approval": {
+                "type": "string"
+              },
+              "require_reason": {
+                "type": "boolean"
+              },
+              "maximum_bytes": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "when_scope",
+              "approval",
+              "require_reason",
+              "maximum_bytes"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "when_scope": {
+                "type": "string"
+              },
+              "approval": {
+                "type": "string"
+              },
+              "require_reason": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "when_scope",
+              "approval",
+              "require_reason"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "when_scope": {
+                "type": "string"
+              },
+              "approval": {
+                "type": "string"
+              },
+              "thresholds": {
+                "type": "object",
+                "properties": {
+                  "pages": {
+                    "type": "integer"
+                  },
+                  "bytes": {
+                    "type": "integer"
+                  },
+                  "duration_seconds": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "pages",
+                  "bytes",
+                  "duration_seconds"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "when_scope",
+              "approval",
+              "thresholds"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "when_scope": {
+                "type": "string"
+              },
+              "approval": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "when_scope",
+              "approval"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "hard_denials": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "network_profiles": {
+      "type": "object",
+      "properties": {
+        "public_web": {
+          "type": "object",
+          "properties": {
+            "allow_public_http_https": {
+              "type": "boolean"
+            },
+            "allow_private_addresses": {
+              "type": "boolean"
+            },
+            "allow_loopback": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "allow_public_http_https",
+            "allow_private_addresses",
+            "allow_loopback"
+          ],
+          "additionalProperties": false
+        },
+        "offline": {
+          "type": "object",
+          "properties": {
+            "allow_public_http_https": {
+              "type": "boolean"
+            },
+            "allow_private_addresses": {
+              "type": "boolean"
+            },
+            "allow_loopback": {
+              "type": "boolean"
+            },
+            "loopback_services_allowlist": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "allow_public_http_https",
+            "allow_private_addresses",
+            "allow_loopback",
+            "loopback_services_allowlist"
+          ],
+          "additionalProperties": false
+        },
+        "approved_private": {
+          "type": "object",
+          "properties": {
+            "allow_public_http_https": {
+              "type": "boolean"
+            },
+            "allow_private_addresses": {
+              "type": "boolean"
+            },
+            "requires_role": {
+              "type": "string"
+            },
+            "requires_per_target_allowlist": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "allow_public_http_https",
+            "allow_private_addresses",
+            "requires_role",
+            "requires_per_target_allowlist"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "public_web",
+        "offline",
+        "approved_private"
+      ],
+      "additionalProperties": {
+        "type": "object"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "default_effect",
+    "roles",
+    "actors",
+    "approval_rules",
+    "hard_denials",
+    "network_profiles"
+  ],
+  "additionalProperties": false
+}

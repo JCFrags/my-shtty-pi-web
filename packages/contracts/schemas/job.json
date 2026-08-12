@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://webx.local/schemas/v1/job.json",
+  "title": "Job",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "job_id",
+    "operation",
+    "state",
+    "priority",
+    "created_at",
+    "updated_at",
+    "actor_id",
+    "attempt"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "job_id": {
+      "type": "string",
+      "pattern": "^[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "parent_job_id": {
+      "type": "string",
+      "pattern": "^[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "operation": {
+      "type": "string"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "leased",
+        "running",
+        "retry_wait",
+        "succeeded",
+        "partial",
+        "failed",
+        "cancelled",
+        "dead_letter"
+      ]
+    },
+    "phase": {
+      "type": "string"
+    },
+    "priority": {
+      "type": "integer",
+      "minimum": -1000,
+      "maximum": 1000
+    },
+    "actor_id": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 128
+    },
+    "request_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "capability": {
+      "type": "string"
+    },
+    "resource_class": {
+      "type": "string",
+      "enum": [
+        "tiny",
+        "cpu",
+        "browser",
+        "gpu",
+        "io",
+        "archive"
+      ]
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_attempts": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "progress": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "not_before": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "deadline_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "lease_owner": {
+      "type": "string"
+    },
+    "lease_expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "cancel_requested": {
+      "type": "boolean"
+    },
+    "result_artifact_id": {
+      "type": "string",
+      "pattern": "^[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "error_code": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "index_state": {
+      "$ref": "common.json#/$defs/projectionState"
+    },
+    "wiki_state": {
+      "$ref": "common.json#/$defs/projectionState"
+    }
+  }
+}

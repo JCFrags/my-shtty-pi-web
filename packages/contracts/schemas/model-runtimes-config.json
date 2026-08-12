@@ -1,0 +1,491 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://webx.local/schemas/v1/model-runtimes-config.json",
+  "title": "WebX local model runtime configuration",
+  "$comment": "Normative structural schema generated from the canonical example. The typed loader also enforces documented cross-field semantic rules.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "integer"
+    },
+    "runtimes": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "base_url": {
+                "type": "string"
+              },
+              "api_key_secret_ref": {
+                "type": "string"
+              },
+              "health_path": {
+                "type": "string"
+              },
+              "concurrency": {
+                "type": "integer"
+              },
+              "models": {
+                "type": "object",
+                "properties": {
+                  "generation": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "context_window": {
+                        "type": "integer"
+                      },
+                      "max_output_tokens": {
+                        "type": "integer"
+                      },
+                      "capabilities": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "context_window",
+                      "max_output_tokens",
+                      "capabilities"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "embeddings": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "dimensions": {
+                        "type": "string"
+                      },
+                      "capabilities": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "dimensions",
+                      "capabilities"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "generation",
+                  "embeddings"
+                ],
+                "additionalProperties": false
+              },
+              "launch_profile": {
+                "type": "object",
+                "properties": {
+                  "managed": {
+                    "type": "boolean"
+                  },
+                  "command": {
+                    "type": "string"
+                  },
+                  "arguments": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "model_paths_allowed": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "managed",
+                  "command",
+                  "arguments",
+                  "model_paths_allowed"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "enabled",
+              "base_url",
+              "api_key_secret_ref",
+              "health_path",
+              "concurrency",
+              "models",
+              "launch_profile"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "base_url": {
+                "type": "string"
+              },
+              "api_key_secret_ref": {
+                "type": "string"
+              },
+              "health_path": {
+                "type": "string"
+              },
+              "concurrency": {
+                "type": "integer"
+              },
+              "models": {
+                "type": "object",
+                "properties": {
+                  "generation": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "context_window": {
+                        "type": "integer"
+                      },
+                      "max_output_tokens": {
+                        "type": "integer"
+                      },
+                      "capabilities": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "context_window",
+                      "max_output_tokens",
+                      "capabilities"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "embeddings": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "dimensions": {
+                        "type": "string"
+                      },
+                      "capabilities": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "dimensions",
+                      "capabilities"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "rerank": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "capabilities": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "capabilities"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "generation",
+                  "embeddings",
+                  "rerank"
+                ],
+                "additionalProperties": false
+              },
+              "launch_profile": {
+                "type": "object",
+                "properties": {
+                  "managed": {
+                    "type": "boolean"
+                  },
+                  "command": {
+                    "type": "string"
+                  },
+                  "arguments": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "managed",
+                  "command",
+                  "arguments"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "enabled",
+              "base_url",
+              "api_key_secret_ref",
+              "health_path",
+              "concurrency",
+              "models",
+              "launch_profile"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "properties": {
+        "generation_default": {
+          "type": "object",
+          "properties": {
+            "workload": {
+              "type": "string"
+            },
+            "runtime_preference": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "temperature": {
+              "type": "integer"
+            },
+            "top_p": {
+              "type": "integer"
+            },
+            "timeout_seconds": {
+              "type": "integer"
+            },
+            "max_retries": {
+              "type": "integer"
+            },
+            "require_json_schema": {
+              "type": "boolean"
+            },
+            "external_tools": {
+              "type": "boolean"
+            },
+            "filesystem_access": {
+              "type": "boolean"
+            },
+            "network_access": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workload",
+            "runtime_preference",
+            "temperature",
+            "top_p",
+            "timeout_seconds",
+            "max_retries",
+            "require_json_schema",
+            "external_tools",
+            "filesystem_access",
+            "network_access"
+          ],
+          "additionalProperties": false
+        },
+        "embeddings_default": {
+          "type": "object",
+          "properties": {
+            "workload": {
+              "type": "string"
+            },
+            "runtime_preference": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "batch_size": {
+              "type": "integer"
+            },
+            "timeout_seconds": {
+              "type": "integer"
+            },
+            "normalize": {
+              "type": "boolean"
+            },
+            "external_tools": {
+              "type": "boolean"
+            },
+            "filesystem_access": {
+              "type": "boolean"
+            },
+            "network_access": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workload",
+            "runtime_preference",
+            "batch_size",
+            "timeout_seconds",
+            "normalize",
+            "external_tools",
+            "filesystem_access",
+            "network_access"
+          ],
+          "additionalProperties": false
+        },
+        "rerank_default": {
+          "type": "object",
+          "properties": {
+            "workload": {
+              "type": "string"
+            },
+            "runtime_preference": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "batch_size": {
+              "type": "integer"
+            },
+            "timeout_seconds": {
+              "type": "integer"
+            },
+            "external_tools": {
+              "type": "boolean"
+            },
+            "filesystem_access": {
+              "type": "boolean"
+            },
+            "network_access": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workload",
+            "runtime_preference",
+            "batch_size",
+            "timeout_seconds",
+            "external_tools",
+            "filesystem_access",
+            "network_access"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "generation_default",
+        "embeddings_default",
+        "rerank_default"
+      ],
+      "additionalProperties": false
+    },
+    "validation": {
+      "type": "object",
+      "properties": {
+        "reject_runtime_kinds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reject_non_loopback_or_internal_urls": {
+          "type": "boolean"
+        },
+        "reject_unlisted_models": {
+          "type": "boolean"
+        },
+        "require_model_identity_in_outputs": {
+          "type": "boolean"
+        },
+        "require_source_hash_in_cache_key": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "reject_runtime_kinds",
+        "reject_non_loopback_or_internal_urls",
+        "reject_unlisted_models",
+        "require_model_identity_in_outputs",
+        "require_source_hash_in_cache_key"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema_version",
+    "runtimes",
+    "profiles",
+    "validation"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "not": {
+        "properties": {
+          "runtimes": {
+            "contains": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "ollama"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}

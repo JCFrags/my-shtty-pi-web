@@ -1,0 +1,342 @@
+schema_version: 1
+environment: development
+
+paths:
+  data_dir: ${WEBX_DATA_DIR:-./.data/webx}
+  database: ${WEBX_DATA_DIR:-./.data/webx}/db/webx.sqlite3
+  socket: ${WEBX_SOCKET:-./.data/run/webxd.sock}
+  artifacts: ${WEBX_DATA_DIR:-./.data/webx}
+  staging: ${WEBX_DATA_DIR:-./.data/webx}/tmp/staging
+  logs: ${WEBX_DATA_DIR:-./.data/webx}/logs
+  exports: ${WEBX_DATA_DIR:-./.data/webx}/exports
+
+server:
+  unix_socket:
+    enabled: true
+    path: ${WEBX_SOCKET:-./.data/run/webxd.sock}
+    mode: "0600"
+  loopback:
+    enabled: false
+    host: 127.0.0.1
+    port: 7331
+    token_secret_ref: env:WEBX_LOOPBACK_TOKEN
+  network:
+    enabled: false
+    trusted_proxy_cidrs: []
+  request_limits:
+    json_bytes: 1048576
+    upload_bytes: 1073741824
+    request_timeout_ms: 30000
+
+identity:
+  local_actor_role: operator
+  default_collection: default
+  default_visibility: internal
+
+storage:
+  hash_algorithm: sha256
+  id_format: ulid_lowercase
+  fsync_artifact_commits: true
+  compress_raw_html: zstd
+  low_space:
+    warning_percent: 80
+    stop_optional_percent: 90
+    reject_writes_percent: 95
+  markdown:
+    save_visit_receipt_for_terminal_visit: true
+    save_unique_page_versions: true
+    normalize_line_endings: lf
+    final_newline: true
+    source_trust: untrusted_external_source
+
+sqlite:
+  journal_mode: WAL
+  synchronous: NORMAL
+  busy_timeout_ms: 5000
+  checkpoint_interval_seconds: 60
+  checkpoint_wal_bytes: 268435456
+  online_backup_before_migration: true
+
+queue:
+  poll_interval_ms: 250
+  default_lease_seconds: 60
+  heartbeat_seconds: 15
+  cancellation_grace_seconds: 10
+  max_global_running_jobs: 32
+  resource_capacity:
+    tiny: 16
+    cpu: 8
+    browser: 2
+    gpu: 1
+    io: 8
+    archive: 1
+
+egress_gateway:
+  enabled: true
+  http_proxy_url: ${EGRESSD_HTTP_PROXY_URL:-http://egressd:7340}
+  socks5h_proxy_url: ${EGRESSD_SOCKS5H_PROXY_URL:-socks5h://egressd:7341}
+  service_url: ${EGRESSD_SERVICE_URL:-http://egressd:7342}
+  service_token_secret_ref: env:EGRESSD_SERVICE_TOKEN
+  session_ttl_seconds: 300
+  authorization_cache_seconds: 15
+  enforce_for_all_origin_traffic: true
+  deny_direct_worker_wan: true
+  fail_closed: true
+
+network_policy:
+  allowed_schemes: [http, https]
+  deny_url_userinfo: true
+  deny_private_addresses: true
+  deny_loopback: true
+  deny_link_local: true
+  deny_multicast: true
+  deny_unspecified: true
+  deny_cloud_metadata: true
+  revalidate_every_redirect: true
+  dns_pin_for_connection: true
+  max_redirects: 10
+  public_suffix_validation: true
+  default_domain_concurrency: 2
+  default_domain_delay_ms: 250
+  respect_retry_after: true
+  robots:
+    crawl_default: respect
+    single_fetch_default: record_not_enforce
+    cache_seconds: 86400
+  allowed_domains: []
+  denied_domains: []
+  credentialed_indexing_default: false
+
+budgets:
+  fetch:
+    deadline_ms: 30000
+    browser_deadline_ms: 60000
+    max_wire_bytes: 52428800
+    max_decompressed_bytes: 104857600
+    max_dom_nodes: 250000
+    max_text_chars: 5000000
+  crawl:
+    max_pages: 100
+    max_depth: 3
+    max_duration_seconds: 3600
+    max_total_bytes: 1073741824
+    concurrency: 4
+  media:
+    max_items: 25
+    max_bytes: 10737418240
+    max_live_duration_seconds: 14400
+  document:
+    max_bytes: 1073741824
+    max_pages: 5000
+    max_expanded_bytes: 5368709120
+  model:
+    max_input_tokens: 32768
+    max_output_tokens: 4096
+    deadline_seconds: 300
+
+routing:
+  auto:
+    steps:
+      - engine: crawlee_http
+        accept_gate: html_fast
+      - engine: crawlee_playwright
+        when: javascript_or_interaction_or_quality_failure
+        accept_gate: browser_page
+      - engine: scrapling
+        when: independent_fallback
+        accept_gate: adaptive_page
+    rag_postprocessor: crawl4ai
+  verify:
+    minimum_independent_observations: 2
+    engines: [crawlee_playwright, scrapling]
+    degraded_single_observation_allowed: false
+  offline:
+    network_disabled: true
+  quality_gates:
+    html_fast:
+      allowed_status: [200, 203, 206]
+      min_main_text_chars: 200
+      min_quality_score: 0.55
+      reject_challenge_pages: true
+    browser_page:
+      allowed_status: [200, 203, 206]
+      min_main_text_chars: 100
+      min_quality_score: 0.60
+      reject_challenge_pages: true
+    adaptive_page:
+      allowed_status: [200, 203, 206]
+      min_main_text_chars: 100
+      min_quality_score: 0.55
+      reject_challenge_pages: true
+
+engines:
+  crawlee_http:
+    enabled: true
+    worker: browserd
+    route: http
+    concurrency: 16
+  crawlee_playwright:
+    enabled: true
+    worker: browserd
+    route: browser
+    concurrency: 2
+    browser: chromium
+    block_resource_types: [image, media, font]
+    ephemeral_profiles: true
+  scrapling:
+    enabled: true
+    worker: pyfetchd
+    route: adaptive
+    concurrency: 2
+  crawl4ai:
+    enabled: true
+    worker: pyfetchd
+    purpose: rag_postprocess
+    dynamic_hooks_enabled: false
+  scrapy:
+    enabled: true
+    worker: pyfetchd
+    registered_spiders_only: true
+  docling:
+    enabled: true
+    worker: docd
+  yt_dlp:
+    enabled: true
+    worker: mediad
+  archivebox:
+    enabled: true
+    worker: archived
+  browsertrix:
+    enabled: true
+    worker: archived
+
+extraction:
+  deterministic_order:
+    - json_ld
+    - microdata
+    - rdfa
+    - opengraph
+    - dublin_core
+    - css_xpath_jsonpath
+    - trafilatura
+    - readability
+    - docling
+  sanitizer:
+    implementation: webx_dom_sanitizer
+    version: 1
+    remove_elements: [script, style, noscript, iframe, object, embed, form, input, button, textarea, select]
+    remove_event_attributes: true
+    remove_javascript_urls: true
+    preserve_source_links: true
+    max_data_uri_bytes: 0
+  markdown:
+    version: 1
+    preserve_tables: true
+    preserve_code_fences: true
+    canonicalize_links: true
+    include_frontmatter: true
+    chunk_target_tokens: 700
+    chunk_overlap_tokens: 80
+
+search:
+  searxng:
+    enabled: true
+    base_url: ${SEARXNG_URL:-http://searxng:8080}
+    timeout_ms: 15000
+    max_results: 50
+  meilisearch:
+    enabled: true
+    base_url: ${MEILI_URL:-http://meilisearch:7700}
+    admin_key_secret_ref: env:MEILI_ADMIN_KEY
+    search_key_secret_ref: env:MEILI_SEARCH_KEY
+    indexes:
+      pages: web_pages_current
+      chunks: web_chunks_current
+      history: web_chunks_history
+    task_poll_ms: 250
+    task_deadline_ms: 120000
+    projection_batch_size: 500
+    settings_dir: config/meilisearch
+  yacy:
+    enabled: false
+    base_url: ${YACY_URL:-http://yacy:8090}
+  fusion:
+    method: reciprocal_rank_fusion
+    rrf_k: 60
+  semantic:
+    enabled: false
+    embedding_profile: embeddings_default
+    dimensions: null
+    index_source: userProvided
+
+wiki_intake:
+  enabled: true
+  consumers:
+    - consumer_id: llm-wiki
+      enabled: true
+      delivery_mode: both
+      filesystem_outbox: ${WEBX_DATA_DIR:-./.data/webx}/outbox/wiki/llm-wiki
+      max_visibility: internal
+      collections: [default]
+      lease_seconds: 300
+      secret_ref: env:WIKI_INTAKE_SHARED_SECRET
+  include_source_markdown: by_reference
+  include_raw_html: false
+  emit_tombstones: true
+  default_backfill_batch: 100
+
+models:
+  required_for_core: false
+  gateway_url: ${MODEL_GATEWAY_URL:-http://model-gateway:7338}
+  runtimes_config: config/model-runtimes.example.yaml
+  allowed_runtime_kinds: [llama_cpp, vllm]
+  forbidden_runtime_kinds: [ollama]
+  remote_external_endpoints_allowed: false
+  workloads:
+    structured_extract:
+      enabled: false
+      runtime_profile: generation_default
+      require_json_schema: true
+    embeddings:
+      enabled: false
+      runtime_profile: embeddings_default
+      cache_by_input_model_hash: true
+    rerank:
+      enabled: false
+      runtime_profile: rerank_default
+    source_summarization:
+      enabled: false
+      runtime_profile: generation_default
+      output_is_derived: true
+
+retention:
+  policy_file: config/retention.example.yaml
+
+permissions:
+  policy_file: config/permissions.example.yaml
+
+backup:
+  enabled: true
+  restic_repository_secret_ref: env:RESTIC_REPOSITORY
+  restic_password_file_secret_ref: env:RESTIC_PASSWORD_FILE
+  schedule: "0 3 * * *"
+  sqlite_online_backup: true
+  meilisearch_snapshot: true
+  meilisearch_dump_before_upgrade: true
+  verify_after_backup: true
+  restore_drill_days: 30
+
+observability:
+  log_level: info
+  log_format: json
+  otel:
+    enabled: true
+    exporter_endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+  metrics:
+    enabled: true
+    bind: 127.0.0.1:9464
+  audit:
+    enabled: true
+    hash_chain: true
+    body_logging: false
+    header_allowlist: [content-type, content-length, etag, last-modified, retry-after]

@@ -1,0 +1,417 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://webx.local/schemas/v1/retention-config.json",
+  "title": "WebX retention configuration",
+  "$comment": "Normative structural schema generated from the canonical example. The typed loader also enforces documented cross-field semantic rules.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "integer"
+    },
+    "defaults": {
+      "type": "object",
+      "properties": {
+        "visit_markdown": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "type": "integer"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "retain_days",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "page_markdown": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "type": "integer"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "retain_days",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "page_metadata_json": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "type": "integer"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "retain_days",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "raw_html": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "type": "integer"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "retain_days",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "raw_http_headers": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "type": "integer"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "retain_days",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "screenshot": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "type": "integer"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "retain_days",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "browser_trace": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "type": "integer"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "retain_days",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "failed_response_body": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "type": "integer"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "retain_days",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "media_metadata": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "type": "integer"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "retain_days",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "acquired_media": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "type": "integer"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "retain_days",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "transcript": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "type": "integer"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "retain_days",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "document_source": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "type": "integer"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "retain_days",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "derived_ai_output": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "type": "integer"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "retain_days",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "job_logs": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "type": "integer"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "retain_days",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "audit_log": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "type": "integer"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "retain_days",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "search_projection": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "type": "integer"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "retain_days",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "model_prompt_diagnostics": {
+          "type": "object",
+          "properties": {
+            "retain_days": {
+              "type": "integer"
+            },
+            "action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "retain_days",
+            "action"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "visit_markdown",
+        "page_markdown",
+        "page_metadata_json",
+        "raw_html",
+        "raw_http_headers",
+        "screenshot",
+        "browser_trace",
+        "failed_response_body",
+        "media_metadata",
+        "acquired_media",
+        "transcript",
+        "document_source",
+        "derived_ai_output",
+        "job_logs",
+        "audit_log",
+        "search_projection",
+        "model_prompt_diagnostics"
+      ],
+      "additionalProperties": false
+    },
+    "collection_overrides": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "temporary-research": {
+          "type": "object",
+          "properties": {
+            "raw_html": {
+              "type": "object",
+              "properties": {
+                "retain_days": {
+                  "type": "integer"
+                },
+                "action": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "retain_days",
+                "action"
+              ],
+              "additionalProperties": false
+            },
+            "screenshot": {
+              "type": "object",
+              "properties": {
+                "retain_days": {
+                  "type": "integer"
+                },
+                "action": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "retain_days",
+                "action"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "raw_html",
+            "screenshot"
+          ],
+          "additionalProperties": false
+        },
+        "private": {
+          "type": "object",
+          "properties": {
+            "wiki_delivery": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "enabled"
+              ],
+              "additionalProperties": false
+            },
+            "search_projection": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "enabled"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "wiki_delivery",
+            "search_projection"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "default",
+        "temporary-research",
+        "private"
+      ],
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "defaults",
+    "collection_overrides",
+    "rules"
+  ],
+  "additionalProperties": false
+}

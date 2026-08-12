@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://webx.local/schemas/v1/search-hit.json",
+  "title": "SearchHit",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "hit_id",
+    "source",
+    "title",
+    "url",
+    "rank",
+    "retrieved_at",
+    "evidence_kind"
+  ],
+  "properties": {
+    "hit_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "searxng",
+        "meilisearch",
+        "yacy",
+        "crossref",
+        "arxiv",
+        "pubmed",
+        "commoncrawl"
+      ]
+    },
+    "provider": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "url": {
+      "$ref": "common.json#/$defs/url"
+    },
+    "canonical_url": {
+      "$ref": "common.json#/$defs/url"
+    },
+    "snippet": {
+      "type": "string",
+      "maxLength": 10000
+    },
+    "rank": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "source_score": {
+      "type": "number"
+    },
+    "fusion_score": {
+      "type": "number"
+    },
+    "published_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "visited_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "changed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "page_id": {
+      "type": "string",
+      "pattern": "^[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "version_id": {
+      "type": "string",
+      "pattern": "^[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "artifact_id": {
+      "type": "string",
+      "pattern": "^[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "collection": {
+      "type": "string"
+    },
+    "visibility": {
+      "type": "string",
+      "enum": [
+        "public",
+        "internal",
+        "private",
+        "secret"
+      ]
+    },
+    "language": {
+      "type": "string"
+    },
+    "mime_type": {
+      "type": "string"
+    },
+    "domain": {
+      "type": "string"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "$ref": "common.json#/$defs/tag"
+      }
+    },
+    "evidence_kind": {
+      "type": "string",
+      "enum": [
+        "discovery_snippet",
+        "live_page",
+        "archived_page",
+        "local_document",
+        "derived_chunk"
+      ]
+    },
+    "retrieved_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

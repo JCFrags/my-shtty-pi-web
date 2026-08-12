@@ -1,0 +1,133 @@
+schema_version: 1
+
+default_effect: deny
+
+roles:
+  reader:
+    scopes:
+      - search.read
+      - corpus.read
+      - artifact.read.public
+      - artifact.read.internal
+      - job.read.own
+  operator:
+    inherits: [reader]
+    scopes:
+      - web.fetch
+      - web.verify
+      - browser.interact
+      - crawl.run.bounded
+      - document.process
+      - media.metadata
+      - archive.capture
+      - monitor.manage
+      - upload.create
+      - job.cancel.own
+  elevated_operator:
+    inherits: [operator]
+    scopes:
+      - media.download
+      - browser.persistent
+      - browser.upload
+      - credential.use
+      - crawl.cross_origin
+      - crawl.large
+      - network.api.mutating
+      - network.websocket
+      - proxy.record
+      - artifact.read.private
+      - corpus.export
+  administrator:
+    inherits: [elevated_operator]
+    scopes:
+      - engine.manage
+      - index.rebuild
+      - wiki.manage
+      - backup.manage
+      - restore.execute
+      - migration.execute
+      - auth.manage
+      - policy.manage
+      - artifact.read.secret
+      - retention.manage
+      - audit.read
+
+actors:
+  local-user:
+    role: operator
+    max_visibility: internal
+  pi-agent:
+    role: operator
+    max_visibility: internal
+    denied_scopes:
+      - proxy.record
+      - restore.execute
+      - migration.execute
+      - auth.manage
+      - policy.manage
+      - browser.evaluate
+  llm-wiki:
+    role: reader
+    max_visibility: internal
+    allowed_scopes:
+      - wiki.consume.llm-wiki
+
+approval_rules:
+  - id: browser-persistent
+    when_scope: browser.persistent
+    approval: human_once
+    maximum_duration_seconds: 86400
+  - id: credential-use
+    when_scope: credential.use
+    approval: human_once
+    display_fields: [credential_ref, target_domain, operation, reason]
+  - id: media-download
+    when_scope: media.download
+    approval: human_once
+    require_reason: true
+    maximum_bytes: 10737418240
+  - id: cross-origin-crawl
+    when_scope: crawl.cross_origin
+    approval: human_once
+    require_reason: true
+  - id: large-crawl
+    when_scope: crawl.large
+    approval: human_once
+    thresholds:
+      pages: 1000
+      bytes: 10737418240
+      duration_seconds: 14400
+  - id: private-artifact-read
+    when_scope: artifact.read.private
+    approval: human_once
+  - id: secret-artifact-read
+    when_scope: artifact.read.secret
+    approval: administrator_only
+
+hard_denials:
+  - execute_downloaded_content
+  - bypass_drm_or_access_control
+  - raw_secret_in_api_payload
+  - external_managed_ai_endpoint
+  - model_runtime_kind_ollama
+  - browser_home_directory_mount
+  - docker_socket_mount
+  - private_network_access_without_explicit_network_profile
+  - arbitrary_javascript_evaluation_by_pi
+  - destructive_admin_action_by_pi
+
+network_profiles:
+  public_web:
+    allow_public_http_https: true
+    allow_private_addresses: false
+    allow_loopback: false
+  offline:
+    allow_public_http_https: false
+    allow_private_addresses: false
+    allow_loopback: true
+    loopback_services_allowlist: [webxd, meilisearch, model-gateway, archive-replay]
+  approved_private:
+    allow_public_http_https: true
+    allow_private_addresses: true
+    requires_role: administrator
+    requires_per_target_allowlist: true

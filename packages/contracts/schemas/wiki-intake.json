@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://webx.local/schemas/v1/wiki-intake.json",
+  "title": "WikiIntakeEnvelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "delivery_id",
+    "consumer_id",
+    "sequence",
+    "operation",
+    "idempotency_key",
+    "source",
+    "content",
+    "provenance",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "delivery_id": {
+      "type": "string",
+      "pattern": "^[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "consumer_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "operation": {
+      "type": "string",
+      "enum": [
+        "source_upsert",
+        "source_tombstone"
+      ]
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 300
+    },
+    "supersedes_delivery_id": {
+      "type": "string",
+      "pattern": "^[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "page_id",
+        "canonical_url",
+        "collection",
+        "visibility"
+      ],
+      "properties": {
+        "page_id": {
+          "type": "string",
+          "pattern": "^[0-9a-hjkmnp-tv-z]{26}$"
+        },
+        "version_id": {
+          "type": "string",
+          "pattern": "^[0-9a-hjkmnp-tv-z]{26}$"
+        },
+        "visit_id": {
+          "type": "string",
+          "pattern": "^[0-9a-hjkmnp-tv-z]{26}$"
+        },
+        "canonical_url": {
+          "$ref": "common.json#/$defs/url"
+        },
+        "collection": {
+          "type": "string"
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "public",
+            "internal",
+            "private",
+            "secret"
+          ]
+        },
+        "source_kind": {
+          "type": "string",
+          "enum": [
+            "live_web",
+            "archive",
+            "local_import",
+            "document",
+            "media_transcript"
+          ]
+        },
+        "retrieved_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "published_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "content": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "markdown_artifact": {
+          "$ref": "common.json#/$defs/artifactRef"
+        },
+        "metadata_artifact": {
+          "$ref": "common.json#/$defs/artifactRef"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "language": {
+          "type": "string"
+        },
+        "content_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "tombstone_reason": {
+          "type": "string"
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sanitizer_version",
+        "normalizer_version",
+        "trust"
+      ],
+      "properties": {
+        "sanitizer_version": {
+          "type": "string"
+        },
+        "normalizer_version": {
+          "type": "string"
+        },
+        "extractor_chain": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_artifact_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-hjkmnp-tv-z]{26}$"
+          }
+        },
+        "trust": {
+          "const": "untrusted_external_source"
+        }
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "source_upsert"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "source": {
+            "required": [
+              "version_id"
+            ]
+          },
+          "content": {
+            "required": [
+              "markdown_artifact",
+              "content_sha256"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "source_tombstone"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "content": {
+            "required": [
+              "tombstone_reason"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
