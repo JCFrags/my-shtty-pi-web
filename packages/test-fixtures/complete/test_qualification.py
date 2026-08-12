@@ -67,6 +67,13 @@ class QualificationTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("unsafe or false evidence", result.stderr)
 
+    def test_actual_identity_false_pass_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            entrypoint = pathlib.Path(__file__).with_name("false-actual-identity.mjs")
+            result = run(HARNESS, "--profile", "clean-install", "--entrypoint", "node", "--entrypoint-arg", entrypoint, "--package", PACKAGE, "--output", pathlib.Path(temporary) / "evidence", "--timeout-ms", "5000")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("mock wiring cannot satisfy", result.stderr)
+
     def test_real_package_archive_stage_and_shipped_bridge(self):
         with tempfile.TemporaryDirectory() as temporary:
             temporary = pathlib.Path(temporary)

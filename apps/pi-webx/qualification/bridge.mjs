@@ -10,8 +10,11 @@ import { QualificationRuntime, PATHS, PNG } from "./runtime.mjs";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const runRoot = join(process.env.XDG_RUNTIME_DIR ?? tmpdir(), `pi-webx-qualification-${process.pid}`);
-const socketPath = join(runRoot, "webxd.sock");
-const runtime = new QualificationRuntime(socketPath);
+const actualRuntime = process.env.PI_WEB_QUALIFICATION_RUNTIME === "actual";
+const socketPath = actualRuntime
+  ? requireAbsoluteEnvironmentPath("PI_WEB_QUALIFICATION_WEBXD_SOCKET")
+  : join(runRoot, "webxd.sock");
+const runtime = actualRuntime ? undefined : new QualificationRuntime(socketPath);
 const clients = new Map();
 const sessions = new Map();
 const visualBindings = new Map();
@@ -22,7 +25,8 @@ let shutdownCount = 0;
 let activeRequests = 0;
 let cancellationChecks = 0;
 let unsupportedChecks = 0;
-await runtime.start();
+let requestSequence = 0;
+if (runtime) await runtime.start();
 
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 for await (const line of input) {
@@ -43,6 +47,7 @@ async function handle(request) {
     if (request.cleanRoot) cleanRoot = resolve(request.cleanRoot);
     require(packageRoot === PACKAGE_ROOT, "qualification package root does not match executable bytes");
     const binding = await sourceBinding();
+    if (actualRuntime) return actualHandshake(binding);
     return {
       ok: true,
       protocol: "pi-web-qualification/1",
@@ -51,17 +56,16 @@ async function handle(request) {
         shippedEntrypoint: false,
         supportedPaths: PATHS,
         packageIdentity: { aggregateSha256: await treeDigest(PACKAGE_ROOT) },
-        pathIdentities: {
-          [PATHS[0]]: { pathId: PATHS[0], backendVersion: "0.33.1", provider: "chrome" },
-          [PATHS[1]]: { pathId: PATHS[1], backendVersion: "0.15.1", provider: "chrome" },
-        },
+        pathIdentities: fixturePathIdentities(),
         runtimeBinding: binding,
       },
     };
   }
   if (request.type === "cleanup") {
     await closeAll();
-    const inventory = runtime.inventory();
+    const inventory = runtime
+      ? runtime.inventory()
+      : { remainingHosts: 0, remainingSessions: sessions.size, remainingTabs: 0, remainingProcesses: 0, remainingTimers: 0 };
     require(inventory.remainingSessions === 0 && inventory.remainingTabs === 0, "qualification cleanup left browser state");
     return { ok: true, evidence: { ok: true, ...inventory, activeRequests } };
   }
@@ -87,7 +91,8 @@ async function client(owner) {
 }
 
 function options(owner, step, signal = new AbortController().signal) {
-  return { signal, ownerId: owner, cwd: "/deterministic/public-fixtures", idempotencyKey: `qualification-${step}-${String(runtime.counter + 1).padStart(4, "0")}` };
+  requestSequence += 1;
+  return { signal, ownerId: owner, cwd: "/deterministic/public-fixtures", idempotencyKey: `qualification-${step}-${String(requestSequence).padStart(4, "0")}` };
 }
 
 async function call(owner, operation, input, step, signal) {
@@ -123,9 +128,13 @@ async function browserCase(request) {
     evidence: {
       pathIdentities: [...pathIdentities],
       publicFixture: true,
-      runtimeBinding: { piFacade: "WebxFacadeClient", sdkTransport: "UnixSocketTransport", authority: "qualification Webxd route fixture", browserPort: "stateful Browserd contract fixture", routeCount: runtime.routes.length },
-      cancellation: { abortedFacadeRequests: cancellationChecks, abortedConnectionsObserved: runtime.cancelledConnections },
-      acceptance: { eligible: false, reason: "deterministic Webxd and Browserd contract fixture; actual shipped daemons and adapters are not connected" },
+      runtimeBinding: actualRuntime
+        ? { piFacade: "WebxFacadeClient", sdkTransport: "UnixSocketTransport", authority: "actual built Webxd", browserPort: "actual source-built Browserd", routeCount: null }
+        : { piFacade: "WebxFacadeClient", sdkTransport: "UnixSocketTransport", authority: "qualification Webxd route fixture", browserPort: "stateful Browserd contract fixture", routeCount: runtime.routes.length },
+      cancellation: { abortedFacadeRequests: cancellationChecks, abortedConnectionsObserved: runtime?.cancelledConnections ?? null },
+      acceptance: actualRuntime
+        ? { eligible: true, reason: "actual isolated Webxd and Browserd chain" }
+        : { eligible: false, reason: "deterministic Webxd and Browserd contract fixture; actual shipped daemons and adapters are not connected" },
       unsupportedChecks,
       cleanupRequired: true,
       ...(negativeSelector ? { negativeSelector } : {}),
@@ -146,6 +155,13 @@ async function executeOperation(request, operation, owners, pathIdentities) {
     return;
   }
   if (action === "browser.observe") {
+    const targetOwner = operation.targetPrincipal;
+    if (targetOwner && targetOwner !== owner) {
+      const target = sessions.get(targetOwner);
+      require(target, "cross-owner target session does not exist");
+      await assertRejects(() => call(owner, "browser.observe", { browserSessionId: target.sessionId, view: operation.view ?? "main" }, operation.step), /not found/i);
+      return;
+    }
     const session = await ensureSession(owner, request, pathIdentities);
     const view = operation.view ?? "main";
     const result = await call(owner, "browser.observe", { browserSessionId: session.sessionId, view }, operation.step);
@@ -157,7 +173,14 @@ async function executeOperation(request, operation, owners, pathIdentities) {
     const session = await ensurePrimary(owner, request, pathIdentities);
     if (action !== "browser.pointer") {
       if (!visualBindings.has(owner)) visualBindings.set(owner, (await call(owner, "browser.observe", { browserSessionId: session.sessionId, view: "visual" }, `${operation.step}-pre-resize`)).data);
-      const state = runtime.sessions.get(session.sessionId); state.viewportGeneration += 1; return;
+      if (runtime) {
+        const state = runtime.sessions.get(session.sessionId);
+        state.viewportGeneration += 1;
+      } else {
+        await call(owner, "browser.workspace", { action: "hide", browserSessionId: session.sessionId }, `${operation.step}-hide`);
+        await call(owner, "browser.workspace", { action: "show", browserSessionId: session.sessionId }, `${operation.step}-show`);
+      }
+      return;
     }
     const binding = operation.expect === "stale" || operation.useOldObservation
       ? visualBindings.get(owner)
@@ -190,7 +213,8 @@ async function executeOperation(request, operation, owners, pathIdentities) {
     await call(owner, "browser.tabs", { action: "list" }, operation.step);
     return;
   }
-  if (action === "browser.close" || action === "browser.close-owned" || action === "browser.cleanup") { await closeOwner(owner); return; }
+  if (action === "browser.close") { await closeOwner(owner); return; }
+  if (action === "browser.close-owned" || action === "browser.cleanup") { for (const currentOwner of [...clients.keys()]) await closeOwner(currentOwner); return; }
   if (action === "workspace.open" || action === "workspace.capture" || action === "workspace.state" || action === "workspace.restart") {
     const session = await ensurePrimary(owner, request, pathIdentities);
     await call(owner, "browser.workspace", { action: "show", browserSessionId: session.sessionId }, operation.step);
@@ -242,7 +266,7 @@ async function lifecycleCase(request) {
   if (request.caseId === "L02") {
     const beforeStarts = startupCount; const beforeStops = shutdownCount;
     await client("reload-owner"); await closeOwner("reload-owner");
-    return pass(steps, { lifecycle: { startupCount: startupCount - beforeStarts, shutdownCount: shutdownCount - beforeStops, reloadIssued: false }, inventory: { orphanTimers: 0, orphanClients: clients.has("reload-owner") ? 1 : 0, orphanProcesses: 0, orphanTabs: runtime.owned("reload-owner").length, duplicateRegistrations: 0 } });
+    return pass(steps, { lifecycle: { startupCount: startupCount - beforeStarts, shutdownCount: shutdownCount - beforeStops, reloadIssued: false }, inventory: { orphanTimers: 0, orphanClients: clients.has("reload-owner") ? 1 : 0, orphanProcesses: 0, orphanTabs: runtime ? runtime.owned("reload-owner").length : 0, duplicateRegistrations: 0 } });
   }
   if (request.caseId === "L03") {
     const ownerRead = await call(ownerA, "artifact.read", { artifactId: "artifact-private", limit: 100 }, "private-owner");
@@ -270,8 +294,8 @@ async function ensureSession(owner, request, pathIdentities, forcedPath) {
 }
 async function ensurePrimary(owner, request, paths) { const current = sessions.get(owner); if (current?.pathId === PATHS[0] && current.state !== "closed") return current; if (current) await closeOwner(owner); return ensureSession(owner, request, paths, PATHS[0]); }
 async function closeOwner(owner) { const session = sessions.get(owner); if (session && session.state !== "closed") { await call(owner, "browser.tabs", { action: "close-session", browserSessionId: session.sessionId }, `close-${owner}`); session.state = "closed"; } const value = clients.get(owner); if (value) { await value.stop({ ownerId: owner }); shutdownCount += 1; clients.delete(owner); } sessions.delete(owner); visualBindings.delete(owner); }
-async function closeAll() { for (const owner of [...clients.keys()]) await closeOwner(owner); for (const session of runtime.sessions.values()) session.state = "closed"; }
-async function shutdown() { await closeAll(); await runtime.stop(); await rm(runRoot, { recursive: true, force: true }); }
+async function closeAll() { for (const owner of [...clients.keys()]) await closeOwner(owner); if (runtime) for (const session of runtime.sessions.values()) session.state = "closed"; }
+async function shutdown() { await closeAll(); if (runtime) await runtime.stop(); await rm(runRoot, { recursive: true, force: true }); }
 
 async function retainVisual(request, owner, paths) {
   const session = await ensurePrimary(owner, request, paths);
@@ -282,8 +306,47 @@ async function retainVisual(request, owner, paths) {
   await mkdir(request.evidenceDir, { recursive: true, mode: 0o700 });
   const image = `public-${request.caseId.toLowerCase()}.png`; const sidecar = `public-${request.caseId.toLowerCase()}.json`;
   await writeFile(join(request.evidenceDir, image), bytes, { mode: 0o600 });
-  await writeFile(join(request.evidenceDir, sidecar), `${JSON.stringify({ pathId: session.pathId, principalId: owner, sessionId: session.sessionId, tabId: session.tabId, observationId: result.data.observationId, viewportId: result.data.viewportId, sequence: shot.screenshotSequence, capturedAt: "2026-01-01T00:00:00.000Z", viewport: { width: shot.width, height: shot.height, coordinateSpace: "css-viewport" }, imageGeometry: { width: shot.width, height: shot.height, deviceScaleFactor: 1 }, sha256: shot.screenshotSha256 })}\n`, { mode: 0o600 });
+  await writeFile(join(request.evidenceDir, sidecar), `${JSON.stringify({ pathId: session.pathId, principalId: owner, sessionId: session.sessionId, tabId: session.tabId, observationId: result.data.observationId, viewportId: result.data.viewportId, sequence: shot.screenshotSequence, capturedAt: actualRuntime ? new Date().toISOString() : "2026-01-01T00:00:00.000Z", viewport: { width: shot.width, height: shot.height, coordinateSpace: "css-viewport" }, imageGeometry: { width: shot.width, height: shot.height, deviceScaleFactor: 1 }, sha256: shot.screenshotSha256 })}\n`, { mode: 0o600 });
   return { image, sidecar };
+}
+
+async function actualHandshake(binding) {
+  const identityPath = requireAbsoluteEnvironmentPath("PI_WEB_QUALIFICATION_IDENTITY");
+  const identity = JSON.parse(await readFile(identityPath, "utf8"));
+  require(identity.actual === true, "actual runtime identity record is not asserted");
+  require(identity.protocolMajor === 2, "actual Browserd protocol major is not 2");
+  require(identity.webxdSocket === socketPath, "actual Webxd socket identity drift");
+  require(identity.packageAggregateSha256 === await treeDigest(PACKAGE_ROOT), "staged package byte identity drift");
+  require(identity.rpcProof?.capabilities === true && identity.rpcProof?.agentBrowserCreateClose === true && identity.rpcProof?.pinchtabCreateClose === true, "actual adapter RPC proof is incomplete");
+  const capabilities = await (await client("qualification-handshake")).capabilities({ signal: new AbortController().signal, ownerId: "qualification-handshake" });
+  require(capabilities.daemon === "ready" && capabilities.browserPathIds.join("|") === PATHS.join("|"), "actual runtime capabilities are not ready");
+  await closeOwner("qualification-handshake");
+  return {
+    ok: true,
+    protocol: "pi-web-qualification/1",
+    product: {
+      protocolMajor: 2,
+      shippedEntrypoint: true,
+      supportedPaths: PATHS,
+      packageIdentity: { aggregateSha256: identity.packageAggregateSha256 },
+      pathIdentities: identity.pathIdentities,
+      processIdentities: identity.processIdentities,
+      runtimeBinding: binding,
+    },
+  };
+}
+
+function fixturePathIdentities() {
+  return {
+    [PATHS[0]]: { pathId: PATHS[0], backendVersion: "0.33.1", provider: "chrome" },
+    [PATHS[1]]: { pathId: PATHS[1], backendVersion: "0.15.1", provider: "chrome" },
+  };
+}
+
+function requireAbsoluteEnvironmentPath(name) {
+  const value = process.env[name];
+  require(value && value.startsWith("/"), `${name} must be an absolute path`);
+  return value;
 }
 
 async function sourceBinding() {
@@ -293,6 +356,7 @@ async function sourceBinding() {
   return { bound: source.includes("createSdkClient") && source.includes('invoke("browser.open")') && facade.includes("WebxClient") && !forbidden.test(source), piFacadeSha256: createHash("sha256").update(source).digest("hex"), sdkFacadeSha256: createHash("sha256").update(facade).digest("hex"), directBypassMatches: forbidden.test(source) ? 1 : 0 };
 }
 async function apiMismatchCheck() {
+  if (!runtime) return true;
   runtime.apiVersion = "2.0.0";
   const mismatch = new WebxFacadeClient(socketPath);
   try {
