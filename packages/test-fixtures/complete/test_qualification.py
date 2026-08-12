@@ -123,7 +123,10 @@ class QualificationTest(unittest.TestCase):
     def test_bounded_actual_plan_uses_real_fixture_targets_and_teardown_bounds(self):
         actual = (ROOT / "apps/pi-webx/qualification/actual-check.mjs").read_text()
         bridge = (ROOT / "apps/pi-webx/qualification/bridge.mjs").read_text()
-        self.assertIn('op("wait", "browser.wait", { text: "Pi Web main-content fixture" })', actual)
+        self.assertIn(
+            'op("wait", "browser.wait", { text: "PI-WEB-JOURNEY:J1:semantic-inspect" })',
+            actual,
+        )
         self.assertNotIn('selector: "#fixture"', actual)
         self.assertIn('op("click", "browser.click", { selector: "#root" })', actual)
         self.assertNotIn('op("wait", "browser.wait", { text: "48 connected clients" })', actual)
@@ -135,7 +138,8 @@ class QualificationTest(unittest.TestCase):
         self.assertIn("actualChecks.staleRefused = true", bridge)
         self.assertIn("actualChecks.ownershipRefused = true", bridge)
         self.assertIn("actualChecks.ownershipRefusalClass = refusalClass", bridge)
-        self.assertIn("actualChecks.cancellationRefused = true", bridge)
+        self.assertIn("actualChecks.activeCancellations", bridge)
+        self.assertIn('finalState: "cancelled"', bridge)
         self.assertIn("actualChecks.takeoverSucceeded = true", bridge)
         self.assertIn("actualChecks.returnSucceeded = true", bridge)
         runtime = (ROOT / "apps/pi-webx/qualification/runtime.mjs").read_text()
