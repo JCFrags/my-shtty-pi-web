@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""Validate and plan an identity-bound atomic Pi package link cutover."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import pathlib
+import shlex
+import sys
+import uuid
+
+LIVE_LINK = pathlib.Path("/home/mainpc/.pi/agent/extensions/pi-web")
+
+
+def fail(message: str) -> None:
+    raise RuntimeError(message)
+
+
+def tree_digest(root: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            fail(f"package tree contains a symlink: {relative}")
+        if path.is_file():
+            digest.update(relative.encode())
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def package_check(root: pathlib.Path) -> None:
+    manifest_path = root / "package.json"
+    if not manifest_path.is_file():
+        fail("candidate lacks package.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    pi_manifest = manifest.get("pi")
+    if not isinstance(pi_manifest, dict):
+        fail("candidate lacks a Pi manifest")
+    extensions = pi_manifest.get("extensions")
+    if extensions is None and isinstance(pi_manifest.get("extension"), str):
+        extensions = [pi_manifest["extension"]]
+    if not isinstance(extensions, list) or len(extensions) != 1:
+        fail("candidate must load exactly one extension")
+    extension = extensions[0]
+    if not isinstance(extension, str) or not extension.startswith("./") or ".." in pathlib.PurePosixPath(extension).parts or not (root / extension).is_file():
+        fail("candidate Pi extension is invalid")
+    for section in ("dependencies", "optionalDependencies"):
+        for name, version in manifest.get(section, {}).items():
+            if str(version).startswith(("workspace:", "file:", "link:")):
+                fail(f"production dependency {name} uses a developer link")
+
+
+def current_identity(link: pathlib.Path) -> tuple[str, pathlib.Path]:
+    if not link.is_symlink():
+        fail("registration object is not a symbolic link")
+    raw = os.readlink(link)
+    target = pathlib.Path(raw)
+    resolved = (link.parent / target).resolve(strict=True) if not target.is_absolute() else target.resolve(strict=True)
+    if not resolved.is_dir():
+        fail("current link target is not a directory")
+    return raw, resolved
+
+
+def under(path: pathlib.Path, root: pathlib.Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def command_for(link: pathlib.Path, candidate: pathlib.Path, expected_target: str, expected_hash: str, candidate_hash: str, test_root: pathlib.Path | None) -> str:
+    values = [str(pathlib.Path(__file__).resolve()), "--registration-link", str(link), "--candidate", str(candidate), "--expected-current-target", expected_target, "--expected-current-sha256", expected_hash, "--candidate-sha256", candidate_hash, "--apply", "--confirm-atomic-link-replacement"]
+    if test_root:
+        values += ["--test-root", str(test_root)]
+    return " ".join(shlex.quote(item) for item in values)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--registration-link", type=pathlib.Path, default=LIVE_LINK)
+    parser.add_argument("--candidate", type=pathlib.Path, required=True)
+    parser.add_argument("--expected-current-target", required=True, help="Exact readlink text, not only a resolved path")
+    parser.add_argument("--expected-current-sha256", required=True)
+    parser.add_argument("--candidate-sha256", required=True)
+    parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--confirm-atomic-link-replacement", action="store_true")
+    parser.add_argument("--test-root", type=pathlib.Path, help="Permit an isolated non-live registration link only below this root")
+    args = parser.parse_args()
+
+    link = args.registration_link.absolute()
+    candidate = args.candidate.resolve(strict=True)
+    expected_hash = args.expected_current_sha256.lower()
+    wanted_hash = args.candidate_sha256.lower()
+    if not all(len(value) == 64 and all(character in "0123456789abcdef" for character in value) for value in (expected_hash, wanted_hash)):
+        fail("both aggregate hashes must be lowercase SHA-256")
+
+    test_root = args.test_root.resolve(strict=True) if args.test_root else None
+    if link != LIVE_LINK:
+        if test_root is None or not under(link, test_root) or not under(candidate, test_root):
+            fail("a non-live link is permitted only for an isolated candidate below --test-root")
+    elif test_root is not None:
+        fail("--test-root cannot be used with the live registration link")
+
+    raw_target, prior = current_identity(link)
+    if raw_target != args.expected_current_target:
+        fail("registration link identity drift")
+    actual_prior_hash = tree_digest(prior)
+    if actual_prior_hash != expected_hash:
+        fail("current target byte identity drift")
+    package_check(candidate)
+    actual_candidate_hash = tree_digest(candidate)
+    if actual_candidate_hash != wanted_hash:
+        fail("candidate byte identity drift")
+    if candidate == prior:
+        fail("candidate and current target are identical")
+
+    rollback = command_for(link, prior, str(candidate), wanted_hash, expected_hash, test_root)
+    plan = {
+        "ok": True,
+        "mode": "apply" if args.apply else "dry-run",
+        "registrationLink": str(link),
+        "currentTarget": raw_target,
+        "currentAggregateSha256": actual_prior_hash,
+        "candidate": str(candidate),
+        "candidateAggregateSha256": actual_candidate_hash,
+        "atomicReplacement": True,
+        "reloadIssued": False,
+        "rollbackCommand": rollback,
+    }
+
+    if args.apply:
+        if not args.confirm_atomic_link_replacement:
+            fail("--apply requires --confirm-atomic-link-replacement")
+        # Check the link again immediately before the one atomic replacement.
+        check_raw, check_prior = current_identity(link)
+        if check_raw != raw_target or check_prior != prior or tree_digest(check_prior) != expected_hash:
+            fail("registration identity drift before replacement")
+        temporary = link.parent / f".{link.name}.cutover-{uuid.uuid4().hex}"
+        try:
+            os.symlink(str(candidate), temporary)
+            os.replace(temporary, link)
+        finally:
+            if temporary.is_symlink():
+                temporary.unlink()
+        new_raw, new_target = current_identity(link)
+        if new_raw != str(candidate) or new_target != candidate:
+            fail("atomic replacement verification failed")
+        plan["applied"] = True
+    else:
+        if args.confirm_atomic_link_replacement:
+            fail("confirmation flag is valid only with --apply")
+        plan["applied"] = False
+
+    print(json.dumps(plan, sort_keys=True))
+    print(f"ROLLBACK: {rollback}")
+    print("Current Pi sessions still use the code that they already loaded.")
+    print("USER ACTION REQUIRED AFTER OWNER HANDOFF: /reload")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
+        print(f"pi-package-cutover: {error}", file=sys.stderr)
+        raise SystemExit(1)

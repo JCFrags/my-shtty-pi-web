@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""Create a clean, isolated Pi package stage without changing registration."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import pathlib
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import uuid
+
+
+def fail(message: str) -> None:
+    raise RuntimeError(message)
+
+
+def tree_digest(root: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            fail(f"staged package contains a symlink: {relative}")
+        if path.is_file():
+            digest.update(relative.encode())
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def manifest_check(root: pathlib.Path) -> dict:
+    path = root / "package.json"
+    if not path.is_file():
+        fail("package lacks package.json")
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    pi_manifest = manifest.get("pi")
+    if not isinstance(pi_manifest, dict):
+        fail("package.json lacks a Pi manifest")
+    extensions = pi_manifest.get("extensions")
+    if extensions is None and isinstance(pi_manifest.get("extension"), str):
+        extensions = [pi_manifest["extension"]]
+    if not isinstance(extensions, list) or len(extensions) != 1:
+        fail("package must name exactly one Pi extension")
+    extension = extensions[0]
+    if not isinstance(extension, str) or not extension.startswith("./") or ".." in pathlib.PurePosixPath(extension).parts:
+        fail("invalid Pi extension path")
+    if not (root / extension).is_file():
+        fail("Pi extension entry does not exist")
+    for section in ("dependencies", "optionalDependencies"):
+        values = manifest.get(section, {})
+        if not isinstance(values, dict):
+            fail(f"{section} must be an object")
+        for name, version in values.items():
+            if str(version).startswith(("workspace:", "file:", "link:")):
+                fail(f"production dependency {name} uses a developer link")
+    return {"name": manifest.get("name"), "version": manifest.get("version"), "extension": extension}
+
+
+def extract_package(archive: pathlib.Path, target: pathlib.Path) -> None:
+    with tarfile.open(archive, "r:gz") as bundle:
+        members = bundle.getmembers()
+        for member in members:
+            parts = pathlib.PurePosixPath(member.name).parts
+            if not parts or parts[0] != "package" or ".." in parts or member.issym() or member.islnk() or not (member.isdir() or member.isfile()):
+                fail(f"unsafe package archive member: {member.name}")
+        for member in members:
+            relative = pathlib.Path(*pathlib.PurePosixPath(member.name).parts[1:])
+            destination = target / relative
+            if member.isdir():
+                destination.mkdir(parents=True, exist_ok=True)
+            elif member.isfile():
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                source = bundle.extractfile(member)
+                if source is None:
+                    fail(f"cannot read archive member: {member.name}")
+                with destination.open("wb") as output:
+                    shutil.copyfileobj(source, output)
+                os.chmod(destination, member.mode & 0o755)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", type=pathlib.Path, required=True)
+    parser.add_argument("--output", type=pathlib.Path, required=True)
+    parser.add_argument("--npm", default="npm")
+    args = parser.parse_args()
+    source = args.source.resolve(strict=True)
+    output = args.output.resolve()
+    if not source.is_dir():
+        parser.error("--source must be a directory")
+    if output.exists() or output.is_symlink():
+        fail("output must not exist")
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(prefix="pi-package-stage-") as temporary_text:
+        temporary = pathlib.Path(temporary_text)
+        isolated = temporary / "isolated"
+        pack = temporary / "pack"
+        stage = output.parent / f".{output.name}.stage-{uuid.uuid4().hex}"
+        for name in ("home", "config", "data", "state", "runtime", "cache"):
+            (isolated / name).mkdir(parents=True, mode=0o700)
+        pack.mkdir()
+        env = {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": str(isolated / "home"),
+            "XDG_CONFIG_HOME": str(isolated / "config"),
+            "XDG_DATA_HOME": str(isolated / "data"),
+            "XDG_STATE_HOME": str(isolated / "state"),
+            "XDG_RUNTIME_DIR": str(isolated / "runtime"),
+            "npm_config_cache": str(isolated / "cache"),
+            "npm_config_ignore_scripts": "true",
+            "NO_UPDATE_NOTIFIER": "1",
+        }
+        try:
+            packed = subprocess.run([args.npm, "pack", "--json", "--ignore-scripts", "--pack-destination", str(pack)], cwd=source, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+            if packed.returncode != 0:
+                fail("npm pack failed: " + (packed.stderr or packed.stdout).strip())
+            records = json.loads(packed.stdout)
+            if not isinstance(records, list) or len(records) != 1 or not isinstance(records[0].get("filename"), str):
+                fail("npm pack returned an unexpected manifest")
+            archive = pack / records[0]["filename"]
+            stage.mkdir(mode=0o700)
+            extract_package(archive, stage)
+            package = manifest_check(stage)
+            install = subprocess.run([args.npm, "install", "--omit=dev", "--ignore-scripts", "--offline", "--no-audit", "--no-fund", "--legacy-peer-deps", "--package-lock=false"], cwd=stage, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+            if install.returncode != 0:
+                fail("isolated production dependency install failed: " + (install.stderr or install.stdout).strip())
+            package = manifest_check(stage)
+            digest = tree_digest(stage)
+            os.replace(stage, output)
+        finally:
+            if stage.exists():
+                shutil.rmtree(stage)
+
+    print(json.dumps({"ok": True, "output": str(output), "aggregateSha256": digest, "package": package, "registrationChanged": False, "isolatedState": True}, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (OSError, RuntimeError, ValueError, json.JSONDecodeError, tarfile.TarError) as error:
+        print(f"pi-package-stage: {error}", file=sys.stderr)
+        raise SystemExit(1)

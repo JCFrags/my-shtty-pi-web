@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""Run the fixed Complete Web qualification against one shipped entrypoint."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import pathlib
+import re
+import select
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+
+PROTOCOL = "pi-web-qualification/1"
+PATHS = ["agent-browser/chrome", "pinchtab/chrome"]
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+BROWSER_HARNESS = ROOT / "components/browser/scripts/complete-browser-check.mjs"
+FORBIDDEN_KEYS = re.compile(r"cookie|authorization|token|password|private.?key|profile.?path|local.?path", re.I)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--profile", choices=("complete", "clean-install"), default="complete")
+    parser.add_argument("--entrypoint", required=True, help="Executable for the shipped qualification bridge")
+    parser.add_argument("--entrypoint-arg", action="append", default=[])
+    parser.add_argument("--package", type=pathlib.Path)
+    parser.add_argument("--fixtures", type=pathlib.Path, default=ROOT / "packages/test-fixtures")
+    parser.add_argument("--output", type=pathlib.Path)
+    parser.add_argument("--timeout-ms", type=int, default=120_000)
+    parser.add_argument("--wiring-only", action="store_true", help=argparse.SUPPRESS)
+    result = parser.parse_args()
+    if not 1_000 <= result.timeout_ms <= 300_000:
+        parser.error("--timeout-ms must be from 1000 through 300000")
+    if result.profile == "clean-install" and result.package is None:
+        parser.error("--package is required for the clean-install profile")
+    return result
+
+
+def safe(value):
+    if isinstance(value, dict):
+        return {key: "[REDACTED]" if FORBIDDEN_KEYS.search(key) else safe(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [safe(item) for item in value]
+    if isinstance(value, str):
+        return re.sub(r"Bearer\s+\S+", "Bearer [REDACTED]", value, flags=re.I)
+    return value
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise RuntimeError(message)
+
+
+def file_sha256(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def tree_digest(root: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
+        relative = path.relative_to(root).as_posix()
+        require(not path.is_symlink(), f"package tree contains a symlink: {relative}")
+        if path.is_file():
+            digest.update(relative.encode())
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def validate_package(package: pathlib.Path) -> dict:
+    package = package.resolve(strict=True)
+    manifest_path = package / "package.json"
+    require(manifest_path.is_file(), "staged package lacks package.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    pi_manifest = manifest.get("pi")
+    require(isinstance(pi_manifest, dict), "package.json lacks one Pi manifest")
+    extensions = pi_manifest.get("extensions")
+    if extensions is None and isinstance(pi_manifest.get("extension"), str):
+        extensions = [pi_manifest["extension"]]
+    require(isinstance(extensions, list) and len(extensions) == 1, "package must load exactly one extension")
+    extension = extensions[0]
+    require(isinstance(extension, str) and extension.startswith("./") and ".." not in pathlib.PurePosixPath(extension).parts, "invalid Pi extension path")
+    require((package / extension).is_file(), "Pi extension entry does not exist")
+    for section in ("dependencies", "optionalDependencies"):
+        for name, version in manifest.get(section, {}).items():
+            require(not str(version).startswith(("workspace:", "file:", "link:")), f"production dependency {name} uses a developer link")
+    return {"name": manifest.get("name"), "version": manifest.get("version"), "extension": extension, "aggregateSha256": tree_digest(package)}
+
+
+class Bridge:
+    def __init__(self, command: list[str], timeout_ms: int):
+        env = dict(os.environ)
+        env["PI_WEB_QUALIFICATION"] = "1"
+        self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, env=env)
+        self.timeout_ms = timeout_ms
+
+    def request(self, payload: dict, timeout_ms: int | None = None) -> dict:
+        request_id = str(uuid.uuid4())
+        request = {"id": request_id, **payload}
+        assert self.process.stdin and self.process.stdout
+        self.process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
+        self.process.stdin.flush()
+        deadline = time.monotonic() + (timeout_ms or self.timeout_ms) / 1000
+        while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            ready, _, _ = select.select([self.process.stdout], [], [], max(0, remaining))
+            if not ready:
+                break
+            line = self.process.stdout.readline()
+            if not line:
+                break
+            try:
+                response = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if response.get("id") != request_id:
+                continue
+            if "error" in response:
+                raise RuntimeError(str(response["error"].get("message", response["error"])))
+            result = response.get("result")
+            require(isinstance(result, dict), "bridge returned a non-object result")
+            return result
+        raise RuntimeError(f"shipped entrypoint timed out for {payload.get('type')}:{payload.get('caseId', '')}")
+
+    def close(self) -> None:
+        if self.process.stdin:
+            self.process.stdin.close()
+        try:
+            self.process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait()
+
+
+def validate_handshake(result: dict, wiring_only: bool, expected_package_sha256: str | None) -> None:
+    require(result.get("ok") is True and result.get("protocol") == PROTOCOL, "qualification handshake failed")
+    product = result.get("product", {})
+    require(product.get("protocolMajor") == 2, "shipped entrypoint must use browser protocol major 2")
+    require(product.get("supportedPaths") == PATHS, "shipped entrypoint must expose exactly the two accepted browser paths")
+    if not wiring_only:
+        require(product.get("shippedEntrypoint") is True, "mock wiring cannot satisfy the shipped-entrypoint gate")
+        identity = product.get("packageIdentity")
+        package_sha256 = identity.get("aggregateSha256") if isinstance(identity, dict) else None
+        require(isinstance(package_sha256, str) and len(package_sha256) == 64 and all(character in "0123456789abcdef" for character in package_sha256), "shipped entrypoint lacks package byte identity")
+        if expected_package_sha256:
+            require(package_sha256 == expected_package_sha256, "shipped entrypoint package identity drift")
+
+
+def validate_case(case_id: str, result: dict, steps: list[str], required: dict) -> dict:
+    require(result.get("ok") is True, f"{case_id} failed")
+    require(result.get("executedSteps") == steps, f"{case_id} did not execute the fixed plan")
+    evidence = result.get("evidence")
+    require(isinstance(evidence, dict), f"{case_id} lacks evidence")
+    for key, expected in required.items():
+        actual = evidence
+        for part in key.split("."):
+            require(isinstance(actual, dict) and part in actual, f"{case_id} lacks {key}")
+            actual = actual[part]
+        require(actual == expected, f"{case_id} has unsafe or false evidence for {key}")
+    return safe(evidence)
+
+
+LIFECYCLE_CASES = [
+    ("L01", "clean package and health-controlled tools", ["package-load", "pi-version", "register", "health", "api-mismatch", "outage"], {
+        "package.oneExtension": True, "package.productionDependenciesResolved": True, "package.developerLinks": False,
+        "pi.version": "0.84.1", "tools.registeredOnce": True, "tools.healthControlled": True,
+        "apiMajorMismatch.failedClosed": True, "daemonOutage.directFallback": False,
+    }),
+    ("L02", "reload lifecycle", ["start", "reload", "shutdown", "inventory"], {
+        "lifecycle.startupCount": 1, "lifecycle.shutdownCount": 1, "lifecycle.reloadIssued": False,
+        "inventory.orphanTimers": 0, "inventory.orphanClients": 0, "inventory.orphanProcesses": 0,
+        "inventory.orphanTabs": 0, "inventory.duplicateRegistrations": 0,
+    }),
+    ("L03", "private-content isolation", ["seed-private", "read-owner", "deny-public", "scan-output"], {
+        "private.ownerRead": True, "private.publicResultCount": 0, "private.wikiDeliveryCreated": False,
+        "private.sensitiveOutputMatches": 0,
+    }),
+    ("L04", "backup and exact restore", ["seed-state", "backup", "verify", "restore-clean", "reconcile", "doctor"], {
+        "backup.verified": True, "restore.cleanTarget": True, "restore.manifestMatch": True,
+        "restore.artifactHashesVerified": True, "restore.sqliteConsistent": True,
+        "restore.pendingDeliveriesReconciled": True, "restore.doctorFull": True,
+    }),
+    ("L05", "rollback rehearsal", ["record-prior", "activate-copy", "inject-failed-smoke", "rollback", "verify-prior"], {
+        "rollback.identityChecked": True, "rollback.atomicLinkOnly": True, "rollback.priorBytesPreserved": True,
+        "rollback.failedBytesPreserved": True, "rollback.reloadIssued": False, "rollback.priorIdentityRestored": True,
+    }),
+]
+
+
+def main() -> int:
+    args = parse_args()
+    require(args.fixtures.resolve(strict=True).is_dir(), "fixture root does not exist")
+    output = args.output.resolve() if args.output else pathlib.Path(tempfile.mkdtemp(prefix="complete-web-check-"))
+    output.mkdir(parents=True, exist_ok=True, mode=0o700)
+    manifest = {"schema": PROTOCOL, "profile": args.profile, "gateMode": "wiring-only" if args.wiring_only else "shipped-entrypoint", "acceptanceEligible": not args.wiring_only, "requiredPaths": PATHS, "entrypoint": {"executable": pathlib.Path(args.entrypoint).name, "argumentCount": len(args.entrypoint_arg)}, "cases": [], "ok": False}
+    if args.package:
+        manifest["package"] = validate_package(args.package)
+
+    if args.profile == "complete":
+        browser_output = output / "browser"
+        command = ["node", str(BROWSER_HARNESS), "--entrypoint", args.entrypoint]
+        for value in args.entrypoint_arg:
+            command += ["--entrypoint-arg", value]
+        command += ["--output", str(browser_output), "--profile", "complete", "--timeout-ms", str(args.timeout_ms)]
+        completed = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        require(completed.returncode == 0, "browser shipped-entrypoint gate failed: " + safe(completed.stderr or completed.stdout).strip())
+        browser_manifest = json.loads((browser_output / "manifest.json").read_text(encoding="utf-8"))
+        require(browser_manifest.get("ok") is True, "browser manifest is not green")
+        require(browser_manifest.get("requiredPaths") == PATHS, "browser manifest path identity drift")
+        manifest["browserManifestSha256"] = file_sha256(browser_output / "manifest.json")
+        manifest["browserCaseCount"] = len(browser_manifest.get("cases", []))
+        manifest["journeys"] = [item["id"] for item in browser_manifest["cases"] if item.get("id") in {"J1", "J2", "J3", "J4", "J5"} and item.get("ok")]
+        require(manifest["journeys"] == ["J1", "J2", "J3", "J4", "J5"], "five named journeys did not pass")
+
+    bridge = Bridge([args.entrypoint, *args.entrypoint_arg], args.timeout_ms)
+    try:
+        handshake = bridge.request({"type": "handshake", "protocol": PROTOCOL, "qualificationProfile": args.profile, "packageRoot": str(args.package.resolve()) if args.package else None})
+        validate_handshake(handshake, args.wiring_only, manifest.get("package", {}).get("aggregateSha256"))
+        for case_id, title, steps, required in LIFECYCLE_CASES:
+            result = bridge.request({"type": "case", "protocol": PROTOCOL, "caseId": case_id, "operations": [{"step": step, "action": f"qualification.{step}"} for step in steps], "fixtureRoot": str(args.fixtures.resolve()), "packageRoot": str(args.package.resolve()) if args.package else None})
+            evidence = validate_case(case_id, result, steps, required)
+            manifest["cases"].append({"id": case_id, "title": title, "ok": True, "evidence": evidence})
+        cleanup = bridge.request({"type": "cleanup", "protocol": PROTOCOL, "scope": "qualification-owned"}, 10_000)
+        require(cleanup.get("ok") is True, "qualification cleanup failed")
+        cleanup_evidence = cleanup.get("evidence", cleanup)
+        for key in ("remainingHosts", "remainingSessions", "remainingTabs", "remainingProcesses", "remainingTimers"):
+            require(cleanup_evidence.get(key, 0) == 0, f"cleanup left {key}")
+        manifest["cleanup"] = safe(cleanup_evidence)
+    finally:
+        bridge.close()
+
+    manifest["ok"] = True
+    manifest_path = output / "complete-manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.chmod(manifest_path, 0o600)
+    print(json.dumps({"ok": True, "profile": args.profile, "manifest": str(manifest_path), "lifecycleCases": len(manifest["cases"]), "browserCases": manifest.get("browserCaseCount", 0)}))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as error:
+        print(f"complete-web-check: {safe(str(error))}", file=sys.stderr)
+        raise SystemExit(1)
