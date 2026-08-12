@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "components": [
+    {
+      "id": "node-toolchain",
+      "kind": "package-lock",
+      "source": "pnpm-lock.yaml",
+      "version": "lockfile-9",
+      "license": "multiple; inventory pending WX-M0-009",
+      "digest_file": "pnpm-lock.yaml",
+      "health_fixture": "make toolchain-check"
+    },
+    {
+      "id": "python-toolchain",
+      "kind": "package-lock",
+      "source": "uv.lock",
+      "version": "uv-lock-1",
+      "license": "multiple; inventory pending WX-M0-009",
+      "digest_file": "uv.lock",
+      "health_fixture": "make toolchain-check"
+    },
+    {
+      "id": "playwright-browser-set",
+      "kind": "browser",
+      "source": "playwright",
+      "version": "UNRESOLVED_M0",
+      "license": "Apache-2.0",
+      "digest": null,
+      "health_fixture": "fixture:playwright"
+    },
+    {
+      "id": "core-images",
+      "kind": "image-set",
+      "source": "deploy/compose",
+      "version": "UNRESOLVED_M0",
+      "license": "multiple; review required",
+      "digest": null,
+      "health_fixture": "make compose-check"
+    },
+    {
+      "id": "optional-models",
+      "kind": "model-set",
+      "source": "operator-selected local models",
+      "version": "UNRESOLVED_M0",
+      "license": "operator review required",
+      "digest": null,
+      "enabled": false,
+      "health_fixture": "fixture:model-gateway"
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "components": [
+    {
+      "digest": null,
+      "enabled": true,
+      "health_fixture": "make compose-check",
+      "id": "core-images",
+      "kind": "image-set",
+      "license": "multiple; review required",
+      "source": "deploy/compose",
+      "status": "unresolved",
+      "version": "UNRESOLVED_M0"
+    },
+    {
+      "digest": "sha256:62ff64b32e755a4a27dfa80147d7dd48a3634250d1019e00f6fa026e5754d134",
+      "enabled": true,
+      "health_fixture": "make toolchain-check",
+      "id": "node-toolchain",
+      "kind": "package-lock",
+      "license": "multiple; inventory pending WX-M0-009",
+      "source": "pnpm-lock.yaml",
+      "status": "resolved",
+      "version": "lockfile-9"
+    },
+    {
+      "digest": null,
+      "enabled": false,
+      "health_fixture": "fixture:model-gateway",
+      "id": "optional-models",
+      "kind": "model-set",
+      "license": "operator review required",
+      "source": "operator-selected local models",
+      "status": "disabled",
+      "version": "UNRESOLVED_M0"
+    },
+    {
+      "digest": null,
+      "enabled": true,
+      "health_fixture": "fixture:playwright",
+      "id": "playwright-browser-set",
+      "kind": "browser",
+      "license": "Apache-2.0",
+      "source": "playwright",
+      "status": "unresolved",
+      "version": "UNRESOLVED_M0"
+    },
+    {
+      "digest": "sha256:4d988aa783b2e3c33238bbd380c66dab200996d46c75c2903cded2f5e9fcece7",
+      "enabled": true,
+      "health_fixture": "make toolchain-check",
+      "id": "python-toolchain",
+      "kind": "package-lock",
+      "license": "multiple; inventory pending WX-M0-009",
+      "source": "uv.lock",
+      "status": "resolved",
+      "version": "uv-lock-1"
+    }
+  ],
+  "generated_by": "scripts/toolchain-component-lock",
+  "policy": {
+    "floating_versions_allowed": false,
+    "release_requires_all_enabled_resolved": true,
+    "sha256_digest_required": true
+  },
+  "resolved_at": "2026-08-12T05:00:00Z",
+  "schema_version": 1
+}
