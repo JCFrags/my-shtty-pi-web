@@ -78,7 +78,14 @@ export class FailClosedBrowserDestinationAuthority implements BrowserDestination
   }
 }
 
-const qualificationPaths = new Set(["/static", "/spa", "/visual-controls", "/workspace-states"]);
+const qualificationPaths = new Set([
+  "/api/never",
+  "/qualification-journey",
+  "/spa",
+  "/static",
+  "/visual-controls",
+  "/workspace-states",
+]);
 
 /**
  * This authority exists only for the isolated actual-qualification executable.
@@ -96,8 +103,9 @@ export class IsolatedQualificationDestinationAuthority implements BrowserDestina
       parsed.username !== "" ||
       parsed.password !== "" ||
       parsed.hash !== "" ||
-      parsed.search !== "" ||
-      !qualificationPaths.has(parsed.pathname)
+      !qualificationPaths.has(parsed.pathname) ||
+      (parsed.pathname !== "/qualification-journey" && parsed.search !== "") ||
+      (parsed.pathname === "/qualification-journey" && !isQualificationJourneySearch(parsed.searchParams))
     ) {
       throw new BrowserPortError("WEBX_POLICY_QUALIFICATION_TARGET_DENIED", "qualification permits only an exact isolated fixture document", 403);
     }
@@ -114,6 +122,16 @@ export class IsolatedQualificationDestinationAuthority implements BrowserDestina
       redirectPolicy: Object.freeze({ revalidateEveryHop: true, maxRedirects: 0 }),
     });
   }
+}
+
+function isQualificationJourneySearch(parameters: URLSearchParams): boolean {
+  const expected = new Map([
+    ["J1", "semantic-inspect"],
+    ["J2", "visual-binding"],
+    ["J5", "takeover-return"],
+  ]);
+  return [...parameters.keys()].sort().join(",") === "case,state"
+    && expected.get(parameters.get("case") ?? "") === parameters.get("state");
 }
 
 export function actionDestination(action: BrowserAction): { operation: "navigate" | "new-tab"; url: string } | undefined {
