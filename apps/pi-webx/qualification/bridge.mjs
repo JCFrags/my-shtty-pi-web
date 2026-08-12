@@ -341,7 +341,7 @@ async function ensureSession(owner, request, pathIdentities, forcedPath) {
   const existing = sessions.get(owner);
   if (existing && existing.state !== "closed" && (!forcedPath || existing.pathId === forcedPath)) { pathIdentities.add(existing.pathId); return existing; }
   const pathId = forcedPath ?? request.requiredPaths?.[0] ?? PATHS[0];
-  const result = await call(owner, "browser.open", { pathId, url: fixtureUrl(request, "/public") }, `implicit-create-${owner}`);
+  const result = await call(owner, "browser.open", { pathId, url: fixtureUrl(request, "/static") }, `implicit-create-${owner}`);
   sessions.set(owner, result.data); pathIdentities.add(result.data.pathId); return result.data;
 }
 async function ensurePrimary(owner, request, paths) { const current = sessions.get(owner); if (current?.pathId === PATHS[0] && current.state !== "closed") return current; if (current) await closeOwner(owner); return ensureSession(owner, request, paths, PATHS[0]); }
