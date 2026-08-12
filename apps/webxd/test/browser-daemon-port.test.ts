@@ -33,7 +33,7 @@ function workspaceSnapshot() {
   };
 }
 
-function rpc(pathId: "agent-browser/chrome" | "pinchtab/chrome" = "agent-browser/chrome", failInput = false) {
+function rpc(pathId: "agent-browser/chrome" | "pinchtab/chrome" = "agent-browser/chrome", failInput = false, failFrame = false, leaseMs = 30_000) {
   let controlCall = 0;
   const call = vi.fn(async (method: string) => {
     if (method === "system.capabilities") return capabilities;
@@ -42,8 +42,11 @@ function rpc(pathId: "agent-browser/chrome" | "pinchtab/chrome" = "agent-browser
     if (method === "workspace.hide") return { agentId: "agent-a", tabId: "tab-1", visible: false };
     if (method === "tab.close") return { closed: true };
     if (method === "workspace.openScoped" || method === "workspace.selectOwnedTab") return workspaceSnapshot();
-    if (method === "workspace.acquireViewportLease") return { leaseId: "lease-1", expiresAt: "2026-08-12T00:00:30Z", transport: "polled-frames", identity: workspaceSnapshot().selected, geometry: { imageWidth: 1, imageHeight: 1, viewportWidth: 1, viewportHeight: 1, deviceScaleFactor: 1 }, inputSupported: true };
-    if (method === "workspace.getFrame") return { viewportId: "viewport-tab-1", viewportGeneration: 2, sequence: 7, capturedAt: "2026-08-12T00:00:01Z", mediaType: "image/png", width: 640, height: 480, coordinateSpace: "css-viewport", payload: "cG5n", screenshotSha256: digest, controlEpoch: 1, geometry: { imageWidth: 640, imageHeight: 480, viewportWidth: 640, viewportHeight: 480, deviceScaleFactor: 1 } };
+    if (method === "workspace.acquireViewportLease") return { leaseId: "lease-1", expiresAt: new Date(Date.now() + leaseMs).toISOString(), transport: "polled-frames", identity: workspaceSnapshot().selected, geometry: { imageWidth: 1, imageHeight: 1, viewportWidth: 1, viewportHeight: 1, deviceScaleFactor: 1 }, inputSupported: true };
+    if (method === "workspace.getFrame") {
+      if (failFrame) throw new Error("frame failed");
+      return { viewportId: "viewport-tab-1", viewportGeneration: 2, sequence: 7, capturedAt: new Date().toISOString(), mediaType: "image/png", width: 640, height: 480, coordinateSpace: "css-viewport", payload: "cG5n", screenshotSha256: digest, controlEpoch: 1, geometry: { imageWidth: 640, imageHeight: 480, viewportWidth: 640, viewportHeight: 480, deviceScaleFactor: 1 } };
+    }
     if (method === "workspace.compareSetControl") return { controlEpoch: ++controlCall + 1 };
     if (method === "workspace.input") {
       if (failInput) throw new Error("input failed");
@@ -105,19 +108,21 @@ describe("BrowserDaemonRpcPort frozen browserd seam", () => {
     expect(connection.call).toHaveBeenCalledWith("browser.observe", { browserSessionId: "session-1", tabId: "tab-1", view: "full", maxChars: 100, operationId: "operation-observe" }, undefined);
   });
 
-  it("returns a visual guard source from the exact frozen workspace frame shape", async () => {
+  it("retains the exact captured frame lease for one later bound action", async () => {
     const connection = rpc();
     const port = new BrowserDaemonRpcPort(async () => connection);
     await create(port);
     const frame = await port.captureFrame(owner, "session-1", "operation-frame");
     expect(frame).toMatchObject({ mediaType: "image/png", width: 640, height: 480, payloadBase64: "cG5n", screenshotSha256: digest, screenshotSequence: 7, viewportId: "viewport-tab-1", viewportGeneration: 2 });
-    expect(connection.call.mock.calls.at(-1)?.[0]).toBe("workspace.releaseViewportLease");
+    expect(connection.call.mock.calls.at(-1)?.[0]).toBe("workspace.getFrame");
+    expect(connection.call.mock.calls.some(([method]) => method === "workspace.releaseViewportLease")).toBe(false);
   });
 
   it("routes screenshot-bound mouse input through the exact scoped workspace sequence", async () => {
     const connection = rpc();
     const port = new BrowserDaemonRpcPort(async () => connection);
     await create(port);
+    await port.captureFrame(owner, "session-1", "operation-frame");
     await port.act(owner, "session-1", { kind: "mouse-move", x: 12, y: 34, visualGuard: { viewportId: "viewport-tab-1", viewportGeneration: 2, screenshotSha256: digest, screenshotSequence: 7 } }, "operation-cua");
     const methods = connection.call.mock.calls.map(([method]) => method);
     expect(methods.filter((method) => method.startsWith("workspace."))).toEqual(["workspace.focusTab", "workspace.openScoped", "workspace.selectOwnedTab", "workspace.acquireViewportLease", "workspace.getFrame", "workspace.compareSetControl", "workspace.input", "workspace.compareSetControl", "workspace.releaseViewportLease"]);
@@ -127,15 +132,38 @@ describe("BrowserDaemonRpcPort frozen browserd seam", () => {
       action: { type: "mouse_move", x: 12, y: 34 },
     }, undefined);
     expect(methods).not.toContain("browser.act");
+    expect(methods.filter((method) => method === "workspace.acquireViewportLease")).toHaveLength(1);
+    expect(methods.filter((method) => method === "workspace.getFrame")).toHaveLength(1);
   });
 
   it("returns control to the agent and releases the lease after input failure", async () => {
     const connection = rpc("agent-browser/chrome", true);
     const port = new BrowserDaemonRpcPort(async () => connection);
     await create(port);
+    await port.captureFrame(owner, "session-1", "operation-frame");
     await expect(port.act(owner, "session-1", { kind: "mouse-move", x: 12, y: 34, visualGuard: { viewportId: "viewport-tab-1", viewportGeneration: 2, screenshotSha256: digest, screenshotSequence: 7 } }, "operation-cua")).rejects.toThrow("input failed");
     const controls = connection.call.mock.calls.filter(([method]) => method === "workspace.compareSetControl");
     expect(controls.map(([, params]) => params.control)).toEqual(["human", "agent"]);
+    expect(connection.call.mock.calls.at(-1)?.[0]).toBe("workspace.releaseViewportLease");
+  });
+
+  it("returns control and releases the lease when caller cancellation aborts input", async () => {
+    const connection = rpc();
+    const original = connection.call.getMockImplementation();
+    const controller = new AbortController();
+    connection.call.mockImplementation(async (method, params, signal) => {
+      if (method === "workspace.input") {
+        controller.abort();
+        throw new DOMException("input cancelled", "AbortError");
+      }
+      if (original === undefined) throw new Error("missing RPC fixture implementation");
+      return original(method, params, signal);
+    });
+    const port = new BrowserDaemonRpcPort(async () => connection);
+    await create(port);
+    await port.captureFrame(owner, "session-1", "operation-frame", controller.signal);
+    await expect(port.act(owner, "session-1", { kind: "mouse-move", x: 12, y: 34, visualGuard: { viewportId: "viewport-tab-1", viewportGeneration: 2, screenshotSha256: digest, screenshotSequence: 7 } }, "operation-cua", controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(connection.call.mock.calls.filter(([method]) => method === "workspace.compareSetControl").map(([, params]) => params.control)).toEqual(["human", "agent"]);
     expect(connection.call.mock.calls.at(-1)?.[0]).toBe("workspace.releaseViewportLease");
   });
 
@@ -143,9 +171,101 @@ describe("BrowserDaemonRpcPort frozen browserd seam", () => {
     const connection = rpc();
     const port = new BrowserDaemonRpcPort(async () => connection);
     await create(port);
+    await port.captureFrame(owner, "session-1", "operation-frame");
     await expect(port.act(owner, "session-1", { kind: "click", x: 12, y: 34, button: "left", visualGuard: { viewportId: "viewport-tab-1", viewportGeneration: 2, screenshotSha256: "b".repeat(64), screenshotSequence: 7 } }, "operation-cua")).rejects.toMatchObject({ code: "stale-visual" });
     expect(connection.call.mock.calls.some(([method]) => method === "workspace.input")).toBe(false);
     expect(connection.call.mock.calls.at(-1)?.[0]).toBe("workspace.releaseViewportLease");
+  });
+
+  it("consumes a captured frame once and refuses replay", async () => {
+    const connection = rpc();
+    const port = new BrowserDaemonRpcPort(async () => connection);
+    await create(port);
+    await port.captureFrame(owner, "session-1", "operation-frame");
+    const action = { kind: "mouse-move" as const, x: 12, y: 34, visualGuard: { viewportId: "viewport-tab-1", viewportGeneration: 2, screenshotSha256: digest, screenshotSequence: 7 } };
+    await port.act(owner, "session-1", action, "operation-cua-1");
+    await expect(port.act(owner, "session-1", action, "operation-cua-2")).rejects.toMatchObject({ code: "stale-visual" });
+    expect(connection.call.mock.calls.filter(([method]) => method === "workspace.input")).toHaveLength(1);
+    expect(connection.call.mock.calls.filter(([method]) => method === "workspace.releaseViewportLease")).toHaveLength(1);
+  });
+
+  it("serializes concurrent replay attempts so only one action can consume the frame", async () => {
+    const connection = rpc();
+    const port = new BrowserDaemonRpcPort(async () => connection);
+    await create(port);
+    await port.captureFrame(owner, "session-1", "operation-frame");
+    const action = { kind: "mouse-move" as const, x: 12, y: 34, visualGuard: { viewportId: "viewport-tab-1", viewportGeneration: 2, screenshotSha256: digest, screenshotSequence: 7 } };
+    const results = await Promise.allSettled([
+      port.act(owner, "session-1", action, "operation-cua-1"),
+      port.act(owner, "session-1", action, "operation-cua-2"),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(connection.call.mock.calls.filter(([method]) => method === "workspace.input")).toHaveLength(1);
+  });
+
+  it("expires an unused captured frame and releases its bounded lease", async () => {
+    vi.useFakeTimers();
+    try {
+      const connection = rpc("agent-browser/chrome", false, false, 100);
+      const port = new BrowserDaemonRpcPort(async () => connection);
+      await create(port);
+      await port.captureFrame(owner, "session-1", "operation-frame");
+      await vi.advanceTimersByTimeAsync(101);
+      await expect(port.act(owner, "session-1", { kind: "mouse-move", x: 1, y: 1, visualGuard: { viewportId: "viewport-tab-1", viewportGeneration: 2, screenshotSha256: digest, screenshotSequence: 7 } }, "operation-cua")).rejects.toMatchObject({ code: "stale-visual" });
+      expect(connection.call.mock.calls.filter(([method]) => method === "workspace.releaseViewportLease")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("invalidates a captured frame after an intervening semantic action", async () => {
+    const connection = rpc();
+    const port = new BrowserDaemonRpcPort(async () => connection);
+    await create(port);
+    await port.captureFrame(owner, "session-1", "operation-frame");
+    await port.act(owner, "session-1", { kind: "fill", ref: "e1", text: "value" }, "operation-fill");
+    await expect(port.act(owner, "session-1", { kind: "mouse-move", x: 1, y: 1, visualGuard: { viewportId: "viewport-tab-1", viewportGeneration: 2, screenshotSha256: digest, screenshotSequence: 7 } }, "operation-cua")).rejects.toMatchObject({ code: "stale-visual" });
+    expect(connection.call.mock.calls.filter(([method]) => method === "workspace.releaseViewportLease")).toHaveLength(1);
+    expect(connection.call.mock.calls.some(([method]) => method === "workspace.input")).toBe(false);
+  });
+
+  it("invalidates a captured frame across human takeover and return", async () => {
+    const connection = rpc();
+    const port = new BrowserDaemonRpcPort(async () => connection);
+    await create(port);
+    await port.captureFrame(owner, "session-1", "operation-frame");
+    await port.setControl(owner, "session-1", "human", "operation-takeover");
+    await port.setControl(owner, "session-1", "agent", "operation-return");
+    await expect(port.act(owner, "session-1", { kind: "mouse-move", x: 1, y: 1, visualGuard: { viewportId: "viewport-tab-1", viewportGeneration: 2, screenshotSha256: digest, screenshotSequence: 7 } }, "operation-cua")).rejects.toMatchObject({ code: "stale-visual" });
+    expect(connection.call.mock.calls.some(([method]) => method === "workspace.input")).toBe(false);
+  });
+
+  it("does not let another actor consume or invalidate an owned captured frame", async () => {
+    const connection = rpc();
+    const port = new BrowserDaemonRpcPort(async () => connection);
+    await create(port);
+    await port.captureFrame(owner, "session-1", "operation-frame");
+    const action = { kind: "mouse-move" as const, x: 1, y: 1, visualGuard: { viewportId: "viewport-tab-1", viewportGeneration: 2, screenshotSha256: digest, screenshotSequence: 7 } };
+    await expect(port.act({ ...owner, agentId: "agent-b" }, "session-1", action, "operation-cross-owner")).rejects.toMatchObject({ code: "wrong-owner" });
+    await port.act(owner, "session-1", action, "operation-owner");
+    expect(connection.call.mock.calls.filter(([method]) => method === "workspace.input")).toHaveLength(1);
+  });
+
+  it("releases retained leases on frame error and shutdown", async () => {
+    const failedConnection = rpc("agent-browser/chrome", false, true);
+    const failedPort = new BrowserDaemonRpcPort(async () => failedConnection);
+    await create(failedPort);
+    await expect(failedPort.captureFrame(owner, "session-1", "operation-frame-error")).rejects.toThrow("frame failed");
+    expect(failedConnection.call.mock.calls.at(-1)?.[0]).toBe("workspace.releaseViewportLease");
+
+    const connection = rpc();
+    const port = new BrowserDaemonRpcPort(async () => connection);
+    await create(port);
+    await port.captureFrame(owner, "session-1", "operation-frame");
+    await port.shutdown();
+    expect(connection.call.mock.calls.filter(([method]) => method === "workspace.releaseViewportLease")).toHaveLength(1);
+    expect(connection.close).toHaveBeenCalledTimes(2);
   });
 
   it("uses frozen legacy browser.act shapes only for semantic actions", async () => {

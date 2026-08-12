@@ -39,6 +39,18 @@ interface WorkspaceContext {
   readonly viewportGeneration: number;
   readonly controlEpoch: number;
   readonly controlState: string;
+  readonly expiresAtMs: number;
+}
+
+interface PendingVisualFrame {
+  readonly workspace: WorkspaceContext;
+  readonly frame: WorkspaceFrameShape;
+  readonly principalId: string;
+  readonly agentId: string;
+  readonly sessionId: string;
+  readonly tabId: string;
+  readonly pathId: BrowserPathId;
+  readonly timer: ReturnType<typeof setTimeout>;
 }
 
 interface WorkspaceFrameShape {
@@ -56,6 +68,9 @@ interface WorkspaceFrameShape {
 export class BrowserDaemonRpcPort implements BrowserDaemonPort {
   readonly #connections = new Map<string, Promise<BrowserRpcConnection>>();
   readonly #sessions = new Map<string, SessionBinding>();
+  readonly #pendingFrames = new Map<string, PendingVisualFrame>();
+  readonly #sessionLanes = new Map<string, Promise<void>>();
+  #shuttingDown = false;
 
   constructor(private readonly connect: BrowserRpcConnectionFactory) {}
 
@@ -148,59 +163,70 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
   }
 
   async captureFrame(actor: AuthorityActor, sessionId: string, _operationId: string, signal?: AbortSignal): Promise<BrowserVisualFrame> {
-    const binding = this.owned(actor, sessionId);
-    if (binding.session.pathId !== "agent-browser/chrome") throw new BrowserPortError("unsupported", `visual frames are not supported by ${binding.session.pathId}`, 400);
-    const workspace = await this.openWorkspace(actor, binding, signal);
-    try {
-      const frame = workspaceFrame(await workspace.connection.call("workspace.getFrame", { scopeId: workspace.scopeId, leaseId: workspace.leaseId }, signal));
-      return {
-        address: this.address(binding),
-        mediaType: frame.mediaType,
-        width: frame.width,
-        height: frame.height,
-        payloadBase64: frame.payload,
-        screenshotSha256: frame.screenshotSha256,
-        screenshotSequence: frame.sequence,
-        viewportId: frame.viewportId,
-        viewportGeneration: frame.viewportGeneration,
-      };
-    } finally {
-      await this.releaseWorkspace(workspace, signal);
-    }
+    return this.withSessionLane(sessionId, async () => {
+      const binding = this.owned(actor, sessionId);
+      if (binding.session.pathId !== "agent-browser/chrome") throw new BrowserPortError("unsupported", `visual frames are not supported by ${binding.session.pathId}`, 400);
+      await this.invalidatePendingFrame(sessionId);
+      const workspace = await this.openWorkspace(actor, binding, signal);
+      try {
+        const frame = workspaceFrame(await workspace.connection.call("workspace.getFrame", { scopeId: workspace.scopeId, leaseId: workspace.leaseId }, signal));
+        this.retainFrame(actor, binding, workspace, frame);
+        return {
+          address: this.address(binding),
+          mediaType: frame.mediaType,
+          width: frame.width,
+          height: frame.height,
+          payloadBase64: frame.payload,
+          screenshotSha256: frame.screenshotSha256,
+          screenshotSequence: frame.sequence,
+          viewportId: frame.viewportId,
+          viewportGeneration: frame.viewportGeneration,
+        };
+      } catch (error) {
+        await this.releaseWorkspace(workspace);
+        throw error;
+      }
+    });
   }
 
   async act(actor: AuthorityActor, sessionId: string, action: BrowserAction, operationId: string, signal?: AbortSignal): Promise<BrowserOperationResult> {
-    const binding = this.owned(actor, sessionId);
-    assertCapability(binding.session.capabilities, action.kind);
-    if (isWorkspaceCuaAction(action)) return this.workspaceAct(actor, binding, action, operationId, signal);
-    const raw = record(await (await this.connection(actor)).call("browser.act", {
-      browserSessionId: sessionId,
-      tabId: binding.session.tabId,
-      action: legacyAction(action),
-      operationId,
-    }, signal));
-    if (raw.ok !== true) throw new BrowserPortError("backend-failure", "browser action did not succeed", 502, true);
-    return { operationId: text(raw.operationId, "operationId"), state: "succeeded" };
+    return this.withSessionLane(sessionId, async () => {
+      const binding = this.owned(actor, sessionId);
+      assertCapability(binding.session.capabilities, action.kind);
+      if (isWorkspaceCuaAction(action)) return this.workspaceAct(actor, binding, action, operationId, signal);
+      await this.invalidatePendingFrame(sessionId);
+      const raw = record(await (await this.connection(actor)).call("browser.act", {
+        browserSessionId: sessionId,
+        tabId: binding.session.tabId,
+        action: legacyAction(action),
+        operationId,
+      }, signal));
+      if (raw.ok !== true) throw new BrowserPortError("backend-failure", "browser action did not succeed", 502, true);
+      return { operationId: text(raw.operationId, "operationId"), state: "succeeded" };
+    });
   }
 
   async debug(actor: AuthorityActor, sessionId: string, request: BrowserDebugRequest, operationId: string, signal?: AbortSignal): Promise<BrowserDebugResult> {
-    const binding = this.owned(actor, sessionId);
-    const raw = record(await (await this.connection(actor)).call("browser.debug", {
-      browserSessionId: sessionId,
-      tabId: binding.session.tabId,
-      operation: request.operation,
-      args: request.args ?? {},
-      ...(request.maxChars === undefined ? {} : { maxChars: request.maxChars }),
-      operationId,
-    }, signal));
-    const artifactId = optionalText(raw.artifactId);
-    return {
-      operationId: text(raw.operationId, "operationId"),
-      operation: request.operation,
-      ok: boolean(raw.ok, "ok"),
-      data: raw.data,
-      ...(artifactId === undefined ? {} : { artifactId }),
-    };
+    return this.withSessionLane(sessionId, async () => {
+      const binding = this.owned(actor, sessionId);
+      await this.invalidatePendingFrame(sessionId);
+      const raw = record(await (await this.connection(actor)).call("browser.debug", {
+        browserSessionId: sessionId,
+        tabId: binding.session.tabId,
+        operation: request.operation,
+        args: request.args ?? {},
+        ...(request.maxChars === undefined ? {} : { maxChars: request.maxChars }),
+        operationId,
+      }, signal));
+      const artifactId = optionalText(raw.artifactId);
+      return {
+        operationId: text(raw.operationId, "operationId"),
+        operation: request.operation,
+        ok: boolean(raw.ok, "ok"),
+        data: raw.data,
+        ...(artifactId === undefined ? {} : { artifactId }),
+      };
+    });
   }
 
   async workspace(actor: AuthorityActor, request: BrowserWorkspaceRequest, _operationId: string, signal?: AbortSignal): Promise<BrowserWorkspaceResult> {
@@ -223,23 +249,26 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
   }
 
   async setControl(actor: AuthorityActor, sessionId: string, controller: "human" | "agent", _operationId: string, signal?: AbortSignal): Promise<BrowserControlResult> {
-    const binding = this.owned(actor, sessionId);
-    const workspace = await this.openWorkspace(actor, binding, signal);
-    try {
-      const raw = record(await workspace.connection.call("workspace.compareSetControl", {
-        scopeId: workspace.scopeId,
-        leaseId: workspace.leaseId,
-        viewportId: workspace.viewportId,
-        viewportGeneration: workspace.viewportGeneration,
-        control: controller,
-        expectedControlEpoch: workspace.controlEpoch,
-      }, signal));
-      const next = positive(raw.controlEpoch, "controlEpoch");
-      this.#sessions.set(sessionId, { ...binding, controlEpoch: next });
-      return { sessionId, tabId: binding.session.tabId, controller, controlEpoch: next };
-    } finally {
-      await this.releaseWorkspace(workspace, signal);
-    }
+    return this.withSessionLane(sessionId, async () => {
+      const binding = this.owned(actor, sessionId);
+      await this.invalidatePendingFrame(sessionId);
+      const workspace = await this.openWorkspace(actor, binding, signal);
+      try {
+        const raw = record(await workspace.connection.call("workspace.compareSetControl", {
+          scopeId: workspace.scopeId,
+          leaseId: workspace.leaseId,
+          viewportId: workspace.viewportId,
+          viewportGeneration: workspace.viewportGeneration,
+          control: controller,
+          expectedControlEpoch: workspace.controlEpoch,
+        }, signal));
+        const next = positive(raw.controlEpoch, "controlEpoch");
+        this.#sessions.set(sessionId, { ...binding, controlEpoch: next });
+        return { sessionId, tabId: binding.session.tabId, controller, controlEpoch: next };
+      } finally {
+        await this.releaseWorkspace(workspace);
+      }
+    });
   }
 
   async cancel(actor: AuthorityActor, operationId: string, signal?: AbortSignal): Promise<BrowserOperationResult> {
@@ -250,32 +279,47 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
   }
 
   async closeTab(actor: AuthorityActor, sessionId: string, tabId: string, signal?: AbortSignal): Promise<void> {
-    const binding = this.owned(actor, sessionId);
-    if (binding.session.tabId !== tabId) throw new BrowserPortError("wrong-owner", "tab does not belong to the owned session", 403);
-    await (await this.connection(actor)).call("tab.close", { browserSessionId: sessionId, tabId }, signal);
+    await this.withSessionLane(sessionId, async () => {
+      const binding = this.owned(actor, sessionId);
+      if (binding.session.tabId !== tabId) throw new BrowserPortError("wrong-owner", "tab does not belong to the owned session", 403);
+      await this.invalidatePendingFrame(sessionId);
+      await (await this.connection(actor)).call("tab.close", { browserSessionId: sessionId, tabId }, signal);
+    });
   }
 
   async close(actor: AuthorityActor, sessionId: string, signal?: AbortSignal): Promise<void> {
-    const binding = this.owned(actor, sessionId);
-    await (await this.connection(actor)).call("session.close", { browserSessionId: sessionId }, signal);
-    this.#sessions.set(sessionId, { ...binding, session: { ...binding.session, state: "closed" } });
+    await this.withSessionLane(sessionId, async () => {
+      const binding = this.owned(actor, sessionId);
+      await this.invalidatePendingFrame(sessionId);
+      await (await this.connection(actor)).call("session.close", { browserSessionId: sessionId }, signal);
+      this.#sessions.set(sessionId, { ...binding, session: { ...binding.session, state: "closed" } });
+    });
   }
 
   async shutdown(): Promise<void> {
+    if (this.#shuttingDown) return;
+    this.#shuttingDown = true;
+    const lanes = [...this.#sessionLanes.values()];
+    await Promise.allSettled(lanes);
+    const pending = [...this.#pendingFrames.values()];
+    this.#pendingFrames.clear();
+    for (const item of pending) clearTimeout(item.timer);
+    await Promise.allSettled(pending.map(async (item) => this.releaseWorkspace(item.workspace)));
     const connections = [...this.#connections.values()];
     this.#connections.clear();
     this.#sessions.clear();
+    this.#sessionLanes.clear();
     await Promise.allSettled(connections.map(async (connection) => (await connection).close()));
   }
 
   private async workspaceAct(actor: AuthorityActor, binding: SessionBinding, action: BrowserAction, operationId: string, signal?: AbortSignal): Promise<BrowserOperationResult> {
     if (binding.session.pathId !== "agent-browser/chrome") throw new BrowserPortError("unsupported", `visual input is not supported by ${binding.session.pathId}`, 400);
-    const workspace = await this.openWorkspace(actor, binding, signal);
+    const guard = visualGuard(action);
+    if (guard === undefined) throw new BrowserPortError("stale-visual", "visual input requires an exact captured frame guard", 409);
+    const pending = await this.takePendingFrame(actor, binding, guard);
+    const { workspace, frame } = pending;
     try {
       if (workspace.controlState === "human") throw new BrowserPortError("control-conflict", "human takeover is active", 409);
-      const frame = workspaceFrame(await workspace.connection.call("workspace.getFrame", { scopeId: workspace.scopeId, leaseId: workspace.leaseId }, signal));
-      const guard = visualGuard(action);
-      if (guard !== undefined) assertFrameGuard(guard, frame);
       const controlled = record(await workspace.connection.call("workspace.compareSetControl", {
         scopeId: workspace.scopeId,
         leaseId: workspace.leaseId,
@@ -307,12 +351,12 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
           viewportGeneration: workspace.viewportGeneration,
           control: "agent",
           expectedControlEpoch: humanEpoch,
-        }, signal));
+        }));
         const agentEpoch = positive(returned.controlEpoch, "controlEpoch");
         this.#sessions.set(binding.session.sessionId, { ...binding, controlEpoch: agentEpoch });
       }
     } finally {
-      await this.releaseWorkspace(workspace, signal);
+      await this.releaseWorkspace(workspace);
     }
   }
 
@@ -323,20 +367,105 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     const scopeId = text(opened.scopeId, "scopeId");
     const selected = record(await connection.call("workspace.selectOwnedTab", { scopeId, tabId: binding.session.tabId }, signal));
     const lease = record(await connection.call("workspace.acquireViewportLease", { scopeId, tabId: binding.session.tabId }, signal));
-    const identity = record(lease.identity);
-    if (browserPath(identity.pathId) !== binding.session.pathId) throw new BrowserPortError("wrong-path", "workspace changed the selected path", 502);
-    if (text(identity.browserSessionId, "identity.browserSessionId") !== binding.session.sessionId || text(identity.tabId, "identity.tabId") !== binding.session.tabId) {
-      throw new BrowserPortError("wrong-owner", "workspace selected different browser state", 403);
+    const leaseId = text(lease.leaseId, "leaseId");
+    try {
+      const identity = record(lease.identity);
+      if (browserPath(identity.pathId) !== binding.session.pathId) throw new BrowserPortError("wrong-path", "workspace changed the selected path", 502);
+      if (text(identity.browserSessionId, "identity.browserSessionId") !== binding.session.sessionId || text(identity.tabId, "identity.tabId") !== binding.session.tabId) {
+        throw new BrowserPortError("wrong-owner", "workspace selected different browser state", 403);
+      }
+      const localLeaseLimit = Date.now() + 30_000;
+      const leaseExpiry = lease.expiresAt === undefined ? localLeaseLimit : timestamp(lease.expiresAt, "expiresAt");
+      const expiresAtMs = Math.min(leaseExpiry, localLeaseLimit);
+      if (expiresAtMs <= Date.now()) throw new BrowserPortError("stale-visual", "workspace lease expired before use", 409);
+      return {
+        connection,
+        scopeId,
+        leaseId,
+        viewportId: text(identity.viewportId, "identity.viewportId"),
+        viewportGeneration: positive(identity.viewportGeneration, "identity.viewportGeneration"),
+        controlEpoch: positive(identity.controlEpoch, "identity.controlEpoch"),
+        controlState: text(selected.controlState, "controlState"),
+        expiresAtMs,
+      };
+    } catch (error) {
+      await connection.call("workspace.releaseViewportLease", { scopeId, leaseId }).catch(() => undefined);
+      throw error;
     }
-    return {
-      connection,
-      scopeId,
-      leaseId: text(lease.leaseId, "leaseId"),
-      viewportId: text(identity.viewportId, "identity.viewportId"),
-      viewportGeneration: positive(identity.viewportGeneration, "identity.viewportGeneration"),
-      controlEpoch: positive(identity.controlEpoch, "identity.controlEpoch"),
-      controlState: text(selected.controlState, "controlState"),
+  }
+
+  private retainFrame(actor: AuthorityActor, binding: SessionBinding, workspace: WorkspaceContext, frame: WorkspaceFrameShape): void {
+    const delay = Math.max(0, workspace.expiresAtMs - Date.now());
+    let pending!: PendingVisualFrame;
+    const timer = setTimeout(() => {
+      void this.withSessionLane(binding.session.sessionId, async () => {
+        if (this.#pendingFrames.get(binding.session.sessionId) !== pending) return;
+        this.#pendingFrames.delete(binding.session.sessionId);
+        await this.releaseWorkspace(workspace);
+      }).catch(() => undefined);
+    }, delay);
+    (timer as unknown as { unref?: () => void }).unref?.();
+    pending = {
+      workspace,
+      frame,
+      principalId: actor.principalId,
+      agentId: actor.agentId,
+      sessionId: binding.session.sessionId,
+      tabId: binding.session.tabId,
+      pathId: binding.session.pathId,
+      timer,
     };
+    this.#pendingFrames.set(binding.session.sessionId, pending);
+  }
+
+  private async takePendingFrame(actor: AuthorityActor, binding: SessionBinding, guard: VisualGuard): Promise<PendingVisualFrame> {
+    const pending = this.#pendingFrames.get(binding.session.sessionId);
+    if (pending === undefined) throw new BrowserPortError("stale-visual", "captured visual frame is missing or already used", 409);
+    this.#pendingFrames.delete(binding.session.sessionId);
+    clearTimeout(pending.timer);
+    if (pending.workspace.expiresAtMs <= Date.now()) {
+      await this.releaseWorkspace(pending.workspace).catch(() => undefined);
+      throw new BrowserPortError("stale-visual", "captured visual frame lease expired", 409);
+    }
+    if (pending.principalId !== actor.principalId || pending.agentId !== actor.agentId || pending.sessionId !== binding.session.sessionId || pending.tabId !== binding.session.tabId) {
+      await this.releaseWorkspace(pending.workspace).catch(() => undefined);
+      throw new BrowserPortError("wrong-owner", "captured visual frame belongs to a different actor or tab", 403);
+    }
+    if (pending.pathId !== binding.session.pathId) {
+      await this.releaseWorkspace(pending.workspace).catch(() => undefined);
+      throw new BrowserPortError("wrong-path", "captured visual frame belongs to a different browser path", 409);
+    }
+    try {
+      assertFrameGuard(guard, pending.frame);
+    } catch (error) {
+      await this.releaseWorkspace(pending.workspace).catch(() => undefined);
+      throw error;
+    }
+    return pending;
+  }
+
+  private async invalidatePendingFrame(sessionId: string): Promise<void> {
+    const pending = this.#pendingFrames.get(sessionId);
+    if (pending === undefined) return;
+    this.#pendingFrames.delete(sessionId);
+    clearTimeout(pending.timer);
+    await this.releaseWorkspace(pending.workspace);
+  }
+
+  private async withSessionLane<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
+    if (this.#shuttingDown) throw new BrowserPortError("unavailable", "browser daemon port is shutting down", 503, true);
+    const previous = this.#sessionLanes.get(sessionId) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const current = previous.catch(() => undefined).then(() => gate);
+    this.#sessionLanes.set(sessionId, current);
+    await previous.catch(() => undefined);
+    try {
+      return await work();
+    } finally {
+      release();
+      if (this.#sessionLanes.get(sessionId) === current) this.#sessionLanes.delete(sessionId);
+    }
   }
 
   private async releaseWorkspace(workspace: WorkspaceContext, signal?: AbortSignal): Promise<void> {
@@ -440,5 +569,6 @@ function text(value: unknown, name: string): string { if (typeof value !== "stri
 function optionalText(value: unknown): string | undefined { return typeof value === "string" ? value : undefined; }
 function boolean(value: unknown, name: string): boolean { if (typeof value !== "boolean") throw new TypeError(`browser daemon returned invalid ${name}`); return value; }
 function positive(value: unknown, name: string): number { if (!Number.isSafeInteger(value) || (value as number) < 1) throw new TypeError(`browser daemon returned invalid ${name}`); return value as number; }
+function timestamp(value: unknown, name: string): number { const parsed = Date.parse(text(value, name)); if (!Number.isFinite(parsed)) throw new TypeError(`browser daemon returned invalid ${name}`); return parsed; }
 function sha256(value: unknown, name: string): string { const result = text(value, name); if (!/^[a-f0-9]{64}$/u.test(result)) throw new TypeError(`browser daemon returned invalid ${name}`); return result; }
 function stringArray(value: unknown): string[] { if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) throw new TypeError("browser daemon returned invalid string list"); return value as string[]; }
