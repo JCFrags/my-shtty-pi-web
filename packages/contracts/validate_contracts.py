@@ -106,6 +106,13 @@ EXPECTED_TRANSITIONS = {
     "quarantined": [],
 }
 TERMINAL_STATES = {"completed", "quarantined"}
+EXPECTED_DUPLICATE_EFFECTS = [
+    "visit_receipt",
+    "page_version",
+    "artifact",
+    "index_projection",
+    "wiki_delivery",
+]
 EXPECTED_CANDIDATE_RESOLUTION = {
     "staging_valid_final_missing": "rename_staging_then_continue",
     "staging_missing_final_valid": "adopt_final_then_continue",
@@ -344,6 +351,8 @@ def validate_semantics_contract() -> dict[str, Any]:
 
     recovery = semantics["recovery_idempotency"]
     effect_kinds = recovery.get("forbid_duplicate_effects", [])
+    if effect_kinds != EXPECTED_DUPLICATE_EFFECTS:
+        raise ValueError("intent semantics: machine duplicate-effect list mismatch")
     publication_key = recovery["publication_key_template"].format(
         commit_intent_id="01j4w4j9a3jpsk9r7jcrg29q01"
     )

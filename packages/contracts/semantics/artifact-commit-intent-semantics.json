@@ -38,6 +38,7 @@
     "publication_key_template": "commit-intent:{commit_intent_id}",
     "repeat_terminal_result": "return_same_state_and_publication_without_write",
     "forbid_duplicate_effects": [
+      "visit_receipt",
       "page_version",
       "artifact",
       "index_projection",

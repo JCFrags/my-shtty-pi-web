@@ -19,7 +19,8 @@ The check does these operations:
 - rejects all mapped negative fixtures at exact JSON Pointer paths;
 - builds the reference SQL in an in-memory SQLite database;
 - tests every allowed and forbidden commit-intent state transition;
-- tests terminal row immutability and repeated recovery idempotency.
+- tests terminal row immutability and repeated recovery idempotency;
+- runs a restart-boundary SQL/application recovery harness for five publication effects.
 
 The check script pins its focused validation dependencies. The M0 integration owner retains ownership of project manifests and lockfiles.
 
@@ -78,7 +79,9 @@ quarantined -> no state
 
 `completed` and `quarantined` rows are terminal and immutable. SQLite triggers reject skipped, reverse, and terminal writes. The application must apply the same state table before a write.
 
-Repeated terminal recovery returns the existing state and publication without a write. Each recovery uses the existing intent `idempotency_key`. Each publication effect uses `commit-intent:<commit_intent_id>`. A repeated recovery must not create another page version, artifact, index projection, or wiki delivery.
+Repeated terminal recovery returns the existing state and publication without a write. Each recovery uses the existing intent `idempotency_key`. Each publication effect uses `commit-intent:<commit_intent_id>`. A repeated recovery must not create another visit receipt, page version, artifact, index projection, or wiki delivery.
+
+`tests/repeated_publication_recovery.py` is the representative SQL/application-contract harness. It commits all five effects and the `published` intent state in one transaction. It closes the database before intent completion to simulate process loss. It opens the database again and replays recovery twice. It asserts one stable row, effect ID, and publication key for every effect.
 
 ### Quarantine diagnostics
 
