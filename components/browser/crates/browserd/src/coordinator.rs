@@ -1159,18 +1159,33 @@ impl Coordinator {
 
     async fn workspace_hide(&self, principal: &Principal) -> Result<Value, RpcError> {
         let mut workspace = self.workspace.lock().await;
-        if workspace.focused_agent_id.as_ref().is_some_and(|owner| owner != &principal.agent_id) {
+        if workspace.focused_agent_id.as_ref().is_some_and(|owner| owner != &principal.agent_id)
+            || workspace.focused_principal.as_ref().is_some_and(|owner| owner != principal)
+        {
             return Err(forbidden());
         }
+        if workspace.focused_tab_id.as_ref().is_some_and(|tab_id| {
+            self.controls.get(tab_id).is_some_and(|gate| gate.current() == TabControl::Human)
+                || self.tabs.get(tab_id).is_some_and(|tab| tab.control == TabControl::Human)
+        }) {
+            return Err(protected_error("human_control"));
+        }
+        let previous_agent_id = workspace.focused_agent_id.take();
+        let previous_tab_id = workspace.focused_tab_id.take();
+        let previous_scope_id = workspace.scope_id.take();
         workspace.visible = false;
         workspace.focused_principal = None;
-        workspace.scope_id = None;
+        workspace.viewport_generation = workspace.viewport_generation.saturating_add(1).max(1);
         let payload = json!({
-            "agentId": workspace.focused_agent_id,
-            "tabId": workspace.focused_tab_id,
+            "agentId": previous_agent_id,
+            "tabId": previous_tab_id,
             "visible": false
         });
         drop(workspace);
+        self.workspace_leases.retain(|_, lease| {
+            lease.owner_agent_id != principal.agent_id
+                && previous_scope_id.as_ref().is_none_or(|scope_id| &lease.scope_id != scope_id)
+        });
         self.emit("workspace.focusRequested", payload.clone());
         Ok(payload)
     }
@@ -2819,6 +2834,85 @@ mod tests {
         assert!(closed.error.is_none(), "close failed: {:?}", closed.error);
 
         fixture.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn workspace_show_focus_hide_releases_selected_viewport_for_close() {
+        let (coordinator, root) = test_coordinator().await;
+        let connection = ConnectionContext::with_id("workspace-hide-owner");
+        assert!(register(&coordinator, &connection, "workspace-hide-owner", "workspace-hide-client").await.error.is_none());
+        let principal = connection.principal().await.unwrap();
+        let session_id = BrowserSessionId("workspace-hide-session".into());
+        let tab_id = TabId("workspace-hide-tab".into());
+        coordinator.tabs.insert(tab_id.clone(), TabInfo {
+            tab_id: tab_id.clone(), host_id: HostId("workspace-hide-host".into()),
+            browser_session_id: session_id.clone(), owner_agent_id: principal.agent_id.clone(),
+            title: "public fixture".into(), url: "http://127.0.0.1/public".into(), index: 0,
+            control: TabControl::Agent, state: TabState::Idle, last_action_at: None,
+        });
+        coordinator.controls.insert(tab_id.clone(), Arc::new(ControlGate::new(TabControl::Agent)));
+        coordinator.workspace_show(&principal, WorkspaceFocusParams {
+            agent_id: principal.agent_id.clone(), browser_session_id: Some(session_id.clone()), tab_id: Some(tab_id.clone()),
+        }).await.unwrap();
+        let scope_id = coordinator.workspace.lock().await.scope_id.clone().unwrap();
+        coordinator.workspace_leases.insert("workspace-hide-lease".into(), WorkspaceViewportLease {
+            lease_id: "workspace-hide-lease".into(), scope_id: scope_id.clone(), owner_agent_id: principal.agent_id.clone(),
+            browser_session_id: session_id, tab_id: tab_id.clone(), viewport_id: "workspace-hide-viewport".into(),
+            viewport_generation: 1, expires_at: Utc::now() + Duration::seconds(30), last_input_sequence: 0,
+            current_binding: None,
+        });
+
+        coordinator.tabs.get_mut(&tab_id).unwrap().control = TabControl::Human;
+        let protected = coordinator.workspace_hide(&principal).await.unwrap_err();
+        assert_eq!(protected.code, -32009);
+        assert_eq!(protected.data.unwrap()["reason"], "human_control");
+        assert_eq!(coordinator.workspace.lock().await.focused_tab_id.as_ref(), Some(&tab_id));
+
+        coordinator.tabs.get_mut(&tab_id).unwrap().control = TabControl::Agent;
+        coordinator.controls.get(&tab_id).unwrap().set(TabControl::Agent);
+        let hidden = coordinator.workspace_hide(&principal).await.unwrap();
+        assert_eq!(hidden["visible"], false);
+        let workspace = coordinator.workspace.lock().await;
+        assert!(!workspace.visible);
+        assert!(workspace.focused_principal.is_none());
+        assert!(workspace.focused_agent_id.is_none());
+        assert!(workspace.focused_tab_id.is_none());
+        assert!(workspace.scope_id.is_none());
+        drop(workspace);
+        assert!(coordinator.workspace_leases.is_empty());
+        assert!(coordinator.workspace_lease(&principal, &scope_id, "workspace-hide-lease").is_err());
+        let selected_viewport_blocks_close = coordinator.workspace.lock().await.focused_tab_id.as_ref() == Some(&tab_id);
+        assert!(!selected_viewport_blocks_close);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn workspace_hide_refuses_cross_owner_without_changing_focus() {
+        let (coordinator, root) = test_coordinator().await;
+        let owner_connection = ConnectionContext::with_id("workspace-owner");
+        let other_connection = ConnectionContext::with_id("workspace-other");
+        register(&coordinator, &owner_connection, "workspace-owner", "workspace-owner-client").await;
+        register(&coordinator, &other_connection, "workspace-other", "workspace-other-client").await;
+        let owner = owner_connection.principal().await.unwrap();
+        let other = other_connection.principal().await.unwrap();
+        let tab_id = TabId("workspace-owner-tab".into());
+        {
+            let mut workspace = coordinator.workspace.lock().await;
+            workspace.visible = true;
+            workspace.focused_principal = Some(owner.clone());
+            workspace.focused_agent_id = Some(owner.agent_id.clone());
+            workspace.focused_tab_id = Some(tab_id.clone());
+            workspace.scope_id = Some("workspace-owner-scope".into());
+            workspace.viewport_generation = 4;
+        }
+        let refused = coordinator.workspace_hide(&other).await.unwrap_err();
+        assert_eq!(refused.code, -32003);
+        let workspace = coordinator.workspace.lock().await;
+        assert!(workspace.visible);
+        assert_eq!(workspace.focused_agent_id.as_ref(), Some(&owner.agent_id));
+        assert_eq!(workspace.focused_tab_id.as_ref(), Some(&tab_id));
+        assert_eq!(workspace.scope_id.as_deref(), Some("workspace-owner-scope"));
         let _ = std::fs::remove_dir_all(root);
     }
 
