@@ -1,6 +1,5 @@
-/* global fetch */
+/* global AbortController, fetch */
 import assert from "node:assert/strict";
-import { Buffer } from "node:buffer";
 import { test } from "node:test";
 import {
   archiveDocumentCases,
