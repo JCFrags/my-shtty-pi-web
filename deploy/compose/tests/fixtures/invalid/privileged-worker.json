@@ -1,0 +1,1 @@
+{"path":["services","docd","privileged"],"value":true,"expected":"privileged containers are forbidden"}

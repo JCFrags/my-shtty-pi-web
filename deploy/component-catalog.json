@@ -160,13 +160,22 @@
     {
       "id": "remaining-deployment-image-set",
       "kind": "container-image-set",
-      "source": "deploy/compose",
-      "version": "UNRESOLVED_WX_M0_012",
-      "license": "multiple; selection review required",
+      "source": "deploy/compose/images.lock.json",
+      "version": "compose-skeleton-a56dd0e",
+      "license": "MIT AND Apache-2.0 AND AGPL-3.0-or-later",
       "enabled": true,
       "depends_on": ["WX-M0-012"],
-      "artifacts": [],
-      "health_fixture": "make compose-check after WX-M0-012",
+      "artifacts": [
+        {"id": "meilisearch-oci-index", "digest": "sha256:a59e984fd90b9dee0c872cdb9183d330d71c038d7a3b35def5ca3ae7fb186fb2"},
+        {"id": "playwright-placeholder-oci-index", "digest": "sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e"},
+        {"id": "searxng-oci-index", "digest": "sha256:37baac8380e1a31e022b8dda0c58dbd6ba0630e3fdaf2c522bda3d140f5ef111"}
+      ],
+      "digest_files": ["deploy/compose/images.lock.json"],
+      "compatibility": {
+        "profiles": ["core", "full", "llama-cpu", "vllm-gpu", "offline"],
+        "runtime": "rootless Compose compatible"
+      },
+      "health_fixture": "python3 deploy/compose/validate.py",
       "rollback": {"mode": "safe-disable", "previous_known_good": null}
     },
     {

@@ -404,21 +404,37 @@
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "deploy/compose"
+          "url": "deploy/compose/images.lock.json"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "37baac8380e1a31e022b8dda0c58dbd6ba0630e3fdaf2c522bda3d140f5ef111"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "a59e984fd90b9dee0c872cdb9183d330d71c038d7a3b35def5ca3ae7fb186fb2"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "ced6ae7f8f4854d70ad51aa309486fd5400519db430fce62812eb42e60c9b0ea"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e"
         }
       ],
       "licenses": [
         {
-          "license": {
-            "name": "UNRESOLVED"
-          }
+          "expression": "MIT AND Apache-2.0 AND AGPL-3.0-or-later"
         }
       ],
-      "name": "Remaining deployment image set",
+      "name": "Reference Compose deployment image set",
       "properties": [
         {
           "name": "webx:scope",
-          "value": "runtime"
+          "value": "runtime-skeleton"
         },
         {
           "name": "webx:bundled",
@@ -426,12 +442,12 @@
         },
         {
           "name": "webx:license-status",
-          "value": "unresolved"
+          "value": "resolved"
         }
       ],
       "scope": "required",
       "type": "library",
-      "version": "UNRESOLVED_WX_M0_012"
+      "version": "compose-skeleton-a56dd0e"
     },
     {
       "bom-ref": "component:schema-generator-set",
@@ -938,7 +954,7 @@
       "type": "application",
       "version": "0.0.0"
     },
-    "timestamp": "2026-08-12T06:00:00Z",
+    "timestamp": "2026-08-12T06:30:00Z",
     "tools": {
       "components": [
         {
@@ -949,7 +965,7 @@
       ]
     }
   },
-  "serialNumber": "urn:uuid:6925e0a4-fce3-53dc-a8d1-7937c61c3a67",
+  "serialNumber": "urn:uuid:4f5f394b-e29a-5f0a-891a-09119ded2316",
   "specVersion": "1.6",
   "version": 1
 }

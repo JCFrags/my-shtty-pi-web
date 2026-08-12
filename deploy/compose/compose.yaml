@@ -1,0 +1,193 @@
+name: webx
+
+x-service-defaults: &service-defaults
+  image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+  command: ["sleep", "infinity"]
+  read_only: true
+  init: true
+  user: "10000:10000"
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: ["ALL"]
+  networks: [webx_control]
+  pids_limit: 512
+  tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=256m"]
+  healthcheck:
+    disable: true
+  labels:
+    org.webx.placeholder: "true"
+    org.webx.runtime-state: "implementation-pending"
+
+x-worker-environment: &worker-environment
+  WEBX_INTERNAL_URL: http://webxd:7331/internal/v1
+  HTTP_PROXY: http://egressd:7340
+  HTTPS_PROXY: http://egressd:7340
+  ALL_PROXY: socks5h://egressd:7341
+  NO_PROXY: webxd,egressd,meilisearch,model-gateway,llama-cpp,vllm,127.0.0.1,localhost
+
+services:
+  webxd:
+    <<: *service-defaults
+    profiles: [core, full, llama-cpu, vllm-gpu, offline]
+    user: "10000:10000"
+    volumes:
+      - webx_data:/var/lib/webx:rw
+      - webx_run:/run/webx:rw
+      - webx_config:/etc/webx:ro
+
+  egressd:
+    <<: *service-defaults
+    profiles: [core, full, llama-cpu, vllm-gpu]
+    user: "10002:10002"
+    networks: [webx_control, webx_wan]
+    secrets: [egressd_service_token]
+
+  meilisearch:
+    <<: *service-defaults
+    image: getmeili/meilisearch:v1.53.0@sha256:a59e984fd90b9dee0c872cdb9183d330d71c038d7a3b35def5ca3ae7fb186fb2
+    command: null
+    profiles: [core, full, llama-cpu, vllm-gpu, offline]
+    user: "10003:10003"
+    volumes: ["meili_data:/meili_data:rw"]
+    labels:
+      org.webx.placeholder: "false"
+      org.webx.runtime-state: "locked-upstream"
+
+  searxng:
+    <<: *service-defaults
+    image: searxng/searxng:2026.8.12-54613defc@sha256:37baac8380e1a31e022b8dda0c58dbd6ba0630e3fdaf2c522bda3d140f5ef111
+    command: null
+    profiles: [core, full, llama-cpu, vllm-gpu]
+    user: "10004:10004"
+    environment:
+      HTTP_PROXY: http://egressd:7340
+      HTTPS_PROXY: http://egressd:7340
+      ALL_PROXY: socks5h://egressd:7341
+      NO_PROXY: webxd,egressd,127.0.0.1,localhost
+    volumes:
+      - searxng_config:/etc/searxng:ro
+      - searxng_cache:/var/cache/searxng:rw
+    labels:
+      org.webx.placeholder: "false"
+      org.webx.runtime-state: "locked-upstream"
+
+  browserd:
+    <<: *service-defaults
+    profiles: [core, full, llama-cpu, vllm-gpu, offline]
+    user: "10005:10005"
+    environment: *worker-environment
+    secrets: [browserd_bootstrap_token]
+    shm_size: 1gb
+    pids_limit: 2048
+
+  pyfetchd:
+    <<: *service-defaults
+    profiles: [core, full, llama-cpu, vllm-gpu, offline]
+    user: "10006:10006"
+    environment: *worker-environment
+    secrets: [pyfetchd_bootstrap_token]
+
+  docd:
+    <<: *service-defaults
+    profiles: [core, full, llama-cpu, vllm-gpu, offline]
+    user: "10007:10007"
+    environment: *worker-environment
+    secrets: [docd_bootstrap_token]
+
+  mediad:
+    <<: *service-defaults
+    profiles: [core, full, llama-cpu, vllm-gpu, offline]
+    user: "10008:10008"
+    environment: *worker-environment
+    secrets: [mediad_bootstrap_token]
+
+  archived:
+    <<: *service-defaults
+    profiles: [full, offline]
+    user: "10009:10009"
+    environment: *worker-environment
+    secrets: [archived_bootstrap_token]
+
+  monitord:
+    <<: *service-defaults
+    profiles: [full, offline]
+    user: "10010:10010"
+    environment: *worker-environment
+    secrets: [monitord_bootstrap_token]
+
+  yacy:
+    <<: *service-defaults
+    profiles: [full]
+    user: "10011:10011"
+    environment: *worker-environment
+    volumes: ["yacy_data:/opt/yacy_search_server/DATA:rw"]
+
+  otel-collector:
+    <<: *service-defaults
+    profiles: [full]
+    user: "10012:10012"
+    volumes: ["otel_config:/etc/otelcol:ro"]
+
+  prometheus:
+    <<: *service-defaults
+    profiles: [full]
+    user: "10013:10013"
+    volumes:
+      - prometheus_config:/etc/prometheus:ro
+      - prometheus_data:/prometheus:rw
+
+  model-gateway:
+    <<: *service-defaults
+    profiles: [llama-cpu, vllm-gpu]
+    user: "10014:10014"
+    volumes: ["model_config:/etc/webx:ro"]
+
+  llama-cpp:
+    <<: *service-defaults
+    profiles: [llama-cpu]
+    user: "10015:10015"
+    volumes: ["model_data:/models:ro"]
+
+  vllm:
+    <<: *service-defaults
+    profiles: [vllm-gpu]
+    user: "10016:10016"
+    volumes: ["model_data:/models:ro"]
+    labels:
+      org.webx.placeholder: "true"
+      org.webx.runtime-state: "implementation-pending"
+      org.webx.gpu-reservation: "required-in-host-overlay"
+
+networks:
+  webx_control:
+    internal: true
+  webx_wan: {}
+
+volumes:
+  meili_data: {}
+  model_config: {}
+  model_data: {}
+  otel_config: {}
+  prometheus_config: {}
+  prometheus_data: {}
+  searxng_cache: {}
+  searxng_config: {}
+  webx_config: {}
+  webx_data: {}
+  webx_run: {}
+  yacy_data: {}
+
+secrets:
+  egressd_service_token:
+    file: ${WEBX_SECRETS_DIR:?set WEBX_SECRETS_DIR}/egressd-service-token
+  browserd_bootstrap_token:
+    file: ${WEBX_SECRETS_DIR:?set WEBX_SECRETS_DIR}/browserd-bootstrap-token
+  pyfetchd_bootstrap_token:
+    file: ${WEBX_SECRETS_DIR:?set WEBX_SECRETS_DIR}/pyfetchd-bootstrap-token
+  docd_bootstrap_token:
+    file: ${WEBX_SECRETS_DIR:?set WEBX_SECRETS_DIR}/docd-bootstrap-token
+  mediad_bootstrap_token:
+    file: ${WEBX_SECRETS_DIR:?set WEBX_SECRETS_DIR}/mediad-bootstrap-token
+  archived_bootstrap_token:
+    file: ${WEBX_SECRETS_DIR:?set WEBX_SECRETS_DIR}/archived-bootstrap-token
+  monitord_bootstrap_token:
+    file: ${WEBX_SECRETS_DIR:?set WEBX_SECRETS_DIR}/monitord-bootstrap-token

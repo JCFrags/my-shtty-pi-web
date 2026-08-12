@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "images": [
+    {
+      "id": "meilisearch",
+      "component_id": "meilisearch-image",
+      "reference": "getmeili/meilisearch:v1.53.0@sha256:a59e984fd90b9dee0c872cdb9183d330d71c038d7a3b35def5ca3ae7fb186fb2",
+      "license": "MIT",
+      "services": ["meilisearch"]
+    },
+    {
+      "id": "playwright-placeholder",
+      "component_id": "playwright-browser-set",
+      "reference": "mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e",
+      "license": "Apache-2.0",
+      "services": [
+        "archived",
+        "browserd",
+        "docd",
+        "egressd",
+        "llama-cpp",
+        "mediad",
+        "model-gateway",
+        "monitord",
+        "otel-collector",
+        "prometheus",
+        "pyfetchd",
+        "vllm",
+        "webxd",
+        "yacy"
+      ]
+    },
+    {
+      "id": "searxng",
+      "component_id": "searxng-image",
+      "reference": "searxng/searxng:2026.8.12-54613defc@sha256:37baac8380e1a31e022b8dda0c58dbd6ba0630e3fdaf2c522bda3d140f5ef111",
+      "license": "AGPL-3.0-or-later",
+      "services": ["searxng"]
+    }
+  ]
+}

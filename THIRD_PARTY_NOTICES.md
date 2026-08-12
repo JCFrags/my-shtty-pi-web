@@ -84,13 +84,13 @@ This inventory is an engineering record. It is not legal advice.
 - Use: runtime; bundled: false
 - Notice: Retain the Python Software Foundation license and notices.
 
-## Remaining deployment image set UNRESOLVED_WX_M0_012
+## Reference Compose deployment image set compose-skeleton-a56dd0e
 
 - Inventory ID: `component:remaining-deployment-image-set`
-- License: `UNRESOLVED` (unresolved)
-- Source: deploy/compose
-- Use: runtime; bundled: false
-- Notice: Every selected service image and transitive image notice must be inventoried by WX-M0-012 before release.
+- License: `MIT AND Apache-2.0 AND AGPL-3.0-or-later` (resolved)
+- Source: deploy/compose/images.lock.json
+- Use: runtime-skeleton; bundled: false
+- Notice: The skeleton reuses locked Meilisearch, Playwright, and SearXNG OCI indexes. Preserve their MIT, Apache-2.0, and AGPL-3.0-or-later obligations. First-party services are explicitly inert placeholders.
 
 ## Schema generator set json-schema-to-typescript-15.0.4+jsonschema-gentypes-2.12.0
 

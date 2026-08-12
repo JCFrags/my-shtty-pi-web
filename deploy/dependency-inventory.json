@@ -206,20 +206,20 @@
       "component_refs": [
         "remaining-deployment-image-set"
       ],
-      "health_fixture": "make compose-check after WX-M0-012",
+      "health_fixture": "python3 deploy/compose/validate.py",
       "id": "component:remaining-deployment-image-set",
-      "kind": "later-selection",
-      "license": "UNRESOLVED",
-      "license_status": "unresolved",
-      "name": "Remaining deployment image set",
-      "notice": "Every selected service image and transitive image notice must be inventoried by WX-M0-012 before release.",
-      "platform_support": "UNRESOLVED",
-      "replacement": "Only dependency-closed profiles can be enabled.",
-      "scope": "runtime",
-      "security_channel": "UNRESOLVED",
-      "source": "deploy/compose",
-      "upgrade_rollback": "Safely disable unresolved profiles.",
-      "version": "UNRESOLVED_WX_M0_012"
+      "kind": "container-image-set",
+      "license": "MIT AND Apache-2.0 AND AGPL-3.0-or-later",
+      "license_status": "resolved",
+      "name": "Reference Compose deployment image set",
+      "notice": "The skeleton reuses locked Meilisearch, Playwright, and SearXNG OCI indexes. Preserve their MIT, Apache-2.0, and AGPL-3.0-or-later obligations. First-party services are explicitly inert placeholders.",
+      "platform_support": "Linux x64/arm64 OCI indexes; rootless Compose reference",
+      "replacement": "Replace each inert first-party placeholder with its reviewed WebX release image before activation.",
+      "scope": "runtime-skeleton",
+      "security_channel": "Use the Meilisearch, Playwright, and SearXNG upstream security channels.",
+      "source": "deploy/compose/images.lock.json",
+      "upgrade_rollback": "Safely disable the skeleton or revert its serialized lock and Compose files.",
+      "version": "compose-skeleton-a56dd0e"
     },
     {
       "bundled": false,
@@ -515,7 +515,7 @@
       "version": "0.16.2"
     }
   ],
-  "generated_at": "2026-08-12T06:00:00Z",
+  "generated_at": "2026-08-12T06:30:00Z",
   "generated_by": "scripts/dependency-inventory",
   "schema_version": 1
 }
