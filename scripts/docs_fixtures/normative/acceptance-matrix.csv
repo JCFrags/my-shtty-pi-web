@@ -1,0 +1,31 @@
+acceptance_id,title,target_milestone,test_layer,canonical_command,required_profiles,release_blocking,evidence
+AC-001,"Static page, first visit",M2,e2e,make test-e2e TEST=ac-001,core,yes,artifacts/test-evidence/AC-001/
+AC-002,"Static page, unchanged re-fetch",M2,e2e,make test-e2e TEST=ac-002,core,yes,artifacts/test-evidence/AC-002/
+AC-003,JavaScript page escalation,M4,e2e-browser,make test-e2e TEST=ac-003,core,yes,artifacts/test-evidence/AC-003/
+AC-004,Independent verification disagreement,M5,e2e-verify,make test-e2e TEST=ac-004,core,yes,artifacts/test-evidence/AC-004/
+AC-005,Policy-denied SSRF,M1,security,make test-security TEST=ac-005,core,yes,artifacts/test-evidence/AC-005/
+AC-006,Redirect pivot,M2,security,make test-security TEST=ac-006,core,yes,artifacts/test-evidence/AC-006/
+AC-007,Oversized and decompression bomb content,M2,security-performance,make test-security TEST=ac-007,core,yes,artifacts/test-evidence/AC-007/
+AC-008,Crawl budget and cancellation,M4,e2e-chaos,make test-e2e TEST=ac-008,core,yes,artifacts/test-evidence/AC-008/
+AC-009,Search rebuild,M3,recovery,make test-recovery TEST=ac-009,core,yes,artifacts/test-evidence/AC-009/
+AC-010,Wiki replay idempotency,M3,integration,make test-integration TEST=ac-010,core,yes,artifacts/test-evidence/AC-010/
+AC-011,Private content isolation,M3,security,make test-security TEST=ac-011,core,yes,artifacts/test-evidence/AC-011/
+AC-012,Document conversion,M7,e2e-docs,make test-e2e TEST=ac-012,full,yes,artifacts/test-evidence/AC-012/
+AC-013,Media metadata without download,M8,e2e-media,make test-e2e TEST=ac-013,full,yes,artifacts/test-evidence/AC-013/
+AC-014,Transcript preference,M8,e2e-media,make test-e2e TEST=ac-014,full,yes,artifacts/test-evidence/AC-014/
+AC-015,Source/derived separation,M10,e2e-model,make test-e2e TEST=ac-015,model,yes,artifacts/test-evidence/AC-015/
+AC-016,No Ollama,M10,security-contract,make test-release TEST=ac-016,core,yes,artifacts/test-evidence/AC-016/
+AC-017,Pi compact output,M6,pi-e2e,make test-pi TEST=ac-017,core,yes,artifacts/test-evidence/AC-017/
+AC-018,Pi elevated permission denial,M6,pi-security,make test-pi TEST=ac-018,core,yes,artifacts/test-evidence/AC-018/
+AC-019,Worker crash isolation,M4,chaos,make test-chaos TEST=ac-019,core,yes,artifacts/test-evidence/AC-019/
+AC-020,Backup and clean restore,M11,recovery,make test-recovery TEST=ac-020,core,yes,artifacts/test-evidence/AC-020/
+AC-021,Upgrade and rollback,M11,upgrade,make test-upgrade TEST=ac-021,core,yes,artifacts/test-evidence/AC-021/
+AC-022,Accessibility and structured operation,M6,accessibility-contract,make test-cli TEST=ac-022,core,yes,artifacts/test-evidence/AC-022/
+AC-023,Offline local web,M3,offline-e2e,make test-e2e TEST=ac-023,core,yes,artifacts/test-evidence/AC-023/
+AC-024,Change watch,M9,e2e-monitor,make test-e2e TEST=ac-024,full,yes,artifacts/test-evidence/AC-024/
+AC-025,Archive replay,M9,archive-e2e,make test-e2e TEST=ac-025,full,yes,artifacts/test-evidence/AC-025/
+AC-026,Search visibility,M3,security-property,make test-security TEST=ac-026,core,yes,artifacts/test-evidence/AC-026/
+AC-027,Deterministic chunking,M2,property,make test-property TEST=ac-027,core,yes,artifacts/test-evidence/AC-027/
+AC-028,Diagnostics redaction,M11,security,make test-security TEST=ac-028,core,yes,artifacts/test-evidence/AC-028/
+AC-029,Capability and discovery degradation,M6,degradation,make test-e2e TEST=ac-029,core,yes,artifacts/test-evidence/AC-029/
+AC-030,Full profile qualification,M12,release,make release-check,full,yes,artifacts/test-evidence/AC-030/

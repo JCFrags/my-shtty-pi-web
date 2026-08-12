@@ -1,4 +1,4 @@
-.PHONY: bootstrap toolchain-check component-lock-check contracts-generate contracts-check format lint typecheck test-unit
+.PHONY: bootstrap toolchain-check component-lock-check contracts-generate contracts-check format lint typecheck test-unit docs-check
 
 LOCK_RESOLVED_AT := 2026-08-12T05:00:00Z
 QUALITY_AREAS := all typescript python sql shell docs contracts fixtures compose tooling
@@ -48,3 +48,7 @@ typecheck:
 
 test-unit:
 	./scripts/quality-check test-unit
+
+docs-check:
+	./scripts/docs-check
+	python3 scripts/docs_check_test.py
