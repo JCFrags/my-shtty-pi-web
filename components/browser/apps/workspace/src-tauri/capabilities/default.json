@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Minimal workspace capability set",
+  "windows": ["main"],
+  "permissions": ["core:default", "core:window:allow-show", "core:window:allow-hide", "core:window:allow-unminimize", "core:window:allow-set-focus"]
+}

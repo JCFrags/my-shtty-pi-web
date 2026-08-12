@@ -1,0 +1,22 @@
+workspace_binary = "pi-browser-workspace"
+agent_browser_binary = "agent-browser"
+searxng_url = "http://127.0.0.1:8888/"
+reader_url = "http://127.0.0.1:8787/"
+
+[visual_chromium]
+# Optional Chromium-compatible executable used only for visible workspace hosts.
+# executable_path = "/path/to/chrome"
+launch_args = []
+
+[limits]
+max_chromium_hosts = 6
+max_lightpanda_hosts = 24
+max_tabs_per_host = 30
+background_thumbnail_interval_ms = 2000
+max_observation_chars = 1000000
+max_debug_chars = 4000000
+
+[human_control]
+# null/absent means the user returns control explicitly. This is coordination,
+# not a permission gate.
+# inactivity_timeout_ms = 30000

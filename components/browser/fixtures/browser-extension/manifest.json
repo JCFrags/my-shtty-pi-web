@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "Pi Web Workspace Extension Fixture",
+  "version": "0.1.0",
+  "description": "A deterministic extension target for persistent-profile and CDP tests.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Pi Web fixture",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": [
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "content.js"
+      ]
+    }
+  ],
+  "commands": {
+    "fill-test-identity": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L",
+        "linux": "Ctrl+Shift+L"
+      },
+      "description": "Fill the local Pi Web fixture identity"
+    }
+  }
+}

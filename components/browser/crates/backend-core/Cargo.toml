@@ -1,0 +1,13 @@
+[package]
+name = "pi-web-backend-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+pi-web-protocol = { path = "../protocol" }
+thiserror.workspace = true

@@ -1,0 +1,8 @@
+# Profiles are created through `profile.create` or the workspace UI. Example:
+#
+# [[profiles]]
+# name = "main"
+# data_dir = "~/.local/share/pi-web/profiles/main"
+# extensions = ["~/.local/share/pi-web/extensions/keepassxc-browser"]
+# launch_args = []
+# visible_by_default = true

@@ -1,0 +1,13 @@
+[tool.uv.workspace]
+members = ["services/reader", "services/docling"]
+
+[dependency-groups]
+dev = ["pytest==9.0.2"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests/reader", "tests/docling"]

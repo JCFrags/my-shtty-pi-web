@@ -1,0 +1,27 @@
+{
+  "name": "pi-web-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local browser operating environment for Pi",
+  "packageManager": "pnpm@10.13.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "check": "node scripts/check-repo.mjs && pnpm -r check",
+    "test": "pnpm test:js && pnpm test:python",
+    "test:js": "node scripts/check-repo.mjs && node --test packages/*/test/*.test.mjs apps/workspace/test/*.test.mjs tests/**/*.test.mjs",
+    "test:python": "uv run pytest tests/reader tests/docling",
+    "test:reference": "node --test packages/browserd-reference/test/*.test.mjs tests/multi-agent/*.test.mjs",
+    "test:conformance": "node scripts/run-agent-browser-conformance.mjs",
+    "test:extension": "node scripts/password-manager-spike.mjs",
+    "benchmark:browser": "node scripts/benchmark-agent-browser.mjs",
+    "benchmark:observations": "pnpm --filter @pi-web/result-format benchmark",
+    "format": "pnpm -r format",
+    "doctor": "node packages/browserd-reference/src/doctor.mjs"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

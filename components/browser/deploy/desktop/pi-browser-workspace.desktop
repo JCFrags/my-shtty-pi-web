@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Pi Browser Workspace
+Comment=Live browser workspace for local Pi agents
+Exec=env GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 pi-browser-workspace --raise
+Icon=pi-browser-workspace
+Terminal=false
+Categories=Development;Utility;
+StartupNotify=true
+SingleMainWindow=true

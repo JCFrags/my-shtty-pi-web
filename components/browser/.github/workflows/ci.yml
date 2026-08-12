@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  javascript-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: corepack prepare pnpm@10.13.1 --activate
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.10.0'
+          enable-cache: true
+      - run: uv python install 3.13
+      - run: pnpm install --no-frozen-lockfile
+      - run: uv sync --all-packages
+      - run: pnpm check
+      - run: pnpm test
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.88.0'
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets --exclude pi-browser-workspace
+      - run: cargo test --workspace --exclude pi-browser-workspace
+
+  fedora-workspace:
+    runs-on: ubuntu-latest
+    container: fedora:43
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Fedora build prerequisites
+        run: >-
+          dnf install -y
+          gcc gcc-c++ make pkgconf-pkg-config curl git openssl-devel
+          webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel
+          libxdo-devel gtk3-devel glib2-devel cairo-devel pango-devel
+          gdk-pixbuf2-devel nodejs npm
+      - name: Build the workspace shell
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.88.0
+          export PATH="$HOME/.cargo/bin:$PATH"
+          corepack enable
+          corepack prepare pnpm@10.13.1 --activate
+          pnpm install --no-frozen-lockfile
+          pnpm --filter @pi-web/workspace build
+          cargo check -p pi-browser-workspace

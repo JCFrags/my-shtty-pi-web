@@ -1,0 +1,161 @@
+[
+  {
+    "name": "search-results",
+    "value": {
+      "results": [
+        {
+          "title": "Pi extensions",
+          "url": "https://example.test/extensions",
+          "snippet": "Extension API and lifecycle",
+          "engines": [
+            "docs"
+          ]
+        },
+        {
+          "title": "Pi RPC",
+          "url": "https://example.test/rpc",
+          "snippet": "RPC transport reference",
+          "engines": [
+            "docs"
+          ]
+        },
+        {
+          "title": "Agent browser",
+          "url": "https://example.test/browser",
+          "snippet": "Browser session reference",
+          "engines": [
+            "docs",
+            "github"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "interactive-controls",
+    "value": {
+      "controls": [
+        {
+          "ref": "e12",
+          "role": "button",
+          "name": "Add client",
+          "state": "enabled"
+        },
+        {
+          "ref": "e18",
+          "role": "textbox",
+          "name": "Search clients",
+          "state": "enabled"
+        },
+        {
+          "ref": "e25",
+          "role": "button",
+          "name": "Display options",
+          "state": "enabled"
+        },
+        {
+          "ref": "e31",
+          "role": "link",
+          "name": "Desktop-PC",
+          "state": "enabled"
+        },
+        {
+          "ref": "e42",
+          "role": "button",
+          "name": "Block",
+          "state": "enabled"
+        },
+        {
+          "ref": "e49",
+          "role": "button",
+          "name": "Reconnect",
+          "state": "enabled"
+        }
+      ]
+    }
+  },
+  {
+    "name": "tabs",
+    "value": {
+      "tabs": [
+        {
+          "tabId": "tab-a",
+          "title": "UniFi",
+          "url": "https://unifi.home.arpa",
+          "state": "idle",
+          "control": "agent"
+        },
+        {
+          "tabId": "tab-b",
+          "title": "Vaultwarden",
+          "url": "https://vault.home.arpa",
+          "state": "idle",
+          "control": "human"
+        },
+        {
+          "tabId": "tab-c",
+          "title": "Fedora docs",
+          "url": "https://docs.fedoraproject.org",
+          "state": "running",
+          "control": "agent"
+        }
+      ]
+    }
+  },
+  {
+    "name": "network",
+    "value": {
+      "requests": [
+        {
+          "method": "GET",
+          "status": 200,
+          "type": "document",
+          "url": "https://app.test/"
+        },
+        {
+          "method": "GET",
+          "status": 200,
+          "type": "fetch",
+          "url": "https://app.test/api/clients"
+        },
+        {
+          "method": "POST",
+          "status": 201,
+          "type": "fetch",
+          "url": "https://app.test/api/action"
+        },
+        {
+          "method": "GET",
+          "status": 304,
+          "type": "script",
+          "url": "https://app.test/app.js"
+        }
+      ]
+    }
+  },
+  {
+    "name": "downloads",
+    "value": {
+      "downloads": [
+        {
+          "name": "report.pdf",
+          "state": "complete",
+          "bytes": 230411,
+          "artifactId": "01JREPORT"
+        },
+        {
+          "name": "clients.csv",
+          "state": "complete",
+          "bytes": 8401,
+          "artifactId": "01JCLIENTS"
+        },
+        {
+          "name": "backup.zip",
+          "state": "running",
+          "bytes": 1048576,
+          "artifactId": "01JBACKUP"
+        }
+      ]
+    }
+  }
+]

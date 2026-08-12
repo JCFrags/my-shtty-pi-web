@@ -1,0 +1,31 @@
+[package]
+name = "pi-browserd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+base64.workspace = true
+chrono.workspace = true
+dashmap.workspace = true
+futures.workspace = true
+pi-web-artifact-store = { path = "../artifact-store" }
+pi-web-backend-agent-browser = { path = "../backend-agent-browser" }
+pi-web-backend-core = { path = "../backend-core" }
+pi-web-backend-pinchtab = { path = "../backend-pinchtab" }
+pi-web-backend-rustwright = { path = "../backend-rustwright" }
+pi-web-protocol = { path = "../protocol" }
+pi-web-reader-client = { path = "../reader-client" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+toml.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+uuid.workspace = true

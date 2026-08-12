@@ -1,0 +1,17 @@
+[Unit]
+Description=Pi Web Workspace main-content reader
+After=network-online.target pi-web-docling.service
+Wants=network-online.target pi-web-docling.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/lib/pi-web-workspace
+ExecStart=%h/.local/bin/uv run --project %h/.local/lib/pi-web-workspace/services/reader pi-web-reader
+Environment=PI_WEB_READER_HOST=127.0.0.1
+Environment=PI_WEB_READER_PORT=8787
+Environment=PI_WEB_DOCLING_URL=http://127.0.0.1:8792/
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

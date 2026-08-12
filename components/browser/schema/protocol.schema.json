@@ -1,0 +1,346 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pi-web.local/schema/browser-protocol-v2.json",
+  "title": "Pi Web Browser Protocol 2",
+  "description": "Schema authority for the strict browser subsystem. The authenticated principal is supplied by the transport and is not a request parameter.",
+  "type": "object",
+  "required": ["version", "supportedPaths", "methods", "events", "$defs"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "2.0.0" },
+    "supportedPaths": {
+      "const": ["agent-browser/chrome", "pinchtab/chrome"]
+    },
+    "methods": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/methodName" },
+      "uniqueItems": true
+    },
+    "events": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/eventName" },
+      "uniqueItems": true
+    },
+    "$defs": { "type": "object" }
+  },
+  "version": "2.0.0",
+  "supportedPaths": ["agent-browser/chrome", "pinchtab/chrome"],
+  "methods": [
+    "system.capabilities", "session.create", "session.list", "session.close",
+    "tab.create", "tab.list", "tab.close", "browser.observe", "browser.act",
+    "operation.get", "operation.cancel", "artifact.list", "artifact.get", "artifact.delete",
+    "transfer.stageUpload", "transfer.commitUpload", "control.takeover", "control.return",
+    "lifecycle.cleanup", "lifecycle.recover"
+  ],
+  "events": [
+    "session.changed", "tab.changed", "operation.changed", "artifact.created",
+    "control.changed", "lifecycle.changed"
+  ],
+  "$defs": {
+    "nonEmpty": { "type": "string", "minLength": 1 },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "pathId": { "type": "string", "enum": ["agent-browser/chrome", "pinchtab/chrome"] },
+    "methodName": {
+      "type": "string",
+      "enum": [
+        "system.capabilities", "session.create", "session.list", "session.close",
+        "tab.create", "tab.list", "tab.close", "browser.observe", "browser.act",
+        "operation.get", "operation.cancel", "artifact.list", "artifact.get", "artifact.delete",
+        "transfer.stageUpload", "transfer.commitUpload", "control.takeover", "control.return",
+        "lifecycle.cleanup", "lifecycle.recover"
+      ]
+    },
+    "eventName": {
+      "type": "string",
+      "enum": ["session.changed", "tab.changed", "operation.changed", "artifact.created", "control.changed", "lifecycle.changed"]
+    },
+    "principal": {
+      "description": "Authenticated transport identity. The server creates this value after authentication.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principalId", "authenticationId"],
+      "properties": {
+        "principalId": { "$ref": "#/$defs/id" },
+        "authenticationId": { "$ref": "#/$defs/id" }
+      }
+    },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principalId", "agentId"],
+      "properties": {
+        "principalId": { "$ref": "#/$defs/id" },
+        "agentId": { "$ref": "#/$defs/id" }
+      }
+    },
+    "pathIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pathId", "backendVersion", "provider", "hostId", "hostGeneration", "engineGeneration"],
+      "properties": {
+        "pathId": { "$ref": "#/$defs/pathId" },
+        "backendVersion": { "$ref": "#/$defs/nonEmpty" },
+        "provider": { "const": "chrome" },
+        "hostId": { "$ref": "#/$defs/id" },
+        "hostGeneration": { "type": "integer", "minimum": 1 },
+        "engineGeneration": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "address": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentId", "sessionId", "tabId", "pathId", "hostGeneration", "engineGeneration", "controlEpoch"],
+      "properties": {
+        "agentId": { "$ref": "#/$defs/id" },
+        "sessionId": { "$ref": "#/$defs/id" },
+        "tabId": { "$ref": "#/$defs/id" },
+        "pathId": { "$ref": "#/$defs/pathId" },
+        "hostGeneration": { "type": "integer", "minimum": 1 },
+        "engineGeneration": { "type": "integer", "minimum": 1 },
+        "controlEpoch": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pathId", "actions", "observations", "touch", "uploads", "downloads", "visual"],
+      "properties": {
+        "pathId": { "$ref": "#/$defs/pathId" },
+        "actions": { "type": "array", "items": { "$ref": "#/$defs/actionKind" }, "uniqueItems": true },
+        "observations": { "type": "array", "items": { "$ref": "#/$defs/observationView" }, "uniqueItems": true },
+        "touch": { "const": false },
+        "uploads": { "type": "boolean" },
+        "downloads": { "type": "boolean" },
+        "visual": { "type": "boolean" }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "owner", "path", "capabilities", "state", "createdAt"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/id" },
+        "owner": { "$ref": "#/$defs/owner" },
+        "path": { "$ref": "#/$defs/pathIdentity" },
+        "capabilities": { "$ref": "#/$defs/capabilities" },
+        "state": { "enum": ["creating", "ready", "closing", "closed", "failed", "recovering"] },
+        "createdAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "viewport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["viewportId", "generation", "cssWidth", "cssHeight", "deviceScaleFactor", "scrollX", "scrollY", "coordinateSpace"],
+      "properties": {
+        "viewportId": { "$ref": "#/$defs/id" },
+        "generation": { "type": "integer", "minimum": 1 },
+        "cssWidth": { "type": "integer", "minimum": 1 },
+        "cssHeight": { "type": "integer", "minimum": 1 },
+        "deviceScaleFactor": { "type": "number", "exclusiveMinimum": 0 },
+        "scrollX": { "type": "number" },
+        "scrollY": { "type": "number" },
+        "coordinateSpace": { "const": "css-viewport-top-left" }
+      }
+    },
+    "screenshotBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "sha256", "sequence", "capturedAt", "pixelWidth", "pixelHeight", "viewport"],
+      "properties": {
+        "artifactId": { "$ref": "#/$defs/id" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "capturedAt": { "$ref": "#/$defs/timestamp" },
+        "pixelWidth": { "type": "integer", "minimum": 1 },
+        "pixelHeight": { "type": "integer", "minimum": 1 },
+        "viewport": { "$ref": "#/$defs/viewport" }
+      }
+    },
+    "observationView": { "enum": ["main", "interactive", "visual", "full", "diff"] },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observationId", "operationId", "owner", "address", "path", "view", "sequence", "observedAt", "title", "url", "content", "truncated"],
+      "properties": {
+        "observationId": { "$ref": "#/$defs/id" },
+        "operationId": { "$ref": "#/$defs/id" },
+        "owner": { "$ref": "#/$defs/owner" },
+        "address": { "$ref": "#/$defs/address" },
+        "path": { "$ref": "#/$defs/pathIdentity" },
+        "view": { "$ref": "#/$defs/observationView" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "observedAt": { "$ref": "#/$defs/timestamp" },
+        "title": { "type": "string" },
+        "url": { "type": "string" },
+        "content": { "type": "string" },
+        "controls": { "type": "array", "items": { "type": "object" } },
+        "changed": { "type": "array", "items": { "type": "string" } },
+        "screenshot": { "$ref": "#/$defs/screenshotBinding" },
+        "fullArtifactId": { "$ref": "#/$defs/id" },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "point": {
+      "type": "object", "additionalProperties": false, "required": ["x", "y"],
+      "properties": { "x": { "type": "number", "minimum": 0 }, "y": { "type": "number", "minimum": 0 } }
+    },
+    "mouseButton": { "enum": ["left", "middle", "right"] },
+    "actionKind": {
+      "enum": ["navigate", "mouse-move", "mouse-down", "mouse-up", "click", "double-click", "wheel", "drag", "key-press", "key-down", "key-up", "text-input", "fill", "select", "upload", "download", "back", "forward", "reload", "wait"]
+    },
+    "action": {
+      "oneOf": [
+        { "$ref": "#/$defs/navigateAction" },
+        { "$ref": "#/$defs/mouseMoveAction" },
+        { "$ref": "#/$defs/mouseButtonAction" },
+        { "$ref": "#/$defs/wheelAction" },
+        { "$ref": "#/$defs/dragAction" },
+        { "$ref": "#/$defs/keyAction" },
+        { "$ref": "#/$defs/textAction" },
+        { "$ref": "#/$defs/selectAction" },
+        { "$ref": "#/$defs/uploadAction" },
+        { "$ref": "#/$defs/downloadAction" },
+        { "$ref": "#/$defs/simpleAction" },
+        { "$ref": "#/$defs/waitAction" }
+      ]
+    },
+    "visualGuard": {
+      "type": "object", "additionalProperties": false,
+      "required": ["viewportId", "viewportGeneration", "screenshotSha256", "screenshotSequence"],
+      "properties": {
+        "viewportId": { "$ref": "#/$defs/id" },
+        "viewportGeneration": { "type": "integer", "minimum": 1 },
+        "screenshotSha256": { "$ref": "#/$defs/sha256" },
+        "screenshotSequence": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "navigateAction": { "type": "object", "additionalProperties": false, "required": ["kind", "url"], "properties": { "kind": { "const": "navigate" }, "url": { "$ref": "#/$defs/nonEmpty" } } },
+    "mouseMoveAction": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "point", "visualGuard"],
+      "properties": {
+        "kind": { "const": "mouse-move" }, "point": { "$ref": "#/$defs/point" },
+        "visualGuard": { "$ref": "#/$defs/visualGuard" }
+      }
+    },
+    "mouseButtonAction": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "point", "button", "visualGuard"],
+      "properties": {
+        "kind": { "enum": ["mouse-down", "mouse-up", "click", "double-click"] },
+        "point": { "$ref": "#/$defs/point" }, "button": { "$ref": "#/$defs/mouseButton" },
+        "visualGuard": { "$ref": "#/$defs/visualGuard" }
+      }
+    },
+    "wheelAction": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "deltaX", "deltaY", "visualGuard"],
+      "properties": { "kind": { "const": "wheel" }, "deltaX": { "type": "number" }, "deltaY": { "type": "number" }, "visualGuard": { "$ref": "#/$defs/visualGuard" } }
+    },
+    "dragAction": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "from", "to", "visualGuard"],
+      "properties": { "kind": { "const": "drag" }, "from": { "$ref": "#/$defs/point" }, "to": { "$ref": "#/$defs/point" }, "visualGuard": { "$ref": "#/$defs/visualGuard" } }
+    },
+    "keyAction": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "key"],
+      "properties": { "kind": { "enum": ["key-press", "key-down", "key-up"] }, "key": { "$ref": "#/$defs/nonEmpty" } }
+    },
+    "textAction": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "text"],
+      "properties": { "kind": { "enum": ["text-input", "fill"] }, "text": { "type": "string" }, "ref": { "$ref": "#/$defs/nonEmpty" } }
+    },
+    "selectAction": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "ref", "values"],
+      "properties": { "kind": { "const": "select" }, "ref": { "$ref": "#/$defs/nonEmpty" }, "values": { "type": "array", "items": { "type": "string" } } }
+    },
+    "uploadAction": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "ref", "uploadHandleIds"],
+      "properties": { "kind": { "const": "upload" }, "ref": { "$ref": "#/$defs/nonEmpty" }, "uploadHandleIds": { "type": "array", "items": { "$ref": "#/$defs/id" }, "minItems": 1 } }
+    },
+    "downloadAction": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "ref"],
+      "properties": { "kind": { "const": "download" }, "ref": { "$ref": "#/$defs/nonEmpty" } }
+    },
+    "simpleAction": { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "enum": ["back", "forward", "reload"] } } },
+    "waitAction": { "type": "object", "additionalProperties": false, "required": ["kind", "milliseconds"], "properties": { "kind": { "const": "wait" }, "milliseconds": { "type": "integer", "minimum": 0, "maximum": 120000 } } },
+    "operation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["operationId", "owner", "address", "path", "kind", "state", "createdAt", "updatedAt", "cancellationRequested"],
+      "properties": {
+        "operationId": { "$ref": "#/$defs/id" }, "owner": { "$ref": "#/$defs/owner" },
+        "address": { "$ref": "#/$defs/address" }, "path": { "$ref": "#/$defs/pathIdentity" },
+        "kind": { "$ref": "#/$defs/nonEmpty" },
+        "state": { "enum": ["queued", "running", "cancelling", "succeeded", "failed", "cancelled"] },
+        "createdAt": { "$ref": "#/$defs/timestamp" }, "updatedAt": { "$ref": "#/$defs/timestamp" },
+        "cancellationRequested": { "type": "boolean" }, "error": { "$ref": "#/$defs/error" }
+      }
+    },
+    "cancellationResult": {
+      "type": "object", "additionalProperties": false,
+      "required": ["operationId", "outcome", "state", "completedAt"],
+      "properties": {
+        "operationId": { "$ref": "#/$defs/id" },
+        "outcome": { "enum": ["cancelled", "already-terminal", "not-cancellable"] },
+        "state": { "enum": ["queued", "running", "cancelling", "succeeded", "failed", "cancelled"] },
+        "completedAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["artifactId", "owner", "kind", "sha256", "mediaType", "size", "createdAt", "integrityVerified"],
+      "properties": {
+        "artifactId": { "$ref": "#/$defs/id" }, "owner": { "$ref": "#/$defs/owner" },
+        "sessionId": { "$ref": "#/$defs/id" }, "tabId": { "$ref": "#/$defs/id" },
+        "kind": { "enum": ["screenshot", "full-observation", "download", "upload", "pdf", "diagnostic"] },
+        "sha256": { "$ref": "#/$defs/sha256" }, "mediaType": { "$ref": "#/$defs/nonEmpty" },
+        "size": { "type": "integer", "minimum": 0 }, "createdAt": { "$ref": "#/$defs/timestamp" },
+        "integrityVerified": { "const": true }
+      }
+    },
+    "transferHandle": {
+      "type": "object", "additionalProperties": false,
+      "required": ["transferId", "owner", "direction", "state", "sha256", "size", "expiresAt"],
+      "properties": {
+        "transferId": { "$ref": "#/$defs/id" }, "owner": { "$ref": "#/$defs/owner" },
+        "direction": { "enum": ["upload", "download"] }, "state": { "enum": ["staged", "committed", "consumed", "failed", "expired"] },
+        "sha256": { "$ref": "#/$defs/sha256" }, "size": { "type": "integer", "minimum": 0 }, "expiresAt": { "$ref": "#/$defs/timestamp" },
+        "artifactId": { "$ref": "#/$defs/id" }
+      }
+    },
+    "controlLease": {
+      "type": "object", "additionalProperties": false,
+      "required": ["owner", "sessionId", "tabId", "controller", "controlEpoch", "viewportGeneration", "changedAt"],
+      "properties": {
+        "owner": { "$ref": "#/$defs/owner" }, "sessionId": { "$ref": "#/$defs/id" }, "tabId": { "$ref": "#/$defs/id" },
+        "controller": { "enum": ["agent", "human"] }, "controlEpoch": { "type": "integer", "minimum": 1 },
+        "viewportGeneration": { "type": "integer", "minimum": 1 }, "changedAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "cleanupResult": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sessionId", "protected", "state", "closedTabs", "revokedTransfers", "completedAt"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/id" }, "protected": { "const": true },
+        "state": { "enum": ["closed", "partially-cleaned", "cleanup-failed"] },
+        "closedTabs": { "type": "integer", "minimum": 0 }, "revokedTransfers": { "type": "integer", "minimum": 0 },
+        "completedAt": { "$ref": "#/$defs/timestamp" }, "error": { "$ref": "#/$defs/error" }
+      }
+    },
+    "error": {
+      "type": "object", "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": { "enum": ["invalid-request", "unauthenticated", "wrong-owner", "not-found", "wrong-path", "stale-generation", "stale-visual", "stale-control-epoch", "unsupported", "conflict", "cancelled", "backend-failure", "integrity-failure", "cleanup-failure"] },
+        "message": { "$ref": "#/$defs/nonEmpty" }, "retryable": { "type": "boolean" },
+        "details": { "type": "object", "additionalProperties": true }, "path": { "$ref": "#/$defs/pathIdentity" },
+        "operationId": { "$ref": "#/$defs/id" }
+      }
+    },
+    "jsonRpcRequest": {
+      "type": "object", "additionalProperties": false, "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" }, "id": { "oneOf": [{ "type": "string" }, { "type": "integer" }] },
+        "method": { "$ref": "#/$defs/methodName" }, "params": { "type": "object", "not": { "required": ["principal"] }, "additionalProperties": true }
+      }
+    }
+  }
+}

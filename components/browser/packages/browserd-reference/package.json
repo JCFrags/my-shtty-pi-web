@@ -1,0 +1,16 @@
+{
+  "name": "@pi-web/browserd-reference",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "pi-browserd-reference": "./src/server.mjs",
+    "pi-web-reference-client": "./src/client.mjs"
+  },
+  "scripts": {
+    "build": "true",
+    "check": "node --check src/core.mjs && node --check src/server.mjs && node --check src/client.mjs",
+    "test": "node --test test/*.test.mjs",
+    "format": "true"
+  }
+}

@@ -1,0 +1,21 @@
+[Unit]
+Description=Pi Web Workspace Docling worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/lib/pi-web-workspace
+ExecStart=%h/.local/bin/uv run --project %h/.local/lib/pi-web-workspace/services/docling pi-web-docling
+Environment=PI_WEB_DOCLING_HOST=127.0.0.1
+Environment=PI_WEB_DOCLING_PORT=8792
+Environment=DOCLING_ARTIFACTS_PATH=%h/.cache/pi-web/document-models
+Restart=on-failure
+RestartSec=5
+
+# Docling model initialization can use substantial memory. This is not a hard
+# memory ceiling; local document conversion retains full capability.
+OOMPolicy=continue
+
+[Install]
+WantedBy=default.target

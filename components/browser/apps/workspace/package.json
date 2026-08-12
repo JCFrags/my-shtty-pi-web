@@ -1,0 +1,28 @@
+{
+  "name": "@pi-web/workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "tauri": "tauri",
+    "test": "node --experimental-strip-types --test test/*.test.mjs",
+    "check": "tsc -b",
+    "format": "true"
+  },
+  "dependencies": {
+    "@pi-web/protocol": "workspace:*",
+    "@tauri-apps/api": "2.8.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.8.4",
+    "@types/react": "19.1.8",
+    "@types/react-dom": "19.1.6",
+    "@vitejs/plugin-react": "4.6.0",
+    "typescript": "5.9.3",
+    "vite": "7.0.6"
+  }
+}

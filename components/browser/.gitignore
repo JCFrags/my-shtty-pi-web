@@ -1,0 +1,15 @@
+node_modules/
+target/
+dist/
+.venv/
+__pycache__/
+*.pyc
+*.tsbuildinfo
+.validation/
+artifacts/
+downloads/
+profiles/
+*.log
+.env
+.env.*
+!.env.example

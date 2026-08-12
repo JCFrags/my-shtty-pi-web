@@ -1,0 +1,11 @@
+[package]
+name = "pi-web-backend-rustwright"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+pi-web-backend-core = { path = "../backend-core" }
+pi-web-protocol = { path = "../protocol" }

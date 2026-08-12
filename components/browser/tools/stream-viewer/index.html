@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Pi Web stream viewer</title>
+  <style>
+    :root { color-scheme: dark; font: 14px system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #11151b; color: #e7edf5; display: grid; grid-template-rows: auto 1fr; min-height: 100vh; }
+    header { display: flex; gap: .5rem; padding: .6rem; background: #1a2029; border-bottom: 1px solid #34404f; }
+    input { flex: 1; min-width: 15rem; padding: .45rem; background: #0e1319; border: 1px solid #465568; color: inherit; }
+    button { padding: .45rem .8rem; }
+    #stage { min-height: 0; display: grid; place-items: center; overflow: hidden; }
+    canvas { max-width: 100%; max-height: calc(100vh - 3.5rem); outline: none; background: #000; cursor: default; }
+    #status { min-width: 8rem; align-self: center; color: #a9b7c8; }
+  </style>
+</head>
+<body>
+  <header>
+    <input id="url" aria-label="WebSocket stream URL">
+    <button id="connect">Connect</button>
+    <span id="status">disconnected</span>
+  </header>
+  <div id="stage"><canvas id="viewport" tabindex="0" aria-label="Interactive browser viewport"></canvas></div>
+<script type="module">
+const query = new URLSearchParams(location.search);
+const input = document.querySelector('#url');
+const button = document.querySelector('#connect');
+const status = document.querySelector('#status');
+const canvas = document.querySelector('#viewport');
+const context = canvas.getContext('2d');
+input.value = query.get('ws') || 'ws://127.0.0.1:9223';
+let socket;
+let metadata;
+let moveFrame;
+
+button.onclick = connect;
+if (query.has('ws')) connect();
+
+function connect() {
+  socket?.close();
+  status.textContent = 'connecting';
+  socket = new WebSocket(input.value.trim());
+  socket.onopen = () => status.textContent = 'connected';
+  socket.onclose = () => status.textContent = 'closed';
+  socket.onerror = () => status.textContent = 'error';
+  socket.onmessage = ({ data }) => {
+    if (typeof data !== 'string') return;
+    let message;
+    try { message = JSON.parse(data); } catch { return; }
+    if (message.type === 'status') {
+      status.textContent = message.connected ? (message.screencasting ? 'live' : 'browser connected') : 'browser disconnected';
+      return;
+    }
+    if (message.type !== 'frame' || !message.data) return;
+    metadata = message.metadata || {};
+    const image = new Image();
+    image.onload = () => {
+      const width = metadata.deviceWidth || image.naturalWidth;
+      const height = metadata.deviceHeight || image.naturalHeight;
+      if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+      context.drawImage(image, 0, 0, width, height);
+      status.textContent = 'live';
+    };
+    image.src = `data:image/jpeg;base64,${message.data}`;
+  };
+}
+
+function send(message) {
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+}
+function point(event) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left) / rect.width * (metadata?.deviceWidth || canvas.width),
+    y: (event.clientY - rect.top) / rect.height * (metadata?.deviceHeight || canvas.height),
+  };
+}
+function modifiers(event) {
+  return (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0);
+}
+function buttonName(value) { return value === 0 ? 'left' : value === 1 ? 'middle' : value === 2 ? 'right' : 'none'; }
+
+canvas.onpointerdown = (event) => {
+  canvas.focus();
+  canvas.setPointerCapture(event.pointerId);
+  if (event.pointerType === 'touch') {
+    send({ type: 'input_touch', eventType: 'touchStart', touchPoints: [{ ...point(event), id: event.pointerId }] });
+  } else {
+    send({ type: 'input_mouse', eventType: 'mousePressed', ...point(event), button: buttonName(event.button), clickCount: event.detail || 1, modifiers: modifiers(event) });
+  }
+};
+canvas.onpointerup = (event) => {
+  if (event.pointerType === 'touch') send({ type: 'input_touch', eventType: 'touchEnd', touchPoints: [] });
+  else send({ type: 'input_mouse', eventType: 'mouseReleased', ...point(event), button: buttonName(event.button), modifiers: modifiers(event) });
+};
+canvas.onpointermove = (event) => {
+  cancelAnimationFrame(moveFrame);
+  const coordinates = point(event);
+  moveFrame = requestAnimationFrame(() => {
+    if (event.pointerType === 'touch' && event.buttons) send({ type: 'input_touch', eventType: 'touchMove', touchPoints: [{ ...coordinates, id: event.pointerId }] });
+    else send({ type: 'input_mouse', eventType: 'mouseMoved', ...coordinates, modifiers: modifiers(event) });
+  });
+};
+canvas.onwheel = (event) => {
+  event.preventDefault();
+  send({ type: 'input_mouse', eventType: 'mouseWheel', ...point(event), deltaX: event.deltaX, deltaY: event.deltaY, modifiers: modifiers(event) });
+};
+canvas.onkeydown = (event) => {
+  event.preventDefault();
+  const mask = modifiers(event);
+  send({ type: 'input_keyboard', eventType: 'keyDown', key: event.key, code: event.code, modifiers: mask });
+  if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    send({ type: 'input_keyboard', eventType: 'char', text: event.key, modifiers: mask });
+  }
+};
+canvas.onkeyup = (event) => {
+  event.preventDefault();
+  send({ type: 'input_keyboard', eventType: 'keyUp', key: event.key, code: event.code, modifiers: modifiers(event) });
+};
+</script>
+</body>
+</html>

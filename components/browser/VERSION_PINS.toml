@@ -1,0 +1,35 @@
+# Verified/pinned on 2026-07-29. Update only with conformance and workflow benchmarks.
+[pi]
+package = "@earendil-works/pi-coding-agent"
+version = "0.83.0"
+
+[agent_browser]
+version = "0.33.1"
+minimum = "0.31.0"
+maximum_exclusive = "0.34.0"
+namespace = "pi-web-v1"
+idle_timeout_ms = 0
+
+[tauri]
+version = "2.11.5"
+
+[trafilatura]
+version = "2.1.0"
+
+[docling]
+version = "2.115.0"
+
+[searxng]
+# SearXNG is a rolling release. This immutable image digest must be filled by
+# scripts/update-pins.sh and reviewed before deployment.
+image = "docker.io/searxng/searxng:2026.7.28-c01178d03"
+
+[cloakbrowser]
+wrapper_version = "0.5.3"
+free_chromium_version = "146.0.7680.177.5"
+usage = "visible-chromium-only"
+
+[lightpanda]
+version = "0.3.6"
+channel = "stable"
+# Optional SHA-256 enforcement is supported by deploy/versions.env.

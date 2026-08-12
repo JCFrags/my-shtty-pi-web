@@ -1,0 +1,17 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Visual Control Fixture</title><style>
+body{font:16px system-ui;margin:0;background:#f5f7fb;color:#172033}header{padding:16px 24px;background:#172033;color:white;position:sticky;top:0}main{width:760px;margin:24px auto}.blocks{display:flex;gap:16px}.block{width:120px;height:80px;border:3px solid #172033;display:grid;place-items:center;font-weight:700}.red{background:#ef4444}.green{background:#22c55e}.blue{background:#3b82f6}.target{width:120px;height:80px;background:#facc15;border:3px solid #172033;margin:20px 0;display:grid;place-items:center}.track{width:500px;height:64px;background:#dbeafe;position:relative;border:2px solid}.drag{width:48px;height:48px;background:#7c3aed;position:absolute;left:8px;top:8px}.drop{position:absolute;right:8px;top:8px;width:48px;height:48px;border:2px dashed}.scroll-space{height:420px;border-left:8px solid #0ea5e9}.controls{display:grid;gap:10px}input{font:inherit;padding:8px}output{white-space:pre-wrap;display:block;background:white;border:1px solid;padding:12px}
+</style></head><body><header>Deterministic visual controls</header><main>
+<div class="blocks"><div class="block red">RED</div><div class="block green">GREEN</div><div class="block blue">BLUE</div></div>
+<button id="target" class="target">Target center 60,40</button>
+<div id="track" class="track"><div id="drag" class="drag" draggable="true" aria-label="Drag handle"></div><div id="drop" class="drop" aria-label="Drop target"></div></div>
+<div class="controls"><label>Text input <input id="text" autocomplete="off"></label><button id="reset">Reset counters</button><output id="state" aria-live="polite"></output></div>
+<div class="scroll-space"></div><button id="scroll-target">Scroll target</button>
+</main><script>
+const state={move:0,down:0,up:0,click:0,doubleClick:0,wheel:0,drag:0,keyDown:0,keyUp:0,touch:0,text:"",scrollTargetVisible:false};
+const output=document.querySelector('#state');function render(){state.text=document.querySelector('#text').value;output.textContent=JSON.stringify(state);document.title=`Visual Control Fixture · ${state.click} clicks`;}
+const target=document.querySelector('#target');target.onmousemove=()=>{state.move++;render()};target.onmousedown=()=>{state.down++;render()};target.onmouseup=()=>{state.up++;render()};target.onclick=()=>{state.click++;render()};target.ondblclick=()=>{state.doubleClick++;render()};
+document.onwheel=()=>{state.wheel++;render()};document.onkeydown=()=>{state.keyDown++;render()};document.onkeyup=()=>{state.keyUp++;render()};document.ontouchstart=()=>{state.touch++;render()};
+const text=document.querySelector('#text');text.oninput=render;document.querySelector('#drag').ondragstart=e=>e.dataTransfer.setData('text/plain','fixture');const drop=document.querySelector('#drop');drop.ondragover=e=>e.preventDefault();drop.ondrop=e=>{e.preventDefault();state.drag++;render()};
+document.querySelector('#reset').onclick=()=>{for(const key of Object.keys(state))state[key]=typeof state[key]==='number'?0:key==='text'?'':false;text.value='';render()};new IntersectionObserver(([entry])=>{state.scrollTargetVisible=entry.isIntersecting;render()}).observe(document.querySelector('#scroll-target'));render();
+</script></body></html>

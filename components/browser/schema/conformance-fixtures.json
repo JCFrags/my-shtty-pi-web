@@ -1,0 +1,89 @@
+{
+  "version": "2.0.0",
+  "authenticatedPrincipal": {
+    "principalId": "principal-a",
+    "authenticationId": "unix-peer-1000"
+  },
+  "valid": {
+    "owner": { "principalId": "principal-a", "agentId": "agent-a" },
+    "path": {
+      "pathId": "agent-browser/chrome",
+      "backendVersion": "0.33.1",
+      "provider": "chrome",
+      "hostId": "host-a",
+      "hostGeneration": 4,
+      "engineGeneration": 7
+    },
+    "address": {
+      "agentId": "agent-a",
+      "sessionId": "session-a",
+      "tabId": "tab-a",
+      "pathId": "agent-browser/chrome",
+      "hostGeneration": 4,
+      "engineGeneration": 7,
+      "controlEpoch": 3
+    },
+    "visualGuard": {
+      "viewportId": "viewport-a",
+      "viewportGeneration": 9,
+      "screenshotSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "screenshotSequence": 22
+    },
+    "action": {
+      "kind": "click",
+      "point": { "x": 180, "y": 120 },
+      "button": "left",
+      "visualGuard": {
+        "viewportId": "viewport-a",
+        "viewportGeneration": 9,
+        "screenshotSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "screenshotSequence": 22
+      }
+    }
+  },
+  "invalid": [
+    {
+      "name": "malformed-empty-session",
+      "expectedCode": "invalid-request",
+      "address": {
+        "agentId": "agent-a", "sessionId": "", "tabId": "tab-a",
+        "pathId": "agent-browser/chrome", "hostGeneration": 4, "engineGeneration": 7, "controlEpoch": 3
+      }
+    },
+    {
+      "name": "wrong-owner",
+      "expectedCode": "wrong-owner",
+      "principalId": "principal-b",
+      "owner": { "principalId": "principal-a", "agentId": "agent-a" }
+    },
+    {
+      "name": "wrong-path",
+      "expectedCode": "wrong-path",
+      "actualPathId": "agent-browser/chrome",
+      "requestedPathId": "pinchtab/chrome"
+    },
+    {
+      "name": "unsupported-path",
+      "expectedCode": "invalid-request",
+      "requestedPathId": "rustwright/chrome"
+    },
+    {
+      "name": "stale-host-generation",
+      "expectedCode": "stale-generation",
+      "actualGeneration": 5,
+      "requestedGeneration": 4
+    },
+    {
+      "name": "stale-visual",
+      "expectedCode": "stale-visual",
+      "actualViewportGeneration": 10,
+      "requestedViewportGeneration": 9
+    },
+    {
+      "name": "stale-control-epoch",
+      "expectedCode": "stale-control-epoch",
+      "actualControlEpoch": 4,
+      "requestedControlEpoch": 3
+    }
+  ]
+}

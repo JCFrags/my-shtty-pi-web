@@ -1,0 +1,18 @@
+{
+  "name": "@pi-web/result-format",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "benchmark": "node ./src/benchmark.mjs",
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "format": "true"
+  },
+  "dependencies": {
+    "@toon-format/toon": "4.1.0"
+  }
+}

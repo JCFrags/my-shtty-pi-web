@@ -1,0 +1,1 @@
+document.querySelector('#fill').onclick=async()=>{const [tab]=await chrome.tabs.query({active:true,currentWindow:true});if(tab?.id)await chrome.scripting.executeScript({target:{tabId:tab.id},func:()=>{const input=document.querySelector('input[autocomplete="username"]');if(input){input.value='pi';input.dispatchEvent(new Event('input',{bubbles:true}));}}});window.close();};
