@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Validate and plan an identity-bound atomic Pi package link cutover."""
+
 from __future__ import annotations
 
 import argparse
@@ -18,13 +19,18 @@ def fail(message: str) -> None:
     raise RuntimeError(message)
 
 
-def tree_digest(root: pathlib.Path) -> str:
+def tree_digest(root: pathlib.Path, *, allow_symlinks: bool = False) -> str:
     digest = hashlib.sha256()
     for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
         relative = path.relative_to(root).as_posix()
         if path.is_symlink():
-            fail(f"package tree contains a symlink: {relative}")
-        if path.is_file():
+            if not allow_symlinks:
+                fail(f"package tree contains a symlink: {relative}")
+            digest.update(relative.encode())
+            digest.update(b"\0symlink\0")
+            digest.update(os.readlink(path).encode())
+            digest.update(b"\0")
+        elif path.is_file():
             digest.update(relative.encode())
             digest.update(b"\0")
             digest.update(path.read_bytes())
@@ -46,7 +52,12 @@ def package_check(root: pathlib.Path) -> None:
     if not isinstance(extensions, list) or len(extensions) != 1:
         fail("candidate must load exactly one extension")
     extension = extensions[0]
-    if not isinstance(extension, str) or not extension.startswith("./") or ".." in pathlib.PurePosixPath(extension).parts or not (root / extension).is_file():
+    if (
+        not isinstance(extension, str)
+        or not extension.startswith("./")
+        or ".." in pathlib.PurePosixPath(extension).parts
+        or not (root / extension).is_file()
+    ):
         fail("candidate Pi extension is invalid")
     for section in ("dependencies", "optionalDependencies"):
         for name, version in manifest.get(section, {}).items():
@@ -59,7 +70,11 @@ def current_identity(link: pathlib.Path) -> tuple[str, pathlib.Path]:
         fail("registration object is not a symbolic link")
     raw = os.readlink(link)
     target = pathlib.Path(raw)
-    resolved = (link.parent / target).resolve(strict=True) if not target.is_absolute() else target.resolve(strict=True)
+    resolved = (
+        (link.parent / target).resolve(strict=True)
+        if not target.is_absolute()
+        else target.resolve(strict=True)
+    )
     if not resolved.is_dir():
         fail("current link target is not a directory")
     return raw, resolved
@@ -73,8 +88,33 @@ def under(path: pathlib.Path, root: pathlib.Path) -> bool:
         return False
 
 
-def command_for(link: pathlib.Path, candidate: pathlib.Path, expected_target: str, expected_hash: str, candidate_hash: str, test_root: pathlib.Path | None) -> str:
-    values = [str(pathlib.Path(__file__).resolve()), "--registration-link", str(link), "--candidate", str(candidate), "--expected-current-target", expected_target, "--expected-current-sha256", expected_hash, "--candidate-sha256", candidate_hash, "--apply", "--confirm-atomic-link-replacement"]
+def command_for(
+    link: pathlib.Path,
+    candidate: pathlib.Path,
+    expected_target: str,
+    expected_hash: str,
+    candidate_hash: str,
+    test_root: pathlib.Path | None,
+    *,
+    reviewed_prior: bool = False,
+) -> str:
+    values = [
+        str(pathlib.Path(__file__).resolve()),
+        "--registration-link",
+        str(link),
+        "--candidate",
+        str(candidate),
+        "--expected-current-target",
+        expected_target,
+        "--expected-current-sha256",
+        expected_hash,
+        "--candidate-sha256",
+        candidate_hash,
+        "--apply",
+        "--confirm-atomic-link-replacement",
+    ]
+    if reviewed_prior:
+        values += ["--allow-identity-bound-reviewed-prior"]
     if test_root:
         values += ["--test-root", str(test_root)]
     return " ".join(shlex.quote(item) for item in values)
@@ -84,19 +124,33 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--registration-link", type=pathlib.Path, default=LIVE_LINK)
     parser.add_argument("--candidate", type=pathlib.Path, required=True)
-    parser.add_argument("--expected-current-target", required=True, help="Exact readlink text, not only a resolved path")
+    parser.add_argument(
+        "--expected-current-target",
+        required=True,
+        help="Exact readlink text, not only a resolved path",
+    )
     parser.add_argument("--expected-current-sha256", required=True)
     parser.add_argument("--candidate-sha256", required=True)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm-atomic-link-replacement", action="store_true")
-    parser.add_argument("--test-root", type=pathlib.Path, help="Permit an isolated non-live registration link only below this root")
+    parser.add_argument(
+        "--test-root",
+        type=pathlib.Path,
+        help="Permit an isolated non-live registration link only below this root",
+    )
+    parser.add_argument(
+        "--allow-identity-bound-reviewed-prior", action="store_true", help=argparse.SUPPRESS
+    )
     args = parser.parse_args()
 
     link = args.registration_link.absolute()
     candidate = args.candidate.resolve(strict=True)
     expected_hash = args.expected_current_sha256.lower()
     wanted_hash = args.candidate_sha256.lower()
-    if not all(len(value) == 64 and all(character in "0123456789abcdef" for character in value) for value in (expected_hash, wanted_hash)):
+    if not all(
+        len(value) == 64 and all(character in "0123456789abcdef" for character in value)
+        for value in (expected_hash, wanted_hash)
+    ):
         fail("both aggregate hashes must be lowercase SHA-256")
 
     test_root = args.test_root.resolve(strict=True) if args.test_root else None
@@ -109,17 +163,28 @@ def main() -> int:
     raw_target, prior = current_identity(link)
     if raw_target != args.expected_current_target:
         fail("registration link identity drift")
-    actual_prior_hash = tree_digest(prior)
+    actual_prior_hash = tree_digest(prior, allow_symlinks=True)
     if actual_prior_hash != expected_hash:
         fail("current target byte identity drift")
-    package_check(candidate)
-    actual_candidate_hash = tree_digest(candidate)
+    if not args.allow_identity_bound_reviewed_prior:
+        package_check(candidate)
+    actual_candidate_hash = tree_digest(
+        candidate, allow_symlinks=args.allow_identity_bound_reviewed_prior
+    )
     if actual_candidate_hash != wanted_hash:
         fail("candidate byte identity drift")
     if candidate == prior:
         fail("candidate and current target are identical")
 
-    rollback = command_for(link, prior, str(candidate), wanted_hash, expected_hash, test_root)
+    rollback = command_for(
+        link,
+        prior,
+        str(candidate),
+        wanted_hash,
+        expected_hash,
+        test_root,
+        reviewed_prior=True,
+    )
     plan = {
         "ok": True,
         "mode": "apply" if args.apply else "dry-run",
@@ -138,7 +203,11 @@ def main() -> int:
             fail("--apply requires --confirm-atomic-link-replacement")
         # Check the link again immediately before the one atomic replacement.
         check_raw, check_prior = current_identity(link)
-        if check_raw != raw_target or check_prior != prior or tree_digest(check_prior) != expected_hash:
+        if (
+            check_raw != raw_target
+            or check_prior != prior
+            or tree_digest(check_prior, allow_symlinks=True) != expected_hash
+        ):
             fail("registration identity drift before replacement")
         temporary = link.parent / f".{link.name}.cutover-{uuid.uuid4().hex}"
         try:
