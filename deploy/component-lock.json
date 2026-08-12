@@ -85,7 +85,7 @@
     {
       "artifacts": [
         {
-          "digest": "sha256:4a61c614eeda0460bc81e30b56237cd397488afdc4211ad90fb1497bd5edb4e6",
+          "digest": "sha256:b050460c91cc2c9b8b84ce6e5c635b50788db259bc4be7d15a463ee203cf2d6e",
           "id": "file:pnpm-lock.yaml"
         }
       ],
