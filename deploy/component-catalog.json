@@ -179,6 +179,17 @@
       "rollback": {"mode": "safe-disable", "previous_known_good": null}
     },
     {
+      "id": "github-actions-checkout",
+      "kind": "ci-action",
+      "source": "https://github.com/actions/checkout/commit/11bd71901bbe5b1630ceea73d27597364c9af683",
+      "version": "11bd71901bbe5b1630ceea73d27597364c9af683",
+      "license": "MIT",
+      "digest_files": [".github/workflows/m0.yml"],
+      "compatibility": {"release_tag": "v4.2.2", "runner": "GitHub Actions"},
+      "health_fixture": "python3 scripts/ci_validate.py",
+      "rollback": {"mode": "git-revert", "previous_known_good": null}
+    },
+    {
       "id": "optional-model-set",
       "kind": "model-set",
       "source": "operator-selected local models",

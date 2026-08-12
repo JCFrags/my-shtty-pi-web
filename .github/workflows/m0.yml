@@ -1,0 +1,33 @@
+name: WebX M0 gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  m0:
+    name: Local-fixture M0 gate
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - webx-toolchain
+      - webx-ephemeral
+    timeout-minutes: 30
+    steps:
+      - name: Check out the exact revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Validate workflow policy
+        run: python3 scripts/ci_validate.py
+      - name: Run M0 release preparation
+        env:
+          NO_COLOR: "1"
+        run: make release-check

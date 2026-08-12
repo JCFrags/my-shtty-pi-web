@@ -3,6 +3,26 @@
     {
       "bundled": false,
       "component_refs": [
+        "github-actions-checkout"
+      ],
+      "health_fixture": "python3 scripts/ci_validate.py",
+      "id": "component:github-actions-checkout",
+      "kind": "ci-action",
+      "license": "MIT",
+      "license_status": "resolved",
+      "name": "GitHub Actions checkout",
+      "notice": "MIT license; retain copyright and license notice when distributed.",
+      "platform_support": "GitHub Actions ephemeral self-hosted Linux runner",
+      "replacement": "A reviewed local checkout procedure can replace the action.",
+      "scope": "ci",
+      "security_channel": "https://github.com/actions/checkout/security",
+      "source": "https://github.com/actions/checkout/commit/11bd71901bbe5b1630ceea73d27597364c9af683",
+      "upgrade_rollback": "Pin a reviewed immutable commit and revert the workflow and inventory together.",
+      "version": "11bd71901bbe5b1630ceea73d27597364c9af683"
+    },
+    {
+      "bundled": false,
+      "component_refs": [
         "meilisearch-image"
       ],
       "health_fixture": "fixture:meilisearch after WX-M0-012",

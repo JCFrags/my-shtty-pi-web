@@ -3,6 +3,30 @@
     {
       "artifacts": [
         {
+          "digest": "sha256:c379788081476d818a1467e8106e8e97b9d5d3f57811eea970b40674ca028430",
+          "id": "file:.github/workflows/m0.yml"
+        }
+      ],
+      "compatibility": {
+        "release_tag": "v4.2.2",
+        "runner": "GitHub Actions"
+      },
+      "enabled": true,
+      "health_fixture": "python3 scripts/ci_validate.py",
+      "id": "github-actions-checkout",
+      "kind": "ci-action",
+      "license": "MIT",
+      "rollback": {
+        "mode": "git-revert",
+        "previous_known_good": null
+      },
+      "source": "https://github.com/actions/checkout/commit/11bd71901bbe5b1630ceea73d27597364c9af683",
+      "status": "resolved",
+      "version": "11bd71901bbe5b1630ceea73d27597364c9af683"
+    },
+    {
+      "artifacts": [
+        {
           "digest": "sha256:0dd21dcc273b960f99fdf231157d7fdc9bee5714962b32221ba1cbbda49eab22",
           "id": "linux-arm64"
         },
