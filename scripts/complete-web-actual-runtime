@@ -103,12 +103,12 @@ for _ in $(seq 1 200); do [[ -S "$BROWSER_SOCKET" ]] && break; kill -0 "$BROWSER
 [[ -S "$BROWSER_SOCKET" ]] || { echo "complete-web-actual-runtime: isolated Browserd did not start" >&2; exit 1; }
 
 pnpm --dir "$ROOT/apps/webxd" build >"$OUTPUT/webxd-build.log" 2>&1
-BROWSERD_SOCKET="$BROWSER_SOCKET" WEBXD_SOCKET="$WEBXD_SOCKET" setsid node "$ROOT/apps/webxd/dist/apps/webxd/src/main.js" >"$OUTPUT/webxd.log" 2>&1 & WEBXD_PID=$!; WEBXD_PGID=$WEBXD_PID
+PI_WEB_QUALIFICATION_DESTINATION_AUTHORITY=isolated-loopback-fixtures-v1 BROWSERD_SOCKET="$BROWSER_SOCKET" WEBXD_SOCKET="$WEBXD_SOCKET" setsid node "$ROOT/apps/webxd/dist/apps/webxd/src/qualification-main.js" >"$OUTPUT/webxd.log" 2>&1 & WEBXD_PID=$!; WEBXD_PGID=$WEBXD_PID
 for _ in $(seq 1 200); do [[ -S "$WEBXD_SOCKET" ]] && break; kill -0 "$WEBXD_PID" 2>/dev/null || break; sleep .1; done
 [[ -S "$WEBXD_SOCKET" ]] || { echo "complete-web-actual-runtime: actual Webxd did not start" >&2; exit 1; }
 
 BROWSERD_SHA=$(sha256sum "$BROWSERD" | cut -d' ' -f1)
-WEBXD_SHA=$(sha256sum "$ROOT/apps/webxd/dist/apps/webxd/src/main.js" | cut -d' ' -f1)
+WEBXD_SHA=$(sha256sum "$ROOT/apps/webxd/dist/apps/webxd/src/qualification-main.js" | cut -d' ' -f1)
 AGENT_SHA=$(sha256sum "$AGENT_BROWSER" | cut -d' ' -f1)
 PINCH_SHA=$(sha256sum "$PINCHTAB" | cut -d' ' -f1)
 

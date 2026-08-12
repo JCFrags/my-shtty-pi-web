@@ -14,6 +14,11 @@ import type {
   BrowserWorkspaceResult,
   VisualGuard,
 } from "../../../packages/sdk/src/index.js";
+import {
+  FailClosedBrowserDestinationAuthority,
+  actionDestination,
+  type BrowserDestinationAuthority,
+} from "./destination-authority.js";
 import { BrowserPortError, type AuthorityActor, type BrowserDaemonPort } from "./ports.js";
 
 export interface BrowserRpcConnection {
@@ -72,7 +77,10 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
   readonly #sessionLanes = new Map<string, Promise<void>>();
   #shuttingDown = false;
 
-  constructor(private readonly connect: BrowserRpcConnectionFactory) {}
+  constructor(
+    private readonly connect: BrowserRpcConnectionFactory,
+    private readonly destinationAuthority: BrowserDestinationAuthority = new FailClosedBrowserDestinationAuthority(),
+  ) {}
 
   async capabilities(signal?: AbortSignal): Promise<readonly BrowserPathCapability[]> {
     const anonymous: AuthorityActor = { principalId: "webxd-system", agentId: "webxd-system", scopes: new Set() };
@@ -84,11 +92,14 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     return paths;
   }
 
-  async createSession(actor: AuthorityActor, request: BrowserSessionRequest, _operationId: string, signal?: AbortSignal): Promise<BrowserSession> {
+  async createSession(actor: AuthorityActor, request: BrowserSessionRequest, operationId: string, signal?: AbortSignal): Promise<BrowserSession> {
+    const authorizedUrl = request.url === undefined
+      ? undefined
+      : (await this.destinationAuthority.authorize({ actor, operationId, operation: "initial", url: request.url }, signal)).normalizedUrl;
     const connection = await this.connection(actor);
     const raw = record(await connection.call("session.create", {
       pathId: request.pathId,
-      ...(request.url === undefined ? {} : { url: request.url }),
+      ...(authorizedUrl === undefined ? {} : { url: authorizedUrl }),
       ...(request.visible === undefined ? {} : { visible: request.visible }),
       ...(request.label === undefined ? {} : { label: request.label }),
     }, signal));
@@ -194,11 +205,15 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
       const binding = this.owned(actor, sessionId);
       assertCapability(binding.session.capabilities, action.kind);
       if (isWorkspaceCuaAction(action)) return this.workspaceAct(actor, binding, action, operationId, signal);
+      const candidate = actionDestination(action);
+      const dispatchedAction = candidate === undefined
+        ? action
+        : { ...action, url: (await this.destinationAuthority.authorize({ actor, operationId, ...candidate }, signal)).normalizedUrl };
       await this.invalidatePendingFrame(sessionId);
       const raw = record(await (await this.connection(actor)).call("browser.act", {
         browserSessionId: sessionId,
         tabId: binding.session.tabId,
-        action: legacyAction(action),
+        action: legacyAction(dispatchedAction),
         operationId,
       }, signal));
       if (raw.ok !== true) throw new BrowserPortError("backend-failure", "browser action did not succeed", 502, true);

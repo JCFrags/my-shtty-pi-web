@@ -164,7 +164,17 @@ export interface UrlPolicyOptions {
   allowedSchemes?: readonly ("http:" | "https:")[];
 }
 
-const metadataHosts = new Set(["metadata.google.internal", "metadata.aws.internal"]);
+const metadataHosts = new Set([
+  "metadata.google.internal",
+  "metadata.aws.internal",
+  "metadata.azure.internal",
+  "instance-data.ec2.internal",
+]);
+const metadataAddresses = new Set([
+  "169.254.169.254",
+  "fd00:ec2::254",
+  "fe80::a9fe:a9fe",
+]);
 
 export function validatePublicDestination(
   rawUrl: string,
@@ -212,18 +222,22 @@ export function validatePublicDestination(
     if (!(error instanceof PolicyError) || error.code !== "WEBX_URL_INVALID") throw error;
   }
   if (literalAddressClass !== undefined && literalAddressClass !== "public") {
-    const code = literalAddressClass === "link_local"
-      ? "WEBX_POLICY_LINK_LOCAL_ADDRESS"
-      : "WEBX_POLICY_PRIVATE_ADDRESS";
+    const code = metadataAddresses.has(hostname)
+      ? "WEBX_POLICY_METADATA_ENDPOINT"
+      : literalAddressClass === "link_local"
+        ? "WEBX_POLICY_LINK_LOCAL_ADDRESS"
+        : "WEBX_POLICY_PRIVATE_ADDRESS";
     throw new PolicyError(code, `The literal destination address class '${literalAddressClass}' is blocked.`);
   }
 
   for (const address of resolvedAddresses) {
     const classification = classifyAddress(address);
     if (classification !== "public") {
-      const code = classification === "link_local"
-        ? "WEBX_POLICY_LINK_LOCAL_ADDRESS"
-        : "WEBX_POLICY_PRIVATE_ADDRESS";
+      const code = metadataAddresses.has(address.toLowerCase())
+        ? "WEBX_POLICY_METADATA_ENDPOINT"
+        : classification === "link_local"
+          ? "WEBX_POLICY_LINK_LOCAL_ADDRESS"
+          : "WEBX_POLICY_PRIVATE_ADDRESS";
       throw new PolicyError(code, `The destination address class '${classification}' is blocked.`);
     }
   }

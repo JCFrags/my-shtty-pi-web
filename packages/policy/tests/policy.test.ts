@@ -25,7 +25,7 @@ describe("public URL and SSRF policy", () => {
   ])("rejects encoded or resolved private target %s", (url, address) => {
     expectPolicyCode(
       () => validatePublicDestination(url, [address]),
-      address.startsWith("169.254") ? "WEBX_POLICY_LINK_LOCAL_ADDRESS" : "WEBX_POLICY_PRIVATE_ADDRESS",
+      address === "169.254.169.254" ? "WEBX_POLICY_METADATA_ENDPOINT" : "WEBX_POLICY_PRIVATE_ADDRESS",
     );
   });
 

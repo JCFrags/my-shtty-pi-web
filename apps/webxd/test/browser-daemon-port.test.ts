@@ -8,7 +8,7 @@ const capabilities = {
   protocolVersion: "2.0.0",
   supportedPathIds: ["agent-browser/chrome", "pinchtab/chrome"],
   paths: [
-    { pathId: "agent-browser/chrome", actions: ["navigate", "mouse-move", "mouse-down", "mouse-up", "click", "double-click", "wheel", "drag", "key-press", "key-down", "key-up", "text-input", "fill", "select", "upload", "download", "back", "forward", "reload", "wait"], observations: ["main", "interactive", "visual", "full", "diff"], visual: true, touch: false, uploads: true, downloads: true },
+    { pathId: "agent-browser/chrome", actions: ["navigate", "mouse-move", "mouse-down", "mouse-up", "click", "double-click", "wheel", "drag", "key-press", "key-down", "key-up", "text-input", "fill", "select", "upload", "download", "back", "forward", "reload", "wait", "tab-new", "tab-close", "tab-focus"], observations: ["main", "interactive", "visual", "full", "diff"], visual: true, touch: false, uploads: true, downloads: true },
     { pathId: "pinchtab/chrome", actions: ["navigate", "click", "fill"], observations: ["main", "interactive"], visual: false, touch: false, uploads: false, downloads: false },
   ],
 };
@@ -286,5 +286,42 @@ describe("BrowserDaemonRpcPort frozen browserd seam", () => {
     await expect(port.act(owner, "session-1", { kind: "mouse-move", x: 1, y: 1, visualGuard: { viewportId: "v", viewportGeneration: 1, screenshotSha256: digest, screenshotSequence: 1 } }, "operation-2")).rejects.toMatchObject({ code: "unsupported" });
     await expect(port.getSession({ ...owner, principalId: "principal-b" }, "session-1")).rejects.toMatchObject({ code: "wrong-owner" });
     expect(connection.call).toHaveBeenCalledTimes(before);
+  });
+
+  it("authorizes and normalizes every initial, navigate, and new-tab URL before dispatch", async () => {
+    const connection = rpc();
+    const authorize = vi.fn(async (request: { operation: string; url: string }) => ({
+      mode: "egress-bound" as const,
+      normalizedUrl: request.url.replace("source.example", "approved.example"),
+      asciiHostname: "approved.example",
+      port: 443,
+      resolvedAddresses: ["93.184.216.34"],
+      redirectPolicy: { revalidateEveryHop: true as const, maxRedirects: 10 },
+      egressBindingId: "egress-binding-0001",
+    }));
+    const port = new BrowserDaemonRpcPort(async () => connection, { authorize });
+    await port.createSession(owner, { pathId: "agent-browser/chrome", url: "https://source.example/start" }, "operation-create");
+    await port.act(owner, "session-1", { kind: "navigate", url: "https://source.example/next" }, "operation-navigate");
+    await port.act(owner, "session-1", { kind: "tab-new", url: "https://source.example/new" }, "operation-new-tab");
+
+    expect(authorize.mock.calls.map(([item]) => item.operation)).toEqual(["initial", "navigate", "new-tab"]);
+    expect(connection.call).toHaveBeenCalledWith("session.create", expect.objectContaining({ url: "https://approved.example/start" }), undefined);
+    expect(connection.call).toHaveBeenCalledWith("browser.act", expect.objectContaining({ action: { kind: "navigate", url: "https://approved.example/next" } }), undefined);
+    expect(connection.call).toHaveBeenCalledWith("browser.act", expect.objectContaining({ action: { kind: "tab-new", url: "https://approved.example/new" } }), undefined);
+  });
+
+  it.each([
+    ["initial", async (port: BrowserDaemonRpcPort) => port.createSession(owner, { pathId: "agent-browser/chrome", url: "http://127.0.0.1/" }, "blocked-initial")],
+    ["navigate", async (port: BrowserDaemonRpcPort) => { await create(port); return port.act(owner, "session-1", { kind: "navigate", url: "http://10.0.0.1/" }, "blocked-navigate"); }],
+    ["new-tab", async (port: BrowserDaemonRpcPort) => { await create(port); return port.act(owner, "session-1", { kind: "tab-new", url: "http://169.254.169.254/" }, "blocked-new-tab"); }],
+  ])("does not dispatch a refused %s URL", async (_name, run) => {
+    const connection = rpc();
+    const authorize = vi.fn(async () => { throw new Error("destination refused"); });
+    const port = new BrowserDaemonRpcPort(async () => connection, { authorize });
+    const before = connection.call.mock.calls.filter(([method]) => method === "session.create" || method === "browser.act").length;
+    await expect(run(port)).rejects.toThrow("destination refused");
+    const after = connection.call.mock.calls.filter(([method]) => method === "session.create" || method === "browser.act").length;
+    expect(after).toBe(_name === "initial" ? before : before + 1);
+    expect(connection.call.mock.calls.filter(([method]) => method === "browser.act")).toHaveLength(0);
   });
 });

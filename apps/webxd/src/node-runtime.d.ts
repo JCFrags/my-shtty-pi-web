@@ -19,6 +19,9 @@ declare module "node:net" {
   export function createServer(listener: (socket: Socket) => void): Server;
 }
 declare module "node:crypto" { export function randomBytes(size: number): { toString(encoding: "hex"): string }; }
+declare module "node:dns/promises" {
+  export function lookup(hostname: string, options: { all: true; verbatim: true }): Promise<readonly { address: string; family: number }[]>;
+}
 declare module "node:fs/promises" {
   export function chmod(path: string, mode: number): Promise<void>;
   export function lstat(path: string): Promise<{ isSocket(): boolean }>;

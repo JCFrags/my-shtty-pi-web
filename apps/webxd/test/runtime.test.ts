@@ -5,6 +5,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import type { NdjsonConnectionFactory } from "../../../packages/sdk/src/index.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebxClient, WebxError, WebxFacadeClient, UnixSocketTransport, nodeNdjsonConnectionFactory } from "../../../packages/sdk/src/index.js";
+import { FailClosedBrowserDestinationAuthority, type DestinationResolver } from "../src/destination-authority.js";
 import { WebxdRuntime, sameUserPiActorAuthenticator } from "../src/runtime.js";
 
 const paths = [
@@ -158,5 +159,69 @@ describe("actual WebX Unix runtime", () => {
     expect(browser.unregisters).toBe(1);
     await expect(readFile(webxPath)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(client.capabilities()).rejects.toThrow();
+  });
+
+  it("refuses actual Unix browser URL requests before Browserd dispatch", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "webxd-ssrf-"));
+    const previousRuntimeDirectory = process.env.XDG_RUNTIME_DIR;
+    process.env.XDG_RUNTIME_DIR = directory;
+    cleanup.push(async () => { process.env.XDG_RUNTIME_DIR = previousRuntimeDirectory; });
+    const browserPath = join(directory, "browserd.sock");
+    const webxPath = join(directory, "webxd.sock");
+    const browser = new FakeBrowserd(browserPath);
+    await browser.start();
+    cleanup.push(() => browser.stop());
+    const answers = new Map<string, readonly string[]>([
+      ["127.0.0.1", ["127.0.0.1"]],
+      ["10.0.0.8", ["10.0.0.8"]],
+      ["169.254.2.3", ["169.254.2.3"]],
+      ["169.254.169.254", ["169.254.169.254"]],
+      ["::ffff:7f00:1", ["::ffff:127.0.0.1"]],
+      ["mixed.example", ["93.184.216.34", "192.168.1.8"]],
+      ["redirect.example", ["93.184.216.34"]],
+    ]);
+    const destinationResolver: DestinationResolver = {
+      resolve: async (hostname) => answers.get(hostname) ?? [],
+    };
+    const runtime = new WebxdRuntime({
+      socketPath: webxPath,
+      browserSocketPath: browserPath,
+      cwd: "/deterministic/security-fixture",
+      authenticateActor: sameUserPiActorAuthenticator,
+      browserDestinationAuthority: new FailClosedBrowserDestinationAuthority(destinationResolver),
+    });
+    await runtime.start();
+    cleanup.push(() => runtime.stop());
+    const client = new WebxClient(new UnixSocketTransport(webxPath, nodeNdjsonConnectionFactory));
+    await client.bind("ssrf-owner");
+
+    const blocked = [
+      "http://127.0.0.1/",
+      "http://10.0.0.8/",
+      "http://169.254.2.3/",
+      "http://169.254.169.254/latest/meta-data",
+      "http://metadata.google.internal/computeMetadata/v1/",
+      "http://[::ffff:7f00:1]/",
+      "https://mixed.example/",
+      "https://redirect.example/to-private",
+    ];
+    for (const [index, url] of blocked.entries()) {
+      await expect(client.createBrowserSession(
+        { pathId: "agent-browser/chrome", url },
+        { idempotencyKey: `ssrf-initial-${index}` },
+      )).rejects.toMatchObject<WebxError>({ status: 403 });
+    }
+    expect(browser.methods).not.toContain("session.create");
+
+    const session = await client.createBrowserSession(
+      { pathId: "agent-browser/chrome" },
+      { idempotencyKey: "ssrf-blank-session" },
+    );
+    const beforeActions = browser.methods.filter((method) => method === "browser.act").length;
+    await expect(client.actBrowser(session.sessionId, { kind: "navigate", url: "http://127.0.0.1/" }, { idempotencyKey: "ssrf-navigate" }))
+      .rejects.toMatchObject<WebxError>({ status: 403 });
+    await expect(client.actBrowser(session.sessionId, { kind: "tab-new", url: "http://169.254.169.254/" }, { idempotencyKey: "ssrf-new-tab" }))
+      .rejects.toMatchObject<WebxError>({ status: 403 });
+    expect(browser.methods.filter((method) => method === "browser.act")).toHaveLength(beforeActions);
   });
 });

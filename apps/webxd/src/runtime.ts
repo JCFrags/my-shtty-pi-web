@@ -5,6 +5,7 @@ import process, { pid } from "node:process";
 import type { TransportRequest, TransportResponse } from "../../../packages/sdk/src/index.js";
 import { WebxAuthority } from "./authority.js";
 import { BrowserDaemonRpcPort, type BrowserRpcConnection, type BrowserRpcConnectionFactory } from "./browser-daemon-port.js";
+import type { BrowserDestinationAuthority } from "./destination-authority.js";
 import { PUBLIC_ARTIFACTS, PUBLIC_SOURCES } from "./fixtures.js";
 import type { AuthorityActor, IndexedSource } from "./ports.js";
 
@@ -37,6 +38,7 @@ export interface WebxdRuntimeOptions {
     readonly visibility: "public" | "internal" | "private" | "secret";
   }[];
   readonly browserConnectionFactory?: BrowserRpcConnectionFactory;
+  readonly browserDestinationAuthority?: BrowserDestinationAuthority;
   readonly authenticateActor?: WebxActorAuthenticator["authenticate"];
 }
 
@@ -50,7 +52,10 @@ export class WebxdRuntime {
   #started = false;
 
   constructor(private readonly options: WebxdRuntimeOptions) {
-    this.#browser = new BrowserDaemonRpcPort(options.browserConnectionFactory ?? createBrowserRpcConnectionFactory(options.browserSocketPath, options.cwd ?? "."));
+    this.#browser = new BrowserDaemonRpcPort(
+      options.browserConnectionFactory ?? createBrowserRpcConnectionFactory(options.browserSocketPath, options.cwd ?? "."),
+      options.browserDestinationAuthority,
+    );
     this.#authority = new WebxAuthority({
       browser: this.#browser,
       sources: options.sources ?? PUBLIC_SOURCES,
