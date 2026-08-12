@@ -102,6 +102,12 @@ class DocsCheckTest(unittest.TestCase):
             expected="README.md:3: broken local link: docs/missing.md",
         )
 
+    def test_virtual_environment_markdown_is_ignored(self) -> None:
+        hidden = self.root / ".venv/lib/python/site-packages/example"
+        hidden.mkdir(parents=True)
+        (hidden / "README.md").write_text("[Missing](missing.md)\n", encoding="utf-8")
+        self.run_check(success=True)
+
     def test_reference_style_link(self) -> None:
         (self.root / "README.md").write_text(
             "# Fixture\n\n[Guide][guide]\n\n[guide]: docs/guide.md#valid-anchor\n",
