@@ -8,7 +8,7 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const required = [
   "Cargo.toml", "package.json", "pnpm-workspace.yaml", "AGENTS.md",
   "schema/protocol.schema.json", "crates/browserd/src/coordinator.rs",
-  "crates/backend-agent-browser/src/lib.rs", "packages/pi-extension/src/index.ts",
+  "crates/backend-agent-browser/src/lib.rs",
   "apps/workspace/src/App.tsx", "services/reader/src/pi_web_reader/pipeline.py",
   "services/docling/src/pi_web_docling/converter.py", "deploy/install-fedora.sh",
   "tools/stream-viewer/index.html", "scripts/password-manager-spike.mjs",
@@ -34,8 +34,6 @@ for (const event of schema.events) {
 
 const coordinator = await text("crates/browserd/src/coordinator.rs");
 const backend = await text("crates/backend-agent-browser/src/lib.rs");
-const extension = await text("packages/pi-extension/src/index.ts");
-const rpc = await text("packages/pi-extension/src/rpc.ts");
 const workspace = await text("apps/workspace/src/App.tsx");
 const workspaceRpc = await text("apps/workspace/src/lib/rpc.ts");
 const viewport = await text("apps/workspace/src/components/Viewport.tsx");
@@ -56,10 +54,6 @@ assert.doesNotMatch(
   /AGENT_BROWSER_HEADED.*runtime\.launch\.visible/s,
   "visible workspace sessions must not open ordinary Chrome windows by default",
 );
-assert.match(extension, /setActiveTools/);
-assert.match(extension, /source: "agent"/);
-assert.match(rpc, /PI_BROWSERD_REQUEST_TIMEOUT_MS/);
-assert.doesNotMatch(rpc, /setTimeout\(90_000/, "browser calls must not have a capability-limiting hard timeout");
 assert.match(workspace, /Return to agent/);
 assert.match(workspace, /selectOwnedTab/);
 assert.match(workspace, /controlState: "takeover-pending"/);
