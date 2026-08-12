@@ -30,6 +30,10 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@vitest/coverage-v8@4.1.10)(vite@8.2.1)
 
+  apps/webxd: {}
+
+  packages/sdk: {}
+
   packages/test-fixtures: {}
 
 packages:
