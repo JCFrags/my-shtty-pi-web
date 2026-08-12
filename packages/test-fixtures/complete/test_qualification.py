@@ -67,6 +67,31 @@ class QualificationTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("unsafe or false evidence", result.stderr)
 
+    def test_real_package_archive_stage_and_shipped_bridge(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary = pathlib.Path(temporary)
+            staged = temporary / "pi-webx"
+            stage_result = run(STAGE, "--source", ROOT / "apps/pi-webx", "--output", staged)
+            self.assertEqual(stage_result.returncode, 0, stage_result.stderr or stage_result.stdout)
+            self.assertTrue((staged / "qualification/bridge.mjs").is_file())
+            self.assertFalse((staged / "node_modules").exists())
+            output = temporary / "evidence"
+            result = run(HARNESS, "--wiring-only", "--profile", "clean-install", "--entrypoint", staged / "qualification/bridge.mjs", "--package", staged, "--output", output, "--timeout-ms", "5000")
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            manifest = json.loads((output / "complete-manifest.json").read_text())
+            self.assertFalse(manifest["acceptanceEligible"])
+            self.assertEqual(manifest["package"]["aggregateSha256"], json.loads(stage_result.stdout)["aggregateSha256"])
+
+            other = temporary / "other"
+            shutil.copytree(staged, other)
+            false_pass = run(HARNESS, "--profile", "clean-install", "--entrypoint", staged / "qualification/bridge.mjs", "--package", staged, "--output", temporary / "false-pass", "--timeout-ms", "5000")
+            self.assertNotEqual(false_pass.returncode, 0)
+            self.assertIn("mock wiring cannot satisfy", false_pass.stderr)
+
+            wrong_root = run(HARNESS, "--wiring-only", "--profile", "clean-install", "--entrypoint", staged / "qualification/bridge.mjs", "--package", other, "--output", temporary / "wrong-root", "--timeout-ms", "5000")
+            self.assertNotEqual(wrong_root.returncode, 0)
+            self.assertIn("package root does not match", wrong_root.stderr)
+
     def test_stage_isolated_package_and_reject_developer_link(self):
         with tempfile.TemporaryDirectory() as temporary:
             temporary = pathlib.Path(temporary)

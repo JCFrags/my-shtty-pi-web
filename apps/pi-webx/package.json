@@ -6,6 +6,15 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "bin": {
+    "pi-webx-qualification": "./qualification/bridge.mjs"
+  },
+  "files": [
+    "src",
+    "skills",
+    "vendor",
+    "qualification"
+  ],
   "pi": {
     "extensions": [
       "./src/index.ts"

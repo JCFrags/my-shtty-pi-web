@@ -127,9 +127,12 @@ def main() -> int:
             stage.mkdir(mode=0o700)
             extract_package(archive, stage)
             package = manifest_check(stage)
-            install = subprocess.run([args.npm, "install", "--omit=dev", "--ignore-scripts", "--offline", "--no-audit", "--no-fund", "--legacy-peer-deps", "--package-lock=false"], cwd=stage, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-            if install.returncode != 0:
-                fail("isolated production dependency install failed: " + (install.stderr or install.stdout).strip())
+            manifest = json.loads((stage / "package.json").read_text(encoding="utf-8"))
+            production = {**manifest.get("dependencies", {}), **manifest.get("optionalDependencies", {})}
+            if production:
+                install = subprocess.run([args.npm, "install", "--omit=dev", "--omit=peer", "--ignore-scripts", "--offline", "--no-audit", "--no-fund", "--package-lock=false"], cwd=stage, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+                if install.returncode != 0:
+                    fail("isolated production dependency install failed: " + (install.stderr or install.stdout).strip())
             package = manifest_check(stage)
             digest = tree_digest(stage)
             os.replace(stage, output)
