@@ -32,6 +32,10 @@ importers:
 
   apps/webxd: {}
 
+  packages/artifacts: {}
+
+  packages/policy: {}
+
   packages/sdk: {}
 
   packages/test-fixtures: {}
