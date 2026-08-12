@@ -1,0 +1,881 @@
+{
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "component:meilisearch-image",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/meilisearch/meilisearch/tree/v1.53.0"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "0dd21dcc273b960f99fdf231157d7fdc9bee5714962b32221ba1cbbda49eab22"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "3f94965d79acd5ae318f48b2a59ad84abd0155d8d3bb5b4a2ce51e5b134a8928"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "a59e984fd90b9dee0c872cdb9183d330d71c038d7a3b35def5ca3ae7fb186fb2"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "Meilisearch Community Edition",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "runtime"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "scope": "required",
+      "type": "application",
+      "version": "v1.53.0"
+    },
+    {
+      "bom-ref": "component:native-tool-compatibility",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "toolchain.lock.yaml"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "3ebdd0f50a5d37a120efc3998ccc8b37fec7d177323c039fc2aad56e85b6cbaf"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "HOST-PACKAGES-NOT-BUNDLED"
+          }
+        }
+      ],
+      "name": "Fedora reference host tools",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "host"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "scope": "required",
+      "type": "library",
+      "version": "fedora-44-reference-host-1"
+    },
+    {
+      "bom-ref": "component:node-package-set",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "pnpm-lock.yaml"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "fb6e56cf0d5134e5d245eb48c5ae882b0cb8020a04a9f2db8dd5fd14007ed28b"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "AGGREGATE"
+          }
+        }
+      ],
+      "name": "WebX direct Node package set",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "build"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "scope": "required",
+      "type": "library",
+      "version": "lockfile-9"
+    },
+    {
+      "bom-ref": "component:node-runtime",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/nodejs/node/tree/v24.18.0"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "4477b9f78efb77744cf5eb57a0e9594dba66466b38b4e93fa9f35cb907a095a6"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "55aa7153f9d88f28d765fcdad5ae6945b5c0f98a36881703817e4c450fa76742"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "58c9520501f6ae2b52d5b210444e24b9d0c029a58c5011b797bc1fe7105886f6"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "Node.js",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "runtime"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "scope": "required",
+      "type": "application",
+      "version": "24.18.0"
+    },
+    {
+      "bom-ref": "component:optional-model-set",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "operator-selected local models"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "UNRESOLVED"
+          }
+        }
+      ],
+      "name": "Optional local model set",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "optional-runtime"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "safe-disabled"
+        }
+      ],
+      "scope": "excluded",
+      "type": "library",
+      "version": "UNRESOLVED_OPERATOR_SELECTION"
+    },
+    {
+      "bom-ref": "component:pi-coding-agent",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/earendil-works/pi/tree/v0.84.1/packages/coding-agent"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "Pi coding agent",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "runtime"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "scope": "required",
+      "type": "application",
+      "version": "0.84.1"
+    },
+    {
+      "bom-ref": "component:playwright-browser-set",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/microsoft/playwright/tree/v1.62.1"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "941cc91e5022880ac1d14ae90b476b624deb6399dbbc28d612d5d5bd7928fcbd"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "Playwright browser set",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "runtime"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "scope": "required",
+      "type": "library",
+      "version": "1.62.1-noble"
+    },
+    {
+      "bom-ref": "component:pnpm",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/pnpm/pnpm/tree/v10.13.1/pnpm"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "pnpm",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "build"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "scope": "required",
+      "type": "library",
+      "version": "10.13.1"
+    },
+    {
+      "bom-ref": "component:python-package-set",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "uv.lock"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "4d988aa783b2e3c33238bbd380c66dab200996d46c75c2903cded2f5e9fcece7"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "AGGREGATE"
+          }
+        }
+      ],
+      "name": "WebX direct Python package set",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "build"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "scope": "required",
+      "type": "library",
+      "version": "uv-lock-1"
+    },
+    {
+      "bom-ref": "component:python-runtime",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/python/cpython/tree/v3.14.6"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "143b1dddefaec3bd2e21e3b839b34a2b7fb9842272883c576420d605e9f30c63"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "74d0d71d0600e477651a077101d6e62d1e2e69b8e992ba18c993dd643b7ba222"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "PSF-2.0"
+        }
+      ],
+      "name": "Python",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "runtime"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "scope": "required",
+      "type": "application",
+      "version": "3.14.6"
+    },
+    {
+      "bom-ref": "component:remaining-deployment-image-set",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "deploy/compose"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "UNRESOLVED"
+          }
+        }
+      ],
+      "name": "Remaining deployment image set",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "runtime"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "unresolved"
+        }
+      ],
+      "scope": "required",
+      "type": "library",
+      "version": "UNRESOLVED_WX_M0_012"
+    },
+    {
+      "bom-ref": "component:schema-generator-set",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "packages/contracts"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "UNRESOLVED"
+          }
+        }
+      ],
+      "name": "Schema generator set",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "build"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "unresolved"
+        }
+      ],
+      "scope": "required",
+      "type": "library",
+      "version": "UNRESOLVED_WX_M0_004"
+    },
+    {
+      "bom-ref": "component:searxng-image",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/searxng/searxng/tree/54613defc"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "24c8ae7ffe51d2d0e0702a82309a527ed871d16ffd6f2c0f30f7bffdf92d699b"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "37baac8380e1a31e022b8dda0c58dbd6ba0630e3fdaf2c522bda3d140f5ef111"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "fa56e88e968f64316f3c9d0964161cf8825b46d063f7ce09b10f9f81ee649fd3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "AGPL-3.0-or-later"
+        }
+      ],
+      "name": "SearXNG",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "runtime-separate-service"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "scope": "required",
+      "type": "application",
+      "version": "2026.8.12-54613defc"
+    },
+    {
+      "bom-ref": "component:uv",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/astral-sh/uv/tree/0.12.0"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "2c5d6e3092cc5223b10ff403880cc75121bf64e84644e7a0c69f643b0d89ac95"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "625cade2a341d2dceaf8197e51c7271728060b729f64670562d0a74df303ef73"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "eaf842262aa1c418d8ecc5605f02ee1ebfd369124fa48548e85f9481a47831a9"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR MIT"
+        }
+      ],
+      "name": "uv",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "build"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "scope": "required",
+      "type": "library",
+      "version": "0.12.0"
+    },
+    {
+      "bom-ref": "npm:@eslint/js",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/eslint/eslint/tree/v10.0.1/packages/js"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "@eslint/js",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "development"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "purl": "pkg:npm/%40eslint/js@10.0.1",
+      "scope": "required",
+      "type": "library",
+      "version": "10.0.1"
+    },
+    {
+      "bom-ref": "npm:@vitest/coverage-v8",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/vitest-dev/vitest/tree/v4.1.10/packages/coverage-v8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "@vitest/coverage-v8",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "development"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "purl": "pkg:npm/%40vitest/coverage-v8@4.1.10",
+      "scope": "required",
+      "type": "library",
+      "version": "4.1.10"
+    },
+    {
+      "bom-ref": "npm:eslint",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/eslint/eslint/tree/v10.8.1"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "eslint",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "development"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "purl": "pkg:npm/eslint@10.8.1",
+      "scope": "required",
+      "type": "library",
+      "version": "10.8.1"
+    },
+    {
+      "bom-ref": "npm:typescript",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/microsoft/TypeScript/tree/v6.0.3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "typescript",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "development"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "purl": "pkg:npm/typescript@6.0.3",
+      "scope": "required",
+      "type": "library",
+      "version": "6.0.3"
+    },
+    {
+      "bom-ref": "npm:typescript-eslint",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/typescript-eslint/typescript-eslint/tree/v8.67.0/packages/typescript-eslint"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "typescript-eslint",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "development"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "purl": "pkg:npm/typescript-eslint@8.67.0",
+      "scope": "required",
+      "type": "library",
+      "version": "8.67.0"
+    },
+    {
+      "bom-ref": "npm:vitest",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/vitest-dev/vitest/tree/v4.1.10/packages/vitest"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "vitest",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "development"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "purl": "pkg:npm/vitest@4.1.10",
+      "scope": "required",
+      "type": "library",
+      "version": "4.1.10"
+    },
+    {
+      "bom-ref": "pypi:mypy",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/python/mypy/tree/v2.3.0"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "mypy",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "development"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "purl": "pkg:pypi/mypy@2.3.0",
+      "scope": "required",
+      "type": "library",
+      "version": "2.3.0"
+    },
+    {
+      "bom-ref": "pypi:pytest",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/pytest-dev/pytest/tree/9.1.1"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "pytest",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "development"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "purl": "pkg:pypi/pytest@9.1.1",
+      "scope": "required",
+      "type": "library",
+      "version": "9.1.1"
+    },
+    {
+      "bom-ref": "pypi:ruff",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/astral-sh/ruff/tree/0.16.2"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "Ruff",
+      "properties": [
+        {
+          "name": "webx:scope",
+          "value": "development"
+        },
+        {
+          "name": "webx:bundled",
+          "value": "false"
+        },
+        {
+          "name": "webx:license-status",
+          "value": "resolved"
+        }
+      ],
+      "purl": "pkg:pypi/ruff@0.16.2",
+      "scope": "required",
+      "type": "library",
+      "version": "0.16.2"
+    }
+  ],
+  "metadata": {
+    "component": {
+      "bom-ref": "webx",
+      "name": "WebX",
+      "type": "application",
+      "version": "0.0.0"
+    },
+    "timestamp": "2026-08-12T06:00:00Z",
+    "tools": {
+      "components": [
+        {
+          "name": "WebX dependency inventory",
+          "type": "application",
+          "version": "1"
+        }
+      ]
+    }
+  },
+  "serialNumber": "urn:uuid:90295202-2aa8-5fd5-96b0-962df19beae1",
+  "specVersion": "1.6",
+  "version": 1
+}
