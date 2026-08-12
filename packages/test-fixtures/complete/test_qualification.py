@@ -67,6 +67,22 @@ class QualificationTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("unsafe or false evidence", result.stderr)
 
+    def test_bounded_actual_plan_uses_real_fixture_targets_and_teardown_bounds(self):
+        actual = (ROOT / "apps/pi-webx/qualification/actual-check.mjs").read_text()
+        bridge = (ROOT / "apps/pi-webx/qualification/bridge.mjs").read_text()
+        self.assertIn('op("wait", "browser.wait", { text: "Pi Web main-content fixture" })', actual)
+        self.assertNotIn('selector: "#fixture"', actual)
+        self.assertIn('op("hide", "workspace.hide")', actual)
+        self.assertIn('op("workspace", "workspace.open")', actual)
+        self.assertIn("staleRefused", actual)
+        self.assertIn("closeAllConnections", actual)
+        self.assertIn("sleep(2_000)", actual)
+        self.assertIn("actualChecks.staleRefused = true", bridge)
+        self.assertIn("actualChecks.ownershipRefused = true", bridge)
+        self.assertIn("actualChecks.cancellationRefused = true", bridge)
+        self.assertIn("actualChecks.takeoverSucceeded = true", bridge)
+        self.assertIn("actualChecks.returnSucceeded = true", bridge)
+
     def test_actual_identity_false_pass_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             entrypoint = pathlib.Path(__file__).with_name("false-actual-identity.mjs")

@@ -106,8 +106,13 @@ async function browserCase(request) {
   const pathIdentities = new Set();
   let negativeSelector;
   let visual;
+  const actualChecks = {};
   for (const operation of request.operations) {
-    await executeOperation(request, operation, owners, pathIdentities);
+    try {
+      await executeOperation(request, operation, owners, pathIdentities, actualChecks);
+    } catch (error) {
+      throw new Error(`${request.caseId}:${operation.step}: ${safeMessage(error)}`);
+    }
     executed.push(operation.step);
     if (operation.selector === request.seededNegativeSelector) negativeSelector = { selector: operation.selector, dispatched: false, code: "invalid-selector-not-found" };
   }
@@ -137,13 +142,14 @@ async function browserCase(request) {
         : { eligible: false, reason: "deterministic Webxd and Browserd contract fixture; actual shipped daemons and adapters are not connected" },
       unsupportedChecks,
       cleanupRequired: true,
+      ...(actualRuntime ? { actualChecks } : {}),
       ...(negativeSelector ? { negativeSelector } : {}),
       ...(visual ? { visual } : {}),
     },
   };
 }
 
-async function executeOperation(request, operation, owners, pathIdentities) {
+async function executeOperation(request, operation, owners, pathIdentities, actualChecks) {
   const owner = operation.principal ?? owners[0];
   const action = operation.action;
   if (action === "browser.create" || action === "browser.create-owned") {
@@ -160,6 +166,7 @@ async function executeOperation(request, operation, owners, pathIdentities) {
       const target = sessions.get(targetOwner);
       require(target, "cross-owner target session does not exist");
       await assertRejects(() => call(owner, "browser.observe", { browserSessionId: target.sessionId, view: operation.view ?? "main" }, operation.step), /not found/i);
+      actualChecks.ownershipRefused = true;
       return;
     }
     const session = await ensureSession(owner, request, pathIdentities);
@@ -190,7 +197,11 @@ async function executeOperation(request, operation, owners, pathIdentities) {
     const kind = pointerKind(operation.kind);
     const visualAction = { kind, observationId: binding.observationId, viewportId: binding.viewportId, x: 0, y: 0, startX: 0, startY: 0, endX: 0, endY: 0, deltaX: 0, deltaY: 1 };
     try { await call(owner, "browser.act", { browserSessionId: session.sessionId, action: visualAction }, operation.step); }
-    catch (error) { if (operation.expect !== "stale" && !operation.useOldObservation) throw error; require(/stale/i.test(error.message), "stale visual action did not fail closed"); }
+    catch (error) {
+      if (operation.expect !== "stale" && !operation.useOldObservation) throw error;
+      require(/stale/i.test(error.message), "stale visual action did not fail closed");
+      actualChecks.staleRefused = true;
+    }
     return;
   }
   if (action === "browser.act" || action === "browser.click" || action === "browser.key" || action === "browser.text" || action === "browser.wait") {
@@ -220,9 +231,15 @@ async function executeOperation(request, operation, owners, pathIdentities) {
     await call(owner, "browser.workspace", { action: "show", browserSessionId: session.sessionId }, operation.step);
     return;
   }
+  if (action === "workspace.hide") {
+    await call(owner, "browser.workspace", { action: "hide" }, operation.step);
+    return;
+  }
   if (action === "workspace.takeover" || action === "workspace.return") {
     const session = await ensurePrimary(owner, request, pathIdentities);
     await call(owner, "browser.workspace", { action: action.endsWith("takeover") ? "takeover" : "return", browserSessionId: session.sessionId }, operation.step);
+    if (action.endsWith("takeover")) actualChecks.takeoverSucceeded = true;
+    else actualChecks.returnSucceeded = true;
     return;
   }
   if (action === "workspace.close") return;
@@ -230,6 +247,7 @@ async function executeOperation(request, operation, owners, pathIdentities) {
   if (action === "operation.cancel") {
     const controller = new AbortController(); controller.abort();
     await assertRejects(() => call(owner, "web.search", { query: "cancel fixture" }, operation.step, controller.signal), /abort|cancel/i);
+    actualChecks.cancellationRefused = true;
     return;
   }
   if (action === "artifact.read" || action === "artifact.read-pages" || action === "artifact.view" || action === "artifact.verify") {
@@ -293,7 +311,31 @@ async function ensureSession(owner, request, pathIdentities, forcedPath) {
   sessions.set(owner, result.data); pathIdentities.add(result.data.pathId); return result.data;
 }
 async function ensurePrimary(owner, request, paths) { const current = sessions.get(owner); if (current?.pathId === PATHS[0] && current.state !== "closed") return current; if (current) await closeOwner(owner); return ensureSession(owner, request, paths, PATHS[0]); }
-async function closeOwner(owner) { const session = sessions.get(owner); if (session && session.state !== "closed") { await call(owner, "browser.tabs", { action: "close-session", browserSessionId: session.sessionId }, `close-${owner}`); session.state = "closed"; } const value = clients.get(owner); if (value) { await value.stop({ ownerId: owner }); shutdownCount += 1; clients.delete(owner); } sessions.delete(owner); visualBindings.delete(owner); }
+async function closeOwner(owner) {
+  const session = sessions.get(owner);
+  let failure;
+  if (session && session.state !== "closed") {
+    try {
+      if (session.pathId === PATHS[0]) {
+        await call(owner, "browser.workspace", { action: "return", browserSessionId: session.sessionId }, `return-${owner}`);
+        await call(owner, "browser.workspace", { action: "hide" }, `hide-${owner}`);
+      }
+      await call(owner, "browser.tabs", { action: "close-session", browserSessionId: session.sessionId }, `close-${owner}`);
+      session.state = "closed";
+    } catch (error) {
+      failure = error;
+    }
+  }
+  const value = clients.get(owner);
+  if (value) {
+    await value.stop({ ownerId: owner }).catch(() => undefined);
+    shutdownCount += 1;
+    clients.delete(owner);
+  }
+  sessions.delete(owner);
+  visualBindings.delete(owner);
+  if (failure) throw failure;
+}
 async function closeAll() { for (const owner of [...clients.keys()]) await closeOwner(owner); if (runtime) for (const session of runtime.sessions.values()) session.state = "closed"; }
 async function shutdown() { await closeAll(); if (runtime) await runtime.stop(); await rm(runRoot, { recursive: true, force: true }); }
 
