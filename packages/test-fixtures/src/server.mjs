@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { isIP } from "node:net";
 import { clearTimeout, setTimeout } from "node:timers";
 import { URL } from "node:url";
+import { createAdversarialManifest } from "./adversarial.mjs";
 import { AUTH_CANARY, bodies, compressedLargeBody, createManifest, largeBody } from "./content.mjs";
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "::1"]);
@@ -37,6 +38,7 @@ export function createFixtureOrigin(options = {}) {
   assertLocalHost(host);
 
   const manifest = createManifest();
+  const adversarialManifest = createAdversarialManifest();
   let protectedPackets = 0;
   const sockets = new Set();
   const timers = new Set();
@@ -74,6 +76,10 @@ export function createFixtureOrigin(options = {}) {
     if (path === "/feeds/rss.xml") return send(response, 200, "application/rss+xml; charset=utf-8", bodies.rss);
     if (path === "/feeds/atom.xml") return send(response, 200, "application/atom+xml; charset=utf-8", bodies.atom);
     if (path === "/api/items") return send(response, 200, "application/json", bodies.api);
+    if (path === "/security/manifest.json") return send(response, 200, "application/json", json(adversarialManifest));
+    if (path === "/security/browser-subresources") return send(response, 200, "text/html; charset=utf-8", bodies.browserSecurity);
+    if (path === "/security/redirect/start") return send(response, 302, "text/plain; charset=utf-8", "security redirect\n", { location: "/security/redirect/private" });
+    if (path === "/security/redirect/private") return send(response, 302, "text/plain; charset=utf-8", "protected redirect\n", { location: "/protected/resource" });
     if (path === "/protected/counter") return send(response, 200, "application/json", json({ packets: protectedPackets }));
     if (path === "/protected/reset" && request.method === "POST") {
       protectedPackets = 0;
@@ -106,6 +112,7 @@ export function createFixtureOrigin(options = {}) {
 
   return {
     manifest,
+    adversarialManifest,
     async start() {
       await new Promise((resolve, reject) => {
         server.once("error", reject);

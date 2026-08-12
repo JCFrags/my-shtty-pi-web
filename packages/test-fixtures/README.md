@@ -1,6 +1,6 @@
 # WebX deterministic fixture origin
 
-This package implements `WX-M0-006`. It supplies one licensed local origin for repeatable HTTP and later browser tests. It uses only Node.js built-in modules. It does not need public network access.
+This package implements `WX-M0-006` and `WX-M0-007`. It supplies one licensed local origin and one deterministic adversarial corpus for repeatable HTTP, policy, parser, and later browser tests. It uses only Node.js built-in modules. It does not need public network access.
 
 ## Safety boundary
 
@@ -30,10 +30,13 @@ pnpm --filter @webx/test-fixtures test
 
 The focused suite proves:
 
-- stable manifest version and hashes across starts;
+- stable origin and adversarial manifest versions and hashes across starts;
 - literal loopback-only listening;
 - representative HTML, SPA, redirect, malformed, bounds, robots, auth, crawl, feed, API, and failure routes;
-- a protected counter of zero before access and the exact count after access;
+- reason-coded SSRF, encoded-address, DNS-rebinding, redirect, and browser-subresource inputs;
+- a protected counter of exactly zero for every denial harness input;
+- generated archive traversal, absolute-path, symlink, compression-ratio, and malformed-document fixtures without expansion;
+- synthetic canary detection across log, receipt, Markdown, event, index, wiki, screenshot, trace, diagnostic, and evidence surfaces;
 - clean cancellation and shutdown.
 
 ## Fixture discovery
@@ -64,4 +67,21 @@ Main routes:
 | `/protected/resource` | increments the protected access count once per request |
 | `POST /protected/reset` | resets the protected counter for an isolated test |
 
-`WX-M0-007` can extend the protected fixture with adversarial DNS and policy scenarios. It must preserve this local-only listener and the counter semantics.
+## Adversarial fixture discovery
+
+`GET /security/manifest.json` returns the stable `WX-M0-007` manifest. The manifest contains only generated or documentation-reserved data. Hostnames use `.invalid`. Public-looking address evidence uses documentation ranges. DNS rebinding is represented as an ordered answer sequence. Tests do not change host DNS.
+
+Main security routes:
+
+| Route | Purpose |
+|---|---|
+| `/security/manifest.json` | adversarial case IDs, limits, license, and hashes |
+| `/security/redirect/start` | first local redirect hop |
+| `/security/redirect/private` | redirect candidate to the protected route |
+| `/security/browser-subresources` | inert page with private and metadata subresource candidates |
+
+`src/adversarial.mjs` exports the exact denial inputs and `runZeroPacketDenialHarness()`. The harness reads the protected counter before and after all decisions. It calls the supplied transport only after an allow decision. A denial check passes only when the transport call count and protected packet count both stay at zero.
+
+The archive files are generated in memory and are never expanded by the focused tests. The secret values use the `WEBX_TEST_SECRET_` prefix. They are synthetic test inputs. `scanSecretCanaries()` scans nested strings and buffers. Its allowlist is only for the exact protected input path in a scanner test. Do not add output paths to that allowlist.
+
+Keep all listeners loopback-only. Do not use these fixtures with public traffic, host DNS changes, private data, browser profiles, or real credentials.

@@ -25,6 +25,12 @@ export const bodies = Object.freeze({
   rss: "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>WebX fixture</title><link>http://fixture.invalid/</link><item><guid>item-v1</guid><title>Stable item</title><link>http://fixture.invalid/html/static</link></item></channel></rss>\n",
   atom: "<?xml version=\"1.0\"?><feed xmlns=\"http://www.w3.org/2005/Atom\"><id>urn:webx:fixture</id><title>WebX fixture</title><updated>2026-08-09T00:00:00Z</updated><entry><id>urn:webx:item:v1</id><title>Stable item</title><updated>2026-08-09T00:00:00Z</updated></entry></feed>\n",
   api: JSON.stringify({ fixture: "webx", seed: FIXTURE_SEED, items: [{ id: "item-1", value: 7 }] }) + "\n",
+  browserSecurity: `<!doctype html><html><head><title>Security subresource candidates</title></head><body>
+<iframe src="http://10.0.0.9/private"></iframe>
+<img src="http://169.254.169.254/latest/meta-data">
+<video src="http://127.0.0.1/protected/resource"></video>
+<script type="application/json" id="webx-security-candidates">["fetch","xhr","websocket","service_worker","iframe","media"]</script>
+</body></html>\n`,
 });
 
 export const largeBody = Buffer.from(`${FIXTURE_SEED}\n`.repeat(65536), "utf8");
@@ -56,6 +62,10 @@ const routeDefinitions = [
   ["rss", "GET", "/feeds/rss.xml", "application/rss+xml", "CC0-1.0 generated"],
   ["atom", "GET", "/feeds/atom.xml", "application/atom+xml", "CC0-1.0 generated"],
   ["api", "GET", "/api/items", "application/json", "CC0-1.0 generated"],
+  ["security-manifest", "GET", "/security/manifest.json", "application/json", "generated"],
+  ["security-browser-subresources", "GET", "/security/browser-subresources", "text/html", "CC0-1.0 generated"],
+  ["security-redirect-start", "GET", "/security/redirect/start", "text/plain", "generated"],
+  ["security-redirect-private", "GET", "/security/redirect/private", "text/plain", "generated"],
   ["protected-counter", "GET", "/protected/counter", "application/json", "generated"],
   ["protected-reset", "POST", "/protected/reset", "application/json", "generated"],
   ["protected-resource", "GET", "/protected/resource", "application/json", "generated"],
@@ -79,6 +89,7 @@ export function createManifest() {
     "/feeds/rss.xml": bodies.rss,
     "/feeds/atom.xml": bodies.atom,
     "/api/items": bodies.api,
+    "/security/browser-subresources": bodies.browserSecurity,
   };
   const routes = routeDefinitions.map(([id, method, path, contentType, license]) => ({
     id,
