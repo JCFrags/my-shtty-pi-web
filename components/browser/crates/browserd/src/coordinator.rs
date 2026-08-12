@@ -2717,6 +2717,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn visual_observation_accepts_only_owned_typed_screenshot_transfer() {
+        let (coordinator, root) = test_coordinator().await;
+        let host_id = HostId("visual-host".into());
+        let owner = AgentId("visual-owner".into());
+        let session_id = BrowserSessionId("visual-session".into());
+        let tab = TabInfo {
+            tab_id: TabId("visual-tab".into()),
+            host_id: host_id.clone(),
+            browser_session_id: session_id,
+            owner_agent_id: owner.clone(),
+            title: "public fixture".into(),
+            url: "http://127.0.0.1/public".into(),
+            index: 0,
+            control: TabControl::Agent,
+            state: TabState::Idle,
+            last_action_at: None,
+        };
+        let transfer_root = coordinator.paths.data.join("downloads").join("hosts").join(host_id.as_ref());
+        std::fs::create_dir_all(&transfer_root).unwrap();
+        std::fs::write(transfer_root.join("shot.png"), b"typed-owned-screenshot").unwrap();
+        let observation = || Observation {
+            view: ObservationView::Visual,
+            title: "public fixture".into(),
+            url: tab.url.clone(),
+            content: String::new(),
+            controls: Vec::new(),
+            changed: Vec::new(),
+            artifact_id: None,
+            truncated: false,
+            metadata: BTreeMap::new(),
+        };
+
+        let mut safe = observation();
+        safe.metadata.insert("transfer".into(), json!({
+            "hostId": host_id, "relativePath": "shot.png", "mediaType": "image/png", "kind": "screenshot"
+        }));
+        coordinator.ingest_observation_artifacts(&tab, &mut safe, 4096).unwrap();
+        let artifact_id = safe.artifact_id.unwrap();
+        assert_eq!(coordinator.artifacts.get(&owner, &artifact_id).unwrap().unwrap().media_type, "image/png");
+
+        let mut raw_path = observation();
+        raw_path.metadata.insert("screenshotPath".into(), json!("/etc/passwd"));
+        assert_eq!(coordinator.ingest_observation_artifacts(&tab, &mut raw_path, 4096).unwrap_err().code, -32043);
+        for (wrong_host, path) in [("other-host", "shot.png"), ("visual-host", "../shot.png"), ("visual-host", "/etc/passwd")] {
+            let mut bad = observation();
+            bad.metadata.insert("transfer".into(), json!({
+                "hostId": wrong_host, "relativePath": path, "mediaType": "image/png", "kind": "screenshot"
+            }));
+            assert_eq!(coordinator.ingest_observation_artifacts(&tab, &mut bad, 4096).unwrap_err().code, -32043);
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     #[ignore = "requires installed PinchTab 0.15.1 and Chromium"]
     async fn real_pinchtab_session_create_navigate_observe_and_close() {
         use tokio::io::AsyncWriteExt as _;

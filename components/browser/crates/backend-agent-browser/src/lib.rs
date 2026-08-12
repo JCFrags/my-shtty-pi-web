@@ -254,6 +254,22 @@ impl AgentBrowserController {
         self
     }
 
+    fn screenshot_transfer(&self, runtime: &HostRuntime) -> Result<(PathBuf, Value)> {
+        let host_root = self
+            .download_root
+            .join("hosts")
+            .join(runtime.handle.host.host_id.as_ref());
+        std::fs::create_dir_all(&host_root).map_err(|error| BackendError::Other(error.into()))?;
+        let relative_path = format!("screenshot-{}.png", Uuid::new_v4());
+        let path = host_root.join(&relative_path);
+        Ok((path, json!({
+            "hostId": runtime.handle.host.host_id,
+            "relativePath": relative_path,
+            "mediaType": "image/png",
+            "kind": "screenshot"
+        })))
+    }
+
     pub async fn validate_installation(&self) -> Result<Version> {
         let output = Command::new(self.binary.as_ref())
             .arg("--version")
@@ -1189,6 +1205,9 @@ impl BrowserController for AgentBrowserController {
             let _ = std::fs::remove_file(&binding.screenshot_path);
         }
         runtime.visual_bindings.lock().await.clear();
+        let _ = std::fs::remove_dir_all(
+            self.download_root.join("hosts").join(runtime.handle.host.host_id.as_ref()),
+        );
         self.hosts.remove(&host.host.host_id);
         close_result.map(|_| ())
     }
@@ -1286,14 +1305,29 @@ impl BrowserController for AgentBrowserController {
                 self.run_json(&runtime, &args).await?
             }
             ObservationView::Visual => {
-                let file = TempBuilder::new().prefix("pi-web-shot-").suffix(".png").tempfile()
-                    .map_err(|error| BackendError::Other(error.into()))?;
-                // Persist after NamedTempFile is dropped; artifact ingestion owns cleanup.
-                let (_persisted, path) = file.keep().map_err(|error| BackendError::Other(error.error.into()))?;
-                let shot = self.run_json(&runtime, &["screenshot".into(), path.to_string_lossy().into_owned()]).await?;
-                let snapshot = self.run_json(&runtime, &["snapshot".into(), "-i".into(), "-c".into()]).await?;
+                let (path, transfer) = self.screenshot_transfer(&runtime)?;
+                let shot = match self
+                    .run_json(&runtime, &["screenshot".into(), path.to_string_lossy().into_owned()])
+                    .await
+                {
+                    Ok(shot) => shot,
+                    Err(error) => {
+                        let _ = std::fs::remove_file(&path);
+                        return Err(error);
+                    }
+                };
+                let snapshot = match self
+                    .run_json(&runtime, &["snapshot".into(), "-i".into(), "-c".into()])
+                    .await
+                {
+                    Ok(snapshot) => snapshot,
+                    Err(error) => {
+                        let _ = std::fs::remove_file(&path);
+                        return Err(error);
+                    }
+                };
                 controls = extract_controls(&snapshot, request.include_bounds);
-                metadata.insert("screenshotPath".into(), Value::String(path.to_string_lossy().into_owned()));
+                metadata.insert("transfer".into(), transfer);
                 json!({ "screenshot": shot, "snapshot": snapshot })
             }
         };
