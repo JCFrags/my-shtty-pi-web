@@ -1,6 +1,26 @@
 .PHONY: bootstrap toolchain-check component-lock-check contracts-generate contracts-check format lint typecheck test-unit
 
 LOCK_RESOLVED_AT := 2026-08-12T05:00:00Z
+QUALITY_AREAS := all typescript python sql shell docs contracts fixtures compose tooling
+AREA ?= all
+_QUALITY_AREA := $(value AREA)
+
+ifneq ($(filter format lint typecheck test-unit,$(MAKECMDGOALS)),)
+ifneq ($(words $(_QUALITY_AREA)),1)
+$(error unsafe or unknown AREA; select exactly one of: $(QUALITY_AREAS))
+endif
+ifeq ($(filter $(_QUALITY_AREA),$(QUALITY_AREAS)),)
+$(error unsafe or unknown AREA; allowed: $(QUALITY_AREAS))
+endif
+ifneq ($(strip $(value AC)),)
+$(error AC is reserved and unsupported by WX-M0-010 targets)
+endif
+ifneq ($(strip $(value PROFILE)),)
+$(error PROFILE is reserved and unsupported by WX-M0-010 targets)
+endif
+override AREA := $(_QUALITY_AREA)
+export AREA
+endif
 
 bootstrap:
 	./scripts/toolchain-check --bootstrap
@@ -18,17 +38,13 @@ contracts-check:
 	packages/contracts/check.sh
 
 format:
-	pnpm exec eslint .
-	uv run ruff format --check scripts/toolchain*.py
+	./scripts/quality-check format
 
 lint:
-	pnpm run lint
-	uv run ruff check scripts/toolchain*.py
-	uv run mypy
+	./scripts/quality-check lint
 
 typecheck:
-	pnpm run typecheck
+	./scripts/quality-check typecheck
 
 test-unit:
-	pnpm run test:unit
-	uv run pytest
+	./scripts/quality-check test-unit
