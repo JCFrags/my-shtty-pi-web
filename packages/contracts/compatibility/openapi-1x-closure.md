@@ -7,7 +7,9 @@ WebX 1.x uses two canonical OpenAPI 3.1 documents:
 - `openapi.yaml` defines the public API for the SDK, CLI, Pi package, and local integrations.
 - `worker-openapi.yaml` defines the internal worker and egress protocol.
 
-The public contract now has one stable `operationId` for each normative HTTP operation. It has 86 operations. This includes system, search, retrieval, browser, crawl, document, media, upload, artifact, page, visit, archive, monitoring, job, index, wiki, corpus, backup, restore, audit, and configuration operations.
+The public contract now has one stable `operationId` for each normative HTTP operation. It has 97 operations. This includes system, search, retrieval, browser, crawl, document, media, upload, artifact, page, visit, archive, monitoring, job, index, wiki, corpus, backup, restore, audit, and configuration operations.
+
+The canonical document includes the 20 routes shipped by the daemon and SDK facade. These routes use the shipped camel-case data shapes. All request and response objects reject unknown fields. Each mutation requires `Idempotency-Key`. The route metadata fixes the enforced scope and byte limits. The version response fixes API major 1 and browser protocol 2. The capability catalog fixes exactly `agent-browser/chrome` and `pinchtab/chrome` in that order.
 
 The worker contract has 10 stable operations. Its completion request can reference `schemas/normalized-content-result.json` through `normalized_content_result`.
 
@@ -45,6 +47,7 @@ The operation stubs do not define duplicate data transfer objects. Canonical ext
 
 - OpenAPI 3.1 and major identity;
 - the complete normative operation inventory;
+- the exact 20-route shipped inventory, scopes, idempotency, limits, strict objects, and browser identities;
 - unique stable `operationId` values;
 - exact path parameter declarations;
 - local reference resolution;

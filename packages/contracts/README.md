@@ -15,7 +15,8 @@ The check does these operations:
 - checks every schema against the JSON Schema 2020-12 meta-schema;
 - resolves every local `$ref` without network access;
 - validates every mapped valid JSON or YAML example with format checks enabled;
-- validates all 86 public and 10 worker OpenAPI operations, local references, major identity, metadata, and path parameters;
+- validates all 97 public and 10 worker OpenAPI operations, local references, major identity, metadata, and path parameters;
+- checks the 20 shipped daemon and SDK routes, exact scopes, mutation idempotency, byte limits, API and browser protocol identity, strict objects, and the two browser paths;
 - checks the strict normalized-content result in worker completion and rejects worker acceptance authority;
 - runs the mandatory commit-intent semantic validator;
 - rejects all mapped negative fixtures at exact JSON Pointer paths;

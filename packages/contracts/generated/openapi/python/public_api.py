@@ -36,6 +36,20 @@ _raw_operations: list[dict[str, Any]] = [{'method': 'POST',
                       'default:#/components/responses/Problem'],
   'scopes': ['wiki.write']},
  {'method': 'POST',
+  'operationId': 'actBrowser',
+  'path': '/browser/sessions/{session_id}/actions',
+  'requestSchema': '#/components/schemas/BrowserActionRequest',
+  'responseSchemas': ['200:application/json:#/components/schemas/BrowserOperationResult',
+                      'default:#/components/responses/ShippedProblem'],
+  'scopes': ['browser.write']},
+ {'method': 'POST',
+  'operationId': 'cancelBrowserOperation',
+  'path': '/browser/operations/{operation_id}/cancel',
+  'requestSchema': '#/components/schemas/EmptyObject',
+  'responseSchemas': ['200:application/json:#/components/schemas/BrowserOperationResult',
+                      'default:#/components/responses/ShippedProblem'],
+  'scopes': ['browser.write']},
+ {'method': 'POST',
   'operationId': 'cancelCrawl',
   'path': '/crawls/{crawl_id}/cancel',
   'requestSchema': None,
@@ -53,7 +67,13 @@ _raw_operations: list[dict[str, Any]] = [{'method': 'POST',
   'operationId': 'closeBrowserSession',
   'path': '/browser/sessions/{session_id}',
   'requestSchema': None,
-  'responseSchemas': ['default:#/components/responses/Problem'],
+  'responseSchemas': ['default:#/components/responses/ShippedProblem'],
+  'scopes': ['browser.write']},
+ {'method': 'DELETE',
+  'operationId': 'closeBrowserTab',
+  'path': '/browser/sessions/{session_id}/tabs/{tab_id}',
+  'requestSchema': None,
+  'responseSchemas': ['default:#/components/responses/ShippedProblem'],
   'scopes': ['browser.write']},
  {'method': 'POST',
   'operationId': 'completeUpload',
@@ -91,19 +111,11 @@ _raw_operations: list[dict[str, Any]] = [{'method': 'POST',
                       'default:#/components/responses/Problem'],
   'scopes': ['admin.write']},
  {'method': 'POST',
-  'operationId': 'createBrowserAction',
-  'path': '/browser/sessions/{session_id}/actions',
-  'requestSchema': '#/components/schemas/BrowserAction',
-  'responseSchemas': ['200:#/components/responses/ArtifactResult',
-                      '202:#/components/responses/JobAccepted',
-                      'default:#/components/responses/Problem'],
-  'scopes': ['browser.write']},
- {'method': 'POST',
   'operationId': 'createBrowserSession',
   'path': '/browser/sessions',
-  'requestSchema': '#/components/schemas/BrowserSessionRequest',
-  'responseSchemas': ['201:application/json:#/components/schemas/BrowserSession',
-                      'default:#/components/responses/Problem'],
+  'requestSchema': '#/components/schemas/BrowserSessionRequestShipped',
+  'responseSchemas': ['201:application/json:#/components/schemas/BrowserSessionShipped',
+                      'default:#/components/responses/ShippedProblem'],
   'scopes': ['browser.write']},
  {'method': 'POST',
   'operationId': 'createCorpusExport',
@@ -262,6 +274,13 @@ _raw_operations: list[dict[str, Any]] = [{'method': 'POST',
   'responseSchemas': ['200:application/json:#/components/schemas/OperationResult',
                       'default:#/components/responses/Problem'],
   'scopes': ['wiki.write']},
+ {'method': 'POST',
+  'operationId': 'debugBrowser',
+  'path': '/browser/sessions/{session_id}/debug',
+  'requestSchema': '#/components/schemas/BrowserDebugRequest',
+  'responseSchemas': ['200:application/json:#/components/schemas/BrowserDebugResult',
+                      'default:#/components/responses/ShippedProblem'],
+  'scopes': ['browser.debug']},
  {'method': 'DELETE',
   'operationId': 'deleteUpload',
   'path': '/uploads/{upload_id}',
@@ -287,6 +306,13 @@ _raw_operations: list[dict[str, Any]] = [{'method': 'POST',
   'responseSchemas': ['200:application/json:#/components/schemas/OperationResult',
                       'default:#/components/responses/Problem'],
   'scopes': ['index.write']},
+ {'method': 'DELETE',
+  'operationId': 'forgetPage',
+  'path': '/pages',
+  'requestSchema': '#/components/schemas/PageForgetRequest',
+  'responseSchemas': ['200:application/json:#/components/schemas/PageForgetResult',
+                      'default:#/components/responses/ShippedProblem'],
+  'scopes': ['pages.write']},
  {'method': 'GET',
   'operationId': 'getArtifact',
   'path': '/artifacts/{artifact_id}',
@@ -305,8 +331,8 @@ _raw_operations: list[dict[str, Any]] = [{'method': 'POST',
   'operationId': 'getArtifactExcerpt',
   'path': '/artifacts/{artifact_id}/excerpt',
   'requestSchema': None,
-  'responseSchemas': ['200:application/json:#/components/schemas/ArtifactExcerpt',
-                      'default:#/components/responses/Problem'],
+  'responseSchemas': ['200:application/json:#/components/schemas/ArtifactExcerptShipped',
+                      'default:#/components/responses/ShippedProblem'],
   'scopes': ['artifacts.read']},
  {'method': 'GET',
   'operationId': 'getArtifactMetadata',
@@ -319,8 +345,8 @@ _raw_operations: list[dict[str, Any]] = [{'method': 'POST',
   'operationId': 'getBrowserSession',
   'path': '/browser/sessions/{session_id}',
   'requestSchema': None,
-  'responseSchemas': ['200:application/json:#/components/schemas/BrowserSession',
-                      'default:#/components/responses/Problem'],
+  'responseSchemas': ['200:application/json:#/components/schemas/BrowserSessionShipped',
+                      'default:#/components/responses/ShippedProblem'],
   'scopes': ['browser.read']},
  {'method': 'GET',
   'operationId': 'getBrowserSnapshot',
@@ -329,11 +355,19 @@ _raw_operations: list[dict[str, Any]] = [{'method': 'POST',
   'responseSchemas': ['200:application/json:#/components/schemas/OperationResult',
                       'default:#/components/responses/Problem'],
   'scopes': ['browser.read']},
+ {'method': 'POST',
+  'operationId': 'getBrowserVisualFrame',
+  'path': '/browser/sessions/{session_id}/frame',
+  'requestSchema': '#/components/schemas/EmptyObject',
+  'responseSchemas': ['200:application/json:#/components/schemas/BrowserVisualFrame',
+                      'default:#/components/responses/ShippedProblem'],
+  'scopes': ['browser.read']},
  {'method': 'GET',
   'operationId': 'getCapabilities',
   'path': '/capabilities',
   'requestSchema': None,
-  'responseSchemas': ['200:application/json:inline', 'default:#/components/responses/Problem'],
+  'responseSchemas': ['200:application/json:#/components/schemas/ShippedCapabilityCatalog',
+                      'default:#/components/responses/ShippedProblem'],
   'scopes': ['system.read']},
  {'method': 'GET',
   'operationId': 'getCorpusStats',
@@ -403,8 +437,8 @@ _raw_operations: list[dict[str, Any]] = [{'method': 'POST',
   'operationId': 'getPage',
   'path': '/pages/{page_id}',
   'requestSchema': None,
-  'responseSchemas': ['200:application/json:./schemas/page-record.json',
-                      'default:#/components/responses/Problem'],
+  'responseSchemas': ['200:application/json:#/components/schemas/BoundedContent',
+                      'default:#/components/responses/ShippedProblem'],
   'scopes': ['pages.read']},
  {'method': 'GET',
   'operationId': 'getPageVersion',
@@ -432,9 +466,9 @@ _raw_operations: list[dict[str, Any]] = [{'method': 'POST',
   'operationId': 'getVersion',
   'path': '/version',
   'requestSchema': None,
-  'responseSchemas': ['200:application/json:#/components/schemas/Version',
-                      'default:#/components/responses/Problem'],
-  'scopes': ['system.read']},
+  'responseSchemas': ['200:application/json:#/components/schemas/ShippedVersionInfo',
+                      'default:#/components/responses/ShippedProblem'],
+  'scopes': ['public']},
  {'method': 'GET',
   'operationId': 'getVisit',
   'path': '/visits/{visit_id}',
@@ -485,6 +519,13 @@ _raw_operations: list[dict[str, Any]] = [{'method': 'POST',
                       'default:#/components/responses/Problem'],
   'scopes': ['admin.read']},
  {'method': 'GET',
+  'operationId': 'listBrowserSessions',
+  'path': '/browser/sessions',
+  'requestSchema': None,
+  'responseSchemas': ['200:application/json:#/components/schemas/BrowserSessionList',
+                      'default:#/components/responses/ShippedProblem'],
+  'scopes': ['browser.read']},
+ {'method': 'GET',
   'operationId': 'listCrawlVisits',
   'path': '/crawls/{crawl_id}/visits',
   'requestSchema': None,
@@ -532,6 +573,20 @@ _raw_operations: list[dict[str, Any]] = [{'method': 'POST',
                       'default:#/components/responses/Problem'],
   'scopes': ['wiki.read']},
  {'method': 'POST',
+  'operationId': 'manageBrowserWorkspace',
+  'path': '/browser/workspace',
+  'requestSchema': '#/components/schemas/BrowserWorkspaceRequest',
+  'responseSchemas': ['200:application/json:#/components/schemas/BrowserWorkspaceResult',
+                      'default:#/components/responses/ShippedProblem'],
+  'scopes': ['browser.control']},
+ {'method': 'POST',
+  'operationId': 'observeBrowser',
+  'path': '/browser/sessions/{session_id}/observe',
+  'requestSchema': '#/components/schemas/BrowserObserveRequest',
+  'responseSchemas': ['200:application/json:#/components/schemas/BrowserObservation',
+                      'default:#/components/responses/ShippedProblem'],
+  'scopes': ['browser.read']},
+ {'method': 'POST',
   'operationId': 'pauseCrawl',
   'path': '/crawls/{crawl_id}/pause',
   'requestSchema': None,
@@ -545,6 +600,20 @@ _raw_operations: list[dict[str, Any]] = [{'method': 'POST',
   'responseSchemas': ['202:#/components/responses/JobAccepted',
                       'default:#/components/responses/Problem'],
   'scopes': ['system.write']},
+ {'method': 'POST',
+  'operationId': 'read',
+  'path': '/read',
+  'requestSchema': '#/components/schemas/ShippedReadRequest',
+  'responseSchemas': ['200:application/json:#/components/schemas/BoundedContent',
+                      'default:#/components/responses/ShippedProblem'],
+  'scopes': ['retrieval.read']},
+ {'method': 'POST',
+  'operationId': 'research',
+  'path': '/research',
+  'requestSchema': '#/components/schemas/ResearchRequest',
+  'responseSchemas': ['200:application/json:#/components/schemas/ResearchResponse',
+                      'default:#/components/responses/ShippedProblem'],
+  'scopes': ['research.write']},
  {'method': 'POST',
   'operationId': 'resumeCrawl',
   'path': '/crawls/{crawl_id}/resume',
@@ -569,9 +638,9 @@ _raw_operations: list[dict[str, Any]] = [{'method': 'POST',
  {'method': 'POST',
   'operationId': 'search',
   'path': '/search',
-  'requestSchema': '#/components/schemas/SearchRequest',
-  'responseSchemas': ['200:application/json:#/components/schemas/SearchResponse',
-                      'default:#/components/responses/Problem'],
+  'requestSchema': '#/components/schemas/ShippedSearchRequest',
+  'responseSchemas': ['200:application/json:#/components/schemas/ShippedSearchResponse',
+                      'default:#/components/responses/ShippedProblem'],
   'scopes': ['search.write']},
  {'method': 'POST',
   'operationId': 'searchLocal',
@@ -580,6 +649,13 @@ _raw_operations: list[dict[str, Any]] = [{'method': 'POST',
   'responseSchemas': ['200:application/json:#/components/schemas/SearchResponse',
                       'default:#/components/responses/Problem'],
   'scopes': ['search.write']},
+ {'method': 'POST',
+  'operationId': 'searchPages',
+  'path': '/pages/search',
+  'requestSchema': '#/components/schemas/PageLibrarySearchRequest',
+  'responseSchemas': ['200:application/json:#/components/schemas/PageLibrarySearchResponse',
+                      'default:#/components/responses/ShippedProblem'],
+  'scopes': ['pages.read']},
  {'method': 'GET',
   'operationId': 'streamBrowserEvents',
   'path': '/browser/sessions/{session_id}/events',
@@ -643,15 +719,17 @@ OPERATIONS = tuple(
 
 class PublicApiClient(Protocol):
     async def acknowledgeWikiDelivery(self, request: OperationRequest) -> OperationResponse: ...
+    async def actBrowser(self, request: OperationRequest) -> OperationResponse: ...
+    async def cancelBrowserOperation(self, request: OperationRequest) -> OperationResponse: ...
     async def cancelCrawl(self, request: OperationRequest) -> OperationResponse: ...
     async def cancelJob(self, request: OperationRequest) -> OperationResponse: ...
     async def closeBrowserSession(self, request: OperationRequest) -> OperationResponse: ...
+    async def closeBrowserTab(self, request: OperationRequest) -> OperationResponse: ...
     async def completeUpload(self, request: OperationRequest) -> OperationResponse: ...
     async def createArchiveCapture(self, request: OperationRequest) -> OperationResponse: ...
     async def createArchiveImport(self, request: OperationRequest) -> OperationResponse: ...
     async def createArchiveReplaySession(self, request: OperationRequest) -> OperationResponse: ...
     async def createBackup(self, request: OperationRequest) -> OperationResponse: ...
-    async def createBrowserAction(self, request: OperationRequest) -> OperationResponse: ...
     async def createBrowserSession(self, request: OperationRequest) -> OperationResponse: ...
     async def createCorpusExport(self, request: OperationRequest) -> OperationResponse: ...
     async def createCorpusImport(self, request: OperationRequest) -> OperationResponse: ...
@@ -675,16 +753,19 @@ class PublicApiClient(Protocol):
     async def createWatch(self, request: OperationRequest) -> OperationResponse: ...
     async def createWikiBackfill(self, request: OperationRequest) -> OperationResponse: ...
     async def createWikiLease(self, request: OperationRequest) -> OperationResponse: ...
+    async def debugBrowser(self, request: OperationRequest) -> OperationResponse: ...
     async def deleteUpload(self, request: OperationRequest) -> OperationResponse: ...
     async def deleteWatch(self, request: OperationRequest) -> OperationResponse: ...
     async def discoverFeeds(self, request: OperationRequest) -> OperationResponse: ...
     async def drainIndex(self, request: OperationRequest) -> OperationResponse: ...
+    async def forgetPage(self, request: OperationRequest) -> OperationResponse: ...
     async def getArtifact(self, request: OperationRequest) -> OperationResponse: ...
     async def getArtifactContent(self, request: OperationRequest) -> OperationResponse: ...
     async def getArtifactExcerpt(self, request: OperationRequest) -> OperationResponse: ...
     async def getArtifactMetadata(self, request: OperationRequest) -> OperationResponse: ...
     async def getBrowserSession(self, request: OperationRequest) -> OperationResponse: ...
     async def getBrowserSnapshot(self, request: OperationRequest) -> OperationResponse: ...
+    async def getBrowserVisualFrame(self, request: OperationRequest) -> OperationResponse: ...
     async def getCapabilities(self, request: OperationRequest) -> OperationResponse: ...
     async def getCorpusStats(self, request: OperationRequest) -> OperationResponse: ...
     async def getCrawl(self, request: OperationRequest) -> OperationResponse: ...
@@ -707,6 +788,7 @@ class PublicApiClient(Protocol):
     async def getWikiDeliveryEnvelope(self, request: OperationRequest) -> OperationResponse: ...
     async def listAuditEvents(self, request: OperationRequest) -> OperationResponse: ...
     async def listBackups(self, request: OperationRequest) -> OperationResponse: ...
+    async def listBrowserSessions(self, request: OperationRequest) -> OperationResponse: ...
     async def listCrawlVisits(self, request: OperationRequest) -> OperationResponse: ...
     async def listEngines(self, request: OperationRequest) -> OperationResponse: ...
     async def listJobs(self, request: OperationRequest) -> OperationResponse: ...
@@ -714,13 +796,18 @@ class PublicApiClient(Protocol):
     async def listPageVersions(self, request: OperationRequest) -> OperationResponse: ...
     async def listWatches(self, request: OperationRequest) -> OperationResponse: ...
     async def listWikiDeliveries(self, request: OperationRequest) -> OperationResponse: ...
+    async def manageBrowserWorkspace(self, request: OperationRequest) -> OperationResponse: ...
+    async def observeBrowser(self, request: OperationRequest) -> OperationResponse: ...
     async def pauseCrawl(self, request: OperationRequest) -> OperationResponse: ...
     async def probeEngine(self, request: OperationRequest) -> OperationResponse: ...
+    async def read(self, request: OperationRequest) -> OperationResponse: ...
+    async def research(self, request: OperationRequest) -> OperationResponse: ...
     async def resumeCrawl(self, request: OperationRequest) -> OperationResponse: ...
     async def retryJob(self, request: OperationRequest) -> OperationResponse: ...
     async def runWatch(self, request: OperationRequest) -> OperationResponse: ...
     async def search(self, request: OperationRequest) -> OperationResponse: ...
     async def searchLocal(self, request: OperationRequest) -> OperationResponse: ...
+    async def searchPages(self, request: OperationRequest) -> OperationResponse: ...
     async def streamBrowserEvents(self, request: OperationRequest) -> OperationResponse: ...
     async def streamJobEvents(self, request: OperationRequest) -> OperationResponse: ...
     async def tombstonePage(self, request: OperationRequest) -> OperationResponse: ...

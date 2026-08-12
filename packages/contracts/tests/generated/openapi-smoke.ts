@@ -18,6 +18,9 @@ type Includes<T, U> = U extends T ? true : false;
 
 type _PublicFetch = Assert<Includes<PublicApiOperationId, 'createFetch'>>;
 type _PublicConfig = Assert<Includes<PublicApiOperationId, 'validateConfig'>>;
+type _ShippedRead = Assert<Includes<PublicApiOperationId, 'read'>>;
+type _ShippedWorkspace = Assert<Includes<PublicApiOperationId, 'manageBrowserWorkspace'>>;
+type _ShippedCancel = Assert<Includes<PublicApiOperationId, 'cancelBrowserOperation'>>;
 type _WorkerComplete = Assert<Includes<WorkerApiOperationId, 'completeAttempt'>>;
 type _PublicJobSchema = Assert<
   PublicApiCanonicalSchema<'./schemas/job.json'> extends { job_id: string } ? true : false
@@ -33,6 +36,9 @@ type _WorkerNormalizedSchema = Assert<
 export type GeneratedOpenApiSmoke =
   | _PublicFetch
   | _PublicConfig
+  | _ShippedRead
+  | _ShippedWorkspace
+  | _ShippedCancel
   | _WorkerComplete
   | _PublicJobSchema
   | _WorkerNormalizedSchema
@@ -41,6 +47,6 @@ export type GeneratedOpenApiSmoke =
   | WorkerApiClient
   | WorkerApiServerHandlers;
 
-if (publicOperations.length !== 86 || workerOperations.length !== 10) {
+if (publicOperations.length !== 97 || workerOperations.length !== 10) {
   throw new Error('generated OpenAPI operation count differs');
 }

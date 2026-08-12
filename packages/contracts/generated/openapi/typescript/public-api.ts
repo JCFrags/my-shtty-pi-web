@@ -2,7 +2,6 @@
 import type { ArtifactResult } from '../../typescript/artifact-result.js';
 import type { ProblemDetails } from '../../typescript/error.js';
 import type { Job } from '../../typescript/job.js';
-import type { PageRecord } from '../../typescript/page-record.js';
 import type { SearchHit } from '../../typescript/search-hit.js';
 import type { VisitRecord } from '../../typescript/visit-record.js';
 import type { WikiIntakeEnvelope } from '../../typescript/wiki-intake.js';
@@ -11,7 +10,6 @@ export interface PublicApiCanonicalSchemas {
   readonly "./schemas/artifact-result.json": ArtifactResult;
   readonly "./schemas/error.json": ProblemDetails;
   readonly "./schemas/job.json": Job;
-  readonly "./schemas/page-record.json": PageRecord;
   readonly "./schemas/search-hit.json": SearchHit;
   readonly "./schemas/visit-record.json": VisitRecord;
   readonly "./schemas/wiki-intake.json": WikiIntakeEnvelope;
@@ -21,7 +19,7 @@ export type PublicApiCanonicalSchemaRef = keyof PublicApiCanonicalSchemas;
 export type PublicApiCanonicalSchema<R extends string> =
   R extends PublicApiCanonicalSchemaRef ? PublicApiCanonicalSchemas[R] : unknown;
 
-export type PublicApiOperationId = "acknowledgeWikiDelivery" | "cancelCrawl" | "cancelJob" | "closeBrowserSession" | "completeUpload" | "createArchiveCapture" | "createArchiveImport" | "createArchiveReplaySession" | "createBackup" | "createBrowserAction" | "createBrowserSession" | "createCorpusExport" | "createCorpusImport" | "createCrawl" | "createDocumentChunk" | "createDocumentConvert" | "createDocumentInspect" | "createDocumentOcr" | "createDocumentScholarly" | "createExtraction" | "createFetch" | "createGalleryAcquisition" | "createIndexRebuild" | "createMediaAcquire" | "createMediaInfo" | "createMediaTranscribe" | "createRestore" | "createStreamRecording" | "createUpload" | "createVerification" | "createWatch" | "createWikiBackfill" | "createWikiLease" | "deleteUpload" | "deleteWatch" | "discoverFeeds" | "drainIndex" | "getArtifact" | "getArtifactContent" | "getArtifactExcerpt" | "getArtifactMetadata" | "getBrowserSession" | "getBrowserSnapshot" | "getCapabilities" | "getCorpusStats" | "getCrawl" | "getEffectiveConfig" | "getEngine" | "getIndexRebuild" | "getIndexStatus" | "getJob" | "getJobResult" | "getLiveness" | "getPage" | "getPageVersion" | "getReadiness" | "getSearchFacets" | "getVersion" | "getVisit" | "getVisitReceipt" | "getWatch" | "getWikiDelivery" | "getWikiDeliveryEnvelope" | "listAuditEvents" | "listBackups" | "listCrawlVisits" | "listEngines" | "listJobs" | "listPageChanges" | "listPageVersions" | "listWatches" | "listWikiDeliveries" | "pauseCrawl" | "probeEngine" | "resumeCrawl" | "retryJob" | "runWatch" | "search" | "searchLocal" | "streamBrowserEvents" | "streamJobEvents" | "tombstonePage" | "updateWatch" | "uploadPart" | "validateConfig" | "verifyBackup";
+export type PublicApiOperationId = "acknowledgeWikiDelivery" | "actBrowser" | "cancelBrowserOperation" | "cancelCrawl" | "cancelJob" | "closeBrowserSession" | "closeBrowserTab" | "completeUpload" | "createArchiveCapture" | "createArchiveImport" | "createArchiveReplaySession" | "createBackup" | "createBrowserSession" | "createCorpusExport" | "createCorpusImport" | "createCrawl" | "createDocumentChunk" | "createDocumentConvert" | "createDocumentInspect" | "createDocumentOcr" | "createDocumentScholarly" | "createExtraction" | "createFetch" | "createGalleryAcquisition" | "createIndexRebuild" | "createMediaAcquire" | "createMediaInfo" | "createMediaTranscribe" | "createRestore" | "createStreamRecording" | "createUpload" | "createVerification" | "createWatch" | "createWikiBackfill" | "createWikiLease" | "debugBrowser" | "deleteUpload" | "deleteWatch" | "discoverFeeds" | "drainIndex" | "forgetPage" | "getArtifact" | "getArtifactContent" | "getArtifactExcerpt" | "getArtifactMetadata" | "getBrowserSession" | "getBrowserSnapshot" | "getBrowserVisualFrame" | "getCapabilities" | "getCorpusStats" | "getCrawl" | "getEffectiveConfig" | "getEngine" | "getIndexRebuild" | "getIndexStatus" | "getJob" | "getJobResult" | "getLiveness" | "getPage" | "getPageVersion" | "getReadiness" | "getSearchFacets" | "getVersion" | "getVisit" | "getVisitReceipt" | "getWatch" | "getWikiDelivery" | "getWikiDeliveryEnvelope" | "listAuditEvents" | "listBackups" | "listBrowserSessions" | "listCrawlVisits" | "listEngines" | "listJobs" | "listPageChanges" | "listPageVersions" | "listWatches" | "listWikiDeliveries" | "manageBrowserWorkspace" | "observeBrowser" | "pauseCrawl" | "probeEngine" | "read" | "research" | "resumeCrawl" | "retryJob" | "runWatch" | "search" | "searchLocal" | "searchPages" | "streamBrowserEvents" | "streamJobEvents" | "tombstonePage" | "updateWatch" | "uploadPart" | "validateConfig" | "verifyBackup";
 
 export interface OperationRequest {
   readonly path?: Readonly<Record<string, string | number>>;
@@ -61,6 +59,32 @@ export const publicOperations = [
   },
   {
     "method": "POST",
+    "operationId": "actBrowser",
+    "path": "/browser/sessions/{session_id}/actions",
+    "requestSchema": "#/components/schemas/BrowserActionRequest",
+    "responseSchemas": [
+      "200:application/json:#/components/schemas/BrowserOperationResult",
+      "default:#/components/responses/ShippedProblem"
+    ],
+    "scopes": [
+      "browser.write"
+    ]
+  },
+  {
+    "method": "POST",
+    "operationId": "cancelBrowserOperation",
+    "path": "/browser/operations/{operation_id}/cancel",
+    "requestSchema": "#/components/schemas/EmptyObject",
+    "responseSchemas": [
+      "200:application/json:#/components/schemas/BrowserOperationResult",
+      "default:#/components/responses/ShippedProblem"
+    ],
+    "scopes": [
+      "browser.write"
+    ]
+  },
+  {
+    "method": "POST",
     "operationId": "cancelCrawl",
     "path": "/crawls/{crawl_id}/cancel",
     "requestSchema": null,
@@ -91,7 +115,19 @@ export const publicOperations = [
     "path": "/browser/sessions/{session_id}",
     "requestSchema": null,
     "responseSchemas": [
-      "default:#/components/responses/Problem"
+      "default:#/components/responses/ShippedProblem"
+    ],
+    "scopes": [
+      "browser.write"
+    ]
+  },
+  {
+    "method": "DELETE",
+    "operationId": "closeBrowserTab",
+    "path": "/browser/sessions/{session_id}/tabs/{tab_id}",
+    "requestSchema": null,
+    "responseSchemas": [
+      "default:#/components/responses/ShippedProblem"
     ],
     "scopes": [
       "browser.write"
@@ -164,26 +200,12 @@ export const publicOperations = [
   },
   {
     "method": "POST",
-    "operationId": "createBrowserAction",
-    "path": "/browser/sessions/{session_id}/actions",
-    "requestSchema": "#/components/schemas/BrowserAction",
-    "responseSchemas": [
-      "200:#/components/responses/ArtifactResult",
-      "202:#/components/responses/JobAccepted",
-      "default:#/components/responses/Problem"
-    ],
-    "scopes": [
-      "browser.write"
-    ]
-  },
-  {
-    "method": "POST",
     "operationId": "createBrowserSession",
     "path": "/browser/sessions",
-    "requestSchema": "#/components/schemas/BrowserSessionRequest",
+    "requestSchema": "#/components/schemas/BrowserSessionRequestShipped",
     "responseSchemas": [
-      "201:application/json:#/components/schemas/BrowserSession",
-      "default:#/components/responses/Problem"
+      "201:application/json:#/components/schemas/BrowserSessionShipped",
+      "default:#/components/responses/ShippedProblem"
     ],
     "scopes": [
       "browser.write"
@@ -479,6 +501,19 @@ export const publicOperations = [
     ]
   },
   {
+    "method": "POST",
+    "operationId": "debugBrowser",
+    "path": "/browser/sessions/{session_id}/debug",
+    "requestSchema": "#/components/schemas/BrowserDebugRequest",
+    "responseSchemas": [
+      "200:application/json:#/components/schemas/BrowserDebugResult",
+      "default:#/components/responses/ShippedProblem"
+    ],
+    "scopes": [
+      "browser.debug"
+    ]
+  },
+  {
     "method": "DELETE",
     "operationId": "deleteUpload",
     "path": "/uploads/{upload_id}",
@@ -529,6 +564,19 @@ export const publicOperations = [
     ]
   },
   {
+    "method": "DELETE",
+    "operationId": "forgetPage",
+    "path": "/pages",
+    "requestSchema": "#/components/schemas/PageForgetRequest",
+    "responseSchemas": [
+      "200:application/json:#/components/schemas/PageForgetResult",
+      "default:#/components/responses/ShippedProblem"
+    ],
+    "scopes": [
+      "pages.write"
+    ]
+  },
+  {
     "method": "GET",
     "operationId": "getArtifact",
     "path": "/artifacts/{artifact_id}",
@@ -560,8 +608,8 @@ export const publicOperations = [
     "path": "/artifacts/{artifact_id}/excerpt",
     "requestSchema": null,
     "responseSchemas": [
-      "200:application/json:#/components/schemas/ArtifactExcerpt",
-      "default:#/components/responses/Problem"
+      "200:application/json:#/components/schemas/ArtifactExcerptShipped",
+      "default:#/components/responses/ShippedProblem"
     ],
     "scopes": [
       "artifacts.read"
@@ -586,8 +634,8 @@ export const publicOperations = [
     "path": "/browser/sessions/{session_id}",
     "requestSchema": null,
     "responseSchemas": [
-      "200:application/json:#/components/schemas/BrowserSession",
-      "default:#/components/responses/Problem"
+      "200:application/json:#/components/schemas/BrowserSessionShipped",
+      "default:#/components/responses/ShippedProblem"
     ],
     "scopes": [
       "browser.read"
@@ -607,13 +655,26 @@ export const publicOperations = [
     ]
   },
   {
+    "method": "POST",
+    "operationId": "getBrowserVisualFrame",
+    "path": "/browser/sessions/{session_id}/frame",
+    "requestSchema": "#/components/schemas/EmptyObject",
+    "responseSchemas": [
+      "200:application/json:#/components/schemas/BrowserVisualFrame",
+      "default:#/components/responses/ShippedProblem"
+    ],
+    "scopes": [
+      "browser.read"
+    ]
+  },
+  {
     "method": "GET",
     "operationId": "getCapabilities",
     "path": "/capabilities",
     "requestSchema": null,
     "responseSchemas": [
-      "200:application/json:inline",
-      "default:#/components/responses/Problem"
+      "200:application/json:#/components/schemas/ShippedCapabilityCatalog",
+      "default:#/components/responses/ShippedProblem"
     ],
     "scopes": [
       "system.read"
@@ -743,8 +804,8 @@ export const publicOperations = [
     "path": "/pages/{page_id}",
     "requestSchema": null,
     "responseSchemas": [
-      "200:application/json:./schemas/page-record.json",
-      "default:#/components/responses/Problem"
+      "200:application/json:#/components/schemas/BoundedContent",
+      "default:#/components/responses/ShippedProblem"
     ],
     "scopes": [
       "pages.read"
@@ -796,11 +857,11 @@ export const publicOperations = [
     "path": "/version",
     "requestSchema": null,
     "responseSchemas": [
-      "200:application/json:#/components/schemas/Version",
-      "default:#/components/responses/Problem"
+      "200:application/json:#/components/schemas/ShippedVersionInfo",
+      "default:#/components/responses/ShippedProblem"
     ],
     "scopes": [
-      "system.read"
+      "public"
     ]
   },
   {
@@ -896,6 +957,19 @@ export const publicOperations = [
   },
   {
     "method": "GET",
+    "operationId": "listBrowserSessions",
+    "path": "/browser/sessions",
+    "requestSchema": null,
+    "responseSchemas": [
+      "200:application/json:#/components/schemas/BrowserSessionList",
+      "default:#/components/responses/ShippedProblem"
+    ],
+    "scopes": [
+      "browser.read"
+    ]
+  },
+  {
+    "method": "GET",
     "operationId": "listCrawlVisits",
     "path": "/crawls/{crawl_id}/visits",
     "requestSchema": null,
@@ -987,6 +1061,32 @@ export const publicOperations = [
   },
   {
     "method": "POST",
+    "operationId": "manageBrowserWorkspace",
+    "path": "/browser/workspace",
+    "requestSchema": "#/components/schemas/BrowserWorkspaceRequest",
+    "responseSchemas": [
+      "200:application/json:#/components/schemas/BrowserWorkspaceResult",
+      "default:#/components/responses/ShippedProblem"
+    ],
+    "scopes": [
+      "browser.control"
+    ]
+  },
+  {
+    "method": "POST",
+    "operationId": "observeBrowser",
+    "path": "/browser/sessions/{session_id}/observe",
+    "requestSchema": "#/components/schemas/BrowserObserveRequest",
+    "responseSchemas": [
+      "200:application/json:#/components/schemas/BrowserObservation",
+      "default:#/components/responses/ShippedProblem"
+    ],
+    "scopes": [
+      "browser.read"
+    ]
+  },
+  {
+    "method": "POST",
     "operationId": "pauseCrawl",
     "path": "/crawls/{crawl_id}/pause",
     "requestSchema": null,
@@ -1009,6 +1109,32 @@ export const publicOperations = [
     ],
     "scopes": [
       "system.write"
+    ]
+  },
+  {
+    "method": "POST",
+    "operationId": "read",
+    "path": "/read",
+    "requestSchema": "#/components/schemas/ShippedReadRequest",
+    "responseSchemas": [
+      "200:application/json:#/components/schemas/BoundedContent",
+      "default:#/components/responses/ShippedProblem"
+    ],
+    "scopes": [
+      "retrieval.read"
+    ]
+  },
+  {
+    "method": "POST",
+    "operationId": "research",
+    "path": "/research",
+    "requestSchema": "#/components/schemas/ResearchRequest",
+    "responseSchemas": [
+      "200:application/json:#/components/schemas/ResearchResponse",
+      "default:#/components/responses/ShippedProblem"
+    ],
+    "scopes": [
+      "research.write"
     ]
   },
   {
@@ -1054,10 +1180,10 @@ export const publicOperations = [
     "method": "POST",
     "operationId": "search",
     "path": "/search",
-    "requestSchema": "#/components/schemas/SearchRequest",
+    "requestSchema": "#/components/schemas/ShippedSearchRequest",
     "responseSchemas": [
-      "200:application/json:#/components/schemas/SearchResponse",
-      "default:#/components/responses/Problem"
+      "200:application/json:#/components/schemas/ShippedSearchResponse",
+      "default:#/components/responses/ShippedProblem"
     ],
     "scopes": [
       "search.write"
@@ -1074,6 +1200,19 @@ export const publicOperations = [
     ],
     "scopes": [
       "search.write"
+    ]
+  },
+  {
+    "method": "POST",
+    "operationId": "searchPages",
+    "path": "/pages/search",
+    "requestSchema": "#/components/schemas/PageLibrarySearchRequest",
+    "responseSchemas": [
+      "200:application/json:#/components/schemas/PageLibrarySearchResponse",
+      "default:#/components/responses/ShippedProblem"
+    ],
+    "scopes": [
+      "pages.read"
     ]
   },
   {
@@ -1171,15 +1310,17 @@ export const publicOperations = [
 
 export interface PublicApiClient {
   acknowledgeWikiDelivery(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
+  actBrowser(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
+  cancelBrowserOperation(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   cancelCrawl(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   cancelJob(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   closeBrowserSession(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
+  closeBrowserTab(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   completeUpload(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   createArchiveCapture(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   createArchiveImport(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   createArchiveReplaySession(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   createBackup(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
-  createBrowserAction(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   createBrowserSession(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   createCorpusExport(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   createCorpusImport(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
@@ -1203,16 +1344,19 @@ export interface PublicApiClient {
   createWatch(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   createWikiBackfill(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   createWikiLease(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
+  debugBrowser(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   deleteUpload(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   deleteWatch(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   discoverFeeds(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   drainIndex(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
+  forgetPage(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   getArtifact(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   getArtifactContent(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   getArtifactExcerpt(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   getArtifactMetadata(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   getBrowserSession(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   getBrowserSnapshot(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
+  getBrowserVisualFrame(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   getCapabilities(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   getCorpusStats(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   getCrawl(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
@@ -1235,6 +1379,7 @@ export interface PublicApiClient {
   getWikiDeliveryEnvelope(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   listAuditEvents(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   listBackups(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
+  listBrowserSessions(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   listCrawlVisits(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   listEngines(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   listJobs(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
@@ -1242,13 +1387,18 @@ export interface PublicApiClient {
   listPageVersions(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   listWatches(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   listWikiDeliveries(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
+  manageBrowserWorkspace(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
+  observeBrowser(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   pauseCrawl(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   probeEngine(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
+  read(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
+  research(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   resumeCrawl(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   retryJob(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   runWatch(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   search(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   searchLocal(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
+  searchPages(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   streamBrowserEvents(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   streamJobEvents(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;
   tombstonePage(request: OperationRequest, signal?: AbortSignal): Promise<OperationResponse>;

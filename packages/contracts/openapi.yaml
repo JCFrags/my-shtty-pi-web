@@ -76,58 +76,51 @@ paths:
         summary: getReadiness contract example
   /version:
     get:
+      operationId: getVersion
       tags:
       - system
-      operationId: getVersion
+      parameters: []
       responses:
         '200':
-          description: Version metadata
+          description: Result
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Version'
+                $ref: '#/components/schemas/ShippedVersionInfo'
         default:
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/ShippedProblem'
       x-webx-scopes:
-      - system.read
+      - public
       x-webx-request-limits:
         max_body_bytes: 0
-        max_response_bytes: 5242880
+        max_response_bytes: 1048576
       x-webx-examples:
-      - name: contract-smoke
-        summary: getVersion contract example
+      - name: shipped-route
+        summary: getVersion shipped route
+      security: []
   /capabilities:
     get:
+      operationId: getCapabilities
       tags:
       - system
-      operationId: getCapabilities
+      parameters: []
       responses:
         '200':
-          description: Enabled capability catalog
+          description: Result
           content:
             application/json:
               schema:
-                type: object
-                required:
-                - api_version
-                - capabilities
-                properties:
-                  api_version:
-                    type: string
-                  capabilities:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Capability'
+                $ref: '#/components/schemas/ShippedCapabilityCatalog'
         default:
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/ShippedProblem'
       x-webx-scopes:
       - system.read
       x-webx-request-limits:
         max_body_bytes: 0
-        max_response_bytes: 5242880
+        max_response_bytes: 1048576
       x-webx-examples:
-      - name: contract-smoke
-        summary: getCapabilities contract example
+      - name: shipped-route
+        summary: getCapabilities shipped route
   /engines:
     get:
       tags:
@@ -177,32 +170,34 @@ paths:
         summary: probeEngine contract example
   /search:
     post:
+      operationId: search
       tags:
       - search
-      operationId: search
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShippedSearchResponse'
+        default:
+          $ref: '#/components/responses/ShippedProblem'
+      x-webx-scopes:
+      - search.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 1048576
+      x-webx-examples:
+      - name: shipped-route
+        summary: search shipped route
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SearchRequest'
-      responses:
-        '200':
-          description: Search response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SearchResponse'
-        default:
-          $ref: '#/components/responses/Problem'
-      x-webx-scopes:
-      - search.write
-      x-webx-request-limits:
-        max_body_bytes: 1048576
-        max_response_bytes: 5242880
-      x-webx-examples:
-      - name: contract-smoke
-        summary: search contract example
+              $ref: '#/components/schemas/ShippedSearchRequest'
   /search/local:
     post:
       tags:
@@ -288,107 +283,132 @@ paths:
       - name: contract-smoke
         summary: createVerification contract example
   /browser/sessions:
-    post:
-      tags:
-      - browser
-      operationId: createBrowserSession
-      parameters:
-      - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BrowserSessionRequest'
-      responses:
-        '201':
-          description: Session
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BrowserSession'
-        default:
-          $ref: '#/components/responses/Problem'
-      x-webx-scopes:
-      - browser.write
-      x-webx-request-limits:
-        max_body_bytes: 1048576
-        max_response_bytes: 5242880
-      x-webx-examples:
-      - name: contract-smoke
-        summary: createBrowserSession contract example
-  /browser/sessions/{session_id}:
     get:
+      operationId: listBrowserSessions
       tags:
       - browser
-      operationId: getBrowserSession
-      parameters:
-      - $ref: '#/components/parameters/SessionId'
+      parameters: []
       responses:
         '200':
-          description: Session
+          description: Result
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BrowserSession'
+                $ref: '#/components/schemas/BrowserSessionList'
         default:
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/ShippedProblem'
       x-webx-scopes:
       - browser.read
       x-webx-request-limits:
         max_body_bytes: 0
-        max_response_bytes: 5242880
+        max_response_bytes: 1048576
       x-webx-examples:
-      - name: contract-smoke
-        summary: getBrowserSession contract example
-    delete:
+      - name: shipped-route
+        summary: listBrowserSessions shipped route
+    post:
+      operationId: createBrowserSession
       tags:
       - browser
-      operationId: closeBrowserSession
       parameters:
-      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/IdempotencyKey'
       responses:
-        '204':
-          description: Closed
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserSessionShipped'
         default:
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/ShippedProblem'
       x-webx-scopes:
       - browser.write
       x-webx-request-limits:
         max_body_bytes: 1048576
-        max_response_bytes: 5242880
+        max_response_bytes: 1048576
       x-webx-examples:
-      - name: contract-smoke
-        summary: closeBrowserSession contract example
-  /browser/sessions/{session_id}/actions:
-    post:
-      tags:
-      - browser
-      operationId: createBrowserAction
-      parameters:
-      - $ref: '#/components/parameters/SessionId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+      - name: shipped-route
+        summary: createBrowserSession shipped route
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/BrowserAction'
+              $ref: '#/components/schemas/BrowserSessionRequestShipped'
+  /browser/sessions/{session_id}:
+    get:
+      operationId: getBrowserSession
+      tags:
+      - browser
+      parameters:
+      - $ref: '#/components/parameters/ShippedSessionId'
       responses:
         '200':
-          $ref: '#/components/responses/ArtifactResult'
-        '202':
-          $ref: '#/components/responses/JobAccepted'
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserSessionShipped'
         default:
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/ShippedProblem'
+      x-webx-scopes:
+      - browser.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 1048576
+      x-webx-examples:
+      - name: shipped-route
+        summary: getBrowserSession shipped route
+    delete:
+      operationId: closeBrowserSession
+      tags:
+      - browser
+      parameters:
+      - $ref: '#/components/parameters/ShippedSessionId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: Session closed
+        default:
+          $ref: '#/components/responses/ShippedProblem'
+      x-webx-scopes:
+      - browser.write
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 1048576
+      x-webx-examples:
+      - name: shipped-route
+        summary: closeBrowserSession shipped route
+  /browser/sessions/{session_id}/actions:
+    post:
+      operationId: actBrowser
+      tags:
+      - browser
+      parameters:
+      - $ref: '#/components/parameters/ShippedSessionId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserOperationResult'
+        default:
+          $ref: '#/components/responses/ShippedProblem'
       x-webx-scopes:
       - browser.write
       x-webx-request-limits:
         max_body_bytes: 1048576
-        max_response_bytes: 5242880
+        max_response_bytes: 1048576
       x-webx-examples:
-      - name: contract-smoke
-        summary: createBrowserAction contract example
+      - name: shipped-route
+        summary: actBrowser shipped route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserActionRequest'
   /crawls:
     post:
       tags:
@@ -642,65 +662,54 @@ paths:
         summary: getArtifactContent contract example
   /artifacts/{artifact_id}/excerpt:
     get:
+      operationId: getArtifactExcerpt
       tags:
       - artifacts
-      operationId: getArtifactExcerpt
       parameters:
-      - $ref: '#/components/parameters/ArtifactId'
-      - name: start_line
-        in: query
-        schema:
-          type: integer
-          minimum: 1
-          default: 1
-      - name: max_lines
-        in: query
-        schema:
-          type: integer
-          minimum: 1
-          maximum: 500
-          default: 100
+      - $ref: '#/components/parameters/ShippedArtifactId'
+      - $ref: '#/components/parameters/ArtifactOffset'
+      - $ref: '#/components/parameters/ArtifactMaxBytes'
       responses:
         '200':
-          description: Excerpt
+          description: Result
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ArtifactExcerpt'
+                $ref: '#/components/schemas/ArtifactExcerptShipped'
         default:
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/ShippedProblem'
       x-webx-scopes:
       - artifacts.read
       x-webx-request-limits:
         max_body_bytes: 0
-        max_response_bytes: 5242880
+        max_response_bytes: 1048576
       x-webx-examples:
-      - name: contract-smoke
-        summary: getArtifactExcerpt contract example
+      - name: shipped-route
+        summary: getArtifactExcerpt shipped route
   /pages/{page_id}:
     get:
+      operationId: getPage
       tags:
       - pages
-      operationId: getPage
       parameters:
-      - $ref: '#/components/parameters/PageId'
+      - $ref: '#/components/parameters/ShippedPageId'
       responses:
         '200':
-          description: Page
+          description: Result
           content:
             application/json:
               schema:
-                $ref: ./schemas/page-record.json
+                $ref: '#/components/schemas/BoundedContent'
         default:
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/ShippedProblem'
       x-webx-scopes:
       - pages.read
       x-webx-request-limits:
         max_body_bytes: 0
-        max_response_bytes: 5242880
+        max_response_bytes: 1048576
       x-webx-examples:
-      - name: contract-smoke
-        summary: getPage contract example
+      - name: shipped-route
+        summary: getPage shipped route
   /visits/{visit_id}:
     get:
       tags:
@@ -2397,6 +2406,302 @@ paths:
       x-webx-examples:
       - name: contract-smoke
         summary: validateConfig contract example
+  /read:
+    post:
+      operationId: read
+      tags:
+      - retrieval
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoundedContent'
+        default:
+          $ref: '#/components/responses/ShippedProblem'
+      x-webx-scopes:
+      - retrieval.read
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 1048576
+      x-webx-examples:
+      - name: shipped-route
+        summary: read shipped route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShippedReadRequest'
+  /research:
+    post:
+      operationId: research
+      tags:
+      - retrieval
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResearchResponse'
+        default:
+          $ref: '#/components/responses/ShippedProblem'
+      x-webx-scopes:
+      - research.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 1048576
+      x-webx-examples:
+      - name: shipped-route
+        summary: research shipped route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResearchRequest'
+  /pages/search:
+    post:
+      operationId: searchPages
+      tags:
+      - pages
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PageLibrarySearchResponse'
+        default:
+          $ref: '#/components/responses/ShippedProblem'
+      x-webx-scopes:
+      - pages.read
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 1048576
+      x-webx-examples:
+      - name: shipped-route
+        summary: searchPages shipped route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PageLibrarySearchRequest'
+  /pages:
+    delete:
+      operationId: forgetPage
+      tags:
+      - pages
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PageForgetResult'
+        default:
+          $ref: '#/components/responses/ShippedProblem'
+      x-webx-scopes:
+      - pages.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 1048576
+      x-webx-examples:
+      - name: shipped-route
+        summary: forgetPage shipped route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PageForgetRequest'
+  /browser/sessions/{session_id}/tabs/{tab_id}:
+    delete:
+      operationId: closeBrowserTab
+      tags:
+      - browser
+      parameters:
+      - $ref: '#/components/parameters/ShippedSessionId'
+      - $ref: '#/components/parameters/ShippedTabId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: Tab closed
+        default:
+          $ref: '#/components/responses/ShippedProblem'
+      x-webx-scopes:
+      - browser.write
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 1048576
+      x-webx-examples:
+      - name: shipped-route
+        summary: closeBrowserTab shipped route
+  /browser/sessions/{session_id}/observe:
+    post:
+      operationId: observeBrowser
+      tags:
+      - browser
+      parameters:
+      - $ref: '#/components/parameters/ShippedSessionId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserObservation'
+        default:
+          $ref: '#/components/responses/ShippedProblem'
+      x-webx-scopes:
+      - browser.read
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 1048576
+      x-webx-examples:
+      - name: shipped-route
+        summary: observeBrowser shipped route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserObserveRequest'
+  /browser/sessions/{session_id}/frame:
+    post:
+      operationId: getBrowserVisualFrame
+      tags:
+      - browser
+      parameters:
+      - $ref: '#/components/parameters/ShippedSessionId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserVisualFrame'
+        default:
+          $ref: '#/components/responses/ShippedProblem'
+      x-webx-scopes:
+      - browser.read
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 1048576
+      x-webx-examples:
+      - name: shipped-route
+        summary: getBrowserVisualFrame shipped route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyObject'
+  /browser/sessions/{session_id}/debug:
+    post:
+      operationId: debugBrowser
+      tags:
+      - browser
+      parameters:
+      - $ref: '#/components/parameters/ShippedSessionId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserDebugResult'
+        default:
+          $ref: '#/components/responses/ShippedProblem'
+      x-webx-scopes:
+      - browser.debug
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 1048576
+      x-webx-examples:
+      - name: shipped-route
+        summary: debugBrowser shipped route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserDebugRequest'
+  /browser/workspace:
+    post:
+      operationId: manageBrowserWorkspace
+      tags:
+      - browser
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserWorkspaceResult'
+        default:
+          $ref: '#/components/responses/ShippedProblem'
+      x-webx-scopes:
+      - browser.control
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 1048576
+      x-webx-examples:
+      - name: shipped-route
+        summary: manageBrowserWorkspace shipped route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserWorkspaceRequest'
+  /browser/operations/{operation_id}/cancel:
+    post:
+      operationId: cancelBrowserOperation
+      tags:
+      - browser
+      parameters:
+      - $ref: '#/components/parameters/ShippedOperationId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserOperationResult'
+        default:
+          $ref: '#/components/responses/ShippedProblem'
+      x-webx-scopes:
+      - browser.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 1048576
+      x-webx-examples:
+      - name: shipped-route
+        summary: cancelBrowserOperation shipped route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyObject'
 components:
   securitySchemes:
     bearerAuth:
@@ -2518,6 +2823,77 @@ components:
         type: integer
         minimum: 1
         maximum: 10000
+    TabId:
+      name: tab_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+    OperationId:
+      name: operation_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+    ArtifactOffset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    ArtifactMaxBytes:
+      name: max_bytes
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 65536
+        default: 16384
+    ShippedSessionId:
+      name: session_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+    ShippedTabId:
+      name: tab_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+    ShippedOperationId:
+      name: operation_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+    ShippedArtifactId:
+      name: artifact_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+    ShippedPageId:
+      name: page_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
   responses:
     Problem:
       description: Structured error
@@ -2537,6 +2913,12 @@ components:
         application/json:
           schema:
             $ref: ./schemas/artifact-result.json
+    ShippedProblem:
+      description: Structured shipped-route error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ShippedProblem'
   schemas:
     Ulid:
       type: string
@@ -3469,3 +3851,1376 @@ components:
         candidate:
           type: object
           additionalProperties: true
+    ShippedProblem:
+      type: object
+      additionalProperties: false
+      required:
+      - code
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 100
+        message:
+          type: string
+          maxLength: 4000
+        retryable:
+          type: boolean
+        details:
+          type: object
+          additionalProperties: true
+    ShippedVersionInfo:
+      type: object
+      additionalProperties: false
+      required:
+      - apiVersion
+      - webxVersion
+      - browserProtocolVersion
+      properties:
+        apiVersion:
+          type: string
+          const: 1.0.0
+        webxVersion:
+          type: string
+          minLength: 1
+        browserProtocolVersion:
+          type: string
+          const: 2.0.0
+    Visibility:
+      type: string
+      enum:
+      - public
+      - internal
+      - private
+      - secret
+    BrowserPathId:
+      type: string
+      enum:
+      - agent-browser/chrome
+      - pinchtab/chrome
+    BrowserPathCapability:
+      type: object
+      additionalProperties: false
+      required:
+      - pathId
+      - actions
+      - observations
+      - visual
+      - touch
+      - uploads
+      - downloads
+      properties:
+        pathId:
+          $ref: '#/components/schemas/BrowserPathId'
+        actions:
+          type: array
+          items:
+            type: string
+        observations:
+          type: array
+          items:
+            type: string
+        visual:
+          type: boolean
+        touch:
+          const: false
+        uploads:
+          type: boolean
+        downloads:
+          type: boolean
+    ShippedCapability:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - enabled
+      - healthy
+      properties:
+        id:
+          type: string
+          enum:
+          - search
+          - read
+          - research
+          - pages
+          - artifacts
+          - browser
+        enabled:
+          type: boolean
+        healthy:
+          type: boolean
+        reason:
+          type: string
+          maxLength: 500
+    ShippedCapabilityCatalog:
+      type: object
+      additionalProperties: false
+      required:
+      - apiVersion
+      - capabilities
+      - browserPaths
+      properties:
+        apiVersion:
+          type: string
+          const: 1.0.0
+        capabilities:
+          type: array
+          minItems: 6
+          maxItems: 6
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/ShippedCapability'
+          allOf:
+          - contains:
+              type: object
+              required:
+              - id
+              properties:
+                id:
+                  const: search
+            minContains: 1
+            maxContains: 1
+          - contains:
+              type: object
+              required:
+              - id
+              properties:
+                id:
+                  const: read
+            minContains: 1
+            maxContains: 1
+          - contains:
+              type: object
+              required:
+              - id
+              properties:
+                id:
+                  const: research
+            minContains: 1
+            maxContains: 1
+          - contains:
+              type: object
+              required:
+              - id
+              properties:
+                id:
+                  const: pages
+            minContains: 1
+            maxContains: 1
+          - contains:
+              type: object
+              required:
+              - id
+              properties:
+                id:
+                  const: artifacts
+            minContains: 1
+            maxContains: 1
+          - contains:
+              type: object
+              required:
+              - id
+              properties:
+                id:
+                  const: browser
+            minContains: 1
+            maxContains: 1
+        browserPaths:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: '#/components/schemas/BrowserPathCapability'
+          prefixItems:
+          - allOf:
+            - $ref: '#/components/schemas/BrowserPathCapability'
+            - type: object
+              properties:
+                pathId:
+                  const: agent-browser/chrome
+          - allOf:
+            - $ref: '#/components/schemas/BrowserPathCapability'
+            - type: object
+              properties:
+                pathId:
+                  const: pinchtab/chrome
+    ShippedSearchRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - query
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+        visibility:
+          type: string
+          enum:
+          - public
+          - internal
+          - private
+          - secret
+    ShippedSearchHit:
+      type: object
+      additionalProperties: false
+      required:
+      - hitId
+      - title
+      - url
+      - snippet
+      - rank
+      - visibility
+      properties:
+        hitId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        title:
+          type: string
+        url:
+          type: string
+          maxLength: 8192
+        snippet:
+          type: string
+          maxLength: 320
+        rank:
+          type: integer
+          minimum: 1
+        visibility:
+          type: string
+          enum:
+          - public
+          - internal
+          - private
+          - secret
+        pageId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 256
+    ShippedSearchResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - query
+      - hits
+      - truncated
+      properties:
+        query:
+          type: string
+        hits:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShippedSearchHit'
+        truncated:
+          type: boolean
+    ShippedReadRequest:
+      type: object
+      additionalProperties: false
+      required: []
+      properties:
+        url:
+          type: string
+          minLength: 1
+          maxLength: 8192
+        pageId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        maxChars:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          default: 16384
+        visibility:
+          type: string
+          enum:
+          - public
+          - internal
+          - private
+          - secret
+      oneOf:
+      - required:
+        - url
+        not:
+          required:
+          - pageId
+      - required:
+        - pageId
+        not:
+          required:
+          - url
+    BoundedContent:
+      type: object
+      additionalProperties: false
+      required:
+      - title
+      - url
+      - untrustedContent
+      - truncated
+      - visibility
+      properties:
+        title:
+          type: string
+        url:
+          type: string
+          maxLength: 8192
+        untrustedContent:
+          type: string
+          maxLength: 100000
+        truncated:
+          type: boolean
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        pageId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        visibility:
+          type: string
+          enum:
+          - public
+          - internal
+          - private
+          - secret
+    ResearchRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - question
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 8192
+        maxSources:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 5
+        maxChars:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          default: 8000
+        visibility:
+          type: string
+          enum:
+          - public
+          - internal
+          - private
+          - secret
+    ResearchResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - question
+      - summary
+      - sources
+      - truncated
+      properties:
+        question:
+          type: string
+        summary:
+          type: string
+          maxLength: 100000
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShippedSearchHit'
+        truncated:
+          type: boolean
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 256
+    PageLibrarySearchRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - query
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 8192
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 10
+        includeHistory:
+          type: boolean
+          default: false
+    PageRecordShipped:
+      type: object
+      additionalProperties: false
+      required:
+      - pageId
+      - ownerPrincipalId
+      - title
+      - url
+      - visibility
+      - artifactId
+      properties:
+        pageId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        ownerPrincipalId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        title:
+          type: string
+        url:
+          type: string
+          maxLength: 8192
+        visibility:
+          type: string
+          enum:
+          - public
+          - internal
+          - private
+          - secret
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 256
+    PageLibrarySearchResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - query
+      - pages
+      - truncated
+      properties:
+        query:
+          type: string
+        pages:
+          type: array
+          items:
+            $ref: '#/components/schemas/PageRecordShipped'
+        truncated:
+          type: boolean
+    PageForgetRequest:
+      type: object
+      additionalProperties: false
+      required: []
+      properties:
+        pageId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        url:
+          type: string
+          minLength: 1
+          maxLength: 8192
+      oneOf:
+      - required:
+        - pageId
+        not:
+          required:
+          - url
+      - required:
+        - url
+        not:
+          required:
+          - pageId
+    PageForgetResult:
+      type: object
+      additionalProperties: false
+      required:
+      - forgotten
+      - pageId
+      properties:
+        forgotten:
+          const: true
+        pageId:
+          type: string
+          minLength: 1
+          maxLength: 256
+    ArtifactExcerptShipped:
+      type: object
+      additionalProperties: false
+      required:
+      - artifactId
+      - mediaType
+      - sha256
+      - sizeBytes
+      - excerpt
+      - offset
+      - visibility
+      - integrityVerified
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        mediaType:
+          type: string
+          minLength: 1
+          maxLength: 255
+        sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        sizeBytes:
+          type: integer
+          minimum: 0
+        excerpt:
+          type: string
+        offset:
+          type: integer
+          minimum: 0
+        nextOffset:
+          type: integer
+          minimum: 1
+        visibility:
+          type: string
+          enum:
+          - public
+          - internal
+          - private
+          - secret
+        integrityVerified:
+          const: true
+    BrowserSessionRequestShipped:
+      type: object
+      additionalProperties: false
+      required:
+      - pathId
+      properties:
+        pathId:
+          $ref: '#/components/schemas/BrowserPathId'
+        url:
+          type: string
+          maxLength: 8192
+        visible:
+          type: boolean
+        label:
+          type: string
+          maxLength: 256
+    BrowserSessionShipped:
+      type: object
+      additionalProperties: false
+      required:
+      - sessionId
+      - tabId
+      - pathId
+      - ownerPrincipalId
+      - ownerAgentId
+      - state
+      - capabilities
+      properties:
+        sessionId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        tabId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        pathId:
+          $ref: '#/components/schemas/BrowserPathId'
+        ownerPrincipalId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        ownerAgentId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        state:
+          type: string
+          enum:
+          - creating
+          - ready
+          - closing
+          - closed
+          - failed
+          - recovering
+        capabilities:
+          $ref: '#/components/schemas/BrowserPathCapability'
+    BrowserSessionList:
+      type: object
+      additionalProperties: false
+      required:
+      - sessions
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/BrowserSessionShipped'
+    BrowserAddress:
+      type: object
+      additionalProperties: false
+      required:
+      - sessionId
+      - tabId
+      - pathId
+      - hostGeneration
+      - engineGeneration
+      - controlEpoch
+      properties:
+        sessionId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        tabId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        pathId:
+          $ref: '#/components/schemas/BrowserPathId'
+        hostGeneration:
+          type: integer
+          minimum: 0
+        engineGeneration:
+          type: integer
+          minimum: 0
+        controlEpoch:
+          type: integer
+          minimum: 0
+    VisualGuard:
+      type: object
+      additionalProperties: false
+      required:
+      - viewportId
+      - viewportGeneration
+      - screenshotSha256
+      - screenshotSequence
+      properties:
+        viewportId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        viewportGeneration:
+          type: integer
+          minimum: 0
+        screenshotSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        screenshotSequence:
+          type: integer
+          minimum: 0
+    BrowserObserveRequest:
+      type: object
+      additionalProperties: false
+      required: []
+      properties:
+        view:
+          type: string
+          enum:
+          - main
+          - interactive
+          - visual
+          - full
+          - diff
+          default: main
+        maxChars:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          default: 16384
+    BrowserScreenshotRef:
+      type: object
+      additionalProperties: false
+      required:
+      - artifactId
+      - sha256
+      - sequence
+      - viewportId
+      - viewportGeneration
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        sequence:
+          type: integer
+          minimum: 0
+        viewportId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        viewportGeneration:
+          type: integer
+          minimum: 0
+    BrowserObservation:
+      type: object
+      additionalProperties: false
+      required:
+      - operationId
+      - address
+      - title
+      - url
+      - content
+      - truncated
+      properties:
+        operationId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        observationId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        address:
+          $ref: '#/components/schemas/BrowserAddress'
+        title:
+          type: string
+        url:
+          type: string
+          maxLength: 8192
+        content:
+          type: string
+          maxLength: 100000
+        truncated:
+          type: boolean
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        screenshot:
+          $ref: '#/components/schemas/BrowserScreenshotRef'
+    BrowserVisualFrame:
+      type: object
+      additionalProperties: false
+      required:
+      - address
+      - mediaType
+      - width
+      - height
+      - payloadBase64
+      - screenshotSha256
+      - screenshotSequence
+      - viewportId
+      - viewportGeneration
+      properties:
+        address:
+          $ref: '#/components/schemas/BrowserAddress'
+        mediaType:
+          type: string
+          enum:
+          - image/png
+          - image/jpeg
+        width:
+          type: integer
+          minimum: 1
+        height:
+          type: integer
+          minimum: 1
+        payloadBase64:
+          type: string
+          contentEncoding: base64
+        screenshotSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        screenshotSequence:
+          type: integer
+          minimum: 0
+        viewportId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        viewportGeneration:
+          type: integer
+          minimum: 0
+    BrowserOperationResult:
+      type: object
+      additionalProperties: false
+      required:
+      - operationId
+      - state
+      properties:
+        operationId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        state:
+          type: string
+          enum:
+          - queued
+          - running
+          - cancelling
+          - succeeded
+          - failed
+          - cancelled
+        observation:
+          $ref: '#/components/schemas/BrowserObservation'
+    BrowserDebugRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - operation
+      properties:
+        operation:
+          type: string
+          enum:
+          - console
+          - network
+          - html
+          - pdf
+          - record-start
+          - record-stop
+        args:
+          type: object
+          additionalProperties: true
+        maxChars:
+          type: integer
+          minimum: 1
+          maximum: 100000
+    BrowserDebugResult:
+      type: object
+      additionalProperties: false
+      required:
+      - operationId
+      - operation
+      - ok
+      - data
+      properties:
+        operationId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        operation:
+          type: string
+          enum:
+          - console
+          - network
+          - html
+          - pdf
+          - record-start
+          - record-stop
+        ok:
+          type: boolean
+        data: {}
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 256
+    BrowserWorkspaceRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - action
+      properties:
+        action:
+          type: string
+          enum:
+          - show
+          - hide
+          - list
+          - attach
+          - takeover
+          - return
+        sessionId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        tabId:
+          type: string
+          minLength: 1
+          maxLength: 256
+    BrowserWorkspaceResult:
+      type: object
+      additionalProperties: false
+      required:
+      - action
+      - data
+      properties:
+        action:
+          type: string
+          enum:
+          - show
+          - hide
+          - list
+          - attach
+          - takeover
+          - return
+        data: {}
+    EmptyObject:
+      type: object
+      additionalProperties: false
+      required: []
+      properties: {}
+    BrowserActionShipped:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - url
+        properties:
+          kind:
+            const: navigate
+          url:
+            type: string
+            minLength: 1
+            maxLength: 8192
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - x
+        - y
+        - visualGuard
+        properties:
+          kind:
+            const: mouse-move
+          x:
+            type: number
+          y:
+            type: number
+          visualGuard:
+            $ref: '#/components/schemas/VisualGuard'
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - x
+        - y
+        - button
+        - visualGuard
+        properties:
+          kind:
+            const: mouse-down
+          x:
+            type: number
+          y:
+            type: number
+          button:
+            type: string
+            enum:
+            - left
+            - middle
+            - right
+          visualGuard:
+            $ref: '#/components/schemas/VisualGuard'
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - x
+        - y
+        - button
+        - visualGuard
+        properties:
+          kind:
+            const: mouse-up
+          x:
+            type: number
+          y:
+            type: number
+          button:
+            type: string
+            enum:
+            - left
+            - middle
+            - right
+          visualGuard:
+            $ref: '#/components/schemas/VisualGuard'
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - x
+        - y
+        - button
+        - visualGuard
+        properties:
+          kind:
+            const: double-click
+          x:
+            type: number
+          y:
+            type: number
+          button:
+            type: string
+            enum:
+            - left
+            - middle
+            - right
+          visualGuard:
+            $ref: '#/components/schemas/VisualGuard'
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - x
+        - y
+        - button
+        - visualGuard
+        properties:
+          kind:
+            const: click
+          x:
+            type: number
+          y:
+            type: number
+          button:
+            type: string
+            enum:
+            - left
+            - middle
+            - right
+          visualGuard:
+            $ref: '#/components/schemas/VisualGuard'
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        properties:
+          kind:
+            const: click
+          ref:
+            type: string
+            minLength: 1
+            maxLength: 256
+          selector:
+            type: string
+            minLength: 1
+            maxLength: 2000
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - deltaX
+        - deltaY
+        - visualGuard
+        properties:
+          kind:
+            const: wheel
+          deltaX:
+            type: number
+          deltaY:
+            type: number
+          visualGuard:
+            $ref: '#/components/schemas/VisualGuard'
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - from
+        - to
+        - visualGuard
+        properties:
+          kind:
+            const: drag
+          from:
+            type: object
+            additionalProperties: false
+            required:
+            - x
+            - y
+            properties:
+              x:
+                type: number
+              y:
+                type: number
+          to:
+            type: object
+            additionalProperties: false
+            required:
+            - x
+            - y
+            properties:
+              x:
+                type: number
+              y:
+                type: number
+          visualGuard:
+            $ref: '#/components/schemas/VisualGuard'
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - key
+        properties:
+          kind:
+            const: key-press
+          key:
+            type: string
+            minLength: 1
+            maxLength: 100
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - key
+        properties:
+          kind:
+            const: key-down
+          key:
+            type: string
+            minLength: 1
+            maxLength: 100
+          code:
+            type: string
+            maxLength: 100
+          modifiers:
+            type: integer
+            minimum: 0
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - key
+        properties:
+          kind:
+            const: key-up
+          key:
+            type: string
+            minLength: 1
+            maxLength: 100
+          code:
+            type: string
+            maxLength: 100
+          modifiers:
+            type: integer
+            minimum: 0
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - text
+        properties:
+          kind:
+            const: text-input
+          text:
+            type: string
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - text
+        properties:
+          kind:
+            const: fill
+          ref:
+            type: string
+            minLength: 1
+            maxLength: 256
+          selector:
+            type: string
+            maxLength: 2000
+          text:
+            type: string
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - text
+        properties:
+          kind:
+            const: type
+          ref:
+            type: string
+            minLength: 1
+            maxLength: 256
+          selector:
+            type: string
+            maxLength: 2000
+          text:
+            type: string
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - key
+        properties:
+          kind:
+            const: press
+          key:
+            type: string
+            minLength: 1
+            maxLength: 100
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        properties:
+          kind:
+            const: hover
+          ref:
+            type: string
+            minLength: 1
+            maxLength: 256
+          selector:
+            type: string
+            maxLength: 2000
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - direction
+        properties:
+          kind:
+            const: scroll
+          direction:
+            type: string
+            enum:
+            - up
+            - down
+            - left
+            - right
+          amount:
+            type: number
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - ref
+        - targetRef
+        properties:
+          kind:
+            const: semantic-drag
+          ref:
+            type: string
+            minLength: 1
+            maxLength: 256
+          targetRef:
+            type: string
+            minLength: 1
+            maxLength: 256
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - values
+        properties:
+          kind:
+            const: select
+          ref:
+            type: string
+            minLength: 1
+            maxLength: 256
+          selector:
+            type: string
+            maxLength: 2000
+          values:
+            type: array
+            items:
+              type: string
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - ref
+        - uploadHandleIds
+        properties:
+          kind:
+            const: upload
+          ref:
+            type: string
+            minLength: 1
+            maxLength: 256
+          uploadHandleIds:
+            type: array
+            items:
+              type: string
+              minLength: 1
+              maxLength: 256
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - ref
+        properties:
+          kind:
+            const: download
+          ref:
+            type: string
+            minLength: 1
+            maxLength: 256
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        properties:
+          kind:
+            const: wait
+          milliseconds:
+            type: number
+            minimum: 0
+          selector:
+            type: string
+            maxLength: 2000
+          text:
+            type: string
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        properties:
+          kind:
+            const: tab-new
+          url:
+            type: string
+            maxLength: 8192
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        properties:
+          kind:
+            const: tab-close
+          tabId:
+            type: string
+            minLength: 1
+            maxLength: 256
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - tabId
+        properties:
+          kind:
+            const: tab-focus
+          tabId:
+            type: string
+            minLength: 1
+            maxLength: 256
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        properties:
+          kind:
+            const: back
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        properties:
+          kind:
+            const: forward
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        properties:
+          kind:
+            const: reload
+    BrowserActionRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - action
+      properties:
+        action:
+          $ref: '#/components/schemas/BrowserActionShipped'
