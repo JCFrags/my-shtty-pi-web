@@ -1,3 +1,5 @@
+import { WebxFacadeClient } from "../vendor/sdk/facade.js";
+
 export const SUPPORTED_API_MAJOR = 1;
 
 export interface WebxCapabilities {
@@ -65,7 +67,11 @@ export interface WebxSdk {
 export type WebxSdkFactory = () => WebxSdk;
 
 export function createSdkClient(): WebxSdk {
-  throw new Error("WebX SDK seam is not bound. The Pi facade is unavailable until integration supplies the generated SDK client.");
+  const runtimeDirectory = process.env.XDG_RUNTIME_DIR;
+  if (runtimeDirectory === undefined || runtimeDirectory.length === 0) {
+    throw new Error("XDG_RUNTIME_DIR is required for the same-user WebX runtime.");
+  }
+  return new WebxFacadeClient(process.env.WEBXD_SOCKET ?? `${runtimeDirectory}/pi-web/webxd.sock`);
 }
 
 export function apiMajor(version: string): number | undefined {
