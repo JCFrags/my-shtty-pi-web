@@ -20,8 +20,27 @@ Corepack is optional when the exact pinned pnpm executable is present. No bootst
 
 Use `make toolchain-check` for a read-only full version check. A mismatch prints the expected and installed versions and exits with status 2.
 
-## Component lock preparation
+## Component lock
 
 `deploy/component-catalog.json` is the reviewed input. `deploy/component-lock.json` is deterministic generated output. Run `make component-lock-check` to reject drift.
 
-Development mode records unresolved browser and image sets. Release mode rejects every enabled unresolved, floating, or invalid component. Optional models stay disabled until an operator selects and reviews exact local model files and licenses.
+The resolver accepts lowercase SHA-256 digests and npm SHA-512 integrity values. It rejects repository path escape, duplicate component or artifact IDs, floating names, invalid digests, and enabled unresolved components in release mode. It records license, source, compatibility, health fixture, and rollback state.
+
+Official metadata resolves these dependency-closed components:
+
+| Component | Selection | Immutable metadata |
+|---|---|---|
+| Pi coding agent | 0.84.1 | npm SHA-512 integrity |
+| Node.js | 24.18.0 | official Linux x64/arm64 and macOS arm64 SHA-256 values |
+| Python | 3.14.6 | official source archive SHA-256 values; code baseline remains Python 3.12 |
+| pnpm | 10.13.1 | npm SHA-512 integrity |
+| uv | 0.12.0 | official Linux x64/arm64 and checksum-file SHA-256 values |
+| Playwright | 1.62.1 Noble image | npm integrity, OCI index and Linux platform digests, and bundled browser revisions |
+| Meilisearch CE | v1.53.0 | OCI index and Linux x64/arm64 digests |
+| SearXNG | 2026.8.12-54613defc | OCI index and Linux x64/arm64 digests |
+| Node and Python package sets | current frozen locks | local lockfile SHA-256 values |
+| Native host compatibility | Fedora 44 reference host | `toolchain.lock.yaml` SHA-256 and exact observed versions |
+
+Metadata came only from the upstream npm registry, Node distribution checksum list, Python download API, GitHub release API or source repository, Microsoft Container Registry, and the publishers' Docker Hub repositories. Resolution did not pull an image or start a container or browser.
+
+Release mode remains red for two explicit later dependencies. `schema-generator-set` depends on merged `WX-M0-003` and the selection owned by `WX-M0-004`. `remaining-deployment-image-set` depends on the final service set owned by `WX-M0-012`. Optional models remain safely disabled until `WX-M10-001` and operator license review.

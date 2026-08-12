@@ -1,51 +1,181 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "resolved_at": "2026-08-12T05:00:00Z",
   "components": [
     {
-      "id": "node-toolchain",
+      "id": "pi-coding-agent",
+      "kind": "pi-runtime",
+      "source": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/0.84.1",
+      "version": "0.84.1",
+      "license": "MIT",
+      "compatibility": {"node": ">=22.19.0", "webx_node": "24.18.0"},
+      "artifacts": [{"id": "npm-tarball", "digest": "sha512-ncAqFrG+iybuPGOhMiZoEHkEzTpJgz3guYD32pD+M7ucc0WeHmauP6wa7qwP8V/KWvsZDVNa5XGsdZ7fkC7w7A=="}],
+      "health_fixture": "disposable Pi package negotiation at WX-M6-013",
+      "rollback": {"mode": "retain-current", "previous_known_good": "0.84.1"}
+    },
+    {
+      "id": "node-runtime",
+      "kind": "runtime",
+      "source": "https://nodejs.org/dist/v24.18.0/SHASUMS256.txt",
+      "version": "24.18.0",
+      "license": "MIT",
+      "artifacts": [
+        {"id": "linux-x64", "digest": "sha256:55aa7153f9d88f28d765fcdad5ae6945b5c0f98a36881703817e4c450fa76742"},
+        {"id": "linux-arm64", "digest": "sha256:58c9520501f6ae2b52d5b210444e24b9d0c029a58c5011b797bc1fe7105886f6"},
+        {"id": "darwin-arm64", "digest": "sha256:4477b9f78efb77744cf5eb57a0e9594dba66466b38b4e93fa9f35cb907a095a6"}
+      ],
+      "health_fixture": "make toolchain-check",
+      "rollback": {"mode": "version-manager", "previous_known_good": null}
+    },
+    {
+      "id": "python-runtime",
+      "kind": "runtime",
+      "source": "https://www.python.org/api/v2/downloads/release_file/?release=1110",
+      "version": "3.14.6",
+      "license": "PSF-2.0",
+      "compatibility": {"source_baseline": ">=3.12,<3.15"},
+      "artifacts": [
+        {"id": "source-tar-xz", "digest": "sha256:143b1dddefaec3bd2e21e3b839b34a2b7fb9842272883c576420d605e9f30c63"},
+        {"id": "source-tar-gz", "digest": "sha256:74d0d71d0600e477651a077101d6e62d1e2e69b8e992ba18c993dd643b7ba222"}
+      ],
+      "health_fixture": "make toolchain-check",
+      "rollback": {"mode": "version-manager", "previous_known_good": null}
+    },
+    {
+      "id": "pnpm",
+      "kind": "package-manager",
+      "source": "https://registry.npmjs.org/pnpm/10.13.1",
+      "version": "10.13.1",
+      "license": "MIT",
+      "compatibility": {"node": ">=18.12", "webx_node": "24.18.0"},
+      "artifacts": [{"id": "npm-tarball", "digest": "sha512-N+vxpcejDV+r4MXfRO6NpMllygxa89urKMOhaBtwolYhjQXIHJwNz3Z+9rhVHrW5YAQrntQwDFkkIzY3fgHPrQ=="}],
+      "health_fixture": "make toolchain-check",
+      "rollback": {"mode": "version-manager", "previous_known_good": null}
+    },
+    {
+      "id": "uv",
+      "kind": "package-manager",
+      "source": "https://api.github.com/repos/astral-sh/uv/releases/tags/0.12.0",
+      "version": "0.12.0",
+      "license": "Apache-2.0 OR MIT",
+      "artifacts": [
+        {"id": "linux-x64", "digest": "sha256:eaf842262aa1c418d8ecc5605f02ee1ebfd369124fa48548e85f9481a47831a9"},
+        {"id": "linux-arm64", "digest": "sha256:2c5d6e3092cc5223b10ff403880cc75121bf64e84644e7a0c69f643b0d89ac95"},
+        {"id": "release-checksum-file", "digest": "sha256:625cade2a341d2dceaf8197e51c7271728060b729f64670562d0a74df303ef73"}
+      ],
+      "health_fixture": "make toolchain-check",
+      "rollback": {"mode": "version-manager", "previous_known_good": null}
+    },
+    {
+      "id": "node-package-set",
       "kind": "package-lock",
       "source": "pnpm-lock.yaml",
       "version": "lockfile-9",
-      "license": "multiple; inventory pending WX-M0-009",
-      "digest_file": "pnpm-lock.yaml",
-      "health_fixture": "make toolchain-check"
+      "license": "multiple; inventory follows in WX-M0-009",
+      "digest_files": ["pnpm-lock.yaml"],
+      "health_fixture": "pnpm install --frozen-lockfile",
+      "rollback": {"mode": "git-revert", "previous_known_good": "046bce1"}
     },
     {
-      "id": "python-toolchain",
+      "id": "python-package-set",
       "kind": "package-lock",
       "source": "uv.lock",
       "version": "uv-lock-1",
-      "license": "multiple; inventory pending WX-M0-009",
-      "digest_file": "uv.lock",
-      "health_fixture": "make toolchain-check"
+      "license": "multiple; inventory follows in WX-M0-009",
+      "digest_files": ["uv.lock"],
+      "health_fixture": "uv sync --frozen --all-packages",
+      "rollback": {"mode": "git-revert", "previous_known_good": "046bce1"}
+    },
+    {
+      "id": "native-tool-compatibility",
+      "kind": "host-compatibility",
+      "source": "toolchain.lock.yaml",
+      "version": "fedora-44-reference-host-1",
+      "license": "multiple; host packages are not bundled",
+      "digest_files": ["toolchain.lock.yaml"],
+      "compatibility": {"git": "2.55.0", "make": "4.4.1", "sqlite": "3.51.2", "curl": "8.18.0", "jq": "1.8.1", "openssl": "3.5.7", "podman": "5.8.4", "docker": "safe-disabled"},
+      "health_fixture": "host prerequisite checks before compose qualification",
+      "rollback": {"mode": "host-package-manager", "previous_known_good": null}
     },
     {
       "id": "playwright-browser-set",
-      "kind": "browser",
-      "source": "playwright",
-      "version": "UNRESOLVED_M0",
+      "kind": "browser-image",
+      "source": "https://mcr.microsoft.com/v2/playwright/manifests/v1.62.1-noble",
+      "version": "1.62.1-noble",
       "license": "Apache-2.0",
-      "digest": null,
-      "health_fixture": "fixture:playwright"
+      "compatibility": {"node": ">=20", "chromium": "151.0.7922.34@1234", "firefox": "153.0@1538", "webkit": "26.5@2336", "ffmpeg_revision": "1011"},
+      "artifacts": [
+        {"id": "oci-index", "digest": "sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e"},
+        {"id": "linux-x64", "digest": "sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac"},
+        {"id": "linux-arm64", "digest": "sha256:941cc91e5022880ac1d14ae90b476b624deb6399dbbc28d612d5d5bd7928fcbd"},
+        {"id": "npm-package", "digest": "sha512-0M+L3LAD8/nm554LOla9Ayx0j0tmFZ0FBcoQ7F1VuVHpM/XpiC8RcDzBQB8W5+hA8L22THxELzeF+2WcUzvcLg=="}
+      ],
+      "health_fixture": "fixture:playwright after WX-M0-006",
+      "rollback": {"mode": "safe-disable", "previous_known_good": null}
     },
     {
-      "id": "core-images",
-      "kind": "image-set",
+      "id": "meilisearch-image",
+      "kind": "container-image",
+      "source": "https://hub.docker.com/v2/repositories/getmeili/meilisearch/tags/v1.53.0",
+      "version": "v1.53.0",
+      "license": "MIT",
+      "artifacts": [
+        {"id": "oci-index", "digest": "sha256:a59e984fd90b9dee0c872cdb9183d330d71c038d7a3b35def5ca3ae7fb186fb2"},
+        {"id": "linux-x64", "digest": "sha256:3f94965d79acd5ae318f48b2a59ad84abd0155d8d3bb5b4a2ce51e5b134a8928"},
+        {"id": "linux-arm64", "digest": "sha256:0dd21dcc273b960f99fdf231157d7fdc9bee5714962b32221ba1cbbda49eab22"}
+      ],
+      "health_fixture": "fixture:meilisearch after WX-M0-012",
+      "rollback": {"mode": "safe-disable", "previous_known_good": null}
+    },
+    {
+      "id": "searxng-image",
+      "kind": "container-image",
+      "source": "https://hub.docker.com/v2/repositories/searxng/searxng/tags/2026.8.12-54613defc",
+      "version": "2026.8.12-54613defc",
+      "license": "AGPL-3.0-or-later",
+      "artifacts": [
+        {"id": "oci-index", "digest": "sha256:37baac8380e1a31e022b8dda0c58dbd6ba0630e3fdaf2c522bda3d140f5ef111"},
+        {"id": "linux-x64", "digest": "sha256:24c8ae7ffe51d2d0e0702a82309a527ed871d16ffd6f2c0f30f7bffdf92d699b"},
+        {"id": "linux-arm64", "digest": "sha256:fa56e88e968f64316f3c9d0964161cf8825b46d063f7ce09b10f9f81ee649fd3"}
+      ],
+      "health_fixture": "fixture:searxng after WX-M0-012",
+      "rollback": {"mode": "safe-disable", "previous_known_good": null}
+    },
+    {
+      "id": "schema-generator-set",
+      "kind": "generator-set",
+      "source": "packages/contracts",
+      "version": "UNRESOLVED_WX_M0_004",
+      "license": "unresolved; selection review required",
+      "enabled": true,
+      "depends_on": ["WX-M0-003", "WX-M0-004"],
+      "artifacts": [],
+      "health_fixture": "make contracts-check after WX-M0-004",
+      "rollback": {"mode": "git-revert", "previous_known_good": null}
+    },
+    {
+      "id": "remaining-deployment-image-set",
+      "kind": "container-image-set",
       "source": "deploy/compose",
-      "version": "UNRESOLVED_M0",
-      "license": "multiple; review required",
-      "digest": null,
-      "health_fixture": "make compose-check"
+      "version": "UNRESOLVED_WX_M0_012",
+      "license": "multiple; selection review required",
+      "enabled": true,
+      "depends_on": ["WX-M0-012"],
+      "artifacts": [],
+      "health_fixture": "make compose-check after WX-M0-012",
+      "rollback": {"mode": "safe-disable", "previous_known_good": null}
     },
     {
-      "id": "optional-models",
+      "id": "optional-model-set",
       "kind": "model-set",
       "source": "operator-selected local models",
-      "version": "UNRESOLVED_M0",
+      "version": "UNRESOLVED_OPERATOR_SELECTION",
       "license": "operator review required",
-      "digest": null,
       "enabled": false,
-      "health_fixture": "fixture:model-gateway"
+      "depends_on": ["WX-M10-001"],
+      "artifacts": [],
+      "health_fixture": "fixture:model-gateway after operator selection",
+      "rollback": {"mode": "safe-disable", "previous_known_good": null}
     }
   ]
 }
