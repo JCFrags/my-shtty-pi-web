@@ -110,11 +110,17 @@ def generate(output: Path) -> None:
     )
 
 
-def compare(expected: Path, actual: Path) -> list[str]:
-    expected_files = {
-        path.relative_to(expected): path for path in expected.rglob("*") if path.is_file()
+def owned_files(root: Path) -> dict[Path, Path]:
+    return {
+        path.relative_to(root): path
+        for path in root.rglob("*")
+        if path.is_file() and path.relative_to(root).parts[0] != "openapi"
     }
-    actual_files = {path.relative_to(actual): path for path in actual.rglob("*") if path.is_file()}
+
+
+def compare(expected: Path, actual: Path) -> list[str]:
+    expected_files = owned_files(expected)
+    actual_files = owned_files(actual)
     failures: list[str] = []
     for path in sorted(expected_files.keys() | actual_files.keys()):
         if path not in expected_files:
@@ -155,8 +161,13 @@ def main() -> int:
         print("VALID generated types match canonical schemas")
         return 0
 
-    if GENERATED_DIR.exists():
-        shutil.rmtree(GENERATED_DIR)
+    GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+    for owned in (GENERATED_DIR / "typescript", GENERATED_DIR / "python"):
+        if owned.exists():
+            shutil.rmtree(owned)
+    trace = GENERATED_DIR / TRACE_PATH
+    if trace.exists():
+        trace.unlink()
     generate(GENERATED_DIR)
     print(f"GENERATED {len(list(SCHEMA_DIR.glob('*.json')))} schema type pairs")
     return 0

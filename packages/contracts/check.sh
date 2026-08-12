@@ -9,5 +9,12 @@ uv run --no-project \
   --with 'referencing==0.36.2' \
   python "$contract_root/validate_contracts.py"
 
+uv run --no-project \
+  --with 'pyyaml==6.0.3' \
+  python "$contract_root/validate_openapi.py"
+
 python "$contract_root/tests/repeated_publication_recovery.py"
 python "$contract_root/tests/generated/check_generated.py"
+uv run --no-project \
+  --with 'pyyaml==6.0.3' \
+  python "$contract_root/tests/generated/check_openapi_generated.py"

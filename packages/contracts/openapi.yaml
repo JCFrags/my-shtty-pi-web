@@ -1,0 +1,3471 @@
+openapi: 3.1.0
+info:
+  title: WebX Local Web Workbench API
+  version: 1.0.0
+  description: Canonical API for the WebX CLI, Pi extension, workers, and wiki intake.
+  x-webx-api-major: 1
+servers:
+- url: http://localhost/v1
+  description: HTTP semantics over the configured Unix socket or loopback listener
+security:
+- bearerAuth: []
+tags:
+- name: system
+- name: search
+- name: retrieval
+- name: browser
+- name: crawls
+- name: jobs
+- name: artifacts
+- name: pages
+- name: documents
+- name: media
+- name: archives
+- name: monitoring
+- name: index
+- name: wiki
+- name: corpus
+- name: admin
+paths:
+  /health/live:
+    get:
+      tags:
+      - system
+      operationId: getLiveness
+      security: []
+      responses:
+        '200':
+          description: Process is live
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - system.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getLiveness contract example
+  /health/ready:
+    get:
+      tags:
+      - system
+      operationId: getReadiness
+      responses:
+        '200':
+          description: Core is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - system.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getReadiness contract example
+  /version:
+    get:
+      tags:
+      - system
+      operationId: getVersion
+      responses:
+        '200':
+          description: Version metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Version'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - system.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getVersion contract example
+  /capabilities:
+    get:
+      tags:
+      - system
+      operationId: getCapabilities
+      responses:
+        '200':
+          description: Enabled capability catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - api_version
+                - capabilities
+                properties:
+                  api_version:
+                    type: string
+                  capabilities:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Capability'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - system.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getCapabilities contract example
+  /engines:
+    get:
+      tags:
+      - system
+      operationId: listEngines
+      responses:
+        '200':
+          description: Engines
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Engine'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - system.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: listEngines contract example
+  /engines/{engine_id}/probe:
+    post:
+      tags:
+      - system
+      operationId: probeEngine
+      parameters:
+      - $ref: '#/components/parameters/EngineId'
+      responses:
+        '202':
+          $ref: '#/components/responses/JobAccepted'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - system.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: probeEngine contract example
+  /search:
+    post:
+      tags:
+      - search
+      operationId: search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Search response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - search.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: search contract example
+  /search/local:
+    post:
+      tags:
+      - search
+      operationId: searchLocal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Local search response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - search.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: searchLocal contract example
+  /fetch:
+    post:
+      tags:
+      - retrieval
+      operationId: createFetch
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FetchRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/ArtifactResult'
+        '202':
+          $ref: '#/components/responses/JobAccepted'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - retrieval.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createFetch contract example
+  /verify:
+    post:
+      tags:
+      - retrieval
+      operationId: createVerification
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/ArtifactResult'
+        '202':
+          $ref: '#/components/responses/JobAccepted'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - retrieval.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createVerification contract example
+  /browser/sessions:
+    post:
+      tags:
+      - browser
+      operationId: createBrowserSession
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserSessionRequest'
+      responses:
+        '201':
+          description: Session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserSession'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - browser.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createBrowserSession contract example
+  /browser/sessions/{session_id}:
+    get:
+      tags:
+      - browser
+      operationId: getBrowserSession
+      parameters:
+      - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: Session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserSession'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - browser.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getBrowserSession contract example
+    delete:
+      tags:
+      - browser
+      operationId: closeBrowserSession
+      parameters:
+      - $ref: '#/components/parameters/SessionId'
+      responses:
+        '204':
+          description: Closed
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - browser.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: closeBrowserSession contract example
+  /browser/sessions/{session_id}/actions:
+    post:
+      tags:
+      - browser
+      operationId: createBrowserAction
+      parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserAction'
+      responses:
+        '200':
+          $ref: '#/components/responses/ArtifactResult'
+        '202':
+          $ref: '#/components/responses/JobAccepted'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - browser.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createBrowserAction contract example
+  /crawls:
+    post:
+      tags:
+      - crawls
+      operationId: createCrawl
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CrawlRequest'
+      responses:
+        '202':
+          $ref: '#/components/responses/JobAccepted'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - crawls.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createCrawl contract example
+  /crawls/{crawl_id}:
+    get:
+      tags:
+      - crawls
+      operationId: getCrawl
+      parameters:
+      - $ref: '#/components/parameters/CrawlId'
+      responses:
+        '200':
+          description: Crawl
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Crawl'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - crawls.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getCrawl contract example
+  /extractions:
+    post:
+      tags:
+      - retrieval
+      operationId: createExtraction
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtractionRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/ArtifactResult'
+        '202':
+          $ref: '#/components/responses/JobAccepted'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - retrieval.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createExtraction contract example
+  /jobs:
+    get:
+      tags:
+      - jobs
+      operationId: listJobs
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobPage'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - jobs.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: listJobs contract example
+  /jobs/{job_id}:
+    get:
+      tags:
+      - jobs
+      operationId: getJob
+      parameters:
+      - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Job
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/job.json
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - jobs.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getJob contract example
+  /jobs/{job_id}/result:
+    get:
+      tags:
+      - jobs
+      operationId: getJobResult
+      parameters:
+      - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          $ref: '#/components/responses/ArtifactResult'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - jobs.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getJobResult contract example
+  /jobs/{job_id}/cancel:
+    post:
+      tags:
+      - jobs
+      operationId: cancelJob
+      parameters:
+      - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Job
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/job.json
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - jobs.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: cancelJob contract example
+  /jobs/{job_id}/events:
+    get:
+      tags:
+      - jobs
+      operationId: streamJobEvents
+      parameters:
+      - $ref: '#/components/parameters/JobId'
+      - name: after
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+      responses:
+        '200':
+          description: Server-sent event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - jobs.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: streamJobEvents contract example
+  /artifacts/{artifact_id}/metadata:
+    get:
+      tags:
+      - artifacts
+      operationId: getArtifactMetadata
+      parameters:
+      - $ref: '#/components/parameters/ArtifactId'
+      responses:
+        '200':
+          description: Metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactMetadata'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - artifacts.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getArtifactMetadata contract example
+  /artifacts/{artifact_id}/content:
+    get:
+      tags:
+      - artifacts
+      operationId: getArtifactContent
+      parameters:
+      - $ref: '#/components/parameters/ArtifactId'
+      responses:
+        '200':
+          description: Artifact bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                contentEncoding: binary
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - artifacts.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getArtifactContent contract example
+  /artifacts/{artifact_id}/excerpt:
+    get:
+      tags:
+      - artifacts
+      operationId: getArtifactExcerpt
+      parameters:
+      - $ref: '#/components/parameters/ArtifactId'
+      - name: start_line
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: max_lines
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+      responses:
+        '200':
+          description: Excerpt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactExcerpt'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - artifacts.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getArtifactExcerpt contract example
+  /pages/{page_id}:
+    get:
+      tags:
+      - pages
+      operationId: getPage
+      parameters:
+      - $ref: '#/components/parameters/PageId'
+      responses:
+        '200':
+          description: Page
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/page-record.json
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - pages.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getPage contract example
+  /visits/{visit_id}:
+    get:
+      tags:
+      - pages
+      operationId: getVisit
+      parameters:
+      - $ref: '#/components/parameters/VisitId'
+      responses:
+        '200':
+          description: Visit
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/visit-record.json
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - pages.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getVisit contract example
+  /index/status:
+    get:
+      tags:
+      - index
+      operationId: getIndexStatus
+      responses:
+        '200':
+          description: Index state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexStatus'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - index.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getIndexStatus contract example
+  /index/rebuilds:
+    post:
+      tags:
+      - index
+      operationId: createIndexRebuild
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - targets
+              properties:
+                targets:
+                  type: array
+                  uniqueItems: true
+                  items:
+                    type: string
+                    enum:
+                    - pages
+                    - chunks
+                    - history
+                    - all
+      responses:
+        '202':
+          $ref: '#/components/responses/JobAccepted'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - index.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createIndexRebuild contract example
+  /wiki/consumers/{consumer_id}/deliveries:
+    get:
+      tags:
+      - wiki
+      operationId: listWikiDeliveries
+      parameters:
+      - $ref: '#/components/parameters/ConsumerId'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Deliveries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiDeliveryPage'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - wiki.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: listWikiDeliveries contract example
+  /wiki/consumers/{consumer_id}/deliveries/{delivery_id}/envelope:
+    get:
+      tags:
+      - wiki
+      operationId: getWikiDeliveryEnvelope
+      parameters:
+      - $ref: '#/components/parameters/ConsumerId'
+      - $ref: '#/components/parameters/DeliveryId'
+      responses:
+        '200':
+          description: Intake envelope
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/wiki-intake.json
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - wiki.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getWikiDeliveryEnvelope contract example
+  /wiki/consumers/{consumer_id}/deliveries/{delivery_id}/ack:
+    post:
+      tags:
+      - wiki
+      operationId: acknowledgeWikiDelivery
+      parameters:
+      - $ref: '#/components/parameters/ConsumerId'
+      - $ref: '#/components/parameters/DeliveryId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WikiAck'
+      responses:
+        '200':
+          description: Ack state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiDelivery'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - wiki.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: acknowledgeWikiDelivery contract example
+  /archives/captures:
+    post:
+      tags:
+      - archives
+      operationId: createArchiveCapture
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FetchRequest'
+      responses:
+        '202':
+          $ref: '#/components/responses/JobAccepted'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - archives.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createArchiveCapture contract example
+  /feeds/discover:
+    post:
+      tags:
+      - monitoring
+      operationId: discoverFeeds
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - url
+              properties:
+                url:
+                  type: string
+                  format: uri
+      responses:
+        '200':
+          description: Feed candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - monitoring.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: discoverFeeds contract example
+  /watches:
+    post:
+      tags:
+      - monitoring
+      operationId: createWatch
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WatchRequest'
+      responses:
+        '201':
+          description: Watch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Watch'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - monitoring.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createWatch contract example
+    get:
+      tags:
+      - monitoring
+      operationId: listWatches
+      responses:
+        '200':
+          description: Watches
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Watch'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - monitoring.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: listWatches contract example
+  /engines/{engine_id}:
+    get:
+      tags:
+      - system
+      operationId: getEngine
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Engine'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/EngineId'
+      x-webx-scopes:
+      - system.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getEngine contract example
+  /search/facets:
+    get:
+      tags:
+      - search
+      operationId: getSearchFacets
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - search.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getSearchFacets contract example
+  /browser/sessions/{session_id}/snapshot:
+    get:
+      tags:
+      - browser
+      operationId: getBrowserSnapshot
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/SessionId'
+      x-webx-scopes:
+      - browser.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getBrowserSnapshot contract example
+  /browser/sessions/{session_id}/events:
+    get:
+      tags:
+      - browser
+      operationId: streamBrowserEvents
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/SessionId'
+      x-webx-scopes:
+      - browser.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: streamBrowserEvents contract example
+  /crawls/{crawl_id}/pause:
+    post:
+      tags:
+      - crawls
+      operationId: pauseCrawl
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/CrawlId'
+      x-webx-scopes:
+      - crawls.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: pauseCrawl contract example
+  /crawls/{crawl_id}/resume:
+    post:
+      tags:
+      - crawls
+      operationId: resumeCrawl
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/CrawlId'
+      x-webx-scopes:
+      - crawls.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: resumeCrawl contract example
+  /crawls/{crawl_id}/cancel:
+    post:
+      tags:
+      - crawls
+      operationId: cancelCrawl
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/CrawlId'
+      x-webx-scopes:
+      - crawls.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: cancelCrawl contract example
+  /crawls/{crawl_id}/visits:
+    get:
+      tags:
+      - crawls
+      operationId: listCrawlVisits
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationPage'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/CrawlId'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      x-webx-scopes:
+      - crawls.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: listCrawlVisits contract example
+  /documents/inspect:
+    post:
+      tags:
+      - documents
+      operationId: createDocumentInspect
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FileOperationRequest'
+            example:
+              input:
+                artifact_id: 01j00000000000000000000000
+      x-webx-scopes:
+      - documents.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createDocumentInspect contract example
+  /documents/convert:
+    post:
+      tags:
+      - documents
+      operationId: createDocumentConvert
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FileOperationRequest'
+            example:
+              input:
+                artifact_id: 01j00000000000000000000000
+      x-webx-scopes:
+      - documents.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createDocumentConvert contract example
+  /documents/ocr:
+    post:
+      tags:
+      - documents
+      operationId: createDocumentOcr
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FileOperationRequest'
+            example:
+              input:
+                artifact_id: 01j00000000000000000000000
+      x-webx-scopes:
+      - documents.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createDocumentOcr contract example
+  /documents/scholarly:
+    post:
+      tags:
+      - documents
+      operationId: createDocumentScholarly
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FileOperationRequest'
+            example:
+              input:
+                artifact_id: 01j00000000000000000000000
+      x-webx-scopes:
+      - documents.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createDocumentScholarly contract example
+  /documents/chunk:
+    post:
+      tags:
+      - documents
+      operationId: createDocumentChunk
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FileOperationRequest'
+            example:
+              input:
+                artifact_id: 01j00000000000000000000000
+      x-webx-scopes:
+      - documents.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createDocumentChunk contract example
+  /media/info:
+    post:
+      tags:
+      - media
+      operationId: createMediaInfo
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaRequest'
+            example:
+              input:
+                artifact_id: 01j00000000000000000000000
+      x-webx-scopes:
+      - media.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createMediaInfo contract example
+  /media/acquire:
+    post:
+      tags:
+      - media
+      operationId: createMediaAcquire
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaRequest'
+            example:
+              input:
+                artifact_id: 01j00000000000000000000000
+      x-webx-scopes:
+      - media.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createMediaAcquire contract example
+  /media/transcribe:
+    post:
+      tags:
+      - media
+      operationId: createMediaTranscribe
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaRequest'
+            example:
+              input:
+                artifact_id: 01j00000000000000000000000
+      x-webx-scopes:
+      - media.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createMediaTranscribe contract example
+  /galleries/acquire:
+    post:
+      tags:
+      - media
+      operationId: createGalleryAcquisition
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaRequest'
+      x-webx-scopes:
+      - media.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createGalleryAcquisition contract example
+  /streams/record:
+    post:
+      tags:
+      - media
+      operationId: createStreamRecording
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaRequest'
+      x-webx-scopes:
+      - media.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createStreamRecording contract example
+  /uploads:
+    post:
+      tags:
+      - artifacts
+      operationId: createUpload
+      responses:
+        '201':
+          description: Upload created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadCreateRequest'
+            example:
+              mime_type: text/plain
+              size_bytes: 12
+      x-webx-scopes:
+      - artifacts.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createUpload contract example
+  /uploads/{upload_id}/parts/{part_number}:
+    put:
+      tags:
+      - artifacts
+      operationId: uploadPart
+      parameters:
+      - $ref: '#/components/parameters/UploadId'
+      - $ref: '#/components/parameters/PartNumber'
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              contentEncoding: binary
+      responses:
+        '201':
+          description: Part stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - artifacts.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: uploadPart contract example
+  /uploads/{upload_id}/complete:
+    post:
+      tags:
+      - artifacts
+      operationId: completeUpload
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/UploadId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadCompleteRequest'
+            example:
+              parts:
+              - 1
+      x-webx-scopes:
+      - artifacts.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: completeUpload contract example
+  /uploads/{upload_id}:
+    delete:
+      tags:
+      - artifacts
+      operationId: deleteUpload
+      parameters:
+      - $ref: '#/components/parameters/UploadId'
+      responses:
+        '204':
+          description: Upload removed
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - artifacts.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: deleteUpload contract example
+  /artifacts/{artifact_id}:
+    get:
+      tags:
+      - artifacts
+      operationId: getArtifact
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactMetadata'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/ArtifactId'
+      x-webx-scopes:
+      - artifacts.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getArtifact contract example
+  /pages/{page_id}/versions:
+    get:
+      tags:
+      - pages
+      operationId: listPageVersions
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationPage'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/PageId'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      x-webx-scopes:
+      - pages.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: listPageVersions contract example
+  /pages/{page_id}/versions/{version_id}:
+    get:
+      tags:
+      - pages
+      operationId: getPageVersion
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/PageId'
+      - $ref: '#/components/parameters/VersionId'
+      x-webx-scopes:
+      - pages.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getPageVersion contract example
+  /pages/{page_id}/changes:
+    get:
+      tags:
+      - pages
+      operationId: listPageChanges
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationPage'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/PageId'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      x-webx-scopes:
+      - pages.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: listPageChanges contract example
+  /pages/{page_id}/tombstone:
+    post:
+      tags:
+      - pages
+      operationId: tombstonePage
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/PageId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+            example:
+              reason: operator request
+      x-webx-scopes:
+      - pages.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: tombstonePage contract example
+  /visits/{visit_id}/receipt:
+    get:
+      tags:
+      - pages
+      operationId: getVisitReceipt
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactMetadata'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/VisitId'
+      x-webx-scopes:
+      - pages.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getVisitReceipt contract example
+  /archives/imports:
+    post:
+      tags:
+      - archives
+      operationId: createArchiveImport
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InputOperationRequest'
+      x-webx-scopes:
+      - archives.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createArchiveImport contract example
+  /archives/{archive_id}/replay-sessions:
+    post:
+      tags:
+      - archives
+      operationId: createArchiveReplaySession
+      responses:
+        '201':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/ArchiveId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplayRequest'
+            example:
+              ttl_seconds: 600
+      x-webx-scopes:
+      - archives.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createArchiveReplaySession contract example
+  /watches/{watch_id}:
+    get:
+      tags:
+      - monitoring
+      operationId: getWatch
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Watch'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/WatchId'
+      x-webx-scopes:
+      - monitoring.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getWatch contract example
+    patch:
+      tags:
+      - monitoring
+      operationId: updateWatch
+      parameters:
+      - $ref: '#/components/parameters/WatchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WatchUpdateRequest'
+            example:
+              enabled: false
+      responses:
+        '200':
+          description: Watch updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Watch'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - monitoring.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: updateWatch contract example
+    delete:
+      tags:
+      - monitoring
+      operationId: deleteWatch
+      parameters:
+      - $ref: '#/components/parameters/WatchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: Watch disabled
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - monitoring.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: deleteWatch contract example
+  /watches/{watch_id}/run:
+    post:
+      tags:
+      - monitoring
+      operationId: runWatch
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/WatchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-webx-scopes:
+      - monitoring.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: runWatch contract example
+  /jobs/{job_id}/retry:
+    post:
+      tags:
+      - jobs
+      operationId: retryJob
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/JobId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-webx-scopes:
+      - jobs.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: retryJob contract example
+  /index/drain:
+    post:
+      tags:
+      - index
+      operationId: drainIndex
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DrainRequest'
+            example:
+              timeout_seconds: 600
+      x-webx-scopes:
+      - index.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: drainIndex contract example
+  /index/rebuilds/{job_id}:
+    get:
+      tags:
+      - index
+      operationId: getIndexRebuild
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/JobId'
+      x-webx-scopes:
+      - index.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getIndexRebuild contract example
+  /wiki/consumers/{consumer_id}/deliveries/{delivery_id}:
+    get:
+      tags:
+      - wiki
+      operationId: getWikiDelivery
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiDelivery'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/ConsumerId'
+      - $ref: '#/components/parameters/DeliveryId'
+      x-webx-scopes:
+      - wiki.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getWikiDelivery contract example
+  /wiki/consumers/{consumer_id}/leases:
+    post:
+      tags:
+      - wiki
+      operationId: createWikiLease
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/ConsumerId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WikiLeaseRequest'
+            example:
+              limit: 50
+      x-webx-scopes:
+      - wiki.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createWikiLease contract example
+  /wiki/consumers/{consumer_id}/backfills:
+    post:
+      tags:
+      - wiki
+      operationId: createWikiBackfill
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/ConsumerId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WikiBackfillRequest'
+            example:
+              from_sequence: 0
+      x-webx-scopes:
+      - wiki.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createWikiBackfill contract example
+  /corpus/imports:
+    post:
+      tags:
+      - corpus
+      operationId: createCorpusImport
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InputOperationRequest'
+      x-webx-scopes:
+      - corpus.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createCorpusImport contract example
+  /corpus/exports:
+    post:
+      tags:
+      - corpus
+      operationId: createCorpusExport
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorpusExportRequest'
+            example:
+              format: jsonl
+      x-webx-scopes:
+      - corpus.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createCorpusExport contract example
+  /corpus/stats:
+    get:
+      tags:
+      - corpus
+      operationId: getCorpusStats
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - corpus.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getCorpusStats contract example
+  /backups:
+    post:
+      tags:
+      - admin
+      operationId: createBackup
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BackupRequest'
+            example:
+              profile: core
+      x-webx-scopes:
+      - admin.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createBackup contract example
+    get:
+      tags:
+      - admin
+      operationId: listBackups
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationPage'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      x-webx-scopes:
+      - admin.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: listBackups contract example
+  /backups/{backup_id}/verify:
+    post:
+      tags:
+      - admin
+      operationId: verifyBackup
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/BackupId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-webx-scopes:
+      - admin.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: verifyBackup contract example
+  /restores:
+    post:
+      tags:
+      - admin
+      operationId: createRestore
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestoreRequest'
+            example:
+              backup_id: 01j00000000000000000000000
+              target: new-empty-root
+      x-webx-scopes:
+      - admin.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: createRestore contract example
+  /audit/events:
+    get:
+      tags:
+      - admin
+      operationId: listAuditEvents
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationPage'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      x-webx-scopes:
+      - admin.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: listAuditEvents contract example
+  /config/effective:
+    get:
+      tags:
+      - admin
+      operationId: getEffectiveConfig
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-webx-scopes:
+      - admin.read
+      x-webx-request-limits:
+        max_body_bytes: 0
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: getEffectiveConfig contract example
+  /config/validate:
+    post:
+      tags:
+      - admin
+      operationId: validateConfig
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigValidationRequest'
+            example:
+              profile: core
+      x-webx-scopes:
+      - admin.write
+      x-webx-request-limits:
+        max_body_bytes: 1048576
+        max_response_bytes: 5242880
+      x-webx-examples:
+      - name: contract-smoke
+        summary: validateConfig contract example
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-webx-key
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 50
+    EngineId:
+      name: engine_id
+      in: path
+      required: true
+      schema:
+        type: string
+    JobId:
+      name: job_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    CrawlId:
+      name: crawl_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    ArtifactId:
+      name: artifact_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    PageId:
+      name: page_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    VisitId:
+      name: visit_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    ConsumerId:
+      name: consumer_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^[a-z0-9][a-z0-9_-]{0,63}$
+    DeliveryId:
+      name: delivery_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    UploadId:
+      name: upload_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    VersionId:
+      name: version_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    ArchiveId:
+      name: archive_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    WatchId:
+      name: watch_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    BackupId:
+      name: backup_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    PartNumber:
+      name: part_number
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 10000
+  responses:
+    Problem:
+      description: Structured error
+      content:
+        application/problem+json:
+          schema:
+            $ref: ./schemas/error.json
+    JobAccepted:
+      description: Job accepted
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/JobAccepted'
+    ArtifactResult:
+      description: Completed result
+      content:
+        application/json:
+          schema:
+            $ref: ./schemas/artifact-result.json
+  schemas:
+    Ulid:
+      type: string
+      pattern: ^[0-9a-hjkmnp-tv-z]{26}$
+    Health:
+      type: object
+      additionalProperties: false
+      required:
+      - status
+      - checked_at
+      properties:
+        status:
+          type: string
+          enum:
+          - ok
+          - degraded
+          - unavailable
+        checked_at:
+          type: string
+          format: date-time
+        checks:
+          type: object
+          additionalProperties: true
+    Version:
+      type: object
+      required:
+      - api_version
+      - webx_version
+      - schema_version
+      properties:
+        api_version:
+          type: string
+        webx_version:
+          type: string
+        schema_version:
+          type: string
+        components:
+          type: object
+          additionalProperties:
+            type: string
+    Capability:
+      type: object
+      required:
+      - id
+      - enabled
+      - healthy
+      - permission
+      properties:
+        id:
+          type: string
+        enabled:
+          type: boolean
+        healthy:
+          type: boolean
+        permission:
+          type: string
+        stability:
+          type: string
+          enum:
+          - stable
+          - beta
+          - experimental
+        limits:
+          type: object
+          additionalProperties: true
+    Engine:
+      type: object
+      required:
+      - id
+      - kind
+      - enabled
+      - health
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+        version:
+          type: string
+        enabled:
+          type: boolean
+        health:
+          type: string
+          enum:
+          - healthy
+          - degraded
+          - unhealthy
+          - unknown
+        capabilities:
+          type: array
+          items:
+            type: string
+        last_probe_at:
+          type: string
+          format: date-time
+        diagnostics:
+          type: object
+          additionalProperties: true
+    JobAccepted:
+      type: object
+      additionalProperties: false
+      required:
+      - job_id
+      - state
+      - operation
+      - status_url
+      - events_url
+      - result_url
+      properties:
+        job_id:
+          $ref: '#/components/schemas/Ulid'
+        state:
+          const: queued
+        operation:
+          type: string
+        status_url:
+          type: string
+        events_url:
+          type: string
+        result_url:
+          type: string
+    FetchRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - url
+      properties:
+        url:
+          type: string
+          format: uri
+          maxLength: 8192
+        mode:
+          type: string
+          enum:
+          - auto
+          - http
+          - browser
+          - adaptive
+          - rag
+          - archive
+          - offline
+          default: auto
+        engine:
+          type: string
+        collection:
+          type: string
+          default: default
+        visibility:
+          type: string
+          enum:
+          - public
+          - internal
+          - private
+          - secret
+          default: internal
+        tags:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        selector:
+          type: string
+          maxLength: 2000
+        archive:
+          type: boolean
+          default: false
+        screenshot:
+          type: string
+          enum:
+          - none
+          - viewport
+          - full
+          default: none
+        max_bytes:
+          type: integer
+          minimum: 1
+        deadline_seconds:
+          type: integer
+          minimum: 1
+        credential_ref:
+          type: string
+        wait_index:
+          type: boolean
+          default: false
+        wait_wiki:
+          type: boolean
+          default: false
+    VerifyRequest:
+      allOf:
+      - $ref: '#/components/schemas/FetchRequest'
+      - type: object
+        properties:
+          critical_fields:
+            type: array
+            items:
+              type: string
+          minimum_independent_observations:
+            type: integer
+            minimum: 2
+            default: 2
+    BrowserSessionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          maxLength: 80
+        persistent:
+          type: boolean
+          default: false
+        ttl_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+        visibility:
+          type: string
+          enum:
+          - public
+          - internal
+          - private
+          - secret
+    BrowserSession:
+      type: object
+      required:
+      - session_id
+      - state
+      - created_at
+      - expires_at
+      properties:
+        session_id:
+          $ref: '#/components/schemas/Ulid'
+        name:
+          type: string
+        state:
+          type: string
+          enum:
+          - starting
+          - ready
+          - busy
+          - closed
+          - failed
+        current_url:
+          type: string
+          format: uri
+        document_generation:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    BrowserAction:
+      type: object
+      required:
+      - action
+      discriminator:
+        propertyName: action
+      properties:
+        action:
+          type: string
+          enum:
+          - navigate
+          - snapshot
+          - click
+          - type
+          - select
+          - upload
+          - screenshot
+          - pdf
+          - console
+          - network
+          - trace_start
+          - trace_stop
+        url:
+          type: string
+          format: uri
+        ref:
+          type: string
+        document_generation:
+          type: string
+        text:
+          type: string
+        value:
+          type: string
+        upload_artifact_id:
+          $ref: '#/components/schemas/Ulid'
+        full:
+          type: boolean
+    CrawlRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - seed_url
+      - max_pages
+      - max_depth
+      - deadline_seconds
+      properties:
+        seed_url:
+          type: string
+          format: uri
+        engine:
+          type: string
+          default: crawlee
+        mode:
+          type: string
+          enum:
+          - auto
+          - http
+          - browser
+          - adaptive
+          - rag
+          - archive
+        scope:
+          type: string
+          enum:
+          - same-origin
+          - same-site
+          - allowlist
+        allowed_origins:
+          type: array
+          items:
+            type: string
+            format: uri
+        include:
+          type: array
+          items:
+            type: string
+        exclude:
+          type: array
+          items:
+            type: string
+        max_pages:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+        max_depth:
+          type: integer
+          minimum: 0
+          maximum: 100
+        max_bytes:
+          type: integer
+          minimum: 1
+        deadline_seconds:
+          type: integer
+          minimum: 1
+        concurrency:
+          type: integer
+          minimum: 1
+        respect_robots:
+          type: boolean
+          default: true
+        collection:
+          type: string
+        visibility:
+          type: string
+          enum:
+          - public
+          - internal
+          - private
+          - secret
+    Crawl:
+      type: object
+      required:
+      - crawl_id
+      - job_id
+      - state
+      - seed_url
+      - budgets
+      - counters
+      properties:
+        crawl_id:
+          $ref: '#/components/schemas/Ulid'
+        job_id:
+          $ref: '#/components/schemas/Ulid'
+        state:
+          type: string
+        seed_url:
+          type: string
+          format: uri
+        budgets:
+          type: object
+          additionalProperties: true
+        counters:
+          type: object
+          additionalProperties:
+            type: integer
+        checkpoint_at:
+          type: string
+          format: date-time
+    ExtractionRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - input
+      - kind
+      properties:
+        input:
+          $ref: '#/components/schemas/InputRef'
+        kind:
+          type: string
+          enum:
+          - main_content
+          - metadata
+          - links
+          - table
+          - schema
+        selector:
+          type: string
+        schema_artifact_id:
+          $ref: '#/components/schemas/Ulid'
+        allow_local_ai:
+          type: boolean
+          default: false
+        model_profile:
+          type: string
+    InputRef:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      maxProperties: 1
+      properties:
+        url:
+          type: string
+          format: uri
+        artifact_id:
+          $ref: '#/components/schemas/Ulid'
+        upload_id:
+          $ref: '#/components/schemas/Ulid'
+    FileOperationRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - input
+      properties:
+        input:
+          $ref: '#/components/schemas/InputRef'
+        output_format:
+          type: string
+        language:
+          type: array
+          items:
+            type: string
+        options:
+          type: object
+          additionalProperties: true
+        visibility:
+          type: string
+          enum:
+          - public
+          - internal
+          - private
+          - secret
+    MediaRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - input
+      properties:
+        input:
+          $ref: '#/components/schemas/InputRef'
+        format:
+          type: string
+        audio_only:
+          type: boolean
+        subtitle_languages:
+          type: array
+          items:
+            type: string
+        max_items:
+          type: integer
+          minimum: 1
+        max_duration_seconds:
+          type: integer
+          minimum: 1
+        model_profile:
+          type: string
+        credential_ref:
+          type: string
+        visibility:
+          type: string
+          enum:
+          - public
+          - internal
+          - private
+          - secret
+    SearchRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - query
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        sources:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+            - searxng
+            - meilisearch
+            - local
+            - yacy
+            - crossref
+            - arxiv
+            - pubmed
+            - commoncrawl
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+        language:
+          type: string
+        site:
+          type: string
+        time_range:
+          type: string
+          enum:
+          - day
+          - week
+          - month
+          - year
+          - any
+        history:
+          type: boolean
+        collection:
+          type: string
+        filters:
+          type: object
+          additionalProperties: true
+        fetch_top:
+          type: integer
+          minimum: 0
+          maximum: 5
+    SearchResponse:
+      type: object
+      required:
+      - query
+      - hits
+      - diagnostics
+      - retrieved_at
+      properties:
+        query:
+          type: string
+        hits:
+          type: array
+          items:
+            $ref: ./schemas/search-hit.json
+        facets:
+          type: object
+          additionalProperties: true
+        diagnostics:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        retrieved_at:
+          type: string
+          format: date-time
+    JobPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: ./schemas/job.json
+        next_cursor:
+          type:
+          - string
+          - 'null'
+        has_more:
+          type: boolean
+    ArtifactMetadata:
+      allOf:
+      - $ref: ./schemas/common.json#/$defs/artifactRef
+      - type: object
+        properties:
+          created_at:
+            type: string
+            format: date-time
+          retention_until:
+            type:
+            - string
+            - 'null'
+            format: date-time
+          source_ids:
+            type: array
+            items:
+              $ref: '#/components/schemas/Ulid'
+    ArtifactExcerpt:
+      type: object
+      required:
+      - artifact_id
+      - start_line
+      - end_line
+      - text
+      - truncated
+      properties:
+        artifact_id:
+          $ref: '#/components/schemas/Ulid'
+        start_line:
+          type: integer
+        end_line:
+          type: integer
+        text:
+          type: string
+          maxLength: 50000
+        truncated:
+          type: boolean
+        content_sha256:
+          type: string
+    IndexStatus:
+      type: object
+      properties:
+        healthy:
+          type: boolean
+        indexes:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        pending:
+          type: integer
+        failed:
+          type: integer
+        oldest_pending_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    WikiDelivery:
+      type: object
+      required:
+      - delivery_id
+      - sequence
+      - state
+      - operation
+      properties:
+        delivery_id:
+          $ref: '#/components/schemas/Ulid'
+        sequence:
+          type: integer
+        state:
+          type: string
+          enum:
+          - pending
+          - exported
+          - leased
+          - accepted
+          - rejected
+          - deferred
+          - dead_letter
+        operation:
+          type: string
+          enum:
+          - source_upsert
+          - source_tombstone
+        idempotency_key:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        external_document_id:
+          type: string
+    WikiDeliveryPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/WikiDelivery'
+        next_cursor:
+          type:
+          - string
+          - 'null'
+        has_more:
+          type: boolean
+    WikiAck:
+      type: object
+      additionalProperties: false
+      required:
+      - state
+      properties:
+        state:
+          type: string
+          enum:
+          - accepted
+          - rejected
+          - deferred
+        external_document_id:
+          type: string
+          maxLength: 500
+        reason_code:
+          type: string
+          maxLength: 100
+        detail:
+          type: string
+          maxLength: 2000
+        retry_after_seconds:
+          type: integer
+          minimum: 0
+    WatchRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - url
+      - schedule
+      properties:
+        url:
+          type: string
+          format: uri
+        schedule:
+          type: string
+        selector:
+          type: string
+        mode:
+          type: string
+          enum:
+          - auto
+          - http
+          - browser
+        collection:
+          type: string
+        visibility:
+          type: string
+          enum:
+          - public
+          - internal
+          - private
+          - secret
+        enabled:
+          type: boolean
+          default: true
+    Watch:
+      type: object
+      required:
+      - watch_id
+      - url
+      - schedule
+      - enabled
+      properties:
+        watch_id:
+          $ref: '#/components/schemas/Ulid'
+        url:
+          type: string
+          format: uri
+        schedule:
+          type: string
+        enabled:
+          type: boolean
+        last_job_id:
+          $ref: '#/components/schemas/Ulid'
+        next_run_at:
+          type: string
+          format: date-time
+        failure_count:
+          type: integer
+    OperationResult:
+      type: object
+      additionalProperties: true
+      description: Operation-specific result. Domain DTOs are generated from the canonical operation schema as each implementation
+        milestone activates the operation.
+    OperationPage:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - next_cursor
+      - has_more
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        next_cursor:
+          type:
+          - string
+          - 'null'
+        has_more:
+          type: boolean
+    UploadCreateRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - mime_type
+      - size_bytes
+      properties:
+        mime_type:
+          type: string
+          maxLength: 255
+        size_bytes:
+          type: integer
+          minimum: 0
+        sha256:
+          $ref: '#/components/schemas/Sha256'
+    Sha256:
+      type: string
+      pattern: ^[0-9a-f]{64}$
+    UploadCompleteRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - parts
+      properties:
+        parts:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: integer
+            minimum: 1
+    ReasonRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - reason
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    InputOperationRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - input
+      properties:
+        input:
+          $ref: '#/components/schemas/InputRef'
+        visibility:
+          type: string
+          enum:
+          - public
+          - internal
+          - private
+          - secret
+    ReplayRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        ttl_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+    WatchUpdateRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        schedule:
+          type: string
+        selector:
+          type: string
+          maxLength: 2000
+        enabled:
+          type: boolean
+    DrainRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 86400
+    WikiLeaseRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+    WikiBackfillRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        from_sequence:
+          type: integer
+          minimum: 0
+        to_sequence:
+          type: integer
+          minimum: 0
+    CorpusExportRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - format
+      properties:
+        format:
+          type: string
+          enum:
+          - jsonl
+          - markdown-bundle
+          - parquet
+        query:
+          type: object
+          additionalProperties: true
+    BackupRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        profile:
+          type: string
+        destination_ref:
+          type: string
+    RestoreRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - backup_id
+      - target
+      properties:
+        backup_id:
+          $ref: '#/components/schemas/Ulid'
+        target:
+          type: string
+          enum:
+          - new-empty-root
+    ConfigValidationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        profile:
+          type: string
+        candidate:
+          type: object
+          additionalProperties: true

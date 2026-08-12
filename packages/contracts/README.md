@@ -1,6 +1,6 @@
 # WebX contracts
 
-This package contains the WebX JSON Schema 2020-12 contracts. It also contains the reference SQLite control-plane contract and mandatory semantic contracts.
+This package contains the WebX JSON Schema 2020-12 contracts and canonical public and worker OpenAPI 3.1 documents. It also contains the reference SQLite control-plane contract and mandatory semantic contracts.
 
 ## Validation
 
@@ -15,6 +15,8 @@ The check does these operations:
 - checks every schema against the JSON Schema 2020-12 meta-schema;
 - resolves every local `$ref` without network access;
 - validates every mapped valid JSON or YAML example with format checks enabled;
+- validates all 86 public and 10 worker OpenAPI operations, local references, major identity, metadata, and path parameters;
+- checks the strict normalized-content result in worker completion and rejects worker acceptance authority;
 - runs the mandatory commit-intent semantic validator;
 - rejects all mapped negative fixtures at exact JSON Pointer paths;
 - builds the reference SQL in an in-memory SQLite database;
@@ -42,6 +44,21 @@ The selected generators are:
 - `jsonschema-gentypes` 2.12.0, BSD-2-Clause.
 
 `generated/traceability.json` maps each canonical schema and SHA-256 to one TypeScript output and one Python output. The focused check runs two isolated generations, checks clean regeneration, verifies a seeded drift failure and exact diagnostic, compiles the TypeScript smoke, imports every Python module, and checks protected fields.
+
+## Generated OpenAPI operation stubs
+
+`openapi.yaml` is the canonical public 1.x API. `worker-openapi.yaml` is the canonical internal 1.x worker and egress protocol. Every operation has a stable `operationId`, scope metadata, request and response byte limits, and an operation example.
+
+`scripts/generate_openapi.py` creates deterministic TypeScript client/server interfaces and Python client protocols in `generated/openapi/`. It also creates operation descriptors and `generated/openapi/traceability.json`. The trace records canonical document hashes, all operation IDs, and the JSON Schema hashes used by generated TypeScript schema mappings.
+
+Run generation and drift checks from the repository root:
+
+```bash
+uv run --no-project --with 'pyyaml==6.0.3' python packages/contracts/scripts/generate_openapi.py
+uv run --no-project --with 'pyyaml==6.0.3' python packages/contracts/scripts/generate_openapi.py --check
+```
+
+The OpenAPI stubs do not create duplicate DTOs. External schema references use the existing JSON-Schema-generated TypeScript types. The compatibility disposition and operation-gap traceability are in `compatibility/openapi-1x-closure.md`.
 
 ## Worker observation authority
 
@@ -138,6 +155,7 @@ A filesystem rename is not treated as part of a SQLite rollback.
 - Accepted decisions: ADR-0004, ADR-0011, ADR-0015
 - Worker authority correction: `compatibility/engine-observation-authority.md`
 - Follow-on generation: `WX-M0-004`
-- Follow-on API and worker protocol integration: `WX-M0-005`
+- API and worker protocol integration: `WX-M0-005`
+- OpenAPI closure disposition: `compatibility/openapi-1x-closure.md`
 
-Generated TypeScript and Python types are not hand-written in this item. The generation owner must consume these corrected schemas after this contract is merged.
+Generated JSON Schema and OpenAPI outputs are deterministic. Do not edit generated files by hand.

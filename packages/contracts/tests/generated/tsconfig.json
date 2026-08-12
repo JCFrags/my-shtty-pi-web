@@ -7,5 +7,5 @@
     "noEmit": true,
     "skipLibCheck": false
   },
-  "files": ["typescript-smoke.ts"]
+  "files": ["typescript-smoke.ts", "openapi-smoke.ts"]
 }

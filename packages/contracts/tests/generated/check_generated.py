@@ -34,7 +34,7 @@ def tree_hashes(root: Path) -> dict[str, str]:
     return {
         str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
         for path in sorted(root.rglob("*"))
-        if path.is_file()
+        if path.is_file() and path.relative_to(root).parts[0] != "openapi"
     }
 
 
