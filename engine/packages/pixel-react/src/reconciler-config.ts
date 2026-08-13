@@ -266,8 +266,8 @@ export class Bridge {
   private nextId = 1;
   private seq = 0;
 
-  constructor(tty?: string, wrapper?: string) {
-    this.engine = createNativeEngine(tty, wrapper);
+  constructor(tty?: string, wrapper?: string, sessionEnv?: NodeJS.ProcessEnv) {
+    this.engine = createNativeEngine(tty, wrapper, sessionEnv);
     if (!defaultBridge) defaultBridge = this;
   }
 

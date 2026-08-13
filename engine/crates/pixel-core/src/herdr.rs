@@ -6,9 +6,24 @@ use std::time::Duration;
 use crate::canvas::Canvas;
 use crate::terminal::FrameFile;
 
-const ACK_TIMEOUT: Duration = Duration::from_secs(5);
+const ACK_TIMEOUT: Duration = Duration::from_secs(12);
 const OPEN_TIMEOUT: Duration = Duration::from_secs(2);
 const SLOTS: u64 = 3;
+
+#[derive(Clone, Debug)]
+pub(crate) struct HerdrTarget {
+    pub(crate) pane: String,
+    pub(crate) socket: String,
+}
+
+impl HerdrTarget {
+    pub(crate) fn from_env(env: &crate::terminal::SessionEnv) -> Option<Self> {
+        Some(Self {
+            pane: env.var("HERDR_PANE_ID")?,
+            socket: env.var("HERDR_SOCKET_PATH")?,
+        })
+    }
+}
 
 pub(crate) struct Herdr {
     frames: BufReader<UnixStream>,
@@ -16,16 +31,16 @@ pub(crate) struct Herdr {
     cell: (u32, u32),
     files: Vec<FrameFile>,
     retired: Vec<FrameFile>,
+    instance: u64,
     generation: u64,
     seq: u64,
 }
 
 impl Herdr {
-    pub(crate) fn open() -> Option<Self> {
-        Self::connect(
-            &std::env::var("HERDR_PANE_ID").ok()?,
-            &std::env::var("HERDR_SOCKET_PATH").ok()?,
-        )
+    pub(crate) fn open(target: &HerdrTarget, instance: u64) -> Option<Self> {
+        let mut herdr = Self::connect(&target.pane, &target.socket)?;
+        herdr.instance = instance;
+        Some(herdr)
     }
 
     fn connect(pane: &str, socket: &str) -> Option<Self> {
@@ -74,6 +89,7 @@ impl Herdr {
             cell,
             files: Vec::new(),
             retired: Vec::new(),
+            instance: 0,
             generation: 0,
             seq: 0,
         })
@@ -81,6 +97,27 @@ impl Herdr {
 
     pub(crate) fn cell(&self) -> (u32, u32) {
         self.cell
+    }
+
+    pub(crate) fn mouse_position_px(
+        &self,
+        kind: crate::terminal::MouseKind,
+        x: u32,
+        y: u32,
+        focused: bool,
+        pixel_mouse: bool,
+        grid: impl FnOnce() -> Option<crate::terminal::WindowSize>,
+    ) -> (u32, u32) {
+        let (cell_w, cell_h) = self.cell;
+        let cell_center =
+            |x: u32, y: u32| ((x - 1) * cell_w + cell_w / 2, (y - 1) * cell_h + cell_h / 2);
+        if !pixel_mouse {
+            return cell_center(x, y);
+        }
+        if !focused && is_wheel(kind) && grid().is_some_and(|ws| within_grid(&ws, x, y)) {
+            return cell_center(x, y);
+        }
+        (x.saturating_sub(1), y.saturating_sub(1))
     }
 
     pub(crate) fn present(&mut self, canvas: &Canvas) -> io::Result<usize> {
@@ -112,8 +149,9 @@ impl Herdr {
             for slot in 0..SLOTS {
                 self.files.push(FrameFile::create(
                     self.directory.join(format!(
-                        "px-{}-{}-{slot}",
+                        "px-{}-{}-{}-{slot}",
                         std::process::id(),
+                        self.instance,
                         self.generation
                     )),
                     pixels.len(),
@@ -124,6 +162,21 @@ impl Herdr {
         file.write(pixels);
         Ok(file.path().to_string_lossy().into_owned())
     }
+}
+
+fn is_wheel(kind: crate::terminal::MouseKind) -> bool {
+    use crate::terminal::MouseKind;
+    matches!(
+        kind,
+        MouseKind::ScrollUp
+            | MouseKind::ScrollDown
+            | MouseKind::ScrollLeft
+            | MouseKind::ScrollRight
+    )
+}
+
+fn within_grid(ws: &crate::terminal::WindowSize, x: u32, y: u32) -> bool {
+    x >= 1 && y >= 1 && x <= ws.cols && y <= ws.rows
 }
 
 fn request(socket: &str, line: &str) -> io::Result<String> {
@@ -247,7 +300,7 @@ mod tests {
 
     /// Answers like herdr does: one info reply per connection, then a stream
     /// that acks every frame. Collects the frame headers it was sent.
-    fn fake_herdr(
+    pub(super) fn fake_herdr(
         directory: &std::path::Path,
         transport: &str,
     ) -> (PathBuf, std::sync::mpsc::Receiver<String>) {
@@ -282,7 +335,7 @@ mod tests {
         (socket, rx)
     }
 
-    fn scratch(name: &str) -> PathBuf {
+    pub(super) fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("pixel-herdr-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -364,5 +417,88 @@ mod tests {
     fn quoting_survives_a_path_with_characters_json_cares_about() {
         assert_eq!(quote(r#"/tmp/a"b\c"#), r#""/tmp/a\"b\\c""#);
         assert_eq!(field_str(&format!(r#"{{"p":{}}}"#, quote(r#"/a"b\c"#)), "p").as_deref(), Some(r#"/a"b\c"#));
+    }
+}
+
+#[cfg(test)]
+mod shared_process_tests {
+    use super::*;
+    use crate::canvas::Canvas;
+
+    #[test]
+    fn engines_sharing_a_process_use_distinct_frame_files() {
+        let dir = tests::scratch("shared-process");
+        let dir_b = tests::scratch("shared-process-b");
+        let (socket_a, _frames_a) = tests::fake_herdr(&dir, "direct-kitty");
+        let (socket_b, _frames_b) = tests::fake_herdr(&dir_b, "direct-kitty");
+        let mut a = Herdr::connect("w1:p1", &socket_a.to_string_lossy()).unwrap();
+        let mut b = Herdr::connect("w1:p2", &socket_b.to_string_lossy()).unwrap();
+        // Both engines share one process and one frame directory, as when
+        // the daemon hosts two herdr sessions.
+        b.directory = dir.clone();
+        b.instance = 1;
+
+        let canvas = Canvas::new(40, 40);
+        a.present(&canvas).unwrap();
+        let path_a = a.files[0].path().to_owned();
+        b.present(&canvas).unwrap();
+        let path_b = b.files[0].path().to_owned();
+
+        assert_ne!(path_a, path_b, "same-process engines must not share frame files");
+        // Writing B's frames must leave A's mapped file fully intact; a
+        // truncated file here means A's next frame copy dies of SIGBUS.
+        assert_eq!(std::fs::metadata(&path_a).unwrap().len(), 40 * 40 * 4);
+        assert_eq!(std::fs::metadata(&path_b).unwrap().len(), 40 * 40 * 4);
+        a.present(&canvas).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod degraded_wheel_tests {
+    use super::*;
+    use crate::terminal::{MouseKind, WindowSize};
+
+    fn grid() -> Option<WindowSize> {
+        Some(WindowSize {
+            cols: 120,
+            rows: 40,
+            width_px: 1200,
+            height_px: 800,
+        })
+    }
+
+    #[test]
+    fn unfocused_in_grid_wheel_rescales_to_cell_centers() {
+        let dir = tests::scratch("degraded-wheel");
+        let (socket, _frames) = tests::fake_herdr(&dir, "direct-kitty");
+        // fake_herdr advertises a 10x20 cell size.
+        let herdr = Herdr::connect("w1:p1", &socket.to_string_lossy()).unwrap();
+
+        // The bug case: an unfocused wheel arrives as cells (8, 9) and is
+        // rescaled to the cell center.
+        assert_eq!(
+            herdr.mouse_position_px(MouseKind::ScrollUp, 8, 9, false, true, grid),
+            (75, 170)
+        );
+        // Focused wheels are honest pixels; pass them through 0-based.
+        assert_eq!(
+            herdr.mouse_position_px(MouseKind::ScrollUp, 8, 9, true, true, grid),
+            (7, 8)
+        );
+        // Coordinates beyond the cell grid can only be pixels.
+        assert_eq!(
+            herdr.mouse_position_px(MouseKind::ScrollDown, 640, 9, false, true, grid),
+            (639, 8)
+        );
+        // Without pixel mouse mode every report is cells.
+        assert_eq!(
+            herdr.mouse_position_px(MouseKind::ScrollUp, 8, 9, false, false, grid),
+            (75, 170)
+        );
+        // Only wheels: clicks focus the pane first, so they stay untouched.
+        assert_eq!(
+            herdr.mouse_position_px(MouseKind::Down, 8, 9, false, true, grid),
+            (7, 8)
+        );
     }
 }

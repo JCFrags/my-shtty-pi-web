@@ -295,17 +295,26 @@ pub struct PixelEngine {
 #[napi]
 impl PixelEngine {
     #[napi(constructor)]
-    pub fn new(tty: Option<String>, wrapper: Option<String>) -> Result<Self> {
+    pub fn new(
+        tty: Option<String>,
+        wrapper: Option<String>,
+        session_env: Option<std::collections::HashMap<String, String>>,
+    ) -> Result<Self> {
         let fonts = vec![
             load_font(SYSTEM_UI_FONTS, UI_FONT_BYTES),
             load_font(SYSTEM_MONO_FONTS, MONO_FONT_BYTES),
         ];
+        let session_env = match session_env {
+            Some(env) => pixel_core::SessionEnv::of_session(env),
+            None => pixel_core::SessionEnv::of_process(),
+        };
         let mut engine = Engine::new(EngineConfig {
             fonts,
             cell_metrics_font: 1,
             watch_resize: false,
             tty,
             wrapper: pixel_core::wrapper::Wrapper::named(wrapper.as_deref()),
+            session_env,
         })
         .map_err(err)?;
         let waker = engine.term.waker().map_err(err)?;
