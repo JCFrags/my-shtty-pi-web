@@ -219,6 +219,7 @@ class Session {
     this.root = createRoot({
       tty: this.ctx.tty,
       wrapper: this.terminal?.wrapper,
+      sessionEnv: this.ctx.env,
       keyEventTypes: true,
       onKey: (event) => this.handleKey(event),
       onPaste: (text) => {

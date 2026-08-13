@@ -2,6 +2,7 @@
   "name": "terminal-graphics-engine",
   "private": true,
   "scripts": {
+    "build": "pnpm -r build",
     "browser": "pnpm --filter terminal-browser start",
     "build:dist": "scripts/release.sh \"local-$(git rev-parse --short HEAD)\"",
     "install:dist": "scripts/install-local.sh",

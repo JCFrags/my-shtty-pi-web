@@ -229,12 +229,15 @@ pub struct Terminal {
     saved: Termios,
     last_frame_size: Option<(u32, u32)>,
     mouse_pixels: bool,
+    focused: bool,
     cell: Option<(u32, u32)>,
     cell_query_unsupported: bool,
     pending: Vec<u8>,
     lone_escape_since: Option<Instant>,
     transport: FrameTransport,
     herdr: Option<crate::herdr::Herdr>,
+    herdr_target: Option<crate::herdr::HerdrTarget>,
+    herdr_retry: Option<(Instant, Duration)>,
     frame_files: Vec<FrameFile>,
     frame_seq: u64,
     wrapper: Wrapper,
@@ -308,23 +311,46 @@ impl Waker {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct SessionEnv {
+    session: Option<std::collections::HashMap<String, String>>,
+}
+
+impl SessionEnv {
+    pub fn of_session(env: std::collections::HashMap<String, String>) -> Self {
+        Self { session: Some(env) }
+    }
+
+    pub fn of_process() -> Self {
+        Self { session: None }
+    }
+
+    pub(crate) fn var(&self, key: &str) -> Option<String> {
+        match &self.session {
+            Some(env) => env.get(key).cloned(),
+            None => std::env::var(key).ok(),
+        }
+    }
+}
+
 impl Terminal {
-    pub fn new(wrapper: Wrapper) -> io::Result<Self> {
+    pub fn new(wrapper: Wrapper, env: SessionEnv) -> io::Result<Self> {
         Self::with_handle(
             TtyHandle::Stdio {
                 stdin: io::stdin(),
                 stdout: io::stdout(),
             },
             wrapper,
+            env,
         )
     }
 
-    pub fn open(tty_path: &str, wrapper: Wrapper) -> io::Result<Self> {
+    pub fn open(tty_path: &str, wrapper: Wrapper, env: SessionEnv) -> io::Result<Self> {
         let file = std::fs::File::options().read(true).write(true).open(tty_path)?;
-        Self::with_handle(TtyHandle::File(file), wrapper)
+        Self::with_handle(TtyHandle::File(file), wrapper, env)
     }
 
-    fn with_handle(mut io: TtyHandle, wrapper: Wrapper) -> io::Result<Self> {
+    fn with_handle(mut io: TtyHandle, wrapper: Wrapper, env: SessionEnv) -> io::Result<Self> {
         let saved = retry_intr(|| termios::tcgetattr(&io.read_fd()))?;
         let mut raw = saved.clone();
         raw.make_raw();
@@ -341,12 +367,15 @@ impl Terminal {
             saved,
             last_frame_size: None,
             mouse_pixels: false,
+            focused: true,
             cell: None,
             cell_query_unsupported: false,
             pending: Vec::new(),
             lone_escape_since: None,
             transport: FrameTransport::Inline,
             herdr: None,
+            herdr_target: crate::herdr::HerdrTarget::from_env(&env),
+            herdr_retry: None,
             frame_files: Vec::new(),
             frame_seq: 0,
             wrapper,
@@ -369,9 +398,9 @@ impl Terminal {
         }
         terminal.mouse_pixels = !wrapper.relayed() && terminal.probe_mouse_pixels()?;
         terminal.clipboard_data = !wrapper.relayed() && terminal.probe_clipboard_data()?;
-        terminal.herdr = crate::herdr::Herdr::open();
-        if let Some(cell) = terminal.herdr.as_ref().map(crate::herdr::Herdr::cell) {
-            terminal.cell = Some(cell);
+        terminal.connect_herdr();
+        if terminal.herdr.is_none() && terminal.herdr_target.is_some() {
+            terminal.herdr_retry = Some((Instant::now() + HERDR_RETRY_MIN, HERDR_RETRY_MIN));
         }
         terminal.transport = terminal.probe_transport()?;
         terminal.color_scheme_updates = terminal.probe_color_scheme()?;
@@ -517,13 +546,40 @@ impl Terminal {
         Ok(name)
     }
 
+    fn connect_herdr(&mut self) {
+        self.herdr = self
+            .herdr_target
+            .as_ref()
+            .and_then(|target| crate::herdr::Herdr::open(target, self.terminal_id));
+        if let Some(cell) = self.herdr.as_ref().map(crate::herdr::Herdr::cell) {
+            self.cell = Some(cell);
+        }
+    }
+
     pub fn draw(&mut self, canvas: &Canvas) -> io::Result<usize> {
+        if self.herdr.is_none()
+            && let Some((at, backoff)) = self.herdr_retry
+            && Instant::now() >= at
+        {
+            self.connect_herdr();
+            match self.herdr {
+                Some(_) => self.herdr_retry = None,
+                None => {
+                    let backoff = (backoff * 2).min(HERDR_RETRY_MAX);
+                    self.herdr_retry = Some((Instant::now() + backoff, backoff));
+                }
+            }
+        }
         if let Some(herdr) = self.herdr.as_mut() {
             match herdr.present(canvas) {
                 Ok(written) => return Ok(written),
                 Err(err) => {
-                    crate::logging::warn("herdr", format!("{err}, drawing it ourselves instead"));
+                    crate::logging::warn(
+                        "herdr",
+                        format!("{err}, drawing it ourselves until herdr is back"),
+                    );
                     self.herdr = None;
+                    self.herdr_retry = Some((Instant::now() + HERDR_RETRY_MIN, HERDR_RETRY_MIN));
                     self.last_frame_size = None;
                     self.placeholders = None;
                 }
@@ -629,10 +685,23 @@ impl Terminal {
                 return Ok(Some(match raw {
                     RawEvent::Key(key) => Event::Key(key),
                     RawEvent::Paste(text) => Event::Paste(text),
-                    RawEvent::Focus(focused) => Event::Focus(focused),
+                    RawEvent::Focus(focused) => {
+                        self.focused = focused;
+                        Event::Focus(focused)
+                    }
                     RawEvent::WindowSize(ws) => Event::WindowSize(ws),
                     RawEvent::Mouse(kind, button, mods, x, y) => {
-                        let (x, y) = self.mouse_position_px(x, y);
+                        let (x, y) = match &self.herdr {
+                            Some(herdr) => herdr.mouse_position_px(
+                                kind,
+                                x,
+                                y,
+                                self.focused,
+                                self.mouse_pixels,
+                                || self.size().ok(),
+                            ),
+                            None => self.mouse_position_px(x, y),
+                        };
                         Event::Mouse(Mouse {
                             kind,
                             button,
@@ -1042,6 +1111,9 @@ const FRAME_PROBE_TIMEOUT_MS: u64 = 300;
 
 const FRAME_SLOTS: u64 = 8;
 
+const HERDR_RETRY_MIN: Duration = Duration::from_secs(1);
+const HERDR_RETRY_MAX: Duration = Duration::from_secs(10);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FrameTransport {
     File,
@@ -1084,12 +1156,12 @@ pub(crate) struct FrameFile {
 impl FrameFile {
     pub(crate) fn create(path: std::path::PathBuf, len: usize) -> io::Result<Self> {
         use std::os::unix::fs::OpenOptionsExt;
+        let _ = std::fs::remove_file(&path);
         let file = std::fs::File::options()
             .mode(0o600)
             .read(true)
             .write(true)
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .open(&path)?;
         rustix::fs::ftruncate(&file, len as u64)?;
         let map = unsafe {
@@ -1132,7 +1204,7 @@ impl Drop for FrameFile {
 }
 
 #[allow(unsafe_code)]
-fn write_shm(name: &str, data: &[u8]) -> io::Result<()> {
+pub(crate) fn write_shm(name: &str, data: &[u8]) -> io::Result<()> {
     let fd = rustix::shm::open(
         name,
         rustix::shm::OFlags::CREATE | rustix::shm::OFlags::EXCL | rustix::shm::OFlags::RDWR,
@@ -2401,8 +2473,8 @@ mod tty_tests {
         let (master_b, _slave_b, path_b) = open_pty();
         let _drain_a = drain(&master_a);
         let _drain_b = drain(&master_b);
-        let mut a = Terminal::open(&path_a, Wrapper::None).unwrap();
-        let mut b = Terminal::open(&path_b, Wrapper::None).unwrap();
+        let mut a = Terminal::open(&path_a, Wrapper::None, SessionEnv::of_process()).unwrap();
+        let mut b = Terminal::open(&path_b, Wrapper::None, SessionEnv::of_process()).unwrap();
 
         assert_ne!(a.terminal_id, b.terminal_id);
         assert_ne!(a.shm_name(0), b.shm_name(0));
@@ -2436,7 +2508,7 @@ mod tty_tests {
         use std::io::Write as _;
         let (mut master, _slave, path) = open_pty();
         let _drain = drain(&master);
-        let mut term = Terminal::open(&path, Wrapper::Tmux).unwrap();
+        let mut term = Terminal::open(&path, Wrapper::Tmux, SessionEnv::of_process()).unwrap();
 
         master.write_all(b"\x1b").unwrap();
         let got = term.poll_event(Some(Duration::from_millis(500))).unwrap();
@@ -2458,7 +2530,7 @@ mod tty_tests {
         use std::io::Write as _;
         let (mut master, _slave, path) = open_pty();
         let _drain = drain(&master);
-        let mut term = Terminal::open(&path, Wrapper::None).unwrap();
+        let mut term = Terminal::open(&path, Wrapper::None, SessionEnv::of_process()).unwrap();
 
         master.write_all(b"\x1b").unwrap();
         let got = term.poll_event(Some(Duration::from_millis(200))).unwrap();
@@ -2469,7 +2541,7 @@ mod tty_tests {
     fn a_wake_ends_a_blocking_poll() {
         let (master, _slave, path) = open_pty();
         let _drain = drain(&master);
-        let mut term = Terminal::open(&path, Wrapper::None).unwrap();
+        let mut term = Terminal::open(&path, Wrapper::None, SessionEnv::of_process()).unwrap();
         let waker = term.waker().unwrap();
 
         std::thread::spawn(move || {

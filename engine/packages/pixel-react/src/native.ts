@@ -125,7 +125,11 @@ export interface DiffRow {
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const binding = require("../native/pixel.node") as {
-  PixelEngine: new (tty?: string, wrapper?: string) => NativeEngine;
+  PixelEngine: new (
+    tty?: string,
+    wrapper?: string,
+    sessionEnv?: Record<string, string>,
+  ) => NativeEngine;
   highlight(source: string, language: string): HighlightSpan[];
   highlightCaptures(): string[];
   diff(oldSource: string, newSource: string, contextLines?: number): DiffRow[];
@@ -143,8 +147,19 @@ const binding = require("../native/pixel.node") as {
   ): Promise<Buffer>;
 };
 
-export function createNativeEngine(tty?: string, wrapper?: string): NativeEngine {
-  const pixelEngine =  new binding.PixelEngine(tty, wrapper);
+export function createNativeEngine(
+  tty?: string,
+  wrapper?: string,
+  sessionEnv?: NodeJS.ProcessEnv,
+): NativeEngine {
+  const env = sessionEnv
+    ? Object.fromEntries(
+        Object.entries(sessionEnv).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        ),
+      )
+    : undefined;
+  const pixelEngine = new binding.PixelEngine(tty, wrapper, env);
 
   return pixelEngine
 }

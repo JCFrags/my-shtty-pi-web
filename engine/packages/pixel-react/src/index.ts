@@ -168,6 +168,7 @@ export interface RootOptions {
   devtools?: boolean;
   tty?: string;
   wrapper?: "tmux";
+  sessionEnv?: NodeJS.ProcessEnv;
 }
 
 export interface PixelRoot {
@@ -259,7 +260,7 @@ function applyColors(colors: TerminalColors): void {
 
 export function createRoot(options: RootOptions = {}): PixelRoot {
   const bridge = options.tty
-    ? new Bridge(options.tty, options.wrapper)
+    ? new Bridge(options.tty, options.wrapper, options.sessionEnv)
     : getBridge(options.wrapper);
   const devtoolsEnabled = options.devtools !== false && bridge === getBridge();
   if (devtoolsEnabled) {
