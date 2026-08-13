@@ -434,6 +434,7 @@ const BROWSER_FLAGS = [
   "--no-overlays",
   "--no-frame",
   "--partition=",
+  "--colors-file=",
   "--palette-key=",
   "--find-key=",
   "--devtools-key=",

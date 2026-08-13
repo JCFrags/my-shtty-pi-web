@@ -112,6 +112,7 @@ class Session {
   private readonly noOverlays: boolean;
   private readonly noFrame: boolean;
   private readonly partition: string | null;
+  private readonly colorsFile: string | null;
   private paletteBinding: KeyBinding[] = [];
   private findBinding: KeyBinding[] = [];
   private devtoolsBinding: KeyBinding[] = [];
@@ -179,6 +180,7 @@ class Session {
     this.noOverlays = this.argv.includes("--no-overlays");
     this.noFrame = this.argv.includes("--no-frame");
     this.partition = flagValue(this.argv, "--partition");
+    this.colorsFile = flagValue(this.argv, "--colors-file");
     this.fallbackState = initialBrowserState(this.initialUrl());
     configureBrowserSession(this.partition, (progress) => this.showDownload(progress));
     this.tabs = new TabManager(
@@ -266,6 +268,7 @@ class Session {
         this.windowBg = this.themeBackground();
         this.tabs.eachController((c) => void c.setBackground(this.windowBg));
         this.render();
+        this.writeColorsFile();
       },
       onEngineExit: (error) => {
         if (error) process.stderr.write(`terminal-browser engine: ${error}\n`);
@@ -281,6 +284,7 @@ class Session {
     this.recalculateLayout();
     this.root.setPointerShape("default");
     this.windowBg = this.themeBackground();
+    this.writeColorsFile();
     this.tabs.create(this.fallbackState.url);
     this.registry = new Registry({
       key: this.ctx.key,
@@ -422,6 +426,24 @@ class Session {
 
   nudgeResize() {
     this.root?.nudgeResize();
+  }
+
+  private writeColorsFile(): void {
+    if (!this.colorsFile || !this.root) return;
+    const colors = this.root.info.colors;
+    if (!colors.background || !colors.foreground) return;
+    const rgb = (channelled: number[] | null) =>
+      channelled ? [channelled[0], channelled[1], channelled[2]] : null;
+    const payload = JSON.stringify({
+      background: rgb(colors.background),
+      foreground: rgb(colors.foreground),
+      ansi: Array.from({ length: 16 }, (_, at) => rgb(colors.palette[at] ?? null)),
+    });
+    try {
+      fs.mkdirSync(path.dirname(this.colorsFile), { recursive: true });
+      fs.writeFileSync(`${this.colorsFile}.tmp`, payload);
+      fs.renameSync(`${this.colorsFile}.tmp`, this.colorsFile);
+    } catch {}
   }
 
   private themeBackground(): string {

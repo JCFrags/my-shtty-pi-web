@@ -17,6 +17,8 @@ The url can be a normal url, a localhost port, or a path to an html file.
 Options:
   --split <direction>   Open in a new pane: right, left, down, up
   --size <fraction>     How much of the space the split takes (0.2 to 0.95)
+  --colors-file=<path>  Keep the terminal's colours written there, updated
+                        live when the terminal's theme changes
 
 Options for turning off features:
   --app-mode            All of the flags below at once

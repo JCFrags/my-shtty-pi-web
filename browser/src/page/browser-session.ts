@@ -70,7 +70,7 @@ export function browserSession(partition: string | null): Session {
   return partition ? session.fromPartition(persistentPartition(partition)) : session.defaultSession;
 }
 
-function persistentPartition(partition: string): string {
+export function persistentPartition(partition: string): string {
   return partition.startsWith("persist:") ? partition : `persist:${partition}`;
 }
 

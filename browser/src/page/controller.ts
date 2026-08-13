@@ -7,6 +7,7 @@ import type {
   WheelEvent,
 } from "pixel-react";
 import { normalizeUrl, urlHost } from "../url";
+import { persistentPartition } from "./browser-session";
 import { cursorShapeFor } from "./cursor";
 import { DevtoolsWindow } from "./devtools";
 import type { DevtoolsAction } from "./devtools";
@@ -78,7 +79,7 @@ export class BrowserController {
     partition: string | null,
     onState: (state: BrowserState) => void,
   ) {
-    this.partition = partition;
+    this.partition = partition ? persistentPartition(partition) : null;
     this.cwd = cwd;
     this.surface = surface;
     this.bitmaps = new BitmapPresenter(surface);
@@ -103,7 +104,7 @@ export class BrowserController {
       fullscreenable: false,
       resizable: false,
       webPreferences: {
-        ...(partition ? { partition } : {}),
+        ...(this.partition ? { partition: this.partition } : {}),
         offscreen: offscreenPreferences(this.renderScale),
         sandbox: true,
         nodeIntegration: false,
