@@ -334,11 +334,7 @@ impl SessionEnv {
 }
 
 impl Terminal {
-    pub fn new(wrapper: Wrapper) -> io::Result<Self> {
-        Self::new_with_env(wrapper, SessionEnv::of_process())
-    }
-
-    pub fn new_with_env(wrapper: Wrapper, env: SessionEnv) -> io::Result<Self> {
+    pub fn new(wrapper: Wrapper, env: SessionEnv) -> io::Result<Self> {
         Self::with_handle(
             TtyHandle::Stdio {
                 stdin: io::stdin(),
@@ -349,11 +345,7 @@ impl Terminal {
         )
     }
 
-    pub fn open(tty_path: &str, wrapper: Wrapper) -> io::Result<Self> {
-        Self::open_with_env(tty_path, wrapper, SessionEnv::of_process())
-    }
-
-    pub fn open_with_env(tty_path: &str, wrapper: Wrapper, env: SessionEnv) -> io::Result<Self> {
+    pub fn open(tty_path: &str, wrapper: Wrapper, env: SessionEnv) -> io::Result<Self> {
         let file = std::fs::File::options().read(true).write(true).open(tty_path)?;
         Self::with_handle(TtyHandle::File(file), wrapper, env)
     }
@@ -2481,8 +2473,8 @@ mod tty_tests {
         let (master_b, _slave_b, path_b) = open_pty();
         let _drain_a = drain(&master_a);
         let _drain_b = drain(&master_b);
-        let mut a = Terminal::open(&path_a, Wrapper::None).unwrap();
-        let mut b = Terminal::open(&path_b, Wrapper::None).unwrap();
+        let mut a = Terminal::open(&path_a, Wrapper::None, SessionEnv::of_process()).unwrap();
+        let mut b = Terminal::open(&path_b, Wrapper::None, SessionEnv::of_process()).unwrap();
 
         assert_ne!(a.terminal_id, b.terminal_id);
         assert_ne!(a.shm_name(0), b.shm_name(0));
@@ -2516,7 +2508,7 @@ mod tty_tests {
         use std::io::Write as _;
         let (mut master, _slave, path) = open_pty();
         let _drain = drain(&master);
-        let mut term = Terminal::open(&path, Wrapper::Tmux).unwrap();
+        let mut term = Terminal::open(&path, Wrapper::Tmux, SessionEnv::of_process()).unwrap();
 
         master.write_all(b"\x1b").unwrap();
         let got = term.poll_event(Some(Duration::from_millis(500))).unwrap();
@@ -2538,7 +2530,7 @@ mod tty_tests {
         use std::io::Write as _;
         let (mut master, _slave, path) = open_pty();
         let _drain = drain(&master);
-        let mut term = Terminal::open(&path, Wrapper::None).unwrap();
+        let mut term = Terminal::open(&path, Wrapper::None, SessionEnv::of_process()).unwrap();
 
         master.write_all(b"\x1b").unwrap();
         let got = term.poll_event(Some(Duration::from_millis(200))).unwrap();
@@ -2549,7 +2541,7 @@ mod tty_tests {
     fn a_wake_ends_a_blocking_poll() {
         let (master, _slave, path) = open_pty();
         let _drain = drain(&master);
-        let mut term = Terminal::open(&path, Wrapper::None).unwrap();
+        let mut term = Terminal::open(&path, Wrapper::None, SessionEnv::of_process()).unwrap();
         let waker = term.waker().unwrap();
 
         std::thread::spawn(move || {

@@ -335,10 +335,8 @@ impl Engine {
     pub fn new(config: EngineConfig) -> io::Result<Self> {
         assert!(!config.fonts.is_empty());
         let mut term = match &config.tty {
-            Some(path) => {
-                Terminal::open_with_env(path, config.wrapper, config.session_env.clone())?
-            }
-            None => Terminal::new_with_env(config.wrapper, config.session_env.clone())?,
+            Some(path) => Terminal::open(path, config.wrapper, config.session_env.clone())?,
+            None => Terminal::new(config.wrapper, config.session_env.clone())?,
         };
         if config.watch_resize {
             term.watch_resize()?;
