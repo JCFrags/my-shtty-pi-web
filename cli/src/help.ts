@@ -17,8 +17,13 @@ The url can be a normal url, a localhost port, or a path to an html file.
 Options:
   --split <direction>   Open in a new pane: right, left, down, up
   --size <fraction>     How much of the space the split takes (0.2 to 0.95)
-  --colors-file=<path>  Keep the terminal's colours written there, updated
-                        live when the terminal's theme changes
+  --preload=<path>      Run this script in every page's preload context, with
+                        the terminalBrowser api on globalThis: theme(),
+                        onTheme(cb) for live terminal theme changes, and
+                        send(message) to reach the main script
+  --main-script=<path>  Load this module in the browser process; it is called
+                        with { onMessage } and hears everything the preloads
+                        send
 
 Options for turning off features:
   --app-mode            All of the flags below at once

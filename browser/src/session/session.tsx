@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { app, screen } from "electron";
+import { app, ipcMain, screen } from "electron";
+import { createRequire } from "node:module";
+import type { IpcMainEvent, Session as ElectronSession } from "electron";
 import { createRoot } from "pixel-react";
 import type { DragEvent, EngineKeyEvent, PixelRoot, Surface } from "pixel-react";
 import { detect } from "pixel-terminals";
@@ -80,6 +82,45 @@ const APP_MODE_FLAGS = [
 
 const FONT_FILE = path.join("assets", "fonts", "JetBrainsMono-Regular.ttf");
 
+const API_PRELOAD_SOURCE = `const { ipcRenderer } = require("electron");
+let current = null;
+const subscribers = new Set();
+ipcRenderer.on("terminal-browser:theme", (_event, theme) => {
+  current = theme;
+  for (const subscriber of subscribers) {
+    try { subscriber(theme); } catch {}
+  }
+});
+ipcRenderer.send("terminal-browser:theme-request");
+globalThis.terminalBrowser = {
+  theme: () => current,
+  onTheme(subscriber) {
+    subscribers.add(subscriber);
+    if (current) { try { subscriber(current); } catch {} }
+    return () => subscribers.delete(subscriber);
+  },
+  send: (message) => ipcRenderer.send("terminal-browser:app-message", message),
+};
+`;
+
+let apiPreloadFile: string | null = null;
+function apiPreloadPath(): string {
+  if (!apiPreloadFile) {
+    apiPreloadFile = path.join(app.getPath("userData"), "terminal-browser-api-preload.js");
+    fs.writeFileSync(apiPreloadFile, API_PRELOAD_SOURCE);
+  }
+  return apiPreloadFile;
+}
+
+const registeredPreloads = new WeakMap<ElectronSession, Set<string>>();
+function registerPreloadOnce(ses: ElectronSession, filePath: string) {
+  let seen = registeredPreloads.get(ses);
+  if (!seen) registeredPreloads.set(ses, (seen = new Set()));
+  if (seen.has(filePath)) return;
+  seen.add(filePath);
+  ses.registerPreloadScript({ type: "frame", filePath });
+}
+
 function bundledFontPath(): string {
   for (let dir = __dirname; ; dir = path.dirname(dir)) {
     const candidate = path.join(dir, FONT_FILE);
@@ -112,7 +153,22 @@ class Session {
   private readonly noOverlays: boolean;
   private readonly noFrame: boolean;
   private readonly partition: string | null;
-  private readonly colorsFile: string | null;
+  private readonly preload: string | null;
+  private readonly mainScript: string | null;
+  private readonly appMessageSubscribers = new Set<(message: unknown) => void>();
+  private readonly onThemeRequest = (event: IpcMainEvent) => {
+    if (!this.ownsSender(event)) return;
+    const payload = this.themePayload();
+    if (payload) event.sender.send("terminal-browser:theme", payload);
+  };
+  private readonly onAppMessage = (event: IpcMainEvent, message: unknown) => {
+    if (!this.ownsSender(event)) return;
+    for (const subscriber of this.appMessageSubscribers) {
+      try {
+        subscriber(message);
+      } catch {}
+    }
+  };
   private paletteBinding: KeyBinding[] = [];
   private findBinding: KeyBinding[] = [];
   private devtoolsBinding: KeyBinding[] = [];
@@ -180,7 +236,8 @@ class Session {
     this.noOverlays = this.argv.includes("--no-overlays");
     this.noFrame = this.argv.includes("--no-frame");
     this.partition = flagValue(this.argv, "--partition");
-    this.colorsFile = flagValue(this.argv, "--colors-file");
+    this.preload = flagValue(this.argv, "--preload");
+    this.mainScript = flagValue(this.argv, "--main-script");
     this.fallbackState = initialBrowserState(this.initialUrl());
     configureBrowserSession(this.partition, (progress) => this.showDownload(progress));
     this.tabs = new TabManager(
@@ -268,7 +325,7 @@ class Session {
         this.windowBg = this.themeBackground();
         this.tabs.eachController((c) => void c.setBackground(this.windowBg));
         this.render();
-        this.writeColorsFile();
+        this.broadcastTheme();
       },
       onEngineExit: (error) => {
         if (error) process.stderr.write(`terminal-browser engine: ${error}\n`);
@@ -284,7 +341,7 @@ class Session {
     this.recalculateLayout();
     this.root.setPointerShape("default");
     this.windowBg = this.themeBackground();
-    this.writeColorsFile();
+    this.installEmbedderApi();
     this.tabs.create(this.fallbackState.url);
     this.registry = new Registry({
       key: this.ctx.key,
@@ -404,6 +461,9 @@ class Session {
   shutdown(code = 0) {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
+    ipcMain.removeListener("terminal-browser:theme-request", this.onThemeRequest);
+    ipcMain.removeListener("terminal-browser:app-message", this.onAppMessage);
+    this.appMessageSubscribers.clear();
     for (const record of this.records.values()) record.dispose();
     this.records.clear();
     this.shownRecord = null;
@@ -428,22 +488,63 @@ class Session {
     this.root?.nudgeResize();
   }
 
-  private writeColorsFile(): void {
-    if (!this.colorsFile || !this.root) return;
+  private themePayload(): {
+    background: number[];
+    foreground: number[];
+    ansi: (number[] | null)[];
+  } | null {
+    if (!this.root) return null;
     const colors = this.root.info.colors;
-    if (!colors.background || !colors.foreground) return;
+    if (!colors.background || !colors.foreground) return null;
     const rgb = (channelled: number[] | null) =>
       channelled ? [channelled[0], channelled[1], channelled[2]] : null;
-    const payload = JSON.stringify({
-      background: rgb(colors.background),
-      foreground: rgb(colors.foreground),
+    return {
+      background: rgb(colors.background) as number[],
+      foreground: rgb(colors.foreground) as number[],
       ansi: Array.from({ length: 16 }, (_, at) => rgb(colors.palette[at] ?? null)),
+    };
+  }
+
+  private ownsSender(event: IpcMainEvent): boolean {
+    let mine = false;
+    this.tabs.eachController((controller) => {
+      if (controller.hasContents(event.sender.id)) mine = true;
     });
-    try {
-      fs.mkdirSync(path.dirname(this.colorsFile), { recursive: true });
-      fs.writeFileSync(`${this.colorsFile}.tmp`, payload);
-      fs.renameSync(`${this.colorsFile}.tmp`, this.colorsFile);
-    } catch {}
+    return mine;
+  }
+
+  private broadcastTheme(): void {
+    if (!this.preload && !this.mainScript) return;
+    const payload = this.themePayload();
+    if (!payload) return;
+    this.tabs.eachController((controller) =>
+      controller.sendToPage("terminal-browser:theme", payload),
+    );
+  }
+
+  private installEmbedderApi(): void {
+    if (!this.preload && !this.mainScript) return;
+    ipcMain.on("terminal-browser:theme-request", this.onThemeRequest);
+    ipcMain.on("terminal-browser:app-message", this.onAppMessage);
+    if (this.preload) {
+      const ses = browserSession(this.partition);
+      registerPreloadOnce(ses, apiPreloadPath());
+      registerPreloadOnce(ses, path.resolve(this.ctx.cwd, this.preload));
+    }
+    if (this.mainScript) {
+      const file = path.resolve(this.ctx.cwd, this.mainScript);
+      try {
+        const factory = createRequire(file)(file);
+        factory({
+          onMessage: (subscriber: (message: unknown) => void) =>
+            this.appMessageSubscribers.add(subscriber),
+        });
+      } catch (error) {
+        process.stderr.write(
+          `main script failed: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      }
+    }
   }
 
   private themeBackground(): string {

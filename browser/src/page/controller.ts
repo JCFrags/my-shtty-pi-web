@@ -482,6 +482,16 @@ export class BrowserController {
     this.input.key(event);
   }
 
+  sendToPage(channel: string, payload: unknown): void {
+    try {
+      this.window.webContents.send(channel, payload);
+    } catch {}
+  }
+
+  hasContents(id: number): boolean {
+    return this.window.webContents.id === id;
+  }
+
   paste(text: string) {
     this.input.paste(text);
   }
@@ -491,7 +501,10 @@ export class BrowserController {
   }
 
   setActive(active: boolean) {
-    if (!active) this.blurContent();
+    if (!active) {
+      this.blurContent();
+      this.input.releaseModifiers();
+    }
   }
 
   stop() {

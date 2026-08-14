@@ -21,9 +21,25 @@ export class PageInput {
   private wheelRemainderX = 0;
   private wheelRemainderY = 0;
   private sentKeys = new Set<string>();
+  private superHeld = false;
 
   constructor(target: InputTarget) {
     this.target = target;
+  }
+
+  releaseModifiers() {
+    this.superHeld = false;
+  }
+
+  private rememberModifiers(event: EngineKeyEvent) {
+    this.superHeld =
+      event.key === "leftsuper" || event.key === "rightsuper"
+        ? event.kind !== "release"
+        : !!event.mods.super;
+  }
+
+  private pointerModifiers(mods: PointerEvent["mods"]) {
+    return this.modifiers(this.superHeld && !mods.super ? { ...mods, super: true } : mods);
   }
 
   pointer(event: PointerEvent) {
@@ -39,7 +55,7 @@ export class PageInput {
       this.activeClickCount = this.nextClickCount(button, x, y);
     }
     if (event.kind === "up" && button) this.pressed.delete(button);
-    const modifiers = this.modifiers(event.mods);
+    const modifiers = this.pointerModifiers(event.mods);
     for (const pressed of this.pressed) modifiers.push(`${pressed}buttondown`);
     this.target.contents().sendInputEvent({
       type:
@@ -88,7 +104,7 @@ export class PageInput {
       wheelTicksY: deltaY / 40,
       hasPreciseScrollingDeltas: true,
       canScroll: true,
-      modifiers: this.modifiers(event.mods),
+      modifiers: this.pointerModifiers(event.mods),
     });
   }
 
@@ -108,7 +124,7 @@ export class PageInput {
       wheelTicksY: ticksY,
       hasPreciseScrollingDeltas: false,
       canScroll: true,
-      modifiers: this.modifiers(event.mods),
+      modifiers: this.pointerModifiers(event.mods),
     });
   }
 
@@ -130,6 +146,7 @@ export class PageInput {
   }
 
   key(event: EngineKeyEvent) {
+    this.rememberModifiers(event);
     if (event.key === "enter") {
       void this.dispatchEnter(event).catch(() => {});
       return;
