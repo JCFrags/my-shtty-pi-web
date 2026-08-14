@@ -91,12 +91,22 @@ fn helper_path() -> Option<String> {
 }
 
 fn spawn_helper() -> Option<SharedHelper> {
-    let mut child = Command::new(helper_path()?)
+    let path = helper_path()?;
+    let mut child = match Command::new(&path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .ok()?;
+    {
+        Ok(child) => child,
+        Err(error) => {
+            crate::logging::warn(
+                "engine",
+                format!("native scroll helper failed to start ({path}): {error}"),
+            );
+            return None;
+        }
+    };
     let stdout = child.stdout.take()?;
     let stdin = child.stdin.take();
     std::thread::spawn(move || {

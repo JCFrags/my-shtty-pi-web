@@ -27,7 +27,7 @@ cp "${CARGO_TARGET_DIR:-$ROOT/engine/target}/release/$NATIVE_LIB" "$STAGE/browse
 
 # the engine bakes in a path to its build directory, which only exists on this machine
 if [ "$TARGET" = darwin-arm64 ]; then
-  swiftc -O "$ROOT/engine/crates/pixel-core/native-scroll-helper.swift" \
+  swiftc -O -target arm64-apple-macos11 "$ROOT/engine/crates/pixel-core/native-scroll-helper.swift" \
     -o "$STAGE/bin/native-scroll-helper"
   codesign --force --sign - --timestamp=none "$STAGE/bin/native-scroll-helper" 2>/dev/null || true
 fi
