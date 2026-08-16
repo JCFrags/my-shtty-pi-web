@@ -17,21 +17,30 @@ The url can be a normal url, a localhost port, or a path to an html file.
 Options:
   --split <direction>   Open in a new pane: right, left, down, up
   --size <fraction>     How much of the space the split takes (0.2 to 0.95)
-  --preload=<path>      Run this script in every page's preload context, with
-                        the terminalBrowser api on globalThis: theme(),
-                        onTheme(cb) for live terminal theme changes, and
-                        send(message) to reach the main script
-  --main-script=<path>  Load this module in the browser process; it is called
-                        with { onMessage } and hears everything the preloads
-                        send
+  --preload=<path>      Run a script inside the context of a web page before it loads (uses electron's preload feature under the hood, runs in an isolated world).
+                        terminal-browser specific api's are exposed on globalThis.terminalBrowser
+                        {
+                          theme: ()  => ...,
+                          onTheme: (cb: () => void) => void
+                        }
+                        and --terminal-browser-session=<key> is passed as extra arguments
+                        to the renderer process, available via process.argv
 
-Options for turning off features:
-  --app-mode            All of the flags below at once
+  --main-script=<path>  Run a node.js script in the same process as the browser (this is an electron main process)
+                        terminal-browser specific api's are exposed on globalT
+  --open-tabs-in-popup-stack
+                        Links that would open a new tab open a popup over the
+                        page instead.
+  --allow-clipboard-read
+                        Lets websites read from clipboard.
   --no-toolbar          No toolbar or tab strip
   --no-shortcuts        No browser shortcuts, keys go to the page
   --no-context-menu     No right-click menu
   --no-overlays         No toasts or HUDs drawn over the page
   --no-frame            No border or padding, the page fills the pane
+  --app-mode            Shorthand for --no-toolbar --no-shortcuts
+                        --no-context-menu --no-overlays --no-frame
+                        --allow-clipboard-read
 
 Examples:
   terminal-browser open localhost:3000

@@ -7,7 +7,7 @@ import type {
   WheelEvent,
 } from "pixel-react";
 import { normalizeUrl, urlHost } from "../url";
-import { persistentPartition } from "./browser-session";
+import { allowClipboardRead, persistentPartition } from "./browser-session";
 import { cursorShapeFor } from "./cursor";
 import { DevtoolsWindow } from "./devtools";
 import type { DevtoolsAction } from "./devtools";
@@ -36,6 +36,9 @@ export class BrowserController {
   private contentFocused = false;
   private readonly input: PageInput;
   private readonly partition: string | null;
+  private readonly tabsAsPopups: boolean;
+  private readonly clipboardRead: boolean;
+  private readonly sessionKey: string;
   private readonly cwd: string;
   private background: string;
   private pendingPopupSize: { width: number; height: number } | null = null;
@@ -59,8 +62,11 @@ export class BrowserController {
   cursorShape = "default";
   onCursorChange: ((shape: string) => void) | null = null;
   onOpenTab: ((url: string, activate: boolean) => void) | null = null;
-  popup: PopupWindow | null = null;
+  private readonly popups: PopupWindow[] = [];
   onPopupChange: (() => void) | null = null;
+  get popup(): PopupWindow | null {
+    return this.popups[this.popups.length - 1] ?? null;
+  }
   devtools: DevtoolsWindow | null = null;
   devtoolsFocused = false;
   onDevtoolsChange: (() => void) | null = null;
@@ -77,9 +83,15 @@ export class BrowserController {
     background: string,
     visible: boolean,
     partition: string | null,
+    tabsAsPopups: boolean,
+    clipboardRead: boolean,
+    sessionKey: string,
     onState: (state: BrowserState) => void,
   ) {
     this.partition = partition ? persistentPartition(partition) : null;
+    this.tabsAsPopups = tabsAsPopups;
+    this.clipboardRead = clipboardRead;
+    this.sessionKey = sessionKey;
     this.cwd = cwd;
     this.surface = surface;
     this.bitmaps = new BitmapPresenter(surface);
@@ -111,8 +123,10 @@ export class BrowserController {
         contextIsolation: true,
         disableDialogs: true,
         backgroundThrottling: false,
+        additionalArguments: [`--terminal-browser-session=${this.sessionKey}`],
       },
     });
+    if (clipboardRead) allowClipboardRead(this.window.webContents);
     this.input = new PageInput({
       contents: () => this.window.webContents,
       scale: () => this.layout.scale,
@@ -184,41 +198,9 @@ export class BrowserController {
         findMatches: { active: result.activeMatchOrdinal, total: result.matches },
       });
     });
-    this.window.webContents.setWindowOpenHandler(({ url, disposition, features }) => {
-      const wantsTab = disposition === "foreground-tab" || disposition === "background-tab";
-      if (wantsTab && this.onOpenTab) {
-        this.onOpenTab(url, disposition === "foreground-tab");
-        return { action: "deny" };
-      }
-      if (disposition === "new-window") {
-        const size = this.popupSize(features);
-        this.pendingPopupSize = size;
-        return {
-          action: "allow",
-          overrideBrowserWindowOptions: {
-            width: size.width,
-            height: size.height,
-            useContentSize: true,
-            show: false,
-            frame: false,
-            skipTaskbar: true,
-            fullscreenable: false,
-            resizable: false,
-            webPreferences: {
-              ...(this.partition ? { partition: this.partition } : {}),
-              offscreen: { useSharedTexture: false, deviceScaleFactor: this.renderScale },
-              sandbox: true,
-              nodeIntegration: false,
-              contextIsolation: true,
-              disableDialogs: true,
-              backgroundThrottling: false,
-            },
-          },
-        };
-      }
-      void this.window.webContents.loadURL(url);
-      return { action: "deny" };
-    });
+    this.window.webContents.setWindowOpenHandler((details) =>
+      this.handleWindowOpen(details, this.window.webContents),
+    );
     this.window.webContents.on("did-create-window", (child) => this.adoptPopup(child));
     void this.window.loadURL(normalizeUrl(initialUrl, cwd));
     this.onState(this.state);
@@ -510,7 +492,7 @@ export class BrowserController {
   stop() {
     if (this.stopped) return;
     this.stopped = true;
-    this.popup?.close();
+    for (const popup of [...this.popups]) popup.close();
     this.devtools?.close();
     screen.off("display-added", this.onDisplayChange);
     screen.off("display-removed", this.onDisplayChange);
@@ -562,10 +544,54 @@ export class BrowserController {
     this.onState(this.state);
   }
 
+  private handleWindowOpen(
+    { url, disposition, features }: Electron.HandlerDetails,
+    opener: Electron.WebContents,
+  ): Electron.WindowOpenHandlerResponse {
+    const wantsTab = disposition === "foreground-tab" || disposition === "background-tab";
+    if (wantsTab && !this.tabsAsPopups && this.onOpenTab) {
+      this.onOpenTab(url, disposition === "foreground-tab");
+      return { action: "deny" };
+    }
+    if (disposition === "new-window" || (wantsTab && this.tabsAsPopups)) {
+      const size = this.popupSize(features);
+      this.pendingPopupSize = size;
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          width: size.width,
+          height: size.height,
+          useContentSize: true,
+          show: false,
+          frame: false,
+          skipTaskbar: true,
+          fullscreenable: false,
+          resizable: false,
+          webPreferences: {
+            ...(this.partition ? { partition: this.partition } : {}),
+            offscreen: { useSharedTexture: false, deviceScaleFactor: this.renderScale },
+            sandbox: true,
+            nodeIntegration: false,
+            contextIsolation: true,
+            disableDialogs: true,
+            backgroundThrottling: false,
+            additionalArguments: [`--terminal-browser-session=${this.sessionKey}`],
+          },
+        },
+      };
+    }
+    void opener.loadURL(url);
+    return { action: "deny" };
+  }
+
   private adoptPopup(child: Electron.BrowserWindow) {
-    this.popup?.close();
+    if (this.clipboardRead) allowClipboardRead(child.webContents);
+    if (!this.tabsAsPopups) this.popup?.close();
     const size = this.pendingPopupSize ?? { width: 480, height: 360 };
     this.pendingPopupSize = null;
+    if (this.tabsAsPopups) {
+      child.webContents.on("did-create-window", (grandchild) => this.adoptPopup(grandchild));
+    }
     const popup = new PopupWindow(
       child,
       this.popupSurface,
@@ -574,11 +600,19 @@ export class BrowserController {
       () => this.layout.scale,
       () => this.onPopupChange?.(),
       () => {
-        if (this.popup === popup) this.popup = null;
+        const at = this.popups.indexOf(popup);
+        if (at < 0) return;
+        const wasTop = at === this.popups.length - 1;
+        this.popups.splice(at, 1);
+        if (wasTop && this.visible) this.popup?.setVisible(true);
         this.onPopupChange?.();
       },
+      this.tabsAsPopups
+        ? (details) => this.handleWindowOpen(details, child.webContents)
+        : undefined,
     );
-    this.popup = popup;
+    this.popup?.setVisible(false);
+    this.popups.push(popup);
     this.onPopupChange?.();
   }
 

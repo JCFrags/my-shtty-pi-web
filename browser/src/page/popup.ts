@@ -33,6 +33,7 @@ export class PopupWindow {
     scale: () => number,
     onChange: () => void,
     onClosed: () => void,
+    openWindow?: (details: Electron.HandlerDetails) => Electron.WindowOpenHandlerResponse,
   ) {
     this.window = window;
     this.surface = surface;
@@ -59,10 +60,13 @@ export class PopupWindow {
     });
     contents.on("did-start-loading", () => this.update({ loading: true }));
     contents.on("did-stop-loading", () => this.update({ loading: false }));
-    contents.setWindowOpenHandler(({ url }) => {
-      void contents.loadURL(url);
-      return { action: "deny" };
-    });
+    contents.setWindowOpenHandler(
+      openWindow ??
+        (({ url }) => {
+          void contents.loadURL(url);
+          return { action: "deny" };
+        }),
+    );
     window.on("closed", () => {
       this.destroyed = true;
       this.surface.clear();

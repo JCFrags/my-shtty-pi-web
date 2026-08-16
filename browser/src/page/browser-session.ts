@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { app, net, session } from "electron";
-import type { Session } from "electron";
+import type { Session, WebContents } from "electron";
 
 export interface DownloadProgress {
   name: string;
@@ -21,6 +21,18 @@ const GRANTED = new Set([
 ]);
 
 const configured = new WeakSet<Session>();
+const clipboardReaders = new WeakSet<WebContents>();
+
+export function allowClipboardRead(contents: WebContents): void {
+  clipboardReaders.add(contents);
+}
+
+function granted(contents: WebContents | null, permission: string): boolean {
+  if (GRANTED.has(permission)) return true;
+  return (
+    permission === "clipboard-read" && contents !== null && clipboardReaders.has(contents)
+  );
+}
 
 export function configureBrowserSession(
   partition: string | null,
@@ -30,10 +42,10 @@ export function configureBrowserSession(
   if (configured.has(target)) return target;
   configured.add(target);
 
-  target.setPermissionRequestHandler((_contents, permission, callback) => {
-    callback(GRANTED.has(permission));
+  target.setPermissionRequestHandler((contents, permission, callback) => {
+    callback(granted(contents, permission));
   });
-  target.setPermissionCheckHandler((_contents, permission) => GRANTED.has(permission));
+  target.setPermissionCheckHandler((contents, permission) => granted(contents, permission));
 
   target.webRequest.onBeforeRequest({ urls: ["file://*", "file://*/*"] }, (details, callback) => {
     callback({ cancel: details.resourceType === "xhr" });

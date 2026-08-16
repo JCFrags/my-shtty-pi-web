@@ -433,6 +433,8 @@ const BROWSER_FLAGS = [
   "--no-context-menu",
   "--no-overlays",
   "--no-frame",
+  "--open-tabs-in-popup-stack",
+  "--allow-clipboard-read",
   "--partition=",
   "--preload=",
   "--main-script=",

@@ -78,6 +78,7 @@ const APP_MODE_FLAGS = [
   "--no-context-menu",
   "--no-overlays",
   "--no-frame",
+  "--allow-clipboard-read",
 ];
 
 const FONT_FILE = path.join("assets", "fonts", "JetBrainsMono-Regular.ttf");
@@ -99,7 +100,6 @@ globalThis.terminalBrowser = {
     if (current) { try { subscriber(current); } catch {} }
     return () => subscribers.delete(subscriber);
   },
-  send: (message) => ipcRenderer.send("terminal-browser:app-message", message),
 };
 `;
 
@@ -152,22 +152,15 @@ class Session {
   private readonly noContextMenu: boolean;
   private readonly noOverlays: boolean;
   private readonly noFrame: boolean;
+  private readonly tabsAsPopups: boolean;
+  private readonly clipboardRead: boolean;
   private readonly partition: string | null;
   private readonly preload: string | null;
   private readonly mainScript: string | null;
-  private readonly appMessageSubscribers = new Set<(message: unknown) => void>();
   private readonly onThemeRequest = (event: IpcMainEvent) => {
     if (!this.ownsSender(event)) return;
     const payload = this.themePayload();
     if (payload) event.sender.send("terminal-browser:theme", payload);
-  };
-  private readonly onAppMessage = (event: IpcMainEvent, message: unknown) => {
-    if (!this.ownsSender(event)) return;
-    for (const subscriber of this.appMessageSubscribers) {
-      try {
-        subscriber(message);
-      } catch {}
-    }
   };
   private paletteBinding: KeyBinding[] = [];
   private findBinding: KeyBinding[] = [];
@@ -235,6 +228,8 @@ class Session {
     this.noContextMenu = this.argv.includes("--no-context-menu");
     this.noOverlays = this.argv.includes("--no-overlays");
     this.noFrame = this.argv.includes("--no-frame");
+    this.tabsAsPopups = this.argv.includes("--open-tabs-in-popup-stack");
+    this.clipboardRead = this.argv.includes("--allow-clipboard-read");
     this.partition = flagValue(this.argv, "--partition");
     this.preload = flagValue(this.argv, "--preload");
     this.mainScript = flagValue(this.argv, "--main-script");
@@ -253,6 +248,9 @@ class Session {
             this.windowBg,
             visible,
             this.partition,
+            this.tabsAsPopups,
+            this.clipboardRead,
+            this.ctx.key,
             onState,
           ),
         onActivated: () => {
@@ -462,8 +460,6 @@ class Session {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
     ipcMain.removeListener("terminal-browser:theme-request", this.onThemeRequest);
-    ipcMain.removeListener("terminal-browser:app-message", this.onAppMessage);
-    this.appMessageSubscribers.clear();
     for (const record of this.records.values()) record.dispose();
     this.records.clear();
     this.shownRecord = null;
@@ -525,7 +521,6 @@ class Session {
   private installEmbedderApi(): void {
     if (!this.preload && !this.mainScript) return;
     ipcMain.on("terminal-browser:theme-request", this.onThemeRequest);
-    ipcMain.on("terminal-browser:app-message", this.onAppMessage);
     if (this.preload) {
       const ses = browserSession(this.partition);
       registerPreloadOnce(ses, apiPreloadPath());
@@ -534,11 +529,7 @@ class Session {
     if (this.mainScript) {
       const file = path.resolve(this.ctx.cwd, this.mainScript);
       try {
-        const factory = createRequire(file)(file);
-        factory({
-          onMessage: (subscriber: (message: unknown) => void) =>
-            this.appMessageSubscribers.add(subscriber),
-        });
+        createRequire(file)(file);
       } catch (error) {
         process.stderr.write(
           `main script failed: ${error instanceof Error ? error.message : String(error)}\n`,
