@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { app, net, session } from "electron";
@@ -42,7 +43,9 @@ export function configureBrowserSession(
   target.protocol.handle("file", async (request) => {
     const directory = requestedDirectory(request.url);
     if (directory) return directoryListing(directory);
-    return net.fetch(request, { bypassCustomProtocolHandlers: true });
+    const range = request.headers.get("range");
+    const ranged = range ? rangeResponse(request.url, range) : null;
+    return ranged ?? net.fetch(request, { bypassCustomProtocolHandlers: true });
   });
 
   target.on("will-download", (_event, item) => {
@@ -72,6 +75,38 @@ export function browserSession(partition: string | null): Session {
 
 function persistentPartition(partition: string): string {
   return partition.startsWith("persist:") ? partition : `persist:${partition}`;
+}
+
+function rangeResponse(url: string, range: string): Response | null {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+  if (!match || (!match[1] && !match[2])) return null;
+  let file: string;
+  let size: number;
+  try {
+    file = fileURLToPath(new URL(url).href.split(/[?#]/)[0]);
+    const stat = fs.statSync(file);
+    if (!stat.isFile()) return null;
+    size = stat.size;
+  } catch {
+    return null;
+  }
+  const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+  const end = match[1] && match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
+  if (start >= size || start > end) {
+    return new Response(null, {
+      status: 416,
+      headers: { "content-range": `bytes */${size}` },
+    });
+  }
+  const body = Readable.toWeb(fs.createReadStream(file, { start, end })) as ReadableStream;
+  return new Response(body, {
+    status: 206,
+    headers: {
+      "accept-ranges": "bytes",
+      "content-range": `bytes ${start}-${end}/${size}`,
+      "content-length": String(end - start + 1),
+    },
+  });
 }
 
 function requestedDirectory(url: string): string | null {
