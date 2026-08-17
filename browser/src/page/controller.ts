@@ -437,10 +437,6 @@ export class BrowserController {
     return this.input.selectionText();
   }
 
-  cut() {
-    this.input.cut();
-  }
-
   blurContent() {
     if (!this.contentFocused) return;
     this.input.releaseKeys();

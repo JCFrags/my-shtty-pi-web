@@ -436,7 +436,7 @@ class Session {
     return event.kind === "press" && this.clipboardHeld(event) && event.key === "x";
   }
 
-  private focusedInput(): { selectionText(): Promise<string>; cut(): void } | null {
+  private focusedInput(): { selectionText(): Promise<string> } | null {
     const browser = this.tabs.activeController;
     if (!browser) return null;
     if (browser.popup) return browser.popup.input;
@@ -444,24 +444,16 @@ class Session {
     return browser;
   }
 
-  private async copySelection() {
+  private async mirrorSelection(): Promise<boolean> {
     const text = await this.focusedInput()?.selectionText();
-    if (!text) {
-      if (process.platform === "linux") this.showToast("ctrl+q to quit", "alert");
-      return;
-    }
+    if (!text) return false;
     this.root?.setClipboard(text);
-    this.showToast("copied to clipboard", "done");
+    return true;
   }
 
-
-  private async cutSelection() {
-    const input = this.focusedInput();
-    if (!input) return;
-    const text = await input.selectionText();
-    if (!text) return;
-    this.root?.setClipboard(text);
-    input.cut();
+  private async copySelection() {
+    if (await this.mirrorSelection()) this.showToast("copied to clipboard", "done");
+    else if (process.platform === "linux") this.showToast("ctrl+q to quit", "alert");
   }
 
   shutdown(code = 0) {
@@ -825,7 +817,7 @@ class Session {
       }
       if (this.isPasteKey(event)) this.root?.requestClipboardImage();
       if (this.isCopyKey(event)) void this.copySelection();
-      if (this.isCutKey(event)) void this.cutSelection();
+      if (this.isCutKey(event)) void this.mirrorSelection();
       browser.popup.input.key(event);
       return;
     }
@@ -950,13 +942,7 @@ class Session {
     if (this.browserFocused) {
       if (this.isPasteKey(event)) this.root?.requestClipboardImage();
       if (this.isCopyKey(event)) void this.copySelection();
-      // A real browser cuts two ways, and both must survive here. Its Edit
-      // menu cuts native editables with a dom selection — cutSelection is
-      // that menu, emulated, since an offscreen window has none. And the
-      // keydown still reaches the page, because editors like monaco have no
-      // dom selection (theirs is painted) and cut in their own cmd+x
-      // handler instead. So: emulate the menu, and never eat the key.
-      if (this.isCutKey(event)) void this.cutSelection();
+      if (this.isCutKey(event)) void this.mirrorSelection();
       this.routeKey(event);
     }
   }

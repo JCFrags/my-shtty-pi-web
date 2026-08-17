@@ -205,8 +205,12 @@ export class PageInput {
   }
 
   paste(text: string) {
-    this.syncFocus();
     clipboard.writeText(text);
+    if (process.platform === "darwin") {
+      void this.dispatchPaste().catch(() => { });
+      return;
+    }
+    this.syncFocus();
     this.target.contents().paste();
   }
 
@@ -218,11 +222,6 @@ export class PageInput {
     }
     return "";
   }
-
-  cut() {
-    this.target.contents().cut();
-  }
-
 
   pasteImage(image: PastedImage) {
     this.syncFocus();
@@ -279,6 +278,23 @@ export class PageInput {
     if (!event.mods.ctrl && !event.mods.super && !event.mods.alt) {
       await this.target.cdp("Input.dispatchKeyEvent", { type: "char", text: "\r", ...base });
     }
+  }
+
+  private async dispatchPaste() {
+    const base = {
+      key: "v",
+      code: "KeyV",
+      windowsVirtualKeyCode: 86,
+      nativeVirtualKeyCode: 86,
+      modifiers: 4,
+    };
+    await this.syncFocus();
+    await this.target.cdp("Input.dispatchKeyEvent", {
+      type: "rawKeyDown",
+      ...base,
+      commands: ["Paste"],
+    });
+    await this.target.cdp("Input.dispatchKeyEvent", { type: "keyUp", ...base });
   }
 
   private async dispatchEditing(event: EngineKeyEvent, commands: string[]) {
@@ -355,17 +371,17 @@ const EDITING_KEY_INFO: Record<string, { key: string; code: string; keyCode: num
   down: { key: "ArrowDown", code: "ArrowDown", keyCode: 40 },
   a: { key: "a", code: "KeyA", keyCode: 65 },
   b: { key: "b", code: "KeyB", keyCode: 66 },
+  c: { key: "c", code: "KeyC", keyCode: 67 },
   d: { key: "d", code: "KeyD", keyCode: 68 },
   e: { key: "e", code: "KeyE", keyCode: 69 },
   f: { key: "f", code: "KeyF", keyCode: 70 },
   k: { key: "k", code: "KeyK", keyCode: 75 },
   u: { key: "u", code: "KeyU", keyCode: 85 },
   w: { key: "w", code: "KeyW", keyCode: 87 },
+  x: { key: "x", code: "KeyX", keyCode: 88 },
   z: { key: "z", code: "KeyZ", keyCode: 90 },
 };
 
-/** blink editing command(s) macOS would attach to this key combo, or null
- * when the combo is not an editing shortcut and should use the normal path */
 function editingCommands(event: EngineKeyEvent): string[] | null {
   const { key, mods } = event;
   if (mods.ctrl) return controlEditingCommands(event);
@@ -391,6 +407,8 @@ function editingCommands(event: EngineKeyEvent): string[] | null {
   }
   if (mods.super && !mods.alt && !mods.shift && key === "a") return ["selectAll"];
   if (mods.super && !mods.alt && key === "z") return [mods.shift ? "redo" : "undo"];
+  if (mods.super && !mods.alt && !mods.shift && key === "c") return ["Copy"];
+  if (mods.super && !mods.alt && !mods.shift && key === "x") return ["Cut"];
   return null;
 }
 
