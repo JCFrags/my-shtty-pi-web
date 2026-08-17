@@ -73,6 +73,7 @@ export interface ChromeActions {
   popupPointer(event: PointerEvent): void;
   popupWheel(event: WheelEvent): void;
   popupClose(): void;
+  popupHover(hovering: boolean): void;
   devtoolsPointer(event: PointerEvent): void;
   devtoolsWheel(event: WheelEvent): void;
   devtoolsHover(hovering: boolean): void;

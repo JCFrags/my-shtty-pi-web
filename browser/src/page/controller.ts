@@ -554,7 +554,7 @@ export class BrowserController {
       return { action: "deny" };
     }
     if (disposition === "new-window" || (wantsTab && this.tabsAsPopups)) {
-      const size = this.popupSize(features);
+      const size = wantsTab ? this.tabPopupSize() : this.popupSize(features);
       this.pendingPopupSize = size;
       return {
         action: "allow",
@@ -611,9 +611,20 @@ export class BrowserController {
         ? (details) => this.handleWindowOpen(details, child.webContents)
         : undefined,
     );
+    popup.onCursorChange = () => {
+      if (this.popup === popup) this.onCursorChange?.(popup.cursorShape);
+    };
     this.popup?.setVisible(false);
     this.popups.push(popup);
     this.onPopupChange?.();
+  }
+
+  private tabPopupSize(): { width: number; height: number } {
+    const content = this.contentSize(this.layout);
+    return {
+      width: Math.max(280, Math.round(content.width * 0.9)),
+      height: Math.max(280, Math.round(content.height * 0.9)),
+    };
   }
 
   private popupSize(features: string): { width: number; height: number } {

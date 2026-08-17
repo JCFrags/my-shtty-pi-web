@@ -185,6 +185,7 @@ class Session {
   private browserFocused = false;
   private shuttingDown = false;
   private pageHover = false;
+  private popupHover = false;
   private devtoolsHover = false;
   private devtoolsWasFocused = false;
   private devtoolsDockSide: DevtoolsDock = "bottom";
@@ -639,6 +640,10 @@ class Session {
     popupPointer: (event) => this.tabs.activeController?.popup?.input.pointer(event),
     popupWheel: (event) => this.tabs.activeController?.popup?.input.wheel(event),
     popupClose: () => this.tabs.activeController?.popup?.close(),
+    popupHover: (hovering) => {
+      this.popupHover = hovering;
+      this.syncCursor();
+    },
     devtoolsPointer: (event) => {
       const browser = this.tabs.activeController;
       if (!browser?.devtools) return;
@@ -1038,9 +1043,13 @@ class Session {
           : "col-resize"
         : this.devtoolsHover
           ? (browser?.devtools?.cursorShape ?? "default")
-          : this.pageHover
-            ? (browser?.cursorShape ?? "default")
-            : "default";
+          : browser?.popup
+            ? this.popupHover
+              ? browser.popup.cursorShape
+              : "default"
+            : this.pageHover
+              ? (browser?.cursorShape ?? "default")
+              : "default";
     if (shape === this.sentCursor) return;
     this.sentCursor = shape;
     this.root?.setPointerShape(shape);

@@ -23,13 +23,11 @@ Options:
                           theme: ()  => ...,
                           onTheme: (cb: () => void) => void
                         }
-                        and --terminal-browser-session=<key> is passed as extra arguments
+                        --terminal-browser-session=<key> is passed as extra arguments
                         to the renderer process, available via process.argv
 
   --main-script=<path>  Run a node.js script in the same process as the browser (this is an electron main process)
-                        terminal-browser specific api's are exposed on globalT
-  --open-tabs-in-popup-stack
-                        Links that would open a new tab open a popup over the
+  --open-tabs-in-popup-stack Links that would open a new tab open a popup over the
                         page instead.
   --allow-clipboard-read
                         Lets websites read from clipboard.
@@ -82,18 +80,21 @@ nothing when already up to date.
     summary: "Open a tab here, and a browser too if there is none",
     usage: "terminal-browser new-tab [url] [options]",
     body: `
-      Opens a tab in a browser already open. By default, if there is a single browser open
-      in the current terminal tab, it will open a tab in that browser. If there are no browsers,
-      a new browser will be opened with the specified tab as the initial (if ran from a shell without a TTY, it will open in a split to the right). If there are mulitiple browsers,
-      new-tab will error and a --browser <key> is a required argument (<key> can be found by running terminal-browser ls)
+Opens a tab in a browser already open. By default, if there is a single
+browser open in the current terminal tab, it will open a tab in that browser.
+If there are no browsers, a new browser will be opened with the specified tab
+as the initial (if ran from a shell without a TTY, it will open in a split to
+the right). If there are multiple browsers, new-tab will error and a
+--browser <key> is a required argument (<key> can be found by running
+terminal-browser ls)
 
-      Options:
-        --browser <key>     A browser key from terminal-browser ls
+Options:
+  --browser <key>     A browser key from terminal-browser ls
 
-      Examples:
-        terminal-browser new-tab github.com
-        terminal-browser new-tab --browser 90107-1 localhost:3000
-    `,
+Examples:
+  terminal-browser new-tab github.com
+  terminal-browser new-tab --browser 90107-1 localhost:3000
+`,
   },
   shutdown: {
     summary: "Stop the daemon",
