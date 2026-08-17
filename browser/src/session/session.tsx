@@ -822,10 +822,7 @@ class Session {
       }
       if (this.isPasteKey(event)) this.root?.requestClipboardImage();
       if (this.isCopyKey(event)) void this.copySelection();
-      if (this.isCutKey(event)) {
-        void this.cutSelection();
-        return;
-      }
+      if (this.isCutKey(event)) void this.cutSelection();
       browser.popup.input.key(event);
       return;
     }
@@ -950,10 +947,13 @@ class Session {
     if (this.browserFocused) {
       if (this.isPasteKey(event)) this.root?.requestClipboardImage();
       if (this.isCopyKey(event)) void this.copySelection();
-      if (this.isCutKey(event)) {
-        void this.cutSelection();
-        return;
-      }
+      // A real browser cuts two ways, and both must survive here. Its Edit
+      // menu cuts native editables with a dom selection — cutSelection is
+      // that menu, emulated, since an offscreen window has none. And the
+      // keydown still reaches the page, because editors like monaco have no
+      // dom selection (theirs is painted) and cut in their own cmd+x
+      // handler instead. So: emulate the menu, and never eat the key.
+      if (this.isCutKey(event)) void this.cutSelection();
       this.routeKey(event);
     }
   }
