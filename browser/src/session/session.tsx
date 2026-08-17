@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { app, screen } from "electron";
+import { app, ipcMain, screen } from "electron";
+import { createRequire } from "node:module";
+import type { IpcMainEvent, Session as ElectronSession } from "electron";
 import { createRoot } from "pixel-react";
 import type { DragEvent, EngineKeyEvent, PixelRoot, Surface } from "pixel-react";
 import { detect } from "pixel-terminals";
@@ -70,7 +72,55 @@ export function createSession(ctx: SessionContext): SessionHandle {
 
 const DEFAULT_URL = "https://github.com/zenbu-labs";
 
+const APP_MODE_FLAGS = [
+  "--no-toolbar",
+  "--no-shortcuts",
+  "--no-context-menu",
+  "--no-overlays",
+  "--no-frame",
+  "--allow-clipboard-read",
+];
+
 const FONT_FILE = path.join("assets", "fonts", "JetBrainsMono-Regular.ttf");
+
+const API_PRELOAD_SOURCE = `const { ipcRenderer } = require("electron");
+let current = null;
+const subscribers = new Set();
+ipcRenderer.on("terminal-browser:theme", (_event, theme) => {
+  current = theme;
+  for (const subscriber of subscribers) {
+    try { subscriber(theme); } catch {}
+  }
+});
+ipcRenderer.send("terminal-browser:theme-request");
+globalThis.terminalBrowser = {
+  theme: () => current,
+  onTheme(subscriber) {
+    subscribers.add(subscriber);
+    if (current) { try { subscriber(current); } catch {} }
+    return () => subscribers.delete(subscriber);
+  },
+  quit: () => ipcRenderer.send("terminal-browser:quit"),
+};
+`;
+
+let apiPreloadFile: string | null = null;
+function apiPreloadPath(): string {
+  if (!apiPreloadFile) {
+    apiPreloadFile = path.join(app.getPath("userData"), "terminal-browser-api-preload.js");
+    fs.writeFileSync(apiPreloadFile, API_PRELOAD_SOURCE);
+  }
+  return apiPreloadFile;
+}
+
+const registeredPreloads = new WeakMap<ElectronSession, Set<string>>();
+function registerPreloadOnce(ses: ElectronSession, filePath: string) {
+  let seen = registeredPreloads.get(ses);
+  if (!seen) registeredPreloads.set(ses, (seen = new Set()));
+  if (seen.has(filePath)) return;
+  seen.add(filePath);
+  ses.registerPreloadScript({ type: "frame", filePath });
+}
 
 function bundledFontPath(): string {
   for (let dir = __dirname; ; dir = path.dirname(dir)) {
@@ -97,8 +147,26 @@ class Session {
   private readonly marker: string;
   private ownPane: Pane | null = null;
   private finding: Promise<Pane | null> | null = null;
+  private readonly argv: string[];
   private readonly hideToolbar: boolean;
+  private readonly noShortcuts: boolean;
+  private readonly noContextMenu: boolean;
+  private readonly noOverlays: boolean;
+  private readonly noFrame: boolean;
+  private readonly tabsAsPopups: boolean;
+  private readonly clipboardRead: boolean;
   private readonly partition: string | null;
+  private readonly preload: string | null;
+  private readonly mainScript: string | null;
+  private readonly onThemeRequest = (event: IpcMainEvent) => {
+    if (!this.ownsSender(event)) return;
+    const payload = this.themePayload();
+    if (payload) event.sender.send("terminal-browser:theme", payload);
+  };
+  private readonly onQuitRequest = (event: IpcMainEvent) => {
+    if (!this.ownsSender(event)) return;
+    this.shutdown();
+  };
   private paletteBinding: KeyBinding[] = [];
   private findBinding: KeyBinding[] = [];
   private devtoolsBinding: KeyBinding[] = [];
@@ -122,6 +190,7 @@ class Session {
   private browserFocused = false;
   private shuttingDown = false;
   private pageHover = false;
+  private popupHover = false;
   private devtoolsHover = false;
   private devtoolsWasFocused = false;
   private devtoolsDockSide: DevtoolsDock = "bottom";
@@ -159,8 +228,17 @@ class Session {
     this.ctx = ctx;
     this.terminal = detect(ctx.env);
     this.marker = `terminal-browser:${ctx.key}`;
-    this.hideToolbar = ctx.argv.includes("--no-toolbar");
-    this.partition = flagValue(ctx.argv, "--partition");
+    this.argv = ctx.argv.includes("--app-mode") ? [...ctx.argv, ...APP_MODE_FLAGS] : ctx.argv;
+    this.hideToolbar = this.argv.includes("--no-toolbar");
+    this.noShortcuts = this.argv.includes("--no-shortcuts");
+    this.noContextMenu = this.argv.includes("--no-context-menu");
+    this.noOverlays = this.argv.includes("--no-overlays");
+    this.noFrame = this.argv.includes("--no-frame");
+    this.tabsAsPopups = this.argv.includes("--open-tabs-in-popup-stack");
+    this.clipboardRead = this.argv.includes("--allow-clipboard-read");
+    this.partition = flagValue(this.argv, "--partition");
+    this.preload = flagValue(this.argv, "--preload");
+    this.mainScript = flagValue(this.argv, "--main-script");
     this.fallbackState = initialBrowserState(this.initialUrl());
     configureBrowserSession(this.partition, (progress) => this.showDownload(progress));
     this.tabs = new TabManager(
@@ -176,6 +254,9 @@ class Session {
             this.windowBg,
             visible,
             this.partition,
+            this.tabsAsPopups,
+            this.clipboardRead,
+            this.ctx.key,
             onState,
           ),
         onActivated: () => {
@@ -248,6 +329,7 @@ class Session {
         this.windowBg = this.themeBackground();
         this.tabs.eachController((c) => void c.setBackground(this.windowBg));
         this.render();
+        this.broadcastTheme();
       },
       onEngineExit: (error) => {
         if (error) process.stderr.write(`terminal-browser engine: ${error}\n`);
@@ -263,6 +345,7 @@ class Session {
     this.recalculateLayout();
     this.root.setPointerShape("default");
     this.windowBg = this.themeBackground();
+    this.installEmbedderApi();
     this.tabs.create(this.fallbackState.url);
     this.registry = new Registry({
       key: this.ctx.key,
@@ -275,8 +358,8 @@ class Session {
           pane: pane?.id ?? null,
         };
       },
-      splitDir: splitDirection(flagValue(this.ctx.argv, "--split-dir")),
-      parentTty: flagValue(this.ctx.argv, "--parent-tty"),
+      splitDir: splitDirection(flagValue(this.argv, "--split-dir")),
+      parentTty: flagValue(this.argv, "--parent-tty"),
       state: () => this.tabs.activeState ?? this.fallbackState,
       openTab: (url, cwd) => this.tabs.create(url ? normalizeUrl(url, cwd) : DEFAULT_URL).id,
       activateTab: (id) => {
@@ -316,7 +399,7 @@ class Session {
   private applyKeyBindings(kittyKeyboard: boolean) {
     this.noSuper = !kittyKeyboard;
     const binding = (flag: string, fallback: string) =>
-      parseKeyBindings(flagValue(this.ctx.argv, flag) ?? defaultBinding(fallback, this.noSuper));
+      parseKeyBindings(flagValue(this.argv, flag) ?? defaultBinding(fallback, this.noSuper));
     this.paletteBinding = binding("--palette-key", defaultKeys.palette);
     this.findBinding = binding("--find-key", defaultKeys.find);
     // we should use 2 shortcuts for console, also not sure if console actually works as expected
@@ -382,6 +465,8 @@ class Session {
   shutdown(code = 0) {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
+    ipcMain.removeListener("terminal-browser:theme-request", this.onThemeRequest);
+    ipcMain.removeListener("terminal-browser:quit", this.onQuitRequest);
     for (const record of this.records.values()) record.dispose();
     this.records.clear();
     this.shownRecord = null;
@@ -404,6 +489,61 @@ class Session {
 
   nudgeResize() {
     this.root?.nudgeResize();
+  }
+
+  private themePayload(): {
+    background: number[];
+    foreground: number[];
+    ansi: (number[] | null)[];
+  } | null {
+    if (!this.root) return null;
+    const colors = this.root.info.colors;
+    if (!colors.background || !colors.foreground) return null;
+    const rgb = (channelled: number[] | null) =>
+      channelled ? [channelled[0], channelled[1], channelled[2]] : null;
+    return {
+      background: rgb(colors.background) as number[],
+      foreground: rgb(colors.foreground) as number[],
+      ansi: Array.from({ length: 16 }, (_, at) => rgb(colors.palette[at] ?? null)),
+    };
+  }
+
+  private ownsSender(event: IpcMainEvent): boolean {
+    let mine = false;
+    this.tabs.eachController((controller) => {
+      if (controller.hasContents(event.sender.id)) mine = true;
+    });
+    return mine;
+  }
+
+  private broadcastTheme(): void {
+    if (!this.preload && !this.mainScript) return;
+    const payload = this.themePayload();
+    if (!payload) return;
+    this.tabs.eachController((controller) =>
+      controller.sendToPage("terminal-browser:theme", payload),
+    );
+  }
+
+  private installEmbedderApi(): void {
+    if (!this.preload && !this.mainScript) return;
+    ipcMain.on("terminal-browser:theme-request", this.onThemeRequest);
+    ipcMain.on("terminal-browser:quit", this.onQuitRequest);
+    if (this.preload) {
+      const ses = browserSession(this.partition);
+      registerPreloadOnce(ses, apiPreloadPath());
+      registerPreloadOnce(ses, path.resolve(this.ctx.cwd, this.preload));
+    }
+    if (this.mainScript) {
+      const file = path.resolve(this.ctx.cwd, this.mainScript);
+      try {
+        createRequire(file)(file);
+      } catch (error) {
+        process.stderr.write(
+          `main script failed: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      }
+    }
   }
 
   private themeBackground(): string {
@@ -507,6 +647,10 @@ class Session {
     popupPointer: (event) => this.tabs.activeController?.popup?.input.pointer(event),
     popupWheel: (event) => this.tabs.activeController?.popup?.input.wheel(event),
     popupClose: () => this.tabs.activeController?.popup?.close(),
+    popupHover: (hovering) => {
+      this.popupHover = hovering;
+      this.syncCursor();
+    },
     devtoolsPointer: (event) => {
       const browser = this.tabs.activeController;
       if (!browser?.devtools) return;
@@ -665,11 +809,11 @@ class Session {
         browser.popup.close();
         return;
       }
-      if (event.kind !== "release" && event.mods.ctrl && event.key === "q") {
+      if (!this.noShortcuts && event.kind !== "release" && event.mods.ctrl && event.key === "q") {
         this.shutdown();
         return;
       }
-      if (event.kind !== "release" && this.cmdHeld(event)) {
+      if (!this.noShortcuts && event.kind !== "release" && this.cmdHeld(event)) {
         const direction = zoomDirection(event.key);
         if (direction !== null) {
           this.applyZoom(direction);
@@ -688,7 +832,7 @@ class Session {
     if (event.kind !== "release") {
       const quitKey =
         event.key === "q" || (process.platform === "darwin" && event.key === "c");
-      if (event.mods.ctrl && quitKey) {
+      if (!this.noShortcuts && event.mods.ctrl && quitKey) {
         this.shutdown();
         return;
       }
@@ -738,33 +882,35 @@ class Session {
         return;
       }
       if (!this.findOpen && this.activeRecord()?.handleKey(event)) return;
-      if (isRecordKey(event)) {
-        if (!this.activeRecord()) void this.startRecording();
-        return;
-      }
-      if ((this.cmdHeld(event) || event.mods.ctrl) && event.key === "t") {
-        if (!this.activeRecord()?.reviewing) this.openNewTabModal();
-        return;
-      }
-      if (matchesBinding(event, this.paletteBinding)) {
-        this.openPalette();
-        return;
-      }
-      if (this.accelHeld(event) && event.key === "l") {
-        this.openUrlEdit();
-        return;
-      }
-      if (matchesBinding(event, this.findBinding)) {
-        this.openFind();
-        return;
-      }
-      if (matchesBinding(event, this.devtoolsBinding) || isPlainKey(event, "f12")) {
-        this.toggleDevtools();
-        return;
-      }
-      if (matchesBinding(event, this.consoleBinding)) {
-        this.toggleDevtoolsConsole();
-        return;
+      if (!this.noShortcuts) {
+        if (isRecordKey(event)) {
+          if (!this.activeRecord()) void this.startRecording();
+          return;
+        }
+        if ((this.cmdHeld(event) || event.mods.ctrl) && event.key === "t") {
+          if (!this.activeRecord()?.reviewing) this.openNewTabModal();
+          return;
+        }
+        if (matchesBinding(event, this.paletteBinding)) {
+          this.openPalette();
+          return;
+        }
+        if (this.accelHeld(event) && event.key === "l") {
+          this.openUrlEdit();
+          return;
+        }
+        if (matchesBinding(event, this.findBinding)) {
+          this.openFind();
+          return;
+        }
+        if (matchesBinding(event, this.devtoolsBinding) || isPlainKey(event, "f12")) {
+          this.toggleDevtools();
+          return;
+        }
+        if (matchesBinding(event, this.consoleBinding)) {
+          this.toggleDevtoolsConsole();
+          return;
+        }
       }
       if (event.key === "escape" && this.findOpen) {
         this.closeFind();
@@ -774,24 +920,26 @@ class Session {
         browser?.findNext(!event.mods.shift);
         return;
       }
-      if (this.accelHeld(event) && event.key === "r") {
-        this.activeRecord()?.reloaded();
-        browser?.reload();
-        return;
-      }
-      if (this.accelHeld(event) && event.key === "[") {
-        browser?.back();
-        return;
-      }
-      if (this.accelHeld(event) && event.key === "]") {
-        browser?.forward();
-        return;
-      }
-      if (this.cmdHeld(event)) {
-        const direction = zoomDirection(event.key);
-        if (direction !== null) {
-          this.applyZoom(direction);
+      if (!this.noShortcuts) {
+        if (this.accelHeld(event) && event.key === "r") {
+          this.activeRecord()?.reloaded();
+          browser?.reload();
           return;
+        }
+        if (this.accelHeld(event) && event.key === "[") {
+          browser?.back();
+          return;
+        }
+        if (this.accelHeld(event) && event.key === "]") {
+          browser?.forward();
+          return;
+        }
+        if (this.cmdHeld(event)) {
+          const direction = zoomDirection(event.key);
+          if (direction !== null) {
+            this.applyZoom(direction);
+            return;
+          }
         }
       }
     }
@@ -844,6 +992,7 @@ class Session {
   }
 
   private showZoomHud(factor: number) {
+    if (this.noOverlays) return;
     this.zoomHud = factor;
     if (this.zoomHudTimer) clearTimeout(this.zoomHudTimer);
     this.zoomHudTimer = setTimeout(() => {
@@ -855,6 +1004,7 @@ class Session {
   }
 
   private showDownload(progress: DownloadProgress) {
+    if (this.noOverlays) return;
     const percent =
       progress.total > 0 ? Math.round((progress.received / progress.total) * 100) : null;
     if (
@@ -878,6 +1028,7 @@ class Session {
   }
 
   private showToast(text: string, state: "done" | "failed" | "alert", detail?: string) {
+    if (this.noOverlays) return;
     this.toast = { text, detail, failed: state === "failed", alert: state === "alert" };
     if (this.toastTimer) clearTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => {
@@ -899,9 +1050,13 @@ class Session {
           : "col-resize"
         : this.devtoolsHover
           ? (browser?.devtools?.cursorShape ?? "default")
-          : this.pageHover
-            ? (browser?.cursorShape ?? "default")
-            : "default";
+          : browser?.popup
+            ? this.popupHover
+              ? browser.popup.cursorShape
+              : "default"
+            : this.pageHover
+              ? (browser?.cursorShape ?? "default")
+              : "default";
     if (shape === this.sentCursor) return;
     this.sentCursor = shape;
     this.root?.setPointerShape(shape);
@@ -1003,7 +1158,7 @@ class Session {
   }
 
   private openPageMenu(params: Electron.ContextMenuParams) {
-    if (!this.surfaceLayout) return;
+    if (this.noContextMenu || !this.surfaceLayout) return;
     if (this.palette || this.newTab || this.urlEditOpen) return;
     if (this.tabs.activeController?.popup) return;
     const scale = this.surfaceLayout.scale;
@@ -1244,6 +1399,7 @@ class Session {
       this.root.info,
       this.displayScale,
       this.hideToolbar,
+      this.noFrame,
       reviewing ? null : placement,
       reviewing ? recordBarHeight(this.root.info) : 0,
     );
@@ -1288,7 +1444,7 @@ class Session {
   }
 
   private initialUrl(): string {
-    const arg = this.ctx.argv.find((argument) => !argument.startsWith("-"));
+    const arg = this.argv.find((argument) => !argument.startsWith("-"));
     if (arg) return arg;
     try {
       const last = lastUrl()?.trim();

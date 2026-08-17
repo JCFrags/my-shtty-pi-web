@@ -35,7 +35,10 @@ export function PopupModal({
           height: layout.page.height,
           background: [8, 9, 12, 150],
         }}
-        onClick={() => actions.popupClose()}
+        onPointer={(event) => {
+          if (event.kind === "down") actions.popupClose();
+        }}
+        onWheel={() => {}}
       />
       <Box
         style={{
@@ -48,6 +51,8 @@ export function PopupModal({
           border: { width: 1, color: theme.fieldBorder },
           overflow: "hidden",
         }}
+        onPointer={() => {}}
+        onWheel={() => {}}
       >
         <Box
           style={{
@@ -87,6 +92,8 @@ export function PopupModal({
           style={{ width: view.width, height: view.height, background: theme.bg }}
           onPointer={actions.popupPointer}
           onWheel={actions.popupWheel}
+          onMouseEnter={() => actions.popupHover(true)}
+          onMouseLeave={() => actions.popupHover(false)}
         />
       </Box>
     </>

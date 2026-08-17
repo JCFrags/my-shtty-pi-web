@@ -1,3 +1,4 @@
+
 interface CommandHelp {
   summary: string;
   usage: string;
@@ -17,6 +18,27 @@ The url can be a normal url, a localhost port, or a path to an html file.
 Options:
   --split <direction>   Open in a new pane: right, left, down, up
   --size <fraction>     How much of the space the split takes (0.2 to 0.95)
+  --preload=<path>      Run a script inside the context of a web page before it loads (uses electron's preload feature under the hood, runs in an isolated world).
+                        terminal-browser specific api's are exposed on globalThis.terminalBrowser
+                        {
+                          theme: () => { background: [r,g,b], foreground: [r,g,b], ansi: ([r,g,b] | null)[] } | null, // null until the terminal reports its colors
+                          onTheme: (cb: (theme: Theme) => void) => () => void, // returns unsubscribe
+                          quit: () => void // closes this browser window
+                        }
+                        --terminal-browser-session=<key> is passed as extra arguments to the renderer process, available via process.argv
+  --main-script=<path>  Run a node.js script in the same process as the browser (this is an electron main process)
+  --open-tabs-in-popup-stack Links that would open a new tab open a popup over the
+                        page instead.
+  --allow-clipboard-read
+                        Lets websites read from clipboard.
+  --no-toolbar          No toolbar or tab strip
+  --no-shortcuts        No browser shortcuts, keys go to the page
+  --no-context-menu     No right-click menu
+  --no-overlays         No toasts or HUDs drawn over the page
+  --no-frame            No border or padding, the page fills the pane
+  --app-mode            Shorthand for --no-toolbar --no-shortcuts
+                        --no-context-menu --no-overlays --no-frame
+                        --allow-clipboard-read
 
 Examples:
   terminal-browser open localhost:3000
@@ -58,18 +80,21 @@ nothing when already up to date.
     summary: "Open a tab here, and a browser too if there is none",
     usage: "terminal-browser new-tab [url] [options]",
     body: `
-      Opens a tab in a browser already open. By default, if there is a single browser open
-      in the current terminal tab, it will open a tab in that browser. If there are no browsers,
-      a new browser will be opened with the specified tab as the initial (if ran from a shell without a TTY, it will open in a split to the right). If there are mulitiple browsers,
-      new-tab will error and a --browser <key> is a required argument (<key> can be found by running terminal-browser ls)
+Opens a tab in a browser already open. By default, if there is a single
+browser open in the current terminal tab, it will open a tab in that browser.
+If there are no browsers, a new browser will be opened with the specified tab
+as the initial (if ran from a shell without a TTY, it will open in a split to
+the right). If there are multiple browsers, new-tab will error and a
+--browser <key> is a required argument (<key> can be found by running
+terminal-browser ls)
 
-      Options:
-        --browser <key>     A browser key from terminal-browser ls
+Options:
+  --browser <key>     A browser key from terminal-browser ls
 
-      Examples:
-        terminal-browser new-tab github.com
-        terminal-browser new-tab --browser 90107-1 localhost:3000
-    `,
+Examples:
+  terminal-browser new-tab github.com
+  terminal-browser new-tab --browser 90107-1 localhost:3000
+`,
   },
   shutdown: {
     summary: "Stop the daemon",

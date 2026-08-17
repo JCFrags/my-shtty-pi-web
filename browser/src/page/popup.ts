@@ -1,6 +1,7 @@
 import { nativeImage } from "electron";
 import type { BrowserWindow } from "electron";
 import type { Surface } from "pixel-react";
+import { cursorShapeFor } from "./cursor";
 import { PageInput } from "./input";
 import { scaleZoom, stepZoom } from "./zoom";
 import type { ZoomDirection } from "./zoom";
@@ -15,6 +16,8 @@ export interface PopupState {
 
 export class PopupWindow {
   readonly input: PageInput;
+  cursorShape = "default";
+  onCursorChange: (() => void) | null = null;
   private readonly window: BrowserWindow;
   private readonly surface: Surface;
   private readonly onChange: () => void;
@@ -33,6 +36,7 @@ export class PopupWindow {
     scale: () => number,
     onChange: () => void,
     onClosed: () => void,
+    openWindow?: (details: Electron.HandlerDetails) => Electron.WindowOpenHandlerResponse,
   ) {
     this.window = window;
     this.surface = surface;
@@ -59,10 +63,19 @@ export class PopupWindow {
     });
     contents.on("did-start-loading", () => this.update({ loading: true }));
     contents.on("did-stop-loading", () => this.update({ loading: false }));
-    contents.setWindowOpenHandler(({ url }) => {
-      void contents.loadURL(url);
-      return { action: "deny" };
+    contents.on("cursor-changed", (_event, type) => {
+      const shape = cursorShapeFor(type);
+      if (shape === this.cursorShape) return;
+      this.cursorShape = shape;
+      this.onCursorChange?.();
     });
+    contents.setWindowOpenHandler(
+      openWindow ??
+        (({ url }) => {
+          void contents.loadURL(url);
+          return { action: "deny" };
+        }),
+    );
     window.on("closed", () => {
       this.destroyed = true;
       this.surface.clear();

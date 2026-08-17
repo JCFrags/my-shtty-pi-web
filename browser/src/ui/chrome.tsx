@@ -245,7 +245,7 @@ function BrowserTabContents({
   const dock = layout.devtools?.dock ?? null;
   return (
     <>
-      {interactive && (
+      {interactive && layout.frame && (
         <Box
           style={{
             position: "absolute",
@@ -265,7 +265,9 @@ function BrowserTabContents({
           inset: { top: layout.page.y, left: layout.page.x },
           width: layout.page.width,
           height: layout.page.height,
-          cornerRadius: seamRadius(Math.max(2, layout.rem * 0.55 - 1), dock, "page"),
+          cornerRadius: layout.frame
+            ? seamRadius(Math.max(2, layout.rem * 0.55 - 1), dock, "page")
+            : 0,
           background: theme.bg,
         }}
         onPointer={interactive ? actions.pointer : undefined}

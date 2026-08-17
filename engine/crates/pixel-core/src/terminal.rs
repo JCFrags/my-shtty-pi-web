@@ -678,7 +678,7 @@ impl Terminal {
     pub fn poll_event(&mut self, timeout: Option<Duration>) -> io::Result<Option<Event>> {
         let deadline = timeout.map(|t| Instant::now() + t);
         loop {
-            if let Some((raw, used)) = parse_event(&self.pending) {
+            if let Some((raw, used)) = parse_event_kitty(&self.pending, self.kitty_keyboard) {
                 self.pending.drain(..used);
                 self.lone_escape_since = None;
 
@@ -1329,10 +1329,15 @@ fn parse_clip_packet(seq: &[u8]) -> Option<ClipPacket> {
     })
 }
 
+#[cfg(test)]
 fn parse_event(buf: &[u8]) -> Option<(RawEvent, usize)> {
+    parse_event_kitty(buf, false)
+}
+
+fn parse_event_kitty(buf: &[u8], kitty_active: bool) -> Option<(RawEvent, usize)> {
     let b0 = *buf.first()?;
     if b0 != 0x1b {
-        return parse_plain_bytes(buf);
+        return parse_plain_bytes(buf, kitty_active);
     }
     match *buf.get(1)? {
         b'[' => parse_csi(buf),
@@ -1375,7 +1380,7 @@ fn parse_event(buf: &[u8]) -> Option<(RawEvent, usize)> {
     }
 }
 
-fn parse_plain_bytes(buf: &[u8]) -> Option<(RawEvent, usize)> {
+fn parse_plain_bytes(buf: &[u8], kitty_active: bool) -> Option<(RawEvent, usize)> {
     let b0 = buf[0];
     if b0 >= 0x80 {
         let len = match b0 {
@@ -1395,7 +1400,31 @@ fn parse_plain_bytes(buf: &[u8]) -> Option<(RawEvent, usize)> {
             Err(_) => (RawEvent::Key(KeyEvent::plain(Key::Unknown)), 1),
         });
     }
+    if kitty_active && let Some(event) = unrewrite_natural_editing(b0) {
+        return Some((RawEvent::Key(event), 1));
+    }
     Some((RawEvent::Key(byte_key_event(b0)), 1))
+}
+
+fn unrewrite_natural_editing(b: u8) -> Option<KeyEvent> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let key = match b {
+        0x01 => Key::Left,
+        0x05 => Key::Right,
+        0x15 => Key::Backspace,
+        _ => return None,
+    };
+    Some(KeyEvent {
+        key,
+        mods: Mods {
+            sup: true,
+            ..Mods::default()
+        },
+        kind: KeyKind::Press,
+        text: None,
+    })
 }
 
 fn byte_key_event(b: u8) -> KeyEvent {
@@ -2010,6 +2039,40 @@ mod tests {
         );
         assert_eq!(parse_sgr_mouse(b"0;1;1", true), None);
         assert_eq!(parse_sgr_mouse(b"<0;0;1", true), None);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn natural_text_editing_bytes_unrewrite_only_under_kitty() {
+        // with the protocol active a raw readline byte can only be a macOS
+        // "natural text editing" rewrite, so the original chord comes back
+        assert_eq!(parse_event_kitty(b"\x01", true), Some((key_mods(Key::Left, SUPER), 1)));
+        assert_eq!(parse_event_kitty(b"\x05", true), Some((key_mods(Key::Right, SUPER), 1)));
+        assert_eq!(
+            parse_event_kitty(b"\x15", true),
+            Some((key_mods(Key::Backspace, SUPER), 1))
+        );
+        // without the protocol the byte is genuinely ambiguous, so nothing
+        // is invented and ctrl+a stays ctrl+a
+        assert_eq!(
+            parse_event_kitty(b"\x01", false),
+            Some((key_mods(Key::Char('a'), CTRL), 1))
+        );
+        // esc-prefixed bytes are alt chords, never rewrites
+        assert_eq!(
+            parse_event_kitty(b"\x1b\x01", true),
+            Some((
+                key_mods(
+                    Key::Char('a'),
+                    Mods {
+                        ctrl: true,
+                        alt: true,
+                        ..Mods::default()
+                    }
+                ),
+                2
+            ))
+        );
     }
 
     #[test]
