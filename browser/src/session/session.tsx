@@ -100,6 +100,7 @@ globalThis.terminalBrowser = {
     if (current) { try { subscriber(current); } catch {} }
     return () => subscribers.delete(subscriber);
   },
+  quit: () => ipcRenderer.send("terminal-browser:quit"),
 };
 `;
 
@@ -161,6 +162,10 @@ class Session {
     if (!this.ownsSender(event)) return;
     const payload = this.themePayload();
     if (payload) event.sender.send("terminal-browser:theme", payload);
+  };
+  private readonly onQuitRequest = (event: IpcMainEvent) => {
+    if (!this.ownsSender(event)) return;
+    this.shutdown();
   };
   private paletteBinding: KeyBinding[] = [];
   private findBinding: KeyBinding[] = [];
@@ -461,6 +466,7 @@ class Session {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
     ipcMain.removeListener("terminal-browser:theme-request", this.onThemeRequest);
+    ipcMain.removeListener("terminal-browser:quit", this.onQuitRequest);
     for (const record of this.records.values()) record.dispose();
     this.records.clear();
     this.shownRecord = null;
@@ -522,6 +528,7 @@ class Session {
   private installEmbedderApi(): void {
     if (!this.preload && !this.mainScript) return;
     ipcMain.on("terminal-browser:theme-request", this.onThemeRequest);
+    ipcMain.on("terminal-browser:quit", this.onQuitRequest);
     if (this.preload) {
       const ses = browserSession(this.partition);
       registerPreloadOnce(ses, apiPreloadPath());

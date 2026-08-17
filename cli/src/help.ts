@@ -1,3 +1,4 @@
+
 interface CommandHelp {
   summary: string;
   usage: string;
@@ -20,12 +21,11 @@ Options:
   --preload=<path>      Run a script inside the context of a web page before it loads (uses electron's preload feature under the hood, runs in an isolated world).
                         terminal-browser specific api's are exposed on globalThis.terminalBrowser
                         {
-                          theme: ()  => ...,
-                          onTheme: (cb: () => void) => void
+                          theme: () => { background: [r,g,b], foreground: [r,g,b], ansi: ([r,g,b] | null)[] } | null, // null until the terminal reports its colors
+                          onTheme: (cb: (theme: Theme) => void) => () => void, // returns unsubscribe
+                          quit: () => void // closes this browser window
                         }
-                        --terminal-browser-session=<key> is passed as extra arguments
-                        to the renderer process, available via process.argv
-
+                        --terminal-browser-session=<key> is passed as extra arguments to the renderer process, available via process.argv
   --main-script=<path>  Run a node.js script in the same process as the browser (this is an electron main process)
   --open-tabs-in-popup-stack Links that would open a new tab open a popup over the
                         page instead.
