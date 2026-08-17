@@ -140,12 +140,15 @@ export class PopupWindow {
     await this.cdp("Page.startScreencast", this.screencastParams());
   }
 
-  private focus() {
+  private focus(): Promise<void> | undefined {
     if (this.focused || this.destroyed) return;
     this.focused = true;
     this.window.focus();
     this.window.webContents.focus();
-    void this.cdp("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => {});
+    return this.cdp("Emulation.setFocusEmulationEnabled", { enabled: true }).then(
+      () => undefined,
+      () => undefined,
+    );
   }
 
   private async attachCdp() {

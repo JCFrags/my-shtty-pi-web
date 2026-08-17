@@ -24,6 +24,21 @@ const GRANTED = new Set([
 const configured = new WeakSet<Session>();
 const clipboardReaders = new WeakSet<WebContents>();
 
+const SELECT_PICKER_PRELOAD = `const { webFrame } = require("electron");
+webFrame.insertCSS("select, ::picker(select) { appearance: base-select !important }", {
+  cssOrigin: "user",
+});
+`;
+
+let selectPreloadFile: string | null = null;
+function selectPreloadPath(): string {
+  if (!selectPreloadFile) {
+    selectPreloadFile = path.join(app.getPath("userData"), "terminal-browser-select-preload.js");
+    fs.writeFileSync(selectPreloadFile, SELECT_PICKER_PRELOAD);
+  }
+  return selectPreloadFile;
+}
+
 export function allowClipboardRead(contents: WebContents): void {
   clipboardReaders.add(contents);
 }
@@ -42,6 +57,8 @@ export function configureBrowserSession(
   const target = browserSession(partition);
   if (configured.has(target)) return target;
   configured.add(target);
+
+  target.registerPreloadScript({ type: "frame", filePath: selectPreloadPath() });
 
   target.setPermissionRequestHandler((contents, permission, callback) => {
     callback(granted(contents, permission));

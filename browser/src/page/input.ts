@@ -5,9 +5,11 @@ import type { EngineKeyEvent, PastedImage, PointerEvent, WheelEvent } from "pixe
 export interface InputTarget {
   contents(): WebContents;
   scale(): number;
-  focus(): void;
+  focus(): Promise<void> | void;
   cdp(method: string, params?: Record<string, unknown>): Promise<unknown>;
 }
+
+type SendableInputEvent = Parameters<WebContents["sendInputEvent"]>[0];
 
 export class PageInput {
   private readonly target: InputTarget;
@@ -22,9 +24,27 @@ export class PageInput {
   private wheelRemainderY = 0;
   private sentKeys = new Set<string>();
   private superHeld = false;
+  private focusGate: Promise<void> | null = null;
 
   constructor(target: InputTarget) {
     this.target = target;
+  }
+
+  private syncFocus(): Promise<void> | null {
+    const pending = this.target.focus();
+    if (!pending) return this.focusGate;
+    const gate = this.focusGate ? this.focusGate.then(() => pending) : pending;
+    this.focusGate = gate;
+    void gate.then(() => {
+      if (this.focusGate === gate) this.focusGate = null;
+    });
+    return gate;
+  }
+
+  private send(event: SendableInputEvent) {
+    const contents = this.target.contents();
+    if (this.focusGate) void this.focusGate.then(() => contents.sendInputEvent(event));
+    else contents.sendInputEvent(event);
   }
 
   releaseModifiers() {
@@ -43,7 +63,7 @@ export class PageInput {
   }
 
   pointer(event: PointerEvent) {
-    this.target.focus();
+    this.syncFocus();
     const scale = this.target.scale();
     const x = Math.max(0, Math.round(event.x / scale));
     const y = Math.max(0, Math.round(event.y / scale));
@@ -57,7 +77,7 @@ export class PageInput {
     if (event.kind === "up" && button) this.pressed.delete(button);
     const modifiers = this.pointerModifiers(event.mods);
     for (const pressed of this.pressed) modifiers.push(`${pressed}buttondown`);
-    this.target.contents().sendInputEvent({
+    this.send({
       type:
         event.kind === "down"
           ? "mouseDown"
@@ -77,7 +97,7 @@ export class PageInput {
   }
 
   wheel(event: WheelEvent) {
-    this.target.focus();
+    this.syncFocus();
     if (event.mods.ctrl && event.precise) {
       this.pinch(event);
       return;
@@ -94,7 +114,7 @@ export class PageInput {
     this.wheelRemainderX -= deltaX;
     this.wheelRemainderY -= deltaY;
     if (deltaX === 0 && deltaY === 0) return;
-    this.target.contents().sendInputEvent({
+    this.send({
       type: "mouseWheel",
       x: this.lastX,
       y: this.lastY,
@@ -114,7 +134,7 @@ export class PageInput {
     const ticksY = -Math.sign(event.deltaY);
     if (ticksX === 0 && ticksY === 0) return;
     const step = WHEEL_DETENT_PX;
-    this.target.contents().sendInputEvent({
+    this.send({
       type: "mouseWheel",
       x: this.lastX,
       y: this.lastY,
@@ -131,7 +151,7 @@ export class PageInput {
   private pinch(event: WheelEvent) {
     const pinchScale = 1 - event.deltaY / 100;
     if (pinchScale <= 0) return;
-    this.target.contents().sendInputEvent({
+    this.send({
       type: "mouseWheel",
       x: this.lastX,
       y: this.lastY,
@@ -162,10 +182,10 @@ export class PageInput {
       const modifiers = this.modifiers(event.mods);
       if (event.key.startsWith("left")) modifiers.push("left");
       if (event.key.startsWith("right")) modifiers.push("right");
-      this.target.contents().sendInputEvent({ type: "keyUp", keyCode, modifiers });
+      this.send({ type: "keyUp", keyCode, modifiers });
       return;
     }
-    this.target.focus();
+    this.syncFocus();
     if (!keyCode) {
       if (event.text) {
         this.target.contents().insertText(event.text);
@@ -177,15 +197,15 @@ export class PageInput {
     if (event.key.startsWith("right")) modifiers.push("right");
     if (event.kind === "repeat") modifiers.push("isautorepeat");
     this.sentKeys.add(event.key);
-    this.target.contents().sendInputEvent({ type: "rawKeyDown", keyCode, modifiers });
+    this.send({ type: "rawKeyDown", keyCode, modifiers });
     const printable = !!event.text && !event.mods.ctrl && !event.mods.super && !event.mods.alt;
     if (printable) {
-      this.target.contents().sendInputEvent({ type: "char", keyCode: event.text!, modifiers });
+      this.send({ type: "char", keyCode: event.text!, modifiers });
     }
   }
 
   paste(text: string) {
-    this.target.focus();
+    this.syncFocus();
     clipboard.writeText(text);
     this.target.contents().paste();
   }
@@ -205,7 +225,7 @@ export class PageInput {
 
 
   pasteImage(image: PastedImage) {
-    this.target.focus();
+    this.syncFocus();
     switch (image.source) {
       case "clipboard":
         this.target.contents().paste();
@@ -228,7 +248,7 @@ export class PageInput {
       const modifiers: Electron.InputEvent["modifiers"] = [];
       if (key.startsWith("left")) modifiers.push("left");
       if (key.startsWith("right")) modifiers.push("right");
-      this.target.contents().sendInputEvent({ type: "keyUp", keyCode, modifiers });
+      this.send({ type: "keyUp", keyCode, modifiers });
     }
     this.sentKeys.clear();
   }
@@ -250,7 +270,7 @@ export class PageInput {
       await this.target.cdp("Input.dispatchKeyEvent", { type: "keyUp", ...base });
       return;
     }
-    this.target.focus();
+    await this.syncFocus();
     await this.target.cdp("Input.dispatchKeyEvent", {
       type: "rawKeyDown",
       ...base,
@@ -275,7 +295,7 @@ export class PageInput {
       await this.target.cdp("Input.dispatchKeyEvent", { type: "keyUp", ...base });
       return;
     }
-    this.target.focus();
+    await this.syncFocus();
     await this.target.cdp("Input.dispatchKeyEvent", {
       type: "rawKeyDown",
       ...base,

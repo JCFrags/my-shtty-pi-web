@@ -83,25 +83,27 @@ const APP_MODE_FLAGS = [
 
 const FONT_FILE = path.join("assets", "fonts", "JetBrainsMono-Regular.ttf");
 
-const API_PRELOAD_SOURCE = `const { ipcRenderer } = require("electron");
-let current = null;
-const subscribers = new Set();
-ipcRenderer.on("terminal-browser:theme", (_event, theme) => {
-  current = theme;
-  for (const subscriber of subscribers) {
-    try { subscriber(theme); } catch {}
-  }
-});
-ipcRenderer.send("terminal-browser:theme-request");
-globalThis.terminalBrowser = {
-  theme: () => current,
-  onTheme(subscriber) {
-    subscribers.add(subscriber);
-    if (current) { try { subscriber(current); } catch {} }
-    return () => subscribers.delete(subscriber);
-  },
-  quit: () => ipcRenderer.send("terminal-browser:quit"),
-};
+const API_PRELOAD_SOURCE = `if (process.isMainFrame) {
+  const { ipcRenderer } = require("electron");
+  let current = null;
+  const subscribers = new Set();
+  ipcRenderer.on("terminal-browser:theme", (_event, theme) => {
+    current = theme;
+    for (const subscriber of subscribers) {
+      try { subscriber(theme); } catch {}
+    }
+  });
+  ipcRenderer.send("terminal-browser:theme-request");
+  globalThis.terminalBrowser = {
+    theme: () => current,
+    onTheme(subscriber) {
+      subscribers.add(subscriber);
+      if (current) { try { subscriber(current); } catch {} }
+      return () => subscribers.delete(subscriber);
+    },
+    quit: () => ipcRenderer.send("terminal-browser:quit"),
+  };
+}
 `;
 
 let apiPreloadFile: string | null = null;
@@ -509,6 +511,7 @@ class Session {
   }
 
   private ownsSender(event: IpcMainEvent): boolean {
+    if (event.senderFrame !== event.sender.mainFrame) return false;
     let mine = false;
     this.tabs.eachController((controller) => {
       if (controller.hasContents(event.sender.id)) mine = true;

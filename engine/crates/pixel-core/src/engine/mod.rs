@@ -315,6 +315,7 @@ pub struct Engine {
     clipboard: ClipboardFlows,
     focus_click: Option<(Instant, (f32, f32))>,
     last_pointer_activity: Option<Instant>,
+    last_pointer_click: Option<Instant>,
     next_pasted_mark: u64,
     pending: Vec<EngineEvent>,
     color_request_at: Option<Instant>,
@@ -413,6 +414,7 @@ impl Engine {
             clipboard: ClipboardFlows::new(),
             focus_click: None,
             last_pointer_activity: None,
+            last_pointer_click: None,
             next_pasted_mark: 1 << 48,
             pending: Vec::new(),
             color_request_at: None,
@@ -891,6 +893,9 @@ impl Engine {
                 } else if gained
                     && let Some(at) = self.last_pointer_activity
                     && at.elapsed() <= Duration::from_millis(1000)
+                    && self
+                        .last_pointer_click
+                        .is_none_or(|click| click.elapsed() > Duration::from_millis(1000))
                     && let Some(point) = self.cursor
                 {
                     self.focus_click = Some((Instant::now() + Duration::from_millis(75), point));

@@ -120,6 +120,8 @@ export class BrowserController {
         offscreen: offscreenPreferences(this.renderScale),
         sandbox: true,
         nodeIntegration: false,
+        // with sandbox true this is safe, we enable so a users preload script runs inside iframes/webviews
+        nodeIntegrationInSubFrames: true,
         contextIsolation: true,
         disableDialogs: true,
         backgroundThrottling: false,
@@ -375,7 +377,7 @@ export class BrowserController {
     this.updateState({ findMatches: null });
   }
 
-  focusContent() {
+  focusContent(): Promise<void> | undefined {
     this.blurDevtools();
     if (this.contentFocused) return;
     this.window.focus();
@@ -384,7 +386,7 @@ export class BrowserController {
      */
     this.window.webContents.focus();
     this.contentFocused = true;
-    void this.setFocusEmulation(true).catch(() => {});
+    return this.setFocusEmulation(true).catch(() => {});
   }
 
   openDevtools(layout: BrowserSurfaceLayout, dock: DevtoolsDock) {
@@ -572,6 +574,7 @@ export class BrowserController {
             offscreen: { useSharedTexture: false, deviceScaleFactor: this.renderScale },
             sandbox: true,
             nodeIntegration: false,
+            nodeIntegrationInSubFrames: true,
             contextIsolation: true,
             disableDialogs: true,
             backgroundThrottling: false,
