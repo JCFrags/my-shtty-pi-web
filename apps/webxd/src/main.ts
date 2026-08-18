@@ -8,6 +8,8 @@ const runtime = new WebxdRuntime({
   socketPath: process.env.WEBXD_SOCKET ?? `${runtimeDirectory}/pi-web/webxd.sock`,
   browserSocketPath: process.env.BROWSERD_SOCKET ?? `${runtimeDirectory}/pi-web/browserd.sock`,
   cwd: process.cwd(),
+  searxUrl: process.env.WEBX_SEARX_URL ?? "http://127.0.0.1:8888",
+  readerUrl: process.env.WEBX_READER_URL ?? "http://127.0.0.1:8787",
   authenticateActor: sameUserPiActorAuthenticator,
 });
 

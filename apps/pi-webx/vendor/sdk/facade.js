@@ -55,18 +55,14 @@ export class WebxFacadeClient {
         const client = this.client(options.ownerId);
         const value = object(input);
         const requestOptions = { signal: options.signal, idempotencyKey: options.idempotencyKey };
-        if (operation === "web.search") {
-            rejectPresent(value, ["domains", "freshness"], operation);
-            return external("Search results", await client.search({ query: requiredString(value.query, "query"), limit: optionalNumber(value.limit) }, requestOptions));
-        }
+        if (operation === "web.search")
+            return external("Search results", await client.search({ query: requiredString(value.query, "query"), limit: optionalNumber(value.limit), domains: optionalStringArray(value.domains, "domains"), freshness: optionalFreshness(value.freshness) }, requestOptions));
         if (operation === "web.read") {
-            rejectPresent(value, ["browserSessionId", "tabId", "query", "view"], operation);
-            return external("Read result", await client.read({ url: optionalString(value.url), maxChars: optionalNumber(value.maxChars) }, requestOptions));
+            rejectPresent(value, ["browserSessionId", "tabId"], operation);
+            return external("Read result", await client.read({ url: optionalString(value.url), query: optionalString(value.query), view: optionalReadView(value.view), maxChars: optionalNumber(value.maxChars) }, requestOptions));
         }
-        if (operation === "web.research") {
-            rejectPresent(value, ["mode", "maxQueries", "maxPages", "maxBytes", "resume"], operation);
-            return external("Research result", await client.research({ question: requiredString(value.question, "question") }, requestOptions));
-        }
+        if (operation === "web.research")
+            return external("Research result", await client.research({ question: requiredString(value.question, "question"), mode: optionalResearchMode(value.mode), maxQueries: optionalNumber(value.maxQueries), maxPages: optionalNumber(value.maxPages), maxBytes: optionalNumber(value.maxBytes), resume: optionalObject(value.resume) }, requestOptions));
         if (operation === "library.search")
             return external("Page-library results", await client.searchPages({ query: requiredString(value.query, "query"), limit: optionalNumber(value.limit), includeHistory: optionalBoolean(value.includeHistory) }, requestOptions));
         if (operation === "library.get")
@@ -207,6 +203,16 @@ function requiredNumber(value, name) { if (typeof value !== "number" || !Number.
     throw new TypeError(`${name} is required`); return value; }
 function optionalNumber(value) { return typeof value === "number" ? value : undefined; }
 function optionalBoolean(value) { return typeof value === "boolean" ? value : undefined; }
+function optionalStringArray(value, name) { return value === undefined ? undefined : stringArray(value, name); }
+function optionalFreshness(value) { if (value === undefined)
+    return undefined; if (value === "day" || value === "week" || value === "month" || value === "year")
+    return value; throw new TypeError("freshness is invalid"); }
+function optionalReadView(value) { if (value === undefined)
+    return undefined; if (value === "main" || value === "outline" || value === "raw")
+    return value; throw new TypeError("view is invalid"); }
+function optionalResearchMode(value) { if (value === undefined)
+    return undefined; if (value === "quick" || value === "research" || value === "deep")
+    return value; throw new TypeError("mode is invalid"); }
 function validateId(value, name) { if (!/^[A-Za-z0-9._:-]{1,256}$/u.test(value))
     throw new TypeError(`${name} is invalid`); }
 function browserPath(value) { if (value === undefined || value === "agent-browser/chrome")

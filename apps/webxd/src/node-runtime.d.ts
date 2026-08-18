@@ -18,7 +18,10 @@ declare module "node:net" {
   export function createConnection(options: { path: string }): Socket;
   export function createServer(listener: (socket: Socket) => void): Server;
 }
-declare module "node:crypto" { export function randomBytes(size: number): { toString(encoding: "hex"): string }; }
+declare module "node:crypto" {
+  export function randomBytes(size: number): { toString(encoding: "hex"): string };
+  export function createHash(algorithm: "sha256"): { update(data: string): { digest(encoding: "hex"): string } };
+}
 declare module "node:dns/promises" {
   export function lookup(hostname: string, options: { all: true; verbatim: true }): Promise<readonly { address: string; family: number }[]>;
 }

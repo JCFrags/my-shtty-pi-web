@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   ArtifactExcerpt,
   BoundedContent,
@@ -47,12 +48,16 @@ export interface WebxAuthorityOptions {
   readonly artifacts: readonly StoredArtifact[];
   readonly clock: AuthorityClock;
   readonly ids: AuthorityIdSource;
+  readonly searxUrl?: string;
+  readonly readerUrl?: string;
 }
 
 export class WebxAuthority {
   readonly #idempotency = new Map<string, CachedResult>();
   readonly #browserOwners = new Map<string, { principalId: string; agentId: string }>();
   readonly #forgottenPages = new Set<string>();
+  readonly #liveSources = new Map<string, IndexedSource>();
+  readonly #liveArtifacts = new Map<string, StoredArtifact>();
 
   constructor(private readonly options: WebxAuthorityOptions) {}
 
@@ -103,12 +108,12 @@ export class WebxAuthority {
       };
       return ok(catalog);
     }
-    if (request.method === "POST" && url.pathname === "/v1/search") return ok(this.search(actor, body<SearchRequest>(request), "search.write"));
-    if (request.method === "POST" && url.pathname === "/v1/read") return ok(this.read(actor, body<ReadRequest>(request)));
-    if (request.method === "POST" && url.pathname === "/v1/research") return ok(this.research(actor, body<ResearchRequest>(request)));
+    if (request.method === "POST" && url.pathname === "/v1/search") return ok(await this.search(actor, body<SearchRequest>(request), "search.write", request.signal));
+    if (request.method === "POST" && url.pathname === "/v1/read") return ok(await this.read(actor, body<ReadRequest>(request), request.signal));
+    if (request.method === "POST" && url.pathname === "/v1/research") return ok(await this.research(actor, body<ResearchRequest>(request), request.signal));
     if (request.method === "POST" && url.pathname === "/v1/pages/search") return ok(this.searchPages(actor, body<PageLibrarySearchRequest>(request)));
     if (request.method === "DELETE" && url.pathname === "/v1/pages") return ok(this.forgetPage(actor, body<PageForgetRequest>(request)));
-    if (request.method === "GET" && segments[1] === "pages" && segments.length === 3) return ok(this.page(actor, segments[2] ?? ""));
+    if (request.method === "GET" && segments[1] === "pages" && segments.length === 3) return ok(await this.page(actor, segments[2] ?? "", request.signal));
     if (request.method === "GET" && segments[1] === "artifacts" && segments[3] === "excerpt") {
       return ok(this.artifact(actor, segments[2] ?? "", numberQuery(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER), numberQuery(url, "max_bytes", 16_384, 1, MAX_ARTIFACT_BYTES)));
     }
@@ -116,38 +121,79 @@ export class WebxAuthority {
     throw problem(404, "not-found", "operation was not found", false);
   }
 
-  private search(actor: AuthorityActor, request: SearchRequest, scope: string): { query: string; hits: SearchHit[]; truncated: boolean } {
+  private async search(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<{ query: string; hits: SearchHit[]; truncated: boolean }> {
     requireScope(actor, scope);
-    if (typeof request.query !== "string" || request.query.trim().length === 0 || request.query.length > 2_000) throw problem(400, "invalid-request", "query must contain 1 to 2000 characters", false);
+    if (typeof request.query !== "string" || request.query.trim().length === 0 || request.query.length > 8_192) throw problem(400, "invalid-request", "query must contain 1 to 8192 characters", false);
     const limit = integer(request.limit ?? 10, "limit", 1, 50);
-    const requestedVisibility = visibility(request.visibility ?? "public");
-    const terms = request.query.toLocaleLowerCase().split(/\s+/u).filter(Boolean);
-    const matches = this.options.sources.filter((source) => canRead(actor, source.ownerPrincipalId, source.visibility) && VISIBILITY_ORDER[source.visibility] <= VISIBILITY_ORDER[requestedVisibility] && terms.every((term) => `${source.title} ${source.content}`.toLocaleLowerCase().includes(term)));
-    const hits = matches.slice(0, limit).map((source, index): SearchHit => ({
-      hitId: source.hitId, title: source.title, url: source.url,
-      snippet: boundText(source.content, 320).text, rank: index + 1,
-      visibility: source.visibility, pageId: source.pageId, artifactId: source.artifactId,
-    }));
-    return { query: request.query, hits, truncated: matches.length > hits.length };
+    const input = request as SearchRequest & { domains?: string[]; freshness?: "day" | "week" | "month" | "year" };
+    if (this.options.searxUrl === undefined) {
+      const terms = request.query.toLocaleLowerCase().split(/\s+/u).filter(Boolean);
+      const matches = this.options.sources.filter((source) => terms.every((term) => `${source.title} ${source.content}`.toLocaleLowerCase().includes(term)));
+      const hits = matches.slice(0, limit).map((source, index): SearchHit => ({ hitId: source.hitId, title: source.title, url: source.url, snippet: boundText(source.content, 320).text, rank: index + 1, visibility: source.visibility, pageId: source.pageId, artifactId: source.artifactId }));
+      return { query: request.query, hits, truncated: matches.length > hits.length };
+    }
+    const domains = input.domains?.filter((domain) => domain.length > 0) ?? [];
+    const domainQuery = domains.length === 0 ? "" : ` (${domains.map((domain) => `site:${domain}`).join(" OR ")})`;
+    const endpoint = new URL("/search", this.options.searxUrl ?? "http://127.0.0.1:8888");
+    endpoint.searchParams.set("q", `${request.query}${domainQuery}`);
+    endpoint.searchParams.set("format", "json");
+    endpoint.searchParams.set("safesearch", "0");
+    if (input.freshness !== undefined) endpoint.searchParams.set("time_range", input.freshness);
+    const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error(`SearXNG returned HTTP ${response.status}`);
+    const payload = await response.json() as { results?: Array<{ url?: unknown; title?: unknown; content?: unknown; score?: unknown; publishedDate?: unknown; engines?: unknown }> };
+    const raw = Array.isArray(payload.results) ? payload.results : [];
+    const hits: SearchHit[] = raw.filter((item) => typeof item.url === "string" && typeof item.title === "string").slice(0, limit).map((item, index) => ({
+      hitId: `search-${createHash("sha256").update(String(item.url)).digest("hex").slice(0, 20)}`,
+      title: String(item.title), url: String(item.url), snippet: boundText(typeof item.content === "string" ? item.content : "", 500).text,
+      rank: index + 1, visibility: "public",
+      metadata: { score: item.score, publishedDate: item.publishedDate, engines: item.engines },
+    } as SearchHit));
+    return { query: request.query, hits, truncated: raw.length > hits.length };
   }
 
-  private read(actor: AuthorityActor, request: ReadRequest): BoundedContent {
+  private async read(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<BoundedContent> {
     requireScope(actor, "retrieval.read");
     if ((request.url === undefined) === (request.pageId === undefined)) throw problem(400, "invalid-request", "supply exactly one url or pageId", false);
-    const source = request.pageId === undefined ? this.options.sources.find((item) => item.url === request.url) : this.options.sources.find((item) => item.pageId === request.pageId);
+    const allSources = [...this.options.sources, ...this.#liveSources.values()];
+    let source = request.pageId === undefined ? allSources.find((item) => item.url === request.url) : allSources.find((item) => item.pageId === request.pageId);
+    const input = request as ReadRequest & { query?: string; view?: string };
+    if (source === undefined && request.url !== undefined && this.options.readerUrl !== undefined) {
+      const response = await fetch(new URL("/v1/read", this.options.readerUrl), {
+        method: "POST", signal, headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ url: request.url, query: input.query, view: input.view ?? "main", maxChars: integer(request.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, 1_000_000) }),
+      });
+      if (!response.ok) throw new Error(`reader returned HTTP ${response.status}: ${boundText(await response.text(), 500).text}`);
+      const page = await response.json() as { url?: unknown; title?: unknown; content?: unknown; mediaType?: unknown; truncated?: unknown };
+      if (typeof page.content !== "string") throw new Error("reader returned no text content");
+      const digest = createHash("sha256").update(`${request.url}\0${page.content}`).digest("hex");
+      source = { hitId: `hit-${digest.slice(0, 20)}`, ownerPrincipalId: actor.principalId, title: typeof page.title === "string" ? page.title : request.url, url: typeof page.url === "string" ? page.url : request.url, content: page.content, visibility: "public", pageId: `page-${digest}`, artifactId: `artifact-${digest}` };
+      this.#liveSources.set(source.pageId, source);
+      this.#liveArtifacts.set(source.artifactId, { artifactId: source.artifactId, ownerPrincipalId: actor.principalId, mediaType: typeof page.mediaType === "string" ? page.mediaType : "text/markdown", sha256: createHash("sha256").update(page.content).digest("hex"), content: page.content, visibility: "public" });
+    }
     if (source === undefined || !canRead(actor, source.ownerPrincipalId, source.visibility)) throw problem(404, "not-found", "page was not found", false);
-    const maxChars = integer(request.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, MAX_CONTENT_CHARS);
+    const maxChars = integer(request.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, 1_000_000);
     const bounded = boundText(source.content, maxChars);
     return { title: source.title, url: source.url, untrustedContent: bounded.text, truncated: bounded.truncated, artifactId: source.artifactId, pageId: source.pageId, visibility: source.visibility };
   }
 
-  private research(actor: AuthorityActor, request: ResearchRequest): { question: string; summary: string; sources: SearchHit[]; truncated: boolean; artifactId?: string } {
+  private async research(actor: AuthorityActor, request: ResearchRequest, signal?: AbortSignal): Promise<{ question: string; summary: string; sources: SearchHit[]; truncated: boolean }> {
     requireScope(actor, "research.write");
     if (typeof request.question !== "string" || request.question.trim().length === 0) throw problem(400, "invalid-request", "question is required", false);
-    const search = this.search(actor, { query: request.question, limit: integer(request.maxSources ?? 5, "maxSources", 1, 20), visibility: request.visibility ?? "public" }, "research.write");
-    const raw = search.hits.map((hit) => `${hit.title}: ${hit.snippet}`).join("\n");
-    const bounded = boundText(raw || "No matching local evidence.", integer(request.maxChars ?? 8_000, "maxChars", 1, MAX_CONTENT_CHARS));
-    return { question: request.question, summary: bounded.text, sources: search.hits, truncated: bounded.truncated || search.truncated };
+    const input = request as ResearchRequest & { maxPages?: number; maxBytes?: number; maxQueries?: number; mode?: string };
+    const pageLimit = integer(input.maxPages ?? (input.mode === "deep" ? 12 : input.mode === "research" ? 8 : 4), "maxPages", 0, 40);
+    const search = await this.search(actor, { query: request.question, limit: Math.max(5, pageLimit) }, "research.write", signal);
+    const sections: string[] = [];
+    for (const hit of search.hits.slice(0, pageLimit)) {
+      try {
+        const page = await this.read({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, { url: hit.url, maxChars: Math.min(12_000, Math.floor((input.maxBytes ?? 80_000) / Math.max(1, pageLimit))) }, signal);
+        sections.push(`## ${page.title}\nSource: ${page.url}\n\n${page.untrustedContent}`);
+      } catch (error) {
+        sections.push(`## ${hit.title}\nSource: ${hit.url}\n\nRead failed: ${safeMessage(error)}`);
+      }
+    }
+    const summary = sections.length > 0 ? sections.join("\n\n") : "No web evidence was found.";
+    return { question: request.question, summary: boundText(summary, MAX_CONTENT_CHARS).text, sources: search.hits, truncated: search.truncated || summary.length > MAX_CONTENT_CHARS };
   }
 
   private searchPages(actor: AuthorityActor, request: PageLibrarySearchRequest): PageLibrarySearchResponse {
@@ -156,7 +202,7 @@ export class WebxAuthority {
     if (request.includeHistory === true) throw problem(501, "unavailable", "page history search is not available in this runtime", false);
     const limit = integer(request.limit ?? 10, "limit", 1, 100);
     const query = request.query.toLocaleLowerCase();
-    const matches = this.options.sources.filter((source) => source.visibility === "public" && !this.#forgottenPages.has(source.pageId) && `${source.title} ${source.content} ${source.url}`.toLocaleLowerCase().includes(query));
+    const matches = [...this.options.sources, ...this.#liveSources.values()].filter((source) => source.visibility === "public" && !this.#forgottenPages.has(source.pageId) && `${source.title} ${source.content} ${source.url}`.toLocaleLowerCase().includes(query));
     return {
       query: request.query,
       pages: matches.slice(0, limit).map((source) => ({ pageId: source.pageId, ownerPrincipalId: source.ownerPrincipalId, title: source.title, url: source.url, visibility: source.visibility, artifactId: source.artifactId })),
@@ -167,21 +213,22 @@ export class WebxAuthority {
   private forgetPage(actor: AuthorityActor, request: PageForgetRequest): { forgotten: true; pageId: string } {
     requireScope(actor, "pages.write");
     if ((request.pageId === undefined) === (request.url === undefined)) throw problem(400, "invalid-request", "supply exactly one pageId or url", false);
-    const source = request.pageId === undefined ? this.options.sources.find((item) => item.url === request.url) : this.options.sources.find((item) => item.pageId === request.pageId);
+    const sources = [...this.options.sources, ...this.#liveSources.values()];
+    const source = request.pageId === undefined ? sources.find((item) => item.url === request.url) : sources.find((item) => item.pageId === request.pageId);
     if (source === undefined || source.visibility !== "public" || source.ownerPrincipalId !== actor.principalId || this.#forgottenPages.has(source.pageId)) throw problem(404, "not-found", "page was not found", false);
     this.#forgottenPages.add(source.pageId);
     return { forgotten: true, pageId: source.pageId };
   }
 
-  private page(actor: AuthorityActor, pageId: string): BoundedContent {
+  private async page(actor: AuthorityActor, pageId: string, signal?: AbortSignal): Promise<BoundedContent> {
     requireScope(actor, "pages.read");
     if (this.#forgottenPages.has(pageId)) throw problem(404, "not-found", "page was not found", false);
-    return this.read({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, { pageId });
+    return this.read({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, { pageId }, signal);
   }
 
   private artifact(actor: AuthorityActor, artifactId: string, offset: number, maxBytes: number): ArtifactExcerpt {
     requireScope(actor, "artifacts.read");
-    const artifact = this.options.artifacts.find((item) => item.artifactId === artifactId);
+    const artifact = this.options.artifacts.find((item) => item.artifactId === artifactId) ?? this.#liveArtifacts.get(artifactId);
     if (artifact === undefined || !canRead(actor, artifact.ownerPrincipalId, artifact.visibility)) throw problem(404, "not-found", "artifact was not found", false);
     const bytes = new TextEncoder().encode(artifact.content);
     const end = Math.min(bytes.byteLength, offset + maxBytes);

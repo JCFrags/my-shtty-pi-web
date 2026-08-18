@@ -64,6 +64,8 @@ export interface SearchRequest {
   readonly query: string;
   readonly limit?: number;
   readonly visibility?: Visibility;
+  readonly domains?: readonly string[];
+  readonly freshness?: "day" | "week" | "month" | "year";
 }
 
 export interface SearchHit {
@@ -86,6 +88,8 @@ export interface SearchResponse {
 export interface ReadRequest {
   readonly url?: string;
   readonly pageId?: string;
+  readonly query?: string;
+  readonly view?: "main" | "outline" | "raw";
   readonly maxChars?: number;
   readonly visibility?: Visibility;
 }
@@ -102,6 +106,11 @@ export interface BoundedContent {
 
 export interface ResearchRequest {
   readonly question: string;
+  readonly mode?: "quick" | "research" | "deep";
+  readonly maxQueries?: number;
+  readonly maxPages?: number;
+  readonly maxBytes?: number;
+  readonly resume?: Readonly<Record<string, unknown>>;
   readonly maxSources?: number;
   readonly maxChars?: number;
   readonly visibility?: Visibility;
