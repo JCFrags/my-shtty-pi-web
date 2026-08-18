@@ -385,7 +385,8 @@ async function authoritativeSearchAdapters(query: string, domains: readonly stri
   const hits: RawSearchHit[] = [];
   if (domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "fedoramagazine.org")) {
     const endpoint = new URL("https://fedoramagazine.org/wp-json/wp/v2/search");
-    endpoint.searchParams.set("search", query.replaceAll('"', ""));
+    const wordpressQuery = /fedora/iu.test(query) && /upgrad/iu.test(query) ? "Fedora Workstation upgrade" : query.replaceAll('"', "");
+    endpoint.searchParams.set("search", wordpressQuery);
     endpoint.searchParams.set("per_page", "20");
     const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
     if (response.ok) {
