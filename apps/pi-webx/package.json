@@ -17,7 +17,7 @@
   ],
   "pi": {
     "extensions": [
-      "./src/index-web-v6.ts"
+      "./src/index-web-v7.ts"
     ],
     "skills": [
       "./skills/webx"
