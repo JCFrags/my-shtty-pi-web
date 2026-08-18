@@ -12,7 +12,19 @@ Commands: `/web` and `/browser`.
 
 Shortcut: `ctrl+alt+g`.
 
-The default mode is `read`. `/web off` cannot be overridden by `web_upgrade`. Browser capability activation is additive and keeps tools from other extensions active.
+The default mode is `browser`. Web tools are active automatically. `/web off` cannot be overridden by `web_upgrade`. Capability activation is additive and keeps tools from other extensions active.
+
+## Automatic agent routing
+
+Agents receive WebX tool snippets, tool-specific guidance, and a short routing policy in their system prompt:
+
+1. Use `web_read` when an authoritative URL, API, feed, document, or PDF is known.
+2. Use `web_search` when discovery is necessary.
+3. Use `web_research` when the answer needs multiple validated sources.
+4. Use `browser_open` only for dynamic rendering or interaction. Then use `browser_observe`, `browser_act`, and `browser_tabs` to close the session.
+5. Use `web_recall` and `artifact_read` for prior or truncated evidence.
+
+Agents must not use shell HTTP clients or manually launched browsers as the normal web path. Sensitive actions require user approval. Users do not need to run `/web browser`; `/web help` shows the routing guide and `/web status` shows health.
 
 ## Integration seam
 
