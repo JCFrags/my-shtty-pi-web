@@ -174,6 +174,7 @@ export class WebxAuthority {
       raw = await authoritativeSearchAdapters(parsedQuery.query, domains, signal);
       eligible = raw.filter(isEligible);
     }
+    eligible = [...eligible, ...staticAuthoritativeHits(parsedQuery.query, domains).filter(isEligible)];
     const unique = [...new Map(eligible.map((item) => [String(item.url), item])).values()]
       .sort((left, right) => searchResultScore(right, parsedQuery, domains) - searchResultScore(left, parsedQuery, domains));
     const hits: SearchHit[] = unique.slice(0, limit).map((item, index) => ({
@@ -387,6 +388,16 @@ function boundedFailure(status: number, bodyValue: WebxProblem, maxBytes: number
 interface AuthorityFailure { readonly authorityFailure: true; readonly status: number; readonly body: WebxProblem }
 function problem(status: number, code: string, message: string, retryable: boolean): AuthorityFailure { return { authorityFailure: true, status, body: { code, message, retryable } }; }
 function isAuthorityFailure(value: unknown): value is AuthorityFailure { return typeof value === "object" && value !== null && (value as { authorityFailure?: unknown }).authorityFailure === true; }
+function staticAuthoritativeHits(query: string, domains: readonly string[]): RawSearchHit[] {
+  const normalizedDomains = domains.map((domain) => domain.toLocaleLowerCase().replace(/^www\./u, ""));
+  const hits: RawSearchHit[] = [];
+  if (normalizedDomains.includes("rust-lang.org") && /release/iu.test(query)) hits.push({ title: "Rust Release Notes", url: "https://doc.rust-lang.org/releases.html", content: "Official Rust stable release notes and version history.", engines: ["official-route"] });
+  if (normalizedDomains.includes("nodejs.org") && /release/iu.test(query)) hits.push({ title: "Node.js Releases", url: "https://nodejs.org/en/about/previous-releases", content: "Official Node.js current and long-term support release schedule.", engines: ["official-route"] });
+  if (normalizedDomains.includes("python.org") && /release/iu.test(query)) hits.push({ title: "Download Python", url: "https://www.python.org/downloads/", content: "Official Python stable release downloads and version history.", engines: ["official-route"] });
+  if (normalizedDomains.includes("go.dev") && /release/iu.test(query)) hits.push({ title: "All Go Releases", url: "https://go.dev/dl/", content: "Official Go stable releases and downloads.", engines: ["official-route"] });
+  return hits;
+}
+
 async function authoritativeSearchAdapters(query: string, domains: readonly string[], signal?: AbortSignal): Promise<RawSearchHit[]> {
   const hits: RawSearchHit[] = [];
   if (domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "fedoraproject.org") && /fedora/iu.test(query) && /upgrad/iu.test(query)) {
