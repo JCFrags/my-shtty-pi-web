@@ -54,7 +54,7 @@ function assertTrusted(ctx: ExtensionContext): void {
 
 export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClient) {
   return function piWebxExtension(pi: ExtensionAPI): void {
-    let mode: WebMode = "read";
+    let mode: WebMode = "browser";
     let sdk: WebxSdk | undefined;
     let capabilities: WebxCapabilities | undefined;
     let lifecycle: AbortController | undefined;

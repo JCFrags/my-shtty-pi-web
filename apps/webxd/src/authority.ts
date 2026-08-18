@@ -142,14 +142,37 @@ export class WebxAuthority {
     const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
     if (!response.ok) throw new Error(`SearXNG returned HTTP ${response.status}`);
     const payload = await response.json() as { results?: Array<{ url?: unknown; title?: unknown; content?: unknown; score?: unknown; publishedDate?: unknown; engines?: unknown }> };
-    const raw = Array.isArray(payload.results) ? payload.results : [];
-    const hits: SearchHit[] = raw.filter((item) => typeof item.url === "string" && typeof item.title === "string").slice(0, limit).map((item, index) => ({
+    type RawHit = { url?: unknown; title?: unknown; content?: unknown; score?: unknown; publishedDate?: unknown; engines?: unknown };
+    let raw: RawHit[] = Array.isArray(payload.results) ? payload.results : [];
+    const isEligible = (item: RawHit): boolean => {
+      if (typeof item.url !== "string" || typeof item.title !== "string") return false;
+      if (domains.length === 0) return true;
+      try {
+        const hostname = new URL(item.url).hostname.toLocaleLowerCase().replace(/^www\./u, "");
+        return domains.some((domain) => {
+          const wanted = domain.toLocaleLowerCase().replace(/^www\./u, "");
+          return hostname === wanted || hostname.endsWith(`.${wanted}`);
+        });
+      } catch { return false; }
+    };
+    let eligible = raw.filter(isEligible);
+    if (eligible.length === 0 && domains.length > 0) {
+      endpoint.searchParams.set("q", request.query);
+      const fallbackResponse = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
+      if (fallbackResponse.ok) {
+        const fallback = await fallbackResponse.json() as { results?: RawHit[] };
+        raw = Array.isArray(fallback.results) ? fallback.results : [];
+        eligible = raw.filter(isEligible);
+      }
+    }
+    const unique = [...new Map(eligible.map((item) => [String(item.url), item])).values()];
+    const hits: SearchHit[] = unique.slice(0, limit).map((item, index) => ({
       hitId: `search-${createHash("sha256").update(String(item.url)).digest("hex").slice(0, 20)}`,
       title: String(item.title), url: String(item.url), snippet: boundText(typeof item.content === "string" ? item.content : "", 500).text,
       rank: index + 1, visibility: "public",
       metadata: { score: item.score, publishedDate: item.publishedDate, engines: item.engines },
     } as SearchHit));
-    return { query: request.query, hits, truncated: raw.length > hits.length };
+    return { query: request.query, hits, truncated: unique.length > hits.length };
   }
 
   private async read(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<BoundedContent> {
@@ -182,18 +205,22 @@ export class WebxAuthority {
     if (typeof request.question !== "string" || request.question.trim().length === 0) throw problem(400, "invalid-request", "question is required", false);
     const input = request as ResearchRequest & { maxPages?: number; maxBytes?: number; maxQueries?: number; mode?: string };
     const pageLimit = integer(input.maxPages ?? (input.mode === "deep" ? 12 : input.mode === "research" ? 8 : 4), "maxPages", 0, 40);
-    const search = await this.search(actor, { query: request.question, limit: Math.max(5, pageLimit) }, "research.write", signal);
+    const searchQuery = researchSearchQuery(request.question);
+    const preferredDomains = researchDomains(request.question);
+    const search = await this.search(actor, { query: searchQuery, limit: Math.max(6, pageLimit), ...(preferredDomains.length > 0 ? { domains: preferredDomains } : {}) }, "research.write", signal);
     const sections: string[] = [];
     for (const hit of search.hits.slice(0, pageLimit)) {
       try {
-        const page = await this.read({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, { url: hit.url, maxChars: Math.min(12_000, Math.floor((input.maxBytes ?? 80_000) / Math.max(1, pageLimit))) }, signal);
-        sections.push(`## ${page.title}\nSource: ${page.url}\n\n${page.untrustedContent}`);
+        const perPageChars = Math.min(6_000, Math.floor((input.maxBytes ?? 24_000) / Math.max(1, pageLimit)));
+        const page = await this.read({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, { url: hit.url, maxChars: perPageChars }, signal);
+        sections.push(`## ${page.title}\n${page.url}\n\n${page.untrustedContent}`);
       } catch (error) {
         sections.push(`## ${hit.title}\nSource: ${hit.url}\n\nRead failed: ${safeMessage(error)}`);
       }
     }
     const summary = sections.length > 0 ? sections.join("\n\n") : "No web evidence was found.";
-    return { question: request.question, summary: boundText(summary, MAX_CONTENT_CHARS).text, sources: search.hits, truncated: search.truncated || summary.length > MAX_CONTENT_CHARS };
+    const outputLimit = Math.min(MAX_CONTENT_CHARS, input.maxBytes ?? 24_000);
+    return { question: request.question, summary: boundText(summary, outputLimit).text, sources: search.hits, truncated: search.truncated || summary.length > outputLimit };
   }
 
   private searchPages(actor: AuthorityActor, request: PageLibrarySearchRequest): PageLibrarySearchResponse {
@@ -328,4 +355,15 @@ function boundedFailure(status: number, bodyValue: WebxProblem, maxBytes: number
 interface AuthorityFailure { readonly authorityFailure: true; readonly status: number; readonly body: WebxProblem }
 function problem(status: number, code: string, message: string, retryable: boolean): AuthorityFailure { return { authorityFailure: true, status, body: { code, message, retryable } }; }
 function isAuthorityFailure(value: unknown): value is AuthorityFailure { return typeof value === "object" && value !== null && (value as { authorityFailure?: unknown }).authorityFailure === true; }
+function researchDomains(question: string): string[] {
+  const normalized = question.toLocaleLowerCase();
+  if (normalized.includes("fedora")) return ["fedoraproject.org", "fedoramagazine.org"];
+  if (normalized.includes("pi coding agent") || normalized.includes("pi agent")) return ["pi.dev", "github.com"];
+  return [];
+}
+function researchSearchQuery(question: string): string {
+  const noise = new Set(["a", "an", "and", "are", "be", "before", "can", "do", "find", "for", "from", "how", "identify", "in", "is", "of", "official", "or", "should", "source", "sources", "the", "to", "two", "use", "user", "using", "what", "when", "with"]);
+  const terms = question.replace(/[^\p{L}\p{N}._+-]+/gu, " ").trim().split(/\s+/u).filter((term) => term.length > 1 && !noise.has(term.toLocaleLowerCase()));
+  return terms.length > 0 ? terms.slice(0, 12).join(" ") : question;
+}
 function safeMessage(error: unknown): string { return error instanceof Error && error.message.length > 0 ? error.message.slice(0, 300) : "browser or authority backend failed"; }

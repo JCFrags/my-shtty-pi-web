@@ -91,7 +91,7 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   assert.equal(sdk.starts, 1);
   assert.ok(fx.active.includes("other_extension_tool"));
   assert.ok(fx.active.includes("web_search"));
-  assert.ok(!fx.active.includes("browser_open"));
+  assert.ok(fx.active.includes("browser_open"));
 
   await fx.execute("web_upgrade", { mode: "browser" });
   assert.ok(fx.active.includes("browser_open"));
@@ -209,7 +209,8 @@ test("output compaction and artifact recovery have deterministic bounds", () => 
   let value: unknown = "leaf";
   for (let index = 0; index < 20; index += 1) value = { value };
   const result = presentResult({ summary: "ok", data: value });
-  assert.match(JSON.stringify(result.details), /depth limit/);
+  assert.doesNotMatch(JSON.stringify(result.details), /leaf/);
+  assert.match(JSON.stringify(result.content), /depth limit/);
 
   const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(100)]);
   const image = presentResult({

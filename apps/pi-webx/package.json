@@ -17,7 +17,7 @@
   ],
   "pi": {
     "extensions": [
-      "./src/index-live-search-reader-v1.ts"
+      "./src/index-web-v2.ts"
     ],
     "skills": [
       "./skills/webx"
