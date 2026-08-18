@@ -15,7 +15,7 @@ declare module "node:net" {
     close(callback?: (error?: Error) => void): this;
     on(event: "error", listener: (error: Error) => void): this;
   }
-  export function createConnection(options: { path: string }): Socket;
+  export function createConnection(options: { path: string } | { host: string; port: number }): Socket;
   export function createServer(listener: (socket: Socket) => void): Server;
 }
 declare module "node:crypto" {
