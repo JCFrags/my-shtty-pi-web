@@ -38,7 +38,7 @@ Options:
   --no-frame            No border or padding, the page fills the pane
   --app-mode            Shorthand for --no-toolbar --no-shortcuts
                         --no-context-menu --no-overlays --no-frame
-                        --allow-clipboard-read
+                        --allow-clipboard-read --open-tabs-in-popup-stack
 
 Examples:
   terminal-browser open localhost:3000

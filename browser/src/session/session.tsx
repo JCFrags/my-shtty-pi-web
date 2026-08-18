@@ -79,6 +79,7 @@ const APP_MODE_FLAGS = [
   "--no-overlays",
   "--no-frame",
   "--allow-clipboard-read",
+  "--open-tabs-in-popup-stack",
 ];
 
 const FONT_FILE = path.join("assets", "fonts", "JetBrainsMono-Regular.ttf");
