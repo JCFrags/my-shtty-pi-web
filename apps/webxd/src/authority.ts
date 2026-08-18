@@ -150,7 +150,7 @@ export class WebxAuthority {
     let raw: RawSearchHit[] = Array.isArray(payload.results) ? payload.results : [];
     const isEligible = (item: RawSearchHit): boolean => {
       if (typeof item.url !== "string" || typeof item.title !== "string") return false;
-      if (!searchResultRelevant(item, parsedQuery)) return false;
+      if (!searchResultRelevant(item, parsedQuery, domains.length > 0)) return false;
       if (domains.length === 0) return true;
       try {
         const hostname = new URL(item.url).hostname.toLocaleLowerCase().replace(/^www\./u, "");
@@ -169,6 +169,10 @@ export class WebxAuthority {
         raw = Array.isArray(fallback.results) ? fallback.results : [];
         eligible = raw.filter(isEligible);
       }
+    }
+    if (eligible.length === 0 && domains.length > 0) {
+      raw = await authoritativeSearchAdapters(parsedQuery.query, domains, signal);
+      eligible = raw.filter(isEligible);
     }
     const unique = [...new Map(eligible.map((item) => [String(item.url), item])).values()]
       .sort((left, right) => searchResultScore(right, parsedQuery, domains) - searchResultScore(left, parsedQuery, domains));
@@ -217,10 +221,11 @@ export class WebxAuthority {
     const plans = researchSearchPlans(request.question).slice(0, queryLimit);
     const collected: SearchHit[] = [];
     let searchTruncated = false;
+    const perPlanLimit = Math.max(2, Math.ceil(Math.max(6, pageLimit) / Math.max(1, plans.length)));
     for (const plan of plans) {
-      const result = await this.search(actor, { query: plan.query, limit: Math.max(6, pageLimit), ...(plan.domains.length > 0 ? { domains: plan.domains } : {}) }, "research.write", signal);
+      const result = await this.search(actor, { query: plan.query, limit: perPlanLimit, ...(plan.domains.length > 0 ? { domains: plan.domains } : {}) }, "research.write", signal);
       searchTruncated ||= result.truncated;
-      for (const hit of result.hits) if (!collected.some((existing) => existing.url === hit.url)) collected.push(hit);
+      for (const hit of result.hits.slice(0, perPlanLimit)) if (!collected.some((existing) => existing.url === hit.url)) collected.push(hit);
     }
     const sources = collected.slice(0, Math.max(6, pageLimit)).map((hit, index) => ({ ...hit, rank: index + 1 }));
     const sections: string[] = [];
@@ -375,6 +380,32 @@ function boundedFailure(status: number, bodyValue: WebxProblem, maxBytes: number
 interface AuthorityFailure { readonly authorityFailure: true; readonly status: number; readonly body: WebxProblem }
 function problem(status: number, code: string, message: string, retryable: boolean): AuthorityFailure { return { authorityFailure: true, status, body: { code, message, retryable } }; }
 function isAuthorityFailure(value: unknown): value is AuthorityFailure { return typeof value === "object" && value !== null && (value as { authorityFailure?: unknown }).authorityFailure === true; }
+async function authoritativeSearchAdapters(query: string, domains: readonly string[], signal?: AbortSignal): Promise<RawSearchHit[]> {
+  const hits: RawSearchHit[] = [];
+  if (domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "fedoramagazine.org")) {
+    const endpoint = new URL("https://fedoramagazine.org/wp-json/wp/v2/search");
+    endpoint.searchParams.set("search", query.replaceAll('"', ""));
+    endpoint.searchParams.set("per_page", "20");
+    const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
+    if (response.ok) {
+      const payload = await response.json() as Array<{ title?: unknown; url?: unknown }>;
+      if (Array.isArray(payload)) for (const item of payload) hits.push({ title: decodeBasicEntities(String(item.title ?? "")), url: item.url, content: "Official Fedora Magazine search result", engines: ["wordpress-api"] });
+    }
+  }
+  if (domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "ecb.europa.eu")) {
+    const endpoint = new URL("https://api.addsearch.com/v1/search/61893af990d2673c4a92b492dd7f6631");
+    endpoint.searchParams.set("term", query.replaceAll('"', ""));
+    const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
+    if (response.ok) {
+      const payload = await response.json() as { hits?: Array<{ title?: unknown; url?: unknown; meta_description?: unknown; highlight?: unknown }> };
+      if (Array.isArray(payload.hits)) for (const item of payload.hits) hits.push({ title: item.title, url: item.url, content: typeof item.meta_description === "string" ? item.meta_description : typeof item.highlight === "string" ? item.highlight : "Official ECB search result", engines: ["ecb-addsearch-api"] });
+    }
+  }
+  return hits;
+}
+function decodeBasicEntities(value: string): string {
+  return value.replace(/&#(\d+);/gu, (_match, code: string) => String.fromCodePoint(Number(code))).replaceAll("&amp;", "&").replaceAll("&quot;", '"').replaceAll("&#039;", "'");
+}
 function parseSearchQuery(raw: string): ParsedSearchQuery {
   const domains = [...raw.matchAll(/(?:^|\s)site:([A-Za-z0-9.-]+)/giu)].map((match) => match[1] ?? "").filter(Boolean);
   const phrases = [...raw.matchAll(/"([^"]+)"/gu)].map((match) => (match[1] ?? "").trim().toLocaleLowerCase()).filter(Boolean);
@@ -385,13 +416,13 @@ function parseSearchQuery(raw: string): ParsedSearchQuery {
   return { query, domains, phrases, terms: useful, requiredTokens: useful.filter((term) => /\d/u.test(term)) };
 }
 function searchText(item: RawSearchHit): string { return `${String(item.title ?? "")} ${String(item.content ?? "")} ${String(item.url ?? "")}`.toLocaleLowerCase(); }
-function searchResultRelevant(item: RawSearchHit, query: ParsedSearchQuery): boolean {
+function searchResultRelevant(item: RawSearchHit, query: ParsedSearchQuery, domainConstrained: boolean): boolean {
   const text = searchText(item);
   if (query.phrases.some((phrase) => !text.includes(phrase))) return false;
   if (query.requiredTokens.some((token) => !text.includes(token))) return false;
   if (query.terms.length === 0) return true;
   const matched = query.terms.filter((term) => text.includes(term)).length;
-  return matched >= Math.max(1, Math.ceil(Math.min(query.terms.length, 6) / 2));
+  return matched >= (domainConstrained ? 1 : Math.max(1, Math.ceil(Math.min(query.terms.length, 6) / 2)));
 }
 function searchResultScore(item: RawSearchHit, query: ParsedSearchQuery, domains: readonly string[]): number {
   const text = searchText(item);
