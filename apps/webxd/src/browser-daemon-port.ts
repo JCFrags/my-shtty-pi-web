@@ -1,3 +1,4 @@
+import { pid } from "node:process";
 import type {
   BrowserAction,
   BrowserControlResult,
@@ -92,7 +93,8 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
   ) {}
 
   async capabilities(signal?: AbortSignal): Promise<readonly BrowserPathCapability[]> {
-    const anonymous: AuthorityActor = { principalId: "webxd-system", agentId: "webxd-system", scopes: new Set() };
+    const systemIdentity = `webxd-system-${pid}`;
+    const anonymous: AuthorityActor = { principalId: systemIdentity, agentId: systemIdentity, scopes: new Set() };
     const raw = record(await (await this.connection(anonymous)).call("system.capabilities", {}, signal));
     const paths = array(raw.paths).map(pathCapability);
     if (paths.length !== 2 || paths[0]?.pathId !== "agent-browser/chrome" || paths[1]?.pathId !== "pinchtab/chrome") {
