@@ -189,8 +189,9 @@ export class WebxAuthority {
     requireScope(actor, "retrieval.read");
     if ((request.url === undefined) === (request.pageId === undefined)) throw problem(400, "invalid-request", "supply exactly one url or pageId", false);
     const allSources = [...this.options.sources, ...this.#liveSources.values()];
-    let source = request.pageId === undefined ? allSources.find((item) => item.url === request.url) : allSources.find((item) => item.pageId === request.pageId);
     const input = request as ReadRequest & { query?: string; view?: string; fields?: readonly string[]; itemOffset?: number; itemLimit?: number };
+    const transformed = input.query !== undefined || input.fields !== undefined || input.itemOffset !== undefined || input.itemLimit !== undefined || (input.view !== undefined && input.view !== "main");
+    let source = request.pageId === undefined && !transformed ? allSources.find((item) => item.url === request.url) : request.pageId === undefined ? undefined : allSources.find((item) => item.pageId === request.pageId);
     if (source === undefined && request.url !== undefined && this.options.readerUrl !== undefined) {
       const response = await fetch(new URL("/v1/read", this.options.readerUrl), {
         method: "POST", signal, headers: { "content-type": "application/json", accept: "application/json" },
