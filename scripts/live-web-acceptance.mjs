@@ -78,6 +78,29 @@ try {
   assert(hostname(observed.data.url) === "github.com");
   assert(observed.data.content.length > 500, "browser returned no useful page content");
 
+  const visual = await client.request("browser.observe", {
+    browserSessionId: browserSession.sessionId,
+    view: "visual",
+    maxChars: 2_000,
+  }, options());
+  assert(visual.data.screenshot?.payloadBase64.length > 1_000, "browser returned no visual frame");
+
+  await client.request("browser.act", {
+    browserSessionId: browserSession.sessionId,
+    action: { kind: "wait", milliseconds: 2_000 },
+  }, options());
+  await client.request("browser.act", {
+    browserSessionId: browserSession.sessionId,
+    action: { kind: "click", selector: "#issues-tab" },
+  }, options());
+  await new Promise((resolve) => setTimeout(resolve, 3_000));
+  const clicked = await client.request("browser.observe", {
+    browserSessionId: browserSession.sessionId,
+    view: "main",
+    maxChars: 3_000,
+  }, options());
+  assert(clicked.data.url.includes("/issues"), "browser click did not navigate to issues");
+
   await assert.rejects(
     client.request("browser.open", {
       pathId: "agent-browser/chrome",
@@ -87,7 +110,7 @@ try {
     /loopback|blocked|denied/iu,
   );
 
-  console.log(JSON.stringify({ ok: true, scenarios: 7 }));
+  console.log(JSON.stringify({ ok: true, scenarios: 9 }));
 } finally {
   if (browserSession?.sessionId) {
     await client.request("browser.tabs", {
