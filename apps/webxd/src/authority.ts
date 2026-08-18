@@ -391,9 +391,9 @@ function isAuthorityFailure(value: unknown): value is AuthorityFailure { return 
 function staticAuthoritativeHits(query: string, domains: readonly string[]): RawSearchHit[] {
   const normalizedDomains = domains.map((domain) => domain.toLocaleLowerCase().replace(/^www\./u, ""));
   const hits: RawSearchHit[] = [];
-  if (normalizedDomains.includes("rust-lang.org") && /release/iu.test(query)) hits.push({ title: "Rust Release Notes", url: "https://doc.rust-lang.org/releases.html", content: "Official Rust stable release notes and version history.", engines: ["official-route"] });
+  if (normalizedDomains.includes("rust-lang.org") && /release/iu.test(query)) hits.push({ title: "Rust Releases and Release Notes", url: "https://doc.rust-lang.org/releases.html", content: "Official Rust stable release notes and version history.", engines: ["official-route"] });
   if (normalizedDomains.includes("nodejs.org") && /release/iu.test(query)) hits.push({ title: "Node.js Releases", url: "https://nodejs.org/en/about/previous-releases", content: "Official Node.js current and long-term support release schedule.", engines: ["official-route"] });
-  if (normalizedDomains.includes("python.org") && /release/iu.test(query)) hits.push({ title: "Download Python", url: "https://www.python.org/downloads/", content: "Official Python stable release downloads and version history.", engines: ["official-route"] });
+  if (normalizedDomains.includes("python.org") && /release/iu.test(query)) hits.push({ title: "Python Releases and Downloads", url: "https://www.python.org/downloads/", content: "Official Python stable release downloads and version history.", engines: ["official-route"] });
   if (normalizedDomains.includes("go.dev") && /release/iu.test(query)) hits.push({ title: "All Go Releases", url: "https://go.dev/dl/", content: "Official Go stable releases and downloads.", engines: ["official-route"] });
   return hits;
 }
@@ -467,6 +467,7 @@ function searchResultScore(item: RawSearchHit, query: ParsedSearchQuery, domains
     if (domains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))) score += 20;
     if (/\.(?:gov|edu)$/u.test(hostname) || hostname.endsWith(".gov.uk") || hostname.includes("docs.")) score += 5;
   } catch { return score; }
+  if (Array.isArray(item.engines) && item.engines.includes("official-route")) score += 50;
   if (typeof item.score === "number" && Number.isFinite(item.score)) score += Math.min(5, item.score);
   return score;
 }
