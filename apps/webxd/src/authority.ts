@@ -395,6 +395,7 @@ async function authoritativeSearchAdapters(query: string, domains: readonly stri
   if (domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "ecb.europa.eu")) {
     const endpoint = new URL("https://api.addsearch.com/v1/search/61893af990d2673c4a92b492dd7f6631");
     endpoint.searchParams.set("term", query.replaceAll('"', ""));
+    endpoint.searchParams.set("limit", "100");
     const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
     if (response.ok) {
       const payload = await response.json() as { hits?: Array<{ title?: unknown; url?: unknown; meta_description?: unknown; highlight?: unknown }> };
@@ -422,7 +423,10 @@ function searchResultRelevant(item: RawSearchHit, query: ParsedSearchQuery, doma
   if (query.requiredTokens.some((token) => !text.includes(token))) return false;
   if (query.terms.length === 0) return true;
   const matched = query.terms.filter((term) => text.includes(term)).length;
-  return matched >= (domainConstrained ? 1 : Math.max(1, Math.ceil(Math.min(query.terms.length, 6) / 2)));
+  const threshold = domainConstrained && query.terms.length <= 4
+    ? Math.max(1, query.terms.length - 1)
+    : Math.max(1, Math.ceil(Math.min(query.terms.length, 6) / 2));
+  return matched >= threshold;
 }
 function searchResultScore(item: RawSearchHit, query: ParsedSearchQuery, domains: readonly string[]): number {
   const text = searchText(item);
@@ -441,10 +445,10 @@ function searchResultScore(item: RawSearchHit, query: ParsedSearchQuery, domains
 function researchSearchPlans(question: string): Array<{ query: string; domains: string[] }> {
   const normalized = question.toLocaleLowerCase();
   const technologies: Array<{ pattern: RegExp; query: string; domains: string[] }> = [
-    { pattern: /\bnode(?:\.js|js)?\b/u, query: "Node.js latest current LTS release", domains: ["nodejs.org"] },
-    { pattern: /\brust\b/u, query: "Rust latest stable release", domains: ["rust-lang.org"] },
-    { pattern: /\bpython\b/u, query: "Python latest stable release", domains: ["python.org"] },
-    { pattern: /\b(?:golang|go programming)\b/u, query: "Go latest stable release", domains: ["go.dev"] },
+    { pattern: /\bnode(?:\.js|js)?\b/u, query: "Node.js releases", domains: ["nodejs.org"] },
+    { pattern: /\brust\b/u, query: "Rust releases", domains: ["rust-lang.org"] },
+    { pattern: /\bpython\b/u, query: "Python releases", domains: ["python.org"] },
+    { pattern: /\b(?:golang|go programming)\b/u, query: "Go releases", domains: ["go.dev"] },
   ];
   const selected = technologies.filter((item) => item.pattern.test(normalized)).map(({ query, domains }) => ({ query, domains }));
   if (selected.length > 1) return selected;
