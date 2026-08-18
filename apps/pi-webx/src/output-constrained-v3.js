@@ -47,8 +47,11 @@ function renderData(value) {
     }
     if (typeof data.untrustedContent === "string") {
         const metadata = typeof data.metadata === "object" && data.metadata !== null ? data.metadata : undefined;
-        const status = metadata ? `Read status: source=${String(metadata.source ?? "unknown")}; requested=${String(metadata.requestedUrl ?? data.url ?? "")}; final=${String(metadata.finalUrl ?? data.url ?? "")}; substituted=${String(metadata.substituted ?? false)}; truncated=${String(data.truncated ?? false)}` : undefined;
-        const header = [data.title, data.url, status].filter((item) => typeof item === "string" && item.length > 0).join("\n");
+        const status = metadata ? `Read status: source=${String(metadata.source ?? "unknown")}; requested=${String(metadata.requestedUrl ?? data.url ?? "")}; final=${String(metadata.finalUrl ?? data.url ?? "")}; substituted=${String(metadata.substituted ?? false)}; truncated=${String(data.truncated ?? false)}; saved=${String(metadata.saved ?? false)}; recallable=${String(metadata.immediatelyRecallable ?? false)}` : undefined;
+        const continuation = data.truncated === true
+            ? `Continuation: artifactId=${String(data.artifactId ?? metadata?.artifactId ?? "unavailable")}; pageId=${String(data.pageId ?? metadata?.pageId ?? "unavailable")}`
+            : metadata?.saved === true ? `Saved page: pageId=${String(data.pageId ?? metadata.pageId ?? "unavailable")}; artifactId=${String(data.artifactId ?? metadata.artifactId ?? "unavailable")}` : undefined;
+        const header = [data.title, data.url, status, continuation].filter((item) => typeof item === "string" && item.length > 0).join("\n");
         return `${header}${header ? "\n\n" : ""}${clip(data.untrustedContent, 30_000)}`;
     }
     if (typeof data.question === "string" && typeof data.summary === "string") {

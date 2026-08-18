@@ -62,6 +62,8 @@ describe("WebxAuthority", () => {
     const instance = new WebxAuthority({ browser: browser(), sources: [source], artifacts: [], clock: { now: () => "" }, ids: { next: () => "" } });
     const found = await call(instance, actor(), "POST", "/v1/pages/search", { query: "WebX" }, "pages-search-001");
     expect(found).toMatchObject({ status: 200, body: { pages: [{ pageId: "owned-page", visibility: "public" }] } });
+    const tokenFound = await call(instance, actor(), "POST", "/v1/pages/search", { query: "routes WebX" }, "pages-search-token-001");
+    expect(tokenFound).toMatchObject({ status: 200, body: { pages: [{ pageId: "owned-page" }] } });
     expect(await call(instance, actor(), "DELETE", "/v1/pages", { pageId: "owned-page" }, "pages-forget-001")).toMatchObject({ status: 200, body: { forgotten: true, pageId: "owned-page" } });
     expect(await call(instance, actor(), "GET", "/v1/pages/owned-page")).toMatchObject({ status: 404, body: { code: "not-found" } });
     expect(await call(instance, actor(), "POST", "/v1/pages/search", { query: "WebX", includeHistory: true }, "pages-history-001")).toMatchObject({ status: 200, body: { pages: [] } });

@@ -218,6 +218,14 @@ test("output compaction and artifact recovery have deterministic bounds", () => 
   assert.doesNotMatch(JSON.stringify(result.details), /leaf/);
   assert.match(JSON.stringify(result.content), /depth limit/);
 
+  const continued = presentResult({ summary: "read", data: {
+    title: "Bounded page", url: "https://example.test/page", untrustedContent: "partial",
+    truncated: true, pageId: "page-1", artifactId: "artifact-1",
+    metadata: { saved: true, immediatelyRecallable: true, source: "trafilatura" },
+  } });
+  assert.match(JSON.stringify(continued.content), /Continuation: artifactId=artifact-1; pageId=page-1/);
+  assert.match(JSON.stringify(continued.content), /saved=true; recallable=true/);
+
   const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(100)]);
   const image = presentResult({
     summary: "image", artifactPayload: {

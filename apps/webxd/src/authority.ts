@@ -196,22 +196,27 @@ export class WebxAuthority {
     if (source === undefined && request.url !== undefined && this.options.readerUrl !== undefined) {
       const response = await fetch(new URL("/v1/read", this.options.readerUrl), {
         method: "POST", signal, headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ url: request.url, query: input.query, view: input.view ?? "main", fields: input.fields ?? [], itemOffset: integer(input.itemOffset ?? 0, "itemOffset", 0, 1_000_000), itemLimit: integer(input.itemLimit ?? 50, "itemLimit", 1, 500), maxChars: integer(request.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, 1_000_000) }),
+        body: JSON.stringify({ url: request.url, query: input.query, view: input.view ?? "main", fields: input.fields ?? [], itemOffset: integer(input.itemOffset ?? 0, "itemOffset", 0, 1_000_000), itemLimit: integer(input.itemLimit ?? 50, "itemLimit", 1, 500), maxChars: 1_000_000 }),
       });
-      if (!response.ok) throw new Error(`reader returned HTTP ${response.status}: ${boundText(await response.text(), 500).text}`);
+      if (!response.ok) {
+        const failure = parseReaderFailure(response.status, await response.text());
+        throw problem(failure.toolStatus, "read-failed", failure.message, failure.retryable);
+      }
       const page = await response.json() as { url?: unknown; title?: unknown; content?: unknown; mediaType?: unknown; source?: unknown; truncated?: unknown; metadata?: unknown };
       if (typeof page.content !== "string") throw new Error("reader returned no text content");
       const digest = createHash("sha256").update(`${request.url}\0${page.content}`).digest("hex");
       source = { hitId: `hit-${digest.slice(0, 20)}`, ownerPrincipalId: actor.principalId, title: typeof page.title === "string" ? page.title : request.url, url: typeof page.url === "string" ? page.url : request.url, content: page.content, visibility: "public", pageId: `page-${digest}`, artifactId: `artifact-${digest}` };
       this.#liveSources.set(source.pageId, source);
       const readerMetadata = typeof page.metadata === "object" && page.metadata !== null ? page.metadata as Record<string, unknown> : {};
-      this.#liveReadMetadata.set(source.pageId, { requestedUrl: request.url, finalUrl: source.url, source: page.source, substituted: source.url !== request.url, reader: readerMetadata });
+      this.#liveReadMetadata.set(source.pageId, { requestedUrl: request.url, finalUrl: source.url, source: page.source, substituted: source.url !== request.url, saved: true, immediatelyRecallable: true, pageId: source.pageId, artifactId: source.artifactId, reader: { ...readerMetadata, truncated: page.truncated === true } });
       this.#liveArtifacts.set(source.artifactId, { artifactId: source.artifactId, ownerPrincipalId: actor.principalId, mediaType: typeof page.mediaType === "string" ? page.mediaType : "text/markdown", sha256: createHash("sha256").update(page.content).digest("hex"), content: page.content, visibility: "public" });
     }
     if (source === undefined || !canRead(actor, source.ownerPrincipalId, source.visibility)) throw problem(404, "not-found", "page was not found", false);
     const maxChars = integer(request.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, 1_000_000);
     const bounded = boundText(source.content, maxChars);
-    return { title: source.title, url: source.url, untrustedContent: bounded.text, truncated: bounded.truncated, artifactId: source.artifactId, pageId: source.pageId, visibility: source.visibility, metadata: this.#liveReadMetadata.get(source.pageId) } as BoundedContent;
+    const metadata = this.#liveReadMetadata.get(source.pageId);
+    const readerTruncated = metadata?.reader !== null && typeof metadata?.reader === "object" && (metadata.reader as { truncated?: unknown }).truncated === true;
+    return { title: source.title, url: source.url, untrustedContent: bounded.text, truncated: bounded.truncated || readerTruncated, artifactId: source.artifactId, pageId: source.pageId, visibility: source.visibility, metadata } as BoundedContent;
   }
 
   private async research(actor: AuthorityActor, request: ResearchRequest, signal?: AbortSignal): Promise<{ question: string; summary: string; sources: SearchHit[]; truncated: boolean }> {
@@ -223,7 +228,7 @@ export class WebxAuthority {
     const plans = researchSearchPlans(request.question).slice(0, queryLimit);
     const collected: SearchHit[] = [];
     let searchTruncated = false;
-    const perPlanLimit = Math.max(2, Math.ceil(Math.max(6, pageLimit) / Math.max(1, plans.length)));
+    const perPlanLimit = plans.length > 1 ? 1 : Math.max(2, Math.ceil(Math.max(6, pageLimit) / Math.max(1, plans.length)));
     for (const plan of plans) {
       const result = await this.search(actor, { query: plan.query, limit: perPlanLimit, ...(plan.domains.length > 0 ? { domains: plan.domains } : {}) }, "research.write", signal);
       searchTruncated ||= result.truncated;
@@ -236,11 +241,15 @@ export class WebxAuthority {
     for (const hit of sources.slice(0, pageLimit)) {
       try {
         const perPageChars = Math.min(6_000, Math.floor((input.maxBytes ?? 24_000) / Math.max(1, pageLimit)));
-        const page = await this.read({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, { url: hit.url, maxChars: perPageChars }, signal);
+        const readRequest: ReadRequest & { query?: string; fields?: string[]; itemLimit?: number } = { url: hit.url, maxChars: perPageChars, query: request.question };
+        if (hit.url === "https://nodejs.org/dist/index.json") Object.assign(readRequest, { query: undefined, fields: ["version", "date", "lts"], itemLimit: 50 });
+        if (hit.url.startsWith("https://go.dev/dl/?mode=json")) Object.assign(readRequest, { query: undefined, fields: ["version", "stable"], itemLimit: 10 });
+        const page = await this.read({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, readRequest, signal);
         if (!page.untrustedContent.trim()) continue;
         readableSources += 1;
         readableUrls.push(page.url);
-        sections.push(`## ${page.title}\n${page.url}\n\n${page.untrustedContent}`);
+        const finding = releaseFinding(page.url, page.untrustedContent);
+        sections.push(`${finding ? `## Direct finding\n${finding}\n\n` : ""}## ${page.title}\n${page.url}\n\n${page.untrustedContent}`);
       } catch (error) {
         sections.push(`## ${hit.title}\nSource: ${hit.url}\n\nRead failed: ${safeMessage(error)}`);
       }
@@ -250,7 +259,7 @@ export class WebxAuthority {
     });
     const minimumReadable = hasPrimaryProcedure ? 1 : 2;
     const summary = readableSources >= minimumReadable
-      ? sections.join("\n\n")
+      ? `## Answer-ready findings\n${sections.filter((section) => section.startsWith("## Direct finding")).map((section) => section.split("\n\n", 1)[0]?.replace("## Direct finding\n", "- ") ?? "").filter(Boolean).join("\n")}\n\n## Evidence\n${sections.join("\n\n")}`
       : `Insufficient relevant evidence. Found ${readableSources} readable source${readableSources === 1 ? "" : "s"}; at least ${minimumReadable} are required.\n\n${sections.join("\n\n")}`;
     const outputLimit = Math.min(MAX_CONTENT_CHARS, input.maxBytes ?? 24_000);
     return { question: request.question, summary: boundText(summary, outputLimit).text, sources, truncated: searchTruncated || summary.length > outputLimit };
@@ -261,7 +270,14 @@ export class WebxAuthority {
     if (typeof request.query !== "string" || request.query.trim().length === 0 || request.query.length > 8_192) throw problem(400, "invalid-request", "query must contain 1 to 8192 characters", false);
     const limit = integer(request.limit ?? 10, "limit", 1, 100);
     const query = request.query.toLocaleLowerCase();
-    const matches = [...this.options.sources, ...this.#liveSources.values()].filter((source) => source.visibility === "public" && !this.#forgottenPages.has(source.pageId) && `${source.title} ${source.content} ${source.url}`.toLocaleLowerCase().includes(query));
+    const queryTerms = query.match(/[\p{L}\p{N}._+-]+/gu)?.filter((term) => term.length > 1) ?? [];
+    const matches = [...this.options.sources, ...this.#liveSources.values()].filter((source) => {
+      if (source.visibility !== "public" || this.#forgottenPages.has(source.pageId)) return false;
+      const searchable = `${source.title} ${source.content} ${source.url}`.toLocaleLowerCase();
+      if (queryTerms.length === 0) return searchable.includes(query);
+      const matched = queryTerms.filter((term) => searchable.includes(term)).length;
+      return matched >= Math.max(1, Math.ceil(queryTerms.length / 2));
+    });
     return {
       query: request.query,
       pages: matches.slice(0, limit).map((source) => ({ pageId: source.pageId, ownerPrincipalId: source.ownerPrincipalId, title: source.title, url: source.url, visibility: source.visibility, artifactId: source.artifactId })),
@@ -392,9 +408,9 @@ function staticAuthoritativeHits(query: string, domains: readonly string[]): Raw
   const normalizedDomains = domains.map((domain) => domain.toLocaleLowerCase().replace(/^www\./u, ""));
   const hits: RawSearchHit[] = [];
   if (normalizedDomains.includes("rust-lang.org") && /release/iu.test(query)) hits.push({ title: "Rust Releases and Release Notes", url: "https://doc.rust-lang.org/releases.html", content: "Official Rust stable release notes and version history.", engines: ["official-route"] });
-  if (normalizedDomains.includes("nodejs.org") && /release/iu.test(query)) hits.push({ title: "Node.js Releases", url: "https://nodejs.org/en/about/previous-releases", content: "Official Node.js current and long-term support release schedule.", engines: ["official-route"] });
+  if (normalizedDomains.includes("nodejs.org") && /release/iu.test(query)) hits.push({ title: "Node.js Release Index", url: "https://nodejs.org/dist/index.json", content: "Official Node.js current and long-term support release index.", engines: ["official-route"] });
   if (normalizedDomains.includes("python.org") && /release/iu.test(query)) hits.push({ title: "Python Releases and Downloads", url: "https://www.python.org/downloads/", content: "Official Python stable release downloads and version history.", engines: ["official-route"] });
-  if (normalizedDomains.includes("go.dev") && /release/iu.test(query)) hits.push({ title: "All Go Releases", url: "https://go.dev/dl/", content: "Official Go stable releases and downloads.", engines: ["official-route"] });
+  if (normalizedDomains.includes("go.dev") && /release/iu.test(query)) hits.push({ title: "Go Release Index", url: "https://go.dev/dl/?mode=json", content: "Official Go stable release index.", engines: ["official-route"] });
   return hits;
 }
 
@@ -477,7 +493,7 @@ function researchSearchPlans(question: string): Array<{ query: string; domains: 
     { pattern: /\bnode(?:\.js|js)?\b/u, query: "Node.js releases", domains: ["nodejs.org"] },
     { pattern: /\brust\b/u, query: "Rust releases", domains: ["rust-lang.org"] },
     { pattern: /\bpython\b/u, query: "Python releases", domains: ["python.org"] },
-    { pattern: /\b(?:golang|go programming)\b/u, query: "Go releases", domains: ["go.dev"] },
+    { pattern: /\b(?:golang|go(?: programming)?)(?=\s+(?:stable|release|version)|\b)/u, query: "Go releases", domains: ["go.dev"] },
   ];
   const selected = technologies.filter((item) => item.pattern.test(normalized)).map(({ query, domains }) => ({ query, domains }));
   if (selected.length > 1) return selected;
@@ -496,4 +512,48 @@ function researchSearchQuery(question: string): string {
   const terms = question.replace(/[^\p{L}\p{N}._+-]+/gu, " ").trim().split(/\s+/u).filter((term) => term.length > 1 && !noise.has(term.toLocaleLowerCase()));
   return terms.length > 0 ? terms.slice(0, 12).join(" ") : question;
 }
-function safeMessage(error: unknown): string { return error instanceof Error && error.message.length > 0 ? error.message.slice(0, 300) : "browser or authority backend failed"; }
+function releaseFinding(url: string, content: string): string | undefined {
+  try {
+    const value = JSON.parse(content) as unknown;
+    if (url.includes("nodejs.org/dist/index.json")) {
+      const rows = Array.isArray(value)
+        ? value.filter((item): item is { version: string; date: string; lts?: unknown } => typeof item === "object" && item !== null && typeof (item as { version?: unknown }).version === "string" && typeof (item as { date?: unknown }).date === "string")
+        : projectedRows(value, ["version", "date", "lts"]) as Array<{ version: string; date: string; lts?: unknown }>;
+      const latest = rows[0];
+      const lts = rows.find((item) => typeof item.lts === "string" && item.lts.length > 0);
+      if (latest && lts) return `Node.js latest stable is ${latest.version} (${latest.date}); current LTS is ${lts.version} (${lts.date}, ${String(lts.lts)}).`;
+    }
+    if (url.startsWith("https://go.dev/dl/")) {
+      const rows = Array.isArray(value) ? value : projectedRows(value, ["version", "stable"]);
+      const stable = rows.find((item): item is { version: string; stable: true } => typeof item === "object" && item !== null && (item as { stable?: unknown }).stable === true && typeof (item as { version?: unknown }).version === "string");
+      if (stable) return `Go latest stable is ${stable.version}.`;
+    }
+  } catch { /* HTML findings use bounded pattern extraction below. */ }
+  if (/^https:\/\/(?:www\.)?python\.org\/downloads\/?(?:[?#]|$)/u.test(url)) {
+    const match = content.match(/Python\s+(3\.\d+\.\d+)[^\n]*\n?([A-Z][a-z]+\.\s+\d{1,2},\s+\d{4})/u);
+    if (match) return `Python latest stable is ${match[1]} (${match[2]}).`;
+  }
+  return undefined;
+}
+function projectedRows(value: unknown, keys: readonly string[]): Array<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return [];
+  const record = value as Record<string, unknown>;
+  const length = Math.max(0, ...keys.map((key) => Array.isArray(record[key]) ? record[key].length : 0));
+  return Array.from({ length }, (_, index) => Object.fromEntries(keys.map((key) => [key, Array.isArray(record[key]) ? record[key][index] : undefined])));
+}
+function parseReaderFailure(status: number, raw: string): { toolStatus: number; message: string; retryable: boolean } {
+  let detail = "reader failed";
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown; upstreamStatus?: unknown };
+    const nested = typeof parsed.detail === "object" && parsed.detail !== null ? parsed.detail as { detail?: unknown; upstreamStatus?: unknown } : parsed;
+    if (typeof nested.detail === "string") detail = nested.detail;
+    else if (typeof parsed.detail === "string") detail = parsed.detail;
+    if (typeof nested.upstreamStatus === "number" && nested.upstreamStatus >= 400 && nested.upstreamStatus < 600) status = nested.upstreamStatus;
+  } catch { /* Return a bounded generic failure. */ }
+  detail = detail
+    .replace(/https?:\/\/(?:localhost|127(?:\.\d+){3}|\[::1\])(?::\d+)?[^\s"']*/giu, "the internal converter")
+    .replace(/For more information check:[\s\S]*/giu, "")
+    .trim();
+  return { toolStatus: status, message: `read failed (upstream_status=${status}, tool_status=${status}): ${detail}`.slice(0, 300), retryable: status >= 500 || status === 429 };
+}
+function safeMessage(error: unknown): string { return error instanceof Error && error.message.length > 0 ? error.message.replace(/https?:\/\/(?:localhost|127(?:\.\d+){3}|\[::1\])(?::\d+)?[^\s"']*/giu, "internal service").slice(0, 300) : "browser or authority backend failed"; }
