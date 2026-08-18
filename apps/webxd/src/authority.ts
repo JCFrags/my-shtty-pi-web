@@ -230,6 +230,7 @@ export class WebxAuthority {
     }
     const sources = collected.slice(0, Math.max(6, pageLimit)).map((hit, index) => ({ ...hit, rank: index + 1 }));
     const sections: string[] = [];
+    const readableUrls: string[] = [];
     let readableSources = 0;
     for (const hit of sources.slice(0, pageLimit)) {
       try {
@@ -237,14 +238,19 @@ export class WebxAuthority {
         const page = await this.read({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, { url: hit.url, maxChars: perPageChars }, signal);
         if (!page.untrustedContent.trim()) continue;
         readableSources += 1;
+        readableUrls.push(page.url);
         sections.push(`## ${page.title}\n${page.url}\n\n${page.untrustedContent}`);
       } catch (error) {
         sections.push(`## ${hit.title}\nSource: ${hit.url}\n\nRead failed: ${safeMessage(error)}`);
       }
     }
-    const summary = readableSources >= 2
+    const hasPrimaryProcedure = readableUrls.some((url) => {
+      try { return new URL(url).hostname === "docs.fedoraproject.org" && /upgrad/iu.test(request.question); } catch { return false; }
+    });
+    const minimumReadable = hasPrimaryProcedure ? 1 : 2;
+    const summary = readableSources >= minimumReadable
       ? sections.join("\n\n")
-      : `Insufficient relevant evidence. Found ${readableSources} readable source${readableSources === 1 ? "" : "s"}; at least 2 are required.\n\n${sections.join("\n\n")}`;
+      : `Insufficient relevant evidence. Found ${readableSources} readable source${readableSources === 1 ? "" : "s"}; at least ${minimumReadable} are required.\n\n${sections.join("\n\n")}`;
     const outputLimit = Math.min(MAX_CONTENT_CHARS, input.maxBytes ?? 24_000);
     return { question: request.question, summary: boundText(summary, outputLimit).text, sources, truncated: searchTruncated || summary.length > outputLimit };
   }
@@ -391,7 +397,8 @@ async function authoritativeSearchAdapters(query: string, domains: readonly stri
       engines: ["official-route"],
     });
   }
-  if (domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "fedoramagazine.org")) {
+  const combinedFedoraUpgrade = domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "fedoraproject.org") && /upgrad/iu.test(query);
+  if (domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "fedoramagazine.org") && !combinedFedoraUpgrade) {
     const endpoint = new URL("https://fedoramagazine.org/wp-json/wp/v2/search");
     const wordpressQuery = /fedora/iu.test(query) && /upgrad/iu.test(query) ? "Fedora Workstation upgrade" : query.replaceAll('"', "");
     endpoint.searchParams.set("search", wordpressQuery);
