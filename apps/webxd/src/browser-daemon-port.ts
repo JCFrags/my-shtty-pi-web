@@ -317,7 +317,9 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
       const binding = this.owned(actor, sessionId);
       if (binding.session.tabId !== tabId) throw new BrowserPortError("wrong-owner", "tab does not belong to the owned session", 403);
       await this.invalidatePendingFrame(sessionId);
-      await (await this.connection(actor)).call("tab.close", { browserSessionId: sessionId, tabId }, signal);
+      const connection = await this.connection(actor);
+      await connection.call("workspace.hide", {}, signal);
+      await connection.call("tab.close", { browserSessionId: sessionId, tabId }, signal);
     });
   }
 
@@ -325,7 +327,9 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     await this.withSessionLane(sessionId, async () => {
       const binding = this.owned(actor, sessionId);
       await this.invalidatePendingFrame(sessionId);
-      await (await this.connection(actor)).call("session.close", { browserSessionId: sessionId }, signal);
+      const connection = await this.connection(actor);
+      await connection.call("workspace.hide", {}, signal);
+      await connection.call("session.close", { browserSessionId: sessionId }, signal);
       this.#sessions.set(sessionId, { ...binding, session: { ...binding.session, state: "closed" } });
     });
   }
