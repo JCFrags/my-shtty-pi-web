@@ -383,6 +383,14 @@ function problem(status: number, code: string, message: string, retryable: boole
 function isAuthorityFailure(value: unknown): value is AuthorityFailure { return typeof value === "object" && value !== null && (value as { authorityFailure?: unknown }).authorityFailure === true; }
 async function authoritativeSearchAdapters(query: string, domains: readonly string[], signal?: AbortSignal): Promise<RawSearchHit[]> {
   const hits: RawSearchHit[] = [];
+  if (domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "fedoraproject.org") && /fedora/iu.test(query) && /upgrad/iu.test(query)) {
+    hits.push({
+      title: "Upgrading Fedora Linux Using DNF System Plugin",
+      url: "https://docs.fedoraproject.org/en-US/quick-docs/upgrading-fedora-offline/",
+      content: "Official supported method to upgrade Fedora Workstation to the next release with DNF system-upgrade.",
+      engines: ["official-route"],
+    });
+  }
   if (domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "fedoramagazine.org")) {
     const endpoint = new URL("https://fedoramagazine.org/wp-json/wp/v2/search");
     const wordpressQuery = /fedora/iu.test(query) && /upgrad/iu.test(query) ? "Fedora Workstation upgrade" : query.replaceAll('"', "");
