@@ -28,6 +28,9 @@ const MAX_CONTENT_CHARS = 100_000;
 const MAX_ARTIFACT_BYTES = 65_536;
 const VISIBILITY_ORDER: Readonly<Record<Visibility, number>> = { public: 0, internal: 1, private: 2, secret: 3 };
 
+interface RawSearchHit { readonly url?: unknown; readonly title?: unknown; readonly content?: unknown; readonly score?: unknown; readonly publishedDate?: unknown; readonly engines?: unknown }
+interface ParsedSearchQuery { readonly query: string; readonly domains: readonly string[]; readonly phrases: readonly string[]; readonly terms: readonly string[]; readonly requiredTokens: readonly string[] }
+
 interface StoredArtifact {
   readonly artifactId: string;
   readonly ownerPrincipalId: string;
@@ -58,6 +61,7 @@ export class WebxAuthority {
   readonly #forgottenPages = new Set<string>();
   readonly #liveSources = new Map<string, IndexedSource>();
   readonly #liveArtifacts = new Map<string, StoredArtifact>();
+  readonly #liveReadMetadata = new Map<string, Readonly<Record<string, unknown>>>();
 
   constructor(private readonly options: WebxAuthorityOptions) {}
 
@@ -132,20 +136,21 @@ export class WebxAuthority {
       const hits = matches.slice(0, limit).map((source, index): SearchHit => ({ hitId: source.hitId, title: source.title, url: source.url, snippet: boundText(source.content, 320).text, rank: index + 1, visibility: source.visibility, pageId: source.pageId, artifactId: source.artifactId }));
       return { query: request.query, hits, truncated: matches.length > hits.length };
     }
-    const domains = input.domains?.filter((domain) => domain.length > 0) ?? [];
-    const domainQuery = domains.length === 0 ? "" : ` (${domains.map((domain) => `site:${domain}`).join(" OR ")})`;
+    const parsedQuery = parseSearchQuery(request.query);
+    const domains = [...new Set([...(input.domains?.filter((domain) => domain.length > 0) ?? []), ...parsedQuery.domains])];
+    const domainQuery = domains.length === 0 ? "" : ` ${domains.map((domain) => `site:${domain}`).join(" OR ")}`;
     const endpoint = new URL("/search", this.options.searxUrl ?? "http://127.0.0.1:8888");
-    endpoint.searchParams.set("q", `${request.query}${domainQuery}`);
+    endpoint.searchParams.set("q", `${parsedQuery.query}${domainQuery}`.trim());
     endpoint.searchParams.set("format", "json");
     endpoint.searchParams.set("safesearch", "0");
     if (input.freshness !== undefined) endpoint.searchParams.set("time_range", input.freshness);
     const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
     if (!response.ok) throw new Error(`SearXNG returned HTTP ${response.status}`);
     const payload = await response.json() as { results?: Array<{ url?: unknown; title?: unknown; content?: unknown; score?: unknown; publishedDate?: unknown; engines?: unknown }> };
-    type RawHit = { url?: unknown; title?: unknown; content?: unknown; score?: unknown; publishedDate?: unknown; engines?: unknown };
-    let raw: RawHit[] = Array.isArray(payload.results) ? payload.results : [];
-    const isEligible = (item: RawHit): boolean => {
+    let raw: RawSearchHit[] = Array.isArray(payload.results) ? payload.results : [];
+    const isEligible = (item: RawSearchHit): boolean => {
       if (typeof item.url !== "string" || typeof item.title !== "string") return false;
+      if (!searchResultRelevant(item, parsedQuery)) return false;
       if (domains.length === 0) return true;
       try {
         const hostname = new URL(item.url).hostname.toLocaleLowerCase().replace(/^www\./u, "");
@@ -157,15 +162,16 @@ export class WebxAuthority {
     };
     let eligible = raw.filter(isEligible);
     if (eligible.length === 0 && domains.length > 0) {
-      endpoint.searchParams.set("q", request.query);
+      endpoint.searchParams.set("q", parsedQuery.query);
       const fallbackResponse = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
       if (fallbackResponse.ok) {
-        const fallback = await fallbackResponse.json() as { results?: RawHit[] };
+        const fallback = await fallbackResponse.json() as { results?: RawSearchHit[] };
         raw = Array.isArray(fallback.results) ? fallback.results : [];
         eligible = raw.filter(isEligible);
       }
     }
-    const unique = [...new Map(eligible.map((item) => [String(item.url), item])).values()];
+    const unique = [...new Map(eligible.map((item) => [String(item.url), item])).values()]
+      .sort((left, right) => searchResultScore(right, parsedQuery, domains) - searchResultScore(left, parsedQuery, domains));
     const hits: SearchHit[] = unique.slice(0, limit).map((item, index) => ({
       hitId: `search-${createHash("sha256").update(String(item.url)).digest("hex").slice(0, 20)}`,
       title: String(item.title), url: String(item.url), snippet: boundText(typeof item.content === "string" ? item.content : "", 500).text,
@@ -187,17 +193,19 @@ export class WebxAuthority {
         body: JSON.stringify({ url: request.url, query: input.query, view: input.view ?? "main", maxChars: integer(request.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, 1_000_000) }),
       });
       if (!response.ok) throw new Error(`reader returned HTTP ${response.status}: ${boundText(await response.text(), 500).text}`);
-      const page = await response.json() as { url?: unknown; title?: unknown; content?: unknown; mediaType?: unknown; truncated?: unknown };
+      const page = await response.json() as { url?: unknown; title?: unknown; content?: unknown; mediaType?: unknown; source?: unknown; truncated?: unknown; metadata?: unknown };
       if (typeof page.content !== "string") throw new Error("reader returned no text content");
       const digest = createHash("sha256").update(`${request.url}\0${page.content}`).digest("hex");
       source = { hitId: `hit-${digest.slice(0, 20)}`, ownerPrincipalId: actor.principalId, title: typeof page.title === "string" ? page.title : request.url, url: typeof page.url === "string" ? page.url : request.url, content: page.content, visibility: "public", pageId: `page-${digest}`, artifactId: `artifact-${digest}` };
       this.#liveSources.set(source.pageId, source);
+      const readerMetadata = typeof page.metadata === "object" && page.metadata !== null ? page.metadata as Record<string, unknown> : {};
+      this.#liveReadMetadata.set(source.pageId, { requestedUrl: request.url, finalUrl: source.url, source: page.source, substituted: source.url !== request.url, reader: readerMetadata });
       this.#liveArtifacts.set(source.artifactId, { artifactId: source.artifactId, ownerPrincipalId: actor.principalId, mediaType: typeof page.mediaType === "string" ? page.mediaType : "text/markdown", sha256: createHash("sha256").update(page.content).digest("hex"), content: page.content, visibility: "public" });
     }
     if (source === undefined || !canRead(actor, source.ownerPrincipalId, source.visibility)) throw problem(404, "not-found", "page was not found", false);
     const maxChars = integer(request.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, 1_000_000);
     const bounded = boundText(source.content, maxChars);
-    return { title: source.title, url: source.url, untrustedContent: bounded.text, truncated: bounded.truncated, artifactId: source.artifactId, pageId: source.pageId, visibility: source.visibility };
+    return { title: source.title, url: source.url, untrustedContent: bounded.text, truncated: bounded.truncated, artifactId: source.artifactId, pageId: source.pageId, visibility: source.visibility, metadata: this.#liveReadMetadata.get(source.pageId) } as BoundedContent;
   }
 
   private async research(actor: AuthorityActor, request: ResearchRequest, signal?: AbortSignal): Promise<{ question: string; summary: string; sources: SearchHit[]; truncated: boolean }> {
@@ -205,22 +213,34 @@ export class WebxAuthority {
     if (typeof request.question !== "string" || request.question.trim().length === 0) throw problem(400, "invalid-request", "question is required", false);
     const input = request as ResearchRequest & { maxPages?: number; maxBytes?: number; maxQueries?: number; mode?: string };
     const pageLimit = integer(input.maxPages ?? (input.mode === "deep" ? 12 : input.mode === "research" ? 8 : 4), "maxPages", 0, 40);
-    const searchQuery = researchSearchQuery(request.question);
-    const preferredDomains = researchDomains(request.question);
-    const search = await this.search(actor, { query: searchQuery, limit: Math.max(6, pageLimit), ...(preferredDomains.length > 0 ? { domains: preferredDomains } : {}) }, "research.write", signal);
+    const queryLimit = integer(input.maxQueries ?? (input.mode === "deep" ? 8 : input.mode === "research" ? 5 : 3), "maxQueries", 1, 24);
+    const plans = researchSearchPlans(request.question).slice(0, queryLimit);
+    const collected: SearchHit[] = [];
+    let searchTruncated = false;
+    for (const plan of plans) {
+      const result = await this.search(actor, { query: plan.query, limit: Math.max(6, pageLimit), ...(plan.domains.length > 0 ? { domains: plan.domains } : {}) }, "research.write", signal);
+      searchTruncated ||= result.truncated;
+      for (const hit of result.hits) if (!collected.some((existing) => existing.url === hit.url)) collected.push(hit);
+    }
+    const sources = collected.slice(0, Math.max(6, pageLimit)).map((hit, index) => ({ ...hit, rank: index + 1 }));
     const sections: string[] = [];
-    for (const hit of search.hits.slice(0, pageLimit)) {
+    let readableSources = 0;
+    for (const hit of sources.slice(0, pageLimit)) {
       try {
         const perPageChars = Math.min(6_000, Math.floor((input.maxBytes ?? 24_000) / Math.max(1, pageLimit)));
         const page = await this.read({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, { url: hit.url, maxChars: perPageChars }, signal);
+        if (!page.untrustedContent.trim()) continue;
+        readableSources += 1;
         sections.push(`## ${page.title}\n${page.url}\n\n${page.untrustedContent}`);
       } catch (error) {
         sections.push(`## ${hit.title}\nSource: ${hit.url}\n\nRead failed: ${safeMessage(error)}`);
       }
     }
-    const summary = sections.length > 0 ? sections.join("\n\n") : "No web evidence was found.";
+    const summary = readableSources >= 2
+      ? sections.join("\n\n")
+      : `Insufficient relevant evidence. Found ${readableSources} readable source${readableSources === 1 ? "" : "s"}; at least 2 are required.\n\n${sections.join("\n\n")}`;
     const outputLimit = Math.min(MAX_CONTENT_CHARS, input.maxBytes ?? 24_000);
-    return { question: request.question, summary: boundText(summary, outputLimit).text, sources: search.hits, truncated: search.truncated || summary.length > outputLimit };
+    return { question: request.question, summary: boundText(summary, outputLimit).text, sources, truncated: searchTruncated || summary.length > outputLimit };
   }
 
   private searchPages(actor: AuthorityActor, request: PageLibrarySearchRequest): PageLibrarySearchResponse {
@@ -355,10 +375,56 @@ function boundedFailure(status: number, bodyValue: WebxProblem, maxBytes: number
 interface AuthorityFailure { readonly authorityFailure: true; readonly status: number; readonly body: WebxProblem }
 function problem(status: number, code: string, message: string, retryable: boolean): AuthorityFailure { return { authorityFailure: true, status, body: { code, message, retryable } }; }
 function isAuthorityFailure(value: unknown): value is AuthorityFailure { return typeof value === "object" && value !== null && (value as { authorityFailure?: unknown }).authorityFailure === true; }
+function parseSearchQuery(raw: string): ParsedSearchQuery {
+  const domains = [...raw.matchAll(/(?:^|\s)site:([A-Za-z0-9.-]+)/giu)].map((match) => match[1] ?? "").filter(Boolean);
+  const phrases = [...raw.matchAll(/"([^"]+)"/gu)].map((match) => (match[1] ?? "").trim().toLocaleLowerCase()).filter(Boolean);
+  const query = raw.replace(/(?:^|\s)site:[A-Za-z0-9.-]+/giu, " ").replace(/\s+/gu, " ").trim();
+  const terms = query.replace(/"/gu, "").toLocaleLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}._+-]*/gu) ?? [];
+  const noise = new Set(["a", "an", "and", "at", "for", "from", "in", "is", "of", "on", "or", "the", "to", "with"]);
+  const useful = [...new Set(terms.filter((term) => term.length > 1 && !noise.has(term)))];
+  return { query, domains, phrases, terms: useful, requiredTokens: useful.filter((term) => /\d/u.test(term)) };
+}
+function searchText(item: RawSearchHit): string { return `${String(item.title ?? "")} ${String(item.content ?? "")} ${String(item.url ?? "")}`.toLocaleLowerCase(); }
+function searchResultRelevant(item: RawSearchHit, query: ParsedSearchQuery): boolean {
+  const text = searchText(item);
+  if (query.phrases.some((phrase) => !text.includes(phrase))) return false;
+  if (query.requiredTokens.some((token) => !text.includes(token))) return false;
+  if (query.terms.length === 0) return true;
+  const matched = query.terms.filter((term) => text.includes(term)).length;
+  return matched >= Math.max(1, Math.ceil(Math.min(query.terms.length, 6) / 2));
+}
+function searchResultScore(item: RawSearchHit, query: ParsedSearchQuery, domains: readonly string[]): number {
+  const text = searchText(item);
+  const title = String(item.title ?? "").toLocaleLowerCase();
+  const matched = query.terms.filter((term) => text.includes(term)).length;
+  const titleMatches = query.terms.filter((term) => title.includes(term)).length;
+  let score = matched * 3 + titleMatches * 5 + query.phrases.filter((phrase) => title.includes(phrase)).length * 10;
+  try {
+    const hostname = new URL(String(item.url)).hostname.toLocaleLowerCase().replace(/^www\./u, "");
+    if (domains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))) score += 20;
+    if (/\.(?:gov|edu)$/u.test(hostname) || hostname.endsWith(".gov.uk") || hostname.includes("docs.")) score += 5;
+  } catch { return score; }
+  if (typeof item.score === "number" && Number.isFinite(item.score)) score += Math.min(5, item.score);
+  return score;
+}
+function researchSearchPlans(question: string): Array<{ query: string; domains: string[] }> {
+  const normalized = question.toLocaleLowerCase();
+  const technologies: Array<{ pattern: RegExp; query: string; domains: string[] }> = [
+    { pattern: /\bnode(?:\.js|js)?\b/u, query: "Node.js latest current LTS release", domains: ["nodejs.org"] },
+    { pattern: /\brust\b/u, query: "Rust latest stable release", domains: ["rust-lang.org"] },
+    { pattern: /\bpython\b/u, query: "Python latest stable release", domains: ["python.org"] },
+    { pattern: /\b(?:golang|go programming)\b/u, query: "Go latest stable release", domains: ["go.dev"] },
+  ];
+  const selected = technologies.filter((item) => item.pattern.test(normalized)).map(({ query, domains }) => ({ query, domains }));
+  if (selected.length > 1) return selected;
+  return [{ query: researchSearchQuery(question), domains: researchDomains(question) }];
+}
 function researchDomains(question: string): string[] {
   const normalized = question.toLocaleLowerCase();
   if (normalized.includes("fedora")) return ["fedoraproject.org", "fedoramagazine.org"];
   if (normalized.includes("pi coding agent") || normalized.includes("pi agent")) return ["pi.dev", "github.com"];
+  if (normalized.includes("weather") || normalized.includes("forecast")) return ["weather.gov"];
+  if (normalized.includes("ecb") || normalized.includes("european central bank")) return ["ecb.europa.eu"];
   return [];
 }
 function researchSearchQuery(question: string): string {

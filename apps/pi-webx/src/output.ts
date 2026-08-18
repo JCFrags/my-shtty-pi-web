@@ -44,7 +44,9 @@ function renderData(value: unknown): string | undefined {
     return hits.length ? hits.join("\n") : "No results.";
   }
   if (typeof data.untrustedContent === "string") {
-    const header = [data.title, data.url].filter((item) => typeof item === "string" && item.length > 0).join("\n");
+    const metadata = typeof data.metadata === "object" && data.metadata !== null ? data.metadata as Record<string, unknown> : undefined;
+    const status = metadata ? `Read status: source=${String(metadata.source ?? "unknown")}; requested=${String(metadata.requestedUrl ?? data.url ?? "")}; final=${String(metadata.finalUrl ?? data.url ?? "")}; substituted=${String(metadata.substituted ?? false)}; truncated=${String(data.truncated ?? false)}` : undefined;
+    const header = [data.title, data.url, status].filter((item) => typeof item === "string" && item.length > 0).join("\n");
     return `${header}${header ? "\n\n" : ""}${clip(data.untrustedContent, 30_000)}`;
   }
   if (typeof data.question === "string" && typeof data.summary === "string") {
