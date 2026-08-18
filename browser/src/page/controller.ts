@@ -141,6 +141,9 @@ export class BrowserController {
     });
     this.window.webContents.setFrameRate(frameRate());
     this.window.on("closed", this.onWindowClosed);
+    this.window.webContents.on("will-navigate", (event, url) => {
+      if (this.quitLink(url)) event.preventDefault();
+    });
     screen.on("display-added", this.onDisplayChange);
     screen.on("display-removed", this.onDisplayChange);
     screen.on("display-metrics-changed", this.onDisplayChange);
@@ -562,16 +565,19 @@ export class BrowserController {
     this.onState(this.state);
   }
 
+  private quitLink(url: string): boolean {
+    if (!url.startsWith("terminal-browser://quit")) return false;
+    setImmediate(() => {
+      if (!this.stopped) this.window.close();
+    });
+    return true;
+  }
+
   private handleWindowOpen(
     { url, disposition, features }: Electron.HandlerDetails,
     opener: Electron.WebContents,
   ): Electron.WindowOpenHandlerResponse {
-    if (url.startsWith("terminal-browser://quit")) {
-      setImmediate(() => {
-        if (!this.stopped) this.window.close();
-      });
-      return { action: "deny" };
-    }
+    if (this.quitLink(url)) return { action: "deny" };
     const wantsTab = disposition === "foreground-tab" || disposition === "background-tab";
     if (wantsTab && !this.tabsAsPopups && this.onOpenTab) {
       this.onOpenTab(url, disposition === "foreground-tab");
