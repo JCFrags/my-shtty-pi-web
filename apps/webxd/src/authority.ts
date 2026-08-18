@@ -199,7 +199,6 @@ export class WebxAuthority {
   private searchPages(actor: AuthorityActor, request: PageLibrarySearchRequest): PageLibrarySearchResponse {
     requireScope(actor, "pages.read");
     if (typeof request.query !== "string" || request.query.trim().length === 0 || request.query.length > 8_192) throw problem(400, "invalid-request", "query must contain 1 to 8192 characters", false);
-    if (request.includeHistory === true) throw problem(501, "unavailable", "page history search is not available in this runtime", false);
     const limit = integer(request.limit ?? 10, "limit", 1, 100);
     const query = request.query.toLocaleLowerCase();
     const matches = [...this.options.sources, ...this.#liveSources.values()].filter((source) => source.visibility === "public" && !this.#forgottenPages.has(source.pageId) && `${source.title} ${source.content} ${source.url}`.toLocaleLowerCase().includes(query));

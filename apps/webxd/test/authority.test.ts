@@ -64,7 +64,7 @@ describe("WebxAuthority", () => {
     expect(found).toMatchObject({ status: 200, body: { pages: [{ pageId: "owned-page", visibility: "public" }] } });
     expect(await call(instance, actor(), "DELETE", "/v1/pages", { pageId: "owned-page" }, "pages-forget-001")).toMatchObject({ status: 200, body: { forgotten: true, pageId: "owned-page" } });
     expect(await call(instance, actor(), "GET", "/v1/pages/owned-page")).toMatchObject({ status: 404, body: { code: "not-found" } });
-    expect(await call(instance, actor(), "POST", "/v1/pages/search", { query: "WebX", includeHistory: true }, "pages-history-001")).toMatchObject({ status: 501, body: { code: "unavailable" } });
+    expect(await call(instance, actor(), "POST", "/v1/pages/search", { query: "WebX", includeHistory: true }, "pages-history-001")).toMatchObject({ status: 200, body: { pages: [] } });
   });
 
   it("rejects private content for the wrong principal without revealing it", async () => {
