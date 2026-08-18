@@ -90,6 +90,9 @@ export interface ReadRequest {
   readonly pageId?: string;
   readonly query?: string;
   readonly view?: "main" | "outline" | "raw";
+  readonly fields?: readonly string[];
+  readonly itemOffset?: number;
+  readonly itemLimit?: number;
   readonly maxChars?: number;
   readonly visibility?: Visibility;
 }

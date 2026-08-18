@@ -190,11 +190,11 @@ export class WebxAuthority {
     if ((request.url === undefined) === (request.pageId === undefined)) throw problem(400, "invalid-request", "supply exactly one url or pageId", false);
     const allSources = [...this.options.sources, ...this.#liveSources.values()];
     let source = request.pageId === undefined ? allSources.find((item) => item.url === request.url) : allSources.find((item) => item.pageId === request.pageId);
-    const input = request as ReadRequest & { query?: string; view?: string };
+    const input = request as ReadRequest & { query?: string; view?: string; fields?: readonly string[]; itemOffset?: number; itemLimit?: number };
     if (source === undefined && request.url !== undefined && this.options.readerUrl !== undefined) {
       const response = await fetch(new URL("/v1/read", this.options.readerUrl), {
         method: "POST", signal, headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ url: request.url, query: input.query, view: input.view ?? "main", maxChars: integer(request.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, 1_000_000) }),
+        body: JSON.stringify({ url: request.url, query: input.query, view: input.view ?? "main", fields: input.fields ?? [], itemOffset: integer(input.itemOffset ?? 0, "itemOffset", 0, 1_000_000), itemLimit: integer(input.itemLimit ?? 50, "itemLimit", 1, 500), maxChars: integer(request.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, 1_000_000) }),
       });
       if (!response.ok) throw new Error(`reader returned HTTP ${response.status}: ${boundText(await response.text(), 500).text}`);
       const page = await response.json() as { url?: unknown; title?: unknown; content?: unknown; mediaType?: unknown; source?: unknown; truncated?: unknown; metadata?: unknown };
