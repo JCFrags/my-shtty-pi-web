@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { Value } from "typebox/value";
-import { createPiWebxExtension } from "../src/index.js";
+import { createPiWebxExtension } from "../src/index-web-v6.js";
 import { MAX_MODEL_CHARS, presentResult } from "../src/output.js";
 import {
   ArtifactReadSchema,
@@ -92,6 +92,12 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   assert.ok(fx.active.includes("other_extension_tool"));
   assert.ok(fx.active.includes("web_search"));
   assert.ok(fx.active.includes("browser_open"));
+  const searchTool = fx.tools.find((tool) => tool.name === "web_search");
+  assert.match(String(searchTool?.promptSnippet), /live internet/);
+  assert.ok(Array.isArray(searchTool?.promptGuidelines));
+  const prompt = await (fx.events.get("before_agent_start") as Function)({ systemPrompt: "base" }, fx.ctx);
+  assert.match(prompt.systemPrompt, /WebX is Pi's primary internet interface/);
+  assert.match(prompt.systemPrompt, /Do not replace WebX with curl/);
 
   await fx.execute("web_upgrade", { mode: "browser" });
   assert.ok(fx.active.includes("browser_open"));
