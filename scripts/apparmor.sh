@@ -28,10 +28,8 @@ if [ -f /etc/apparmor.d/abi/5.0 ]; then
   ABI=5.0
 elif [ -f /etc/apparmor.d/abi/4.0 ]; then
   ABI=4.0
-elif [ -f /etc/apparmor.d/abi/3.0 ]; then
-  ABI=3.0
 else
-  echo "no AppArmor abi under /etc/apparmor.d/abi/ — cannot install profile" >&2
+  echo "no supported AppArmor abi under /etc/apparmor.d/abi/ - cannot install profile" >&2
   exit 1
 fi
 
