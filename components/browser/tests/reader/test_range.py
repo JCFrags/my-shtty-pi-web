@@ -4,7 +4,6 @@ import asyncio
 
 import httpx
 import pytest
-
 from pi_web_reader.pipeline import (
     MAX_RANGE_BYTES,
     RangeReadRequest,
