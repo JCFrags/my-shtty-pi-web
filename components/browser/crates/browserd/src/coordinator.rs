@@ -2418,6 +2418,10 @@ impl Coordinator {
         // named daemon sessions. Unsupported backends remain visible as failed instead of
         // being silently replaced.
         for recovered in snapshot.hosts {
+            if !recovered.persistent {
+                tracing::info!(host_id=%recovered.handle.host.host_id, "discarded ephemeral browser host during recovery");
+                continue;
+            }
             if recovered.handle.host.engine != BrowserEngine::Chromium || recovered.handle.host.backend == BrowserBackend::Rustwright {
                 tracing::warn!(host_id=%recovered.handle.host.host_id, "refused recovery of unsupported browser path");
                 continue;

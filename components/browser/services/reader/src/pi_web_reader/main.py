@@ -3,13 +3,27 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from .pipeline import ReaderPipeline, ReadRequest
+from .pipeline import MAX_PUBLIC_REDIRECTS, MAX_RANGE_BYTES, RangeReadRequest, ReaderPipeline, ReadRequest
 
 try:
     from fastapi import FastAPI, HTTPException
     from pydantic import BaseModel, ConfigDict, Field
 except ImportError as error:  # pragma: no cover - exercised only on partial installs
     raise RuntimeError("install reader dependencies with `uv sync --all-packages`") from error
+
+try:
+    import httpx
+except ImportError:  # pragma: no cover
+    httpx = None  # type: ignore[assignment]
+
+
+class RangeReadPayload(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    url: str
+    offset: int = Field(ge=0)
+    length: int = Field(ge=1, le=MAX_RANGE_BYTES)
+    max_redirects: int = Field(default=4, ge=0, le=MAX_PUBLIC_REDIRECTS, alias="maxRedirects")
 
 
 class ReadPayload(BaseModel):
@@ -21,6 +35,9 @@ class ReadPayload(BaseModel):
     max_chars: int = Field(default=20_000, alias="maxChars")
     require_markdown: bool = Field(default=False, alias="requireMarkdown")
     allow_llms_full: bool = Field(default=False, alias="allowLlmsFull")
+    fields: list[str] = Field(default_factory=list, max_length=32)
+    item_offset: int = Field(default=0, ge=0, alias="itemOffset")
+    item_limit: int = Field(default=50, ge=1, le=500, alias="itemLimit")
 
 
 pipeline = ReaderPipeline()
@@ -36,11 +53,29 @@ async def health() -> dict[str, Any]:
         "resolutionOrder": [
             "markdown-negotiation",
             "markdown-fallback",
-            "llms.txt",
             "trafilatura",
+            "llms.txt-fallback",
             "coordinator-render-escalation",
         ],
     }
+
+
+@app.post("/v1/read-range")
+async def read_range(payload: RangeReadPayload) -> dict[str, Any]:
+    try:
+        request = RangeReadRequest(
+            url=payload.url,
+            offset=payload.offset,
+            length=payload.length,
+            max_redirects=payload.max_redirects,
+        )
+        return (await pipeline.read_range(request)).to_dict()
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except Exception as error:
+        if httpx is not None and isinstance(error, httpx.HTTPError):
+            raise HTTPException(status_code=502, detail="range origin request failed") from error
+        raise HTTPException(status_code=502, detail="range processing failed") from error
 
 
 @app.post("/v1/read")
@@ -53,12 +88,26 @@ async def read(payload: ReadPayload) -> dict[str, Any]:
             max_chars=payload.max_chars,
             require_markdown=payload.require_markdown,
             allow_llms_full=payload.allow_llms_full,
+            fields=tuple(payload.fields),
+            item_offset=payload.item_offset,
+            item_limit=payload.item_limit,
         )
         return (await pipeline.read(request)).to_dict()
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except Exception as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
+        if httpx is not None and isinstance(error, httpx.HTTPStatusError):
+            upstream_status = error.response.status_code
+            raise HTTPException(
+                status_code=upstream_status,
+                detail={
+                    "detail": f"upstream returned HTTP {upstream_status}",
+                    "upstreamStatus": upstream_status,
+                    "toolStatus": upstream_status,
+                    "retryable": upstream_status == 429 or upstream_status >= 500,
+                },
+            ) from error
+        raise HTTPException(status_code=502, detail="reader processing failed") from error
 
 
 def run() -> None:

@@ -208,6 +208,7 @@ impl PinchTabController {
 
     fn client_command(&self, runtime: &HostRuntime) -> Command {
         let mut command = self.base_command(runtime);
+        clear_proxy_environment(&mut command);
         command.args([
             "--server",
             runtime.server_url.as_str(),
@@ -1769,6 +1770,25 @@ fn validate_health(value: &Value) -> Result<()> {
     Ok(())
 }
 
+fn clear_proxy_environment(command: &mut Command) {
+    // PinchTab CLI commands use only the authenticated loopback control server.
+    // Do not route that control traffic through the origin-facing egress proxy.
+    // The separately spawned PinchTab server keeps the inherited proxy variables
+    // so its Chromium origin traffic remains forced through controlled egress.
+    for name in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+    ] {
+        command.env_remove(name);
+    }
+}
+
 fn reserve_loopback_port() -> Result<u16> {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .map_err(|error| BackendError::HostUnavailable(format!("cannot reserve loopback port: {error}")))?;
@@ -2172,6 +2192,43 @@ mod tests {
         assert!(validate_provider("chrome").is_ok());
         assert!(validate_provider("agent-browser").is_err());
         assert!(validate_provider("ghost-chrome").is_err());
+    }
+
+    #[test]
+    fn control_cli_removes_proxy_environment() {
+        let mut command = Command::new("pinchtab");
+        for name in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+            "no_proxy",
+        ] {
+            command.env(name, "http://127.0.0.1:8877");
+        }
+
+        clear_proxy_environment(&mut command);
+
+        let environment: BTreeMap<_, _> = command
+            .as_std()
+            .get_envs()
+            .map(|(name, value)| (name.to_owned(), value.map(|item| item.to_owned())))
+            .collect();
+        for name in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+            "no_proxy",
+        ] {
+            assert_eq!(environment.get(std::ffi::OsStr::new(name)), Some(&None));
+        }
     }
 
     #[test]
