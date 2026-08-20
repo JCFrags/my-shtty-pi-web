@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiVersionError, FACADE_OPERATION_INVENTORY, HttpTransport, ResponseLimitError, WebxClient } from "../src/index.js";
+import { ApiVersionError, FACADE_OPERATION_INVENTORY, HttpTransport, ResponseLimitError, UnixSocketTransport, WebxClient } from "../src/index.js";
 import type { BrowserAction } from "../src/types.js";
 
 function transport(version = "1.0.0") {
@@ -78,6 +78,30 @@ describe("WebxClient", () => {
     const fetch = vi.fn(async () => new Response("123456", { status: 200, headers: { "content-type": "text/plain" } }));
     const wire = new HttpTransport({ baseUrl: "http://127.0.0.1", fetch, retryCount: 0 });
     await expect(wire.request({ method: "GET", path: "/", maxResponseBytes: 5 })).rejects.toBeInstanceOf(ResponseLimitError);
+  });
+
+  it("renews one stale runtime binding and retries the rejected request", async () => {
+    const lines: unknown[] = [];
+    let bindingSequence = 0;
+    const connect = vi.fn(async () => ({
+      close: async () => undefined,
+      send: async (line: string) => {
+        const wire = JSON.parse(line) as { bind?: { ownerId?: string }; binding?: { bindingId?: string } };
+        lines.push(wire);
+        if (wire.bind !== undefined) {
+          bindingSequence += 1;
+          return JSON.stringify({ bindingId: `binding-${bindingSequence}`, bindingSecret: `secret-${bindingSequence}` });
+        }
+        if (wire.binding?.bindingId === "binding-1") return JSON.stringify({ status: 400, headers: {}, body: { code: "invalid-wire-request", message: "runtime actor binding is invalid", retryable: false } });
+        return JSON.stringify({ status: 200, headers: {}, body: { ok: true } });
+      },
+    }));
+    const wire = new UnixSocketTransport("/run/user/1000/webxd.sock", connect);
+    await wire.bind("owner-rebind");
+    await expect(wire.request({ method: "GET", path: "/v1/version", maxResponseBytes: 1024 })).resolves.toMatchObject({ status: 200, body: { ok: true } });
+    expect(bindingSequence).toBe(2);
+    expect(lines).toHaveLength(4);
+    expect(lines.at(2)).toEqual({ bind: { ownerId: "owner-rebind" } });
   });
 
   it("propagates AbortSignal to the transport", async () => {
