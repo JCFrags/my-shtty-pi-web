@@ -26,7 +26,13 @@ async def public_resolver(_host: str, _port: int) -> list[str]:
     return ["93.184.216.34"]
 
 
-def response(status: int, request: httpx.Request, *, headers: dict[str, str] | None = None, content: bytes = b"") -> httpx.Response:
+def response(
+    status: int,
+    request: httpx.Request,
+    *,
+    headers: dict[str, str] | None = None,
+    content: bytes = b"",
+) -> httpx.Response:
     return httpx.Response(status, headers=headers, stream=BytesStream(content), request=request)
 
 
@@ -45,7 +51,8 @@ async def test_range_returns_exact_raw_bytes_and_required_metadata() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
         return response(
-            206, request,
+            206,
+            request,
             headers={
                 "content-range": "bytes 10-14/100",
                 "content-type": "application/warc",
@@ -64,14 +71,18 @@ async def test_range_returns_exact_raw_bytes_and_required_metadata() -> None:
     assert result.range_end == 14
     assert result.total_bytes == 100
     assert result.redirect_chain == ("https://data.example/archive.warc.gz",)
-    assert result.to_dict()["sha256"] == "36bbe50ed96841d10443bcb670d6554f0a34b761be67ec9c4a8ad2c0c44ca42c"
+    assert (
+        result.to_dict()["sha256"]
+        == "36bbe50ed96841d10443bcb670d6554f0a34b761be67ec9c4a8ad2c0c44ca42c"
+    )
 
 
 @pytest.mark.asyncio
 async def test_range_accepts_a_short_final_range() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         return response(
-            206, request,
+            206,
+            request,
             headers={"content-range": "bytes 98-99/100"},
             content=b"xy",
         )
@@ -90,7 +101,12 @@ async def test_range_accepts_a_short_final_range() -> None:
         (200, {}, b"abcde", "HTTP 206"),
         (206, {"content-range": "bytes 9-13/100"}, b"abcde", "inconsistent"),
         (206, {"content-range": "bytes 10-14/100"}, b"abcdef", "byte limit"),
-        (206, {"content-range": "bytes 10-14/100", "content-encoding": "gzip"}, b"abcde", "content encoding"),
+        (
+            206,
+            {"content-range": "bytes 10-14/100", "content-encoding": "gzip"},
+            b"abcde",
+            "content encoding",
+        ),
         (206, {"content-range": "items 10-14/100"}, b"abcde", "invalid Content-Range"),
     ],
 )

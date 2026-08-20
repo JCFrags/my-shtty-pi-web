@@ -440,13 +440,25 @@ def extract_pdf_text(content: bytes) -> str:
 
 def validate_range_request(request: RangeReadRequest) -> None:
     validate_public_url_syntax(request.url)
-    if isinstance(request.offset, bool) or not isinstance(request.offset, int) or request.offset < 0:
+    if (
+        isinstance(request.offset, bool)
+        or not isinstance(request.offset, int)
+        or request.offset < 0
+    ):
         raise ValueError("range offset must be a non-negative integer")
-    if isinstance(request.length, bool) or not isinstance(request.length, int) or not 1 <= request.length <= MAX_RANGE_BYTES:
+    if (
+        isinstance(request.length, bool)
+        or not isinstance(request.length, int)
+        or not 1 <= request.length <= MAX_RANGE_BYTES
+    ):
         raise ValueError(f"range length must be from 1 to {MAX_RANGE_BYTES}")
     if request.offset > (2**63 - 1) - request.length:
         raise ValueError("range end exceeds the supported integer bound")
-    if isinstance(request.max_redirects, bool) or not isinstance(request.max_redirects, int) or not 0 <= request.max_redirects <= MAX_PUBLIC_REDIRECTS:
+    if (
+        isinstance(request.max_redirects, bool)
+        or not isinstance(request.max_redirects, int)
+        or not 0 <= request.max_redirects <= MAX_PUBLIC_REDIRECTS
+    ):
         raise ValueError(f"max redirects must be from 0 to {MAX_PUBLIC_REDIRECTS}")
 
 
@@ -690,8 +702,16 @@ def finalize_json_result(fetched: FetchResult, request: ReadRequest) -> ReadResu
     matched_items = total_items
     if collection is not None:
         if request.query:
-            tokens = [token for token in re.findall(r"[\w.+-]+", request.query.casefold()) if len(token) > 1]
-            selected = [item for item in collection if all(token in json.dumps(item, ensure_ascii=False).casefold() for token in tokens)]
+            tokens = [
+                token
+                for token in re.findall(r"[\w.+-]+", request.query.casefold())
+                if len(token) > 1
+            ]
+            selected = [
+                item
+                for item in collection
+                if all(token in json.dumps(item, ensure_ascii=False).casefold() for token in tokens)
+            ]
         matched_items = len(selected)
         selected = selected[request.item_offset : request.item_offset + request.item_limit]
         if collection_key is None:

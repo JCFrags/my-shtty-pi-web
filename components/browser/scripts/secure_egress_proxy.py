@@ -5,6 +5,7 @@ The proxy rejects credentials, local names, non-public addresses, and mixed DNS
 answers. HTTPS uses CONNECT. Each new host or redirect must pass through a new
 validated proxy connection.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -173,7 +174,12 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             await handle_connect(target, reader, writer)
         else:
             await handle_http(method, target, version, lines[1:], reader, writer)
-    except (ProxyDenied, UnicodeError, asyncio.IncompleteReadError, asyncio.LimitOverrunError) as error:
+    except (
+        ProxyDenied,
+        UnicodeError,
+        asyncio.IncompleteReadError,
+        asyncio.LimitOverrunError,
+    ) as error:
         message = str(error).encode("ascii", "replace")[:200]
         writer.write(
             b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Type: text/plain\r\nContent-Length: "
