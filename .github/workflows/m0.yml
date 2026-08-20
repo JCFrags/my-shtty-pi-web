@@ -45,6 +45,7 @@ jobs:
             --with 'pyyaml==6.0.3' \
             --with 'referencing==0.36.2' \
             python -c 'pass'
+          printf '%s\n' "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
       - name: Run M0 release preparation
         env:
           NO_COLOR: "1"

@@ -3,7 +3,7 @@
     {
       "artifacts": [
         {
-          "digest": "sha256:06c36f639529d4e3a01174a5ffde04c7bc11439357b33714332b138789bf9860",
+          "digest": "sha256:6b985af5b7ac645c6cfe35e4c4322cfe8cf990c25c7e4b71e27dac900432c89c",
           "id": "file:.github/workflows/m0.yml"
         }
       ],

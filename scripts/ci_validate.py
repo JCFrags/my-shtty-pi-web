@@ -43,6 +43,7 @@ def validate(text: str) -> list[str]:
         "frozen pnpm dependencies": "pnpm install --frozen-lockfile\n",
         "frozen Python dependencies": "uv sync --frozen --python 3.14.6\n",
         "locked contract dependencies": "--with 'jsonschema[format-nongpl]==4.25.1' \\\n",
+        "project environment": '"$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"\n',
         "timeout": "    timeout-minutes: 30\n",
         "credential removal": "          persist-credentials: false\n",
         "shallow checkout": "          fetch-depth: 1\n",
