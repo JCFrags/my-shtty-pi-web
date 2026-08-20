@@ -58,7 +58,7 @@ class CiPolicyTest(unittest.TestCase):
 
     def test_secret_reference_fails(self) -> None:
         candidate = self.workflow.replace(
-            "NO_COLOR: \"1\"", "PRIVATE_TOKEN: ${{ secrets.PRIVATE_TOKEN }}"
+            'NO_COLOR: "1"', "PRIVATE_TOKEN: ${{ secrets.PRIVATE_TOKEN }}"
         )
         failures = ci_validate.validate(candidate)
         self.assertTrue(any("secrets." in failure for failure in failures), failures)
