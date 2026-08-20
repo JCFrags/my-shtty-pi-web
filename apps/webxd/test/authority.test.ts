@@ -1,7 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebxAuthority } from "../src/authority.js";
 import { PUBLIC_ARTIFACTS, PUBLIC_SOURCES } from "../src/fixtures.js";
 import type { AuthorityActor, BrowserDaemonPort } from "../src/ports.js";
+
+afterEach(() => vi.unstubAllGlobals());
 
 const paths = [
   { pathId: "agent-browser/chrome", actions: ["navigate", "click"], observations: ["main", "visual"], visual: true, touch: false, uploads: false, downloads: true },
@@ -35,8 +38,8 @@ function browser(): BrowserDaemonPort {
   };
 }
 
-function authority(browserPort = browser()) {
-  return new WebxAuthority({ browser: browserPort, sources: PUBLIC_SOURCES, artifacts: PUBLIC_ARTIFACTS, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` } });
+function authority(browserPort = browser(), readerUrl?: string) {
+  return new WebxAuthority({ browser: browserPort, sources: PUBLIC_SOURCES, artifacts: PUBLIC_ARTIFACTS, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, readerUrl });
 }
 
 async function call(instance: WebxAuthority, owner: AuthorityActor, method: "GET" | "POST" | "DELETE", path: string, body?: unknown, key?: string, maxResponseBytes = 1_048_576) {
@@ -55,6 +58,93 @@ describe("WebxAuthority", () => {
     expect(artifact.body).toMatchObject({ excerpt: "WebX", integrityVerified: true, nextOffset: 4 });
   });
 
+  it("reads a bounded byte range into an integrity-checked owner artifact", async () => {
+    const bytes = new TextEncoder().encode("abcde");
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({ url: "https://data.example/archive.warc.gz", offset: 10, length: 5, maxRedirects: 2 });
+      return new Response(JSON.stringify({
+        requestedUrl: "https://data.example/archive.warc.gz",
+        finalUrl: "https://data.example/archive.warc.gz",
+        statusCode: 206,
+        mediaType: "application/warc",
+        contentRange: "bytes 10-14/100",
+        rangeStart: 10,
+        rangeEnd: 14,
+        totalBytes: 100,
+        bodyBase64: "YWJjZGU=",
+        bodyBytes: 5,
+        sha256: digest,
+        redirectChain: ["https://data.example/archive.warc.gz"],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const ranged = await call(instance, actor(), "POST", "/v1/read-range", { url: "https://data.example/archive.warc.gz", offset: 10, length: 5, maxRedirects: 2 }, "range-read-001", 1_048_576);
+    expect(ranged).toMatchObject({ status: 200, body: { statusCode: 206, bodyBytes: 5, sha256: digest, visibility: "internal", integrityVerified: true } });
+    const artifactId = (ranged.body as { artifactId: string }).artifactId;
+    const excerpt = await call(instance, actor(), "GET", `/v1/artifacts/${artifactId}/bytes?offset=0&max_bytes=5`);
+    expect(excerpt).toMatchObject({ status: 200, body: { bodyBase64: "YWJjZGU=", sha256: digest, sizeBytes: 5, integrityVerified: true } });
+    const denied = await call(instance, actor("principal-b", "agent-b"), "GET", `/v1/artifacts/${artifactId}/bytes?offset=0&max_bytes=5`);
+    expect(denied).toMatchObject({ status: 404, body: { code: "not-found" } });
+  });
+
+  it("evicts old binary artifacts at the in-memory count bound", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { url: string };
+      return new Response(JSON.stringify({
+        requestedUrl: request.url, finalUrl: request.url, statusCode: 206,
+        mediaType: "application/octet-stream", contentRange: "bytes 0-0/1",
+        rangeStart: 0, rangeEnd: 0, totalBytes: 1, bodyBase64: "YQ==", bodyBytes: 1,
+        sha256: "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+        redirectChain: [request.url],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    let oldest = "";
+    for (let index = 0; index < 65; index += 1) {
+      const result = await call(instance, actor(), "POST", "/v1/read-range", { url: `https://data.example/${index}.warc`, offset: 0, length: 1 }, `range-evict-${index}`);
+      if (index === 0) oldest = (result.body as { artifactId: string }).artifactId;
+    }
+    expect(await call(instance, actor(), "GET", `/v1/artifacts/${oldest}/bytes?offset=0&max_bytes=1`)).toMatchObject({ status: 404 });
+  });
+
+  it("rejects invalid ranges and malformed reader integrity without fallback", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      requestedUrl: "https://data.example/archive.warc.gz", finalUrl: "https://data.example/archive.warc.gz",
+      statusCode: 206, mediaType: "application/warc", contentRange: "bytes 0-4/5",
+      rangeStart: 0, rangeEnd: 4, totalBytes: 5, bodyBase64: "YWJjZGU=", bodyBytes: 5,
+      sha256: "0".repeat(64), redirectChain: ["https://data.example/archive.warc.gz"],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    expect(await call(instance, actor(), "POST", "/v1/read-range", { url: "https://data.example/archive.warc.gz", offset: 0, length: 0 }, "range-invalid-1")).toMatchObject({ status: 400 });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await call(instance, actor(), "POST", "/v1/read-range", { url: "https://data.example/archive.warc.gz", offset: 0, length: 5 }, "range-invalid-2")).toMatchObject({ status: 502, body: { code: "backend-failure" } });
+  });
+
+  it("propagates active range cancellation to the reader request", async () => {
+    let seenSignal: AbortSignal | undefined;
+    const started = Promise.withResolvers<undefined>();
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      seenSignal = init?.signal ?? undefined;
+      started.resolve(undefined);
+      await new Promise((_resolve, reject) => seenSignal?.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")), { once: true }));
+      throw new Error("unreachable");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    const pending = authority(browser(), "http://127.0.0.1:8787").handle(actor(), {
+      method: "POST", path: "/v1/read-range", body: { url: "https://data.example/archive.warc.gz", offset: 0, length: 5 },
+      maxResponseBytes: 1_048_576, headers: { "idempotency-key": "range-cancel-1" }, signal: controller.signal,
+    });
+    await started.promise;
+    controller.abort();
+    expect(await pending).toMatchObject({ status: 499, body: { code: "cancelled" } });
+    expect(seenSignal?.aborted).toBe(true);
+  });
+
   it("searches and forgets only owner-visible public page-library records", async () => {
     const fixture = PUBLIC_SOURCES[0];
     if (fixture === undefined) throw new Error("fixture source is missing");
@@ -62,9 +152,11 @@ describe("WebxAuthority", () => {
     const instance = new WebxAuthority({ browser: browser(), sources: [source], artifacts: [], clock: { now: () => "" }, ids: { next: () => "" } });
     const found = await call(instance, actor(), "POST", "/v1/pages/search", { query: "WebX" }, "pages-search-001");
     expect(found).toMatchObject({ status: 200, body: { pages: [{ pageId: "owned-page", visibility: "public" }] } });
+    const tokenFound = await call(instance, actor(), "POST", "/v1/pages/search", { query: "routes WebX" }, "pages-search-token-001");
+    expect(tokenFound).toMatchObject({ status: 200, body: { pages: [{ pageId: "owned-page" }] } });
     expect(await call(instance, actor(), "DELETE", "/v1/pages", { pageId: "owned-page" }, "pages-forget-001")).toMatchObject({ status: 200, body: { forgotten: true, pageId: "owned-page" } });
     expect(await call(instance, actor(), "GET", "/v1/pages/owned-page")).toMatchObject({ status: 404, body: { code: "not-found" } });
-    expect(await call(instance, actor(), "POST", "/v1/pages/search", { query: "WebX", includeHistory: true }, "pages-history-001")).toMatchObject({ status: 501, body: { code: "unavailable" } });
+    expect(await call(instance, actor(), "POST", "/v1/pages/search", { query: "WebX", includeHistory: true }, "pages-history-001")).toMatchObject({ status: 200, body: { pages: [] } });
   });
 
   it("rejects private content for the wrong principal without revealing it", async () => {

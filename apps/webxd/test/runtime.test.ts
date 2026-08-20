@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { createServer, type Server, type Socket } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { NdjsonConnectionFactory } from "../../../packages/sdk/src/index.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebxClient, WebxError, WebxFacadeClient, UnixSocketTransport, nodeNdjsonConnectionFactory } from "../../../packages/sdk/src/index.js";
 import { FailClosedBrowserDestinationAuthority, type DestinationResolver } from "../src/destination-authority.js";
 import { WebxdRuntime, sameUserPiActorAuthenticator } from "../src/runtime.js";
@@ -105,6 +105,7 @@ class FakeBrowserd {
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
+  vi.unstubAllGlobals();
   while (cleanup.length > 0) await cleanup.pop()?.();
 });
 
@@ -183,6 +184,66 @@ describe("actual WebX Unix runtime", () => {
     expect(browser.unregisters).toBe(1);
     await expect(readFile(webxPath)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(client.capabilities()).rejects.toThrow();
+  });
+
+  it("routes bounded Range bytes and cancellation through the actual Unix runtime", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "webxd-range-"));
+    const previousRuntimeDirectory = process.env.XDG_RUNTIME_DIR;
+    process.env.XDG_RUNTIME_DIR = directory;
+    cleanup.push(async () => { process.env.XDG_RUNTIME_DIR = previousRuntimeDirectory; });
+    const webxPath = join(directory, "webxd.sock");
+    const runtime = new WebxdRuntime({
+      socketPath: webxPath,
+      browserSocketPath: join(directory, "unused-browserd.sock"),
+      readerUrl: "http://127.0.0.1:8787",
+      cwd: "/deterministic/range-fixture",
+      authenticateActor: sameUserPiActorAuthenticator,
+    });
+    await runtime.start();
+    cleanup.push(() => runtime.stop());
+    const client = new WebxClient(new UnixSocketTransport(webxPath, nodeNdjsonConnectionFactory));
+    await client.bind("range-owner");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      requestedUrl: "https://data.example/archive.warc.gz",
+      finalUrl: "https://data.example/archive.warc.gz",
+      statusCode: 206,
+      mediaType: "application/warc",
+      contentRange: "bytes 10-14/100",
+      rangeStart: 10,
+      rangeEnd: 14,
+      totalBytes: 100,
+      bodyBase64: "YWJjZGU=",
+      bodyBytes: 5,
+      sha256: "36bbe50ed96841d10443bcb670d6554f0a34b761be67ec9c4a8ad2c0c44ca42c",
+      redirectChain: ["https://data.example/archive.warc.gz"],
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const ranged = await client.readRange(
+      { url: "https://data.example/archive.warc.gz", offset: 10, length: 5 },
+      { idempotencyKey: "runtime-range-001" },
+    );
+    const excerpt = await client.getArtifactBytes(ranged.artifactId, 0, 5);
+    expect(excerpt).toMatchObject({ bodyBase64: "YWJjZGU=", sizeBytes: 5, integrityVerified: true });
+
+    const started = Promise.withResolvers<undefined>();
+    const readerCancelled = Promise.withResolvers<undefined>();
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      started.resolve(undefined);
+      return await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          readerCancelled.resolve(undefined);
+          reject(new DOMException("cancelled", "AbortError"));
+        }, { once: true });
+      });
+    }));
+    const controller = new AbortController();
+    const pending = client.readRange(
+      { url: "https://data.example/archive.warc.gz", offset: 0, length: 5 },
+      { idempotencyKey: "runtime-range-cancel", signal: controller.signal },
+    );
+    await started.promise;
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+    await readerCancelled.promise;
   });
 
   it("refuses actual Unix browser URL requests before Browserd dispatch", async () => {

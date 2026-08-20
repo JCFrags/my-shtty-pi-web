@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { availableTools, planUpgrade, TOOL_NAMES, type WebMode } from "./modes.js";
-import { presentResult } from "./output.js";
+import { presentResult } from "./output-constrained-v3.js";
 import {
   ArtifactReadSchema,
   BrowserActSchema,
@@ -24,7 +24,7 @@ import {
   type WebxCapabilities,
   type WebxSdk,
   type WebxSdkFactory,
-} from "./sdk.js";
+} from "./sdk-live-search-reader-v1.js";
 
 const STATUS_KEY = "pi-webx";
 const REFRESH_MS = 60_000;

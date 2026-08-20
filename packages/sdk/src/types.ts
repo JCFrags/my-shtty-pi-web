@@ -64,6 +64,8 @@ export interface SearchRequest {
   readonly query: string;
   readonly limit?: number;
   readonly visibility?: Visibility;
+  readonly domains?: readonly string[];
+  readonly freshness?: "day" | "week" | "month" | "year";
 }
 
 export interface SearchHit {
@@ -86,8 +88,37 @@ export interface SearchResponse {
 export interface ReadRequest {
   readonly url?: string;
   readonly pageId?: string;
+  readonly query?: string;
+  readonly view?: "main" | "outline" | "raw";
+  readonly fields?: readonly string[];
+  readonly itemOffset?: number;
+  readonly itemLimit?: number;
   readonly maxChars?: number;
   readonly visibility?: Visibility;
+}
+
+export interface RangeReadRequest {
+  readonly url: string;
+  readonly offset: number;
+  readonly length: number;
+  readonly maxRedirects?: number;
+}
+
+export interface RangeReadResponse {
+  readonly requestedUrl: string;
+  readonly finalUrl: string;
+  readonly statusCode: 206;
+  readonly mediaType: string;
+  readonly contentRange: string;
+  readonly rangeStart: number;
+  readonly rangeEnd: number;
+  readonly totalBytes: number | null;
+  readonly bodyBytes: number;
+  readonly sha256: string;
+  readonly artifactId: string;
+  readonly redirectChain: readonly string[];
+  readonly visibility: "internal";
+  readonly integrityVerified: true;
 }
 
 export interface BoundedContent {
@@ -102,6 +133,11 @@ export interface BoundedContent {
 
 export interface ResearchRequest {
   readonly question: string;
+  readonly mode?: "quick" | "research" | "deep";
+  readonly maxQueries?: number;
+  readonly maxPages?: number;
+  readonly maxBytes?: number;
+  readonly resume?: Readonly<Record<string, unknown>>;
   readonly maxSources?: number;
   readonly maxChars?: number;
   readonly visibility?: Visibility;
@@ -152,6 +188,18 @@ export interface ArtifactExcerpt {
   readonly sha256: string;
   readonly sizeBytes: number;
   readonly excerpt: string;
+  readonly offset: number;
+  readonly nextOffset?: number;
+  readonly visibility: Visibility;
+  readonly integrityVerified: true;
+}
+
+export interface ArtifactByteExcerpt {
+  readonly artifactId: string;
+  readonly mediaType: string;
+  readonly sha256: string;
+  readonly sizeBytes: number;
+  readonly bodyBase64: string;
   readonly offset: number;
   readonly nextOffset?: number;
   readonly visibility: Visibility;

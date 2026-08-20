@@ -2,6 +2,7 @@ import { ApiVersionError, asWebxError } from "./errors.js";
 import type { UnixSocketTransport } from "./transport.js";
 import {
   WEBX_API_MAJOR,
+  type ArtifactByteExcerpt,
   type ArtifactExcerpt,
   type BoundedContent,
   type BrowserAction,
@@ -21,6 +22,8 @@ import {
   type PageForgetResult,
   type PageLibrarySearchRequest,
   type PageLibrarySearchResponse,
+  type RangeReadRequest,
+  type RangeReadResponse,
   type ReadRequest,
   type RequestOptions,
   type ResearchRequest,
@@ -82,6 +85,10 @@ export class WebxClient {
     return this.call("POST", "/v1/read", request, requireIdempotency(options));
   }
 
+  readRange(request: RangeReadRequest, options: RequestOptions): Promise<RangeReadResponse> {
+    return this.call("POST", "/v1/read-range", request, requireIdempotency(options));
+  }
+
   research(request: ResearchRequest, options: RequestOptions): Promise<ResearchResponse> {
     return this.call("POST", "/v1/research", request, requireIdempotency(options));
   }
@@ -101,6 +108,11 @@ export class WebxClient {
   getArtifactExcerpt(artifactId: string, offset = 0, maxBytes = 16_384, options: RequestOptions = {}): Promise<ArtifactExcerpt> {
     const query = new URLSearchParams({ offset: String(offset), max_bytes: String(maxBytes) });
     return this.call("GET", `/v1/artifacts/${encodeURIComponent(artifactId)}/excerpt?${query}`, undefined, options);
+  }
+
+  getArtifactBytes(artifactId: string, offset = 0, maxBytes = 49_152, options: RequestOptions = {}): Promise<ArtifactByteExcerpt> {
+    const query = new URLSearchParams({ offset: String(offset), max_bytes: String(maxBytes) });
+    return this.call("GET", `/v1/artifacts/${encodeURIComponent(artifactId)}/bytes?${query}`, undefined, options);
   }
 
   createBrowserSession(request: BrowserSessionRequest, options: RequestOptions): Promise<BrowserSession> {

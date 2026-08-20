@@ -59,7 +59,7 @@ export class WebxFacadeClient {
             return external("Search results", await client.search({ query: requiredString(value.query, "query"), limit: optionalNumber(value.limit), domains: optionalStringArray(value.domains, "domains"), freshness: optionalFreshness(value.freshness) }, requestOptions));
         if (operation === "web.read") {
             rejectPresent(value, ["browserSessionId", "tabId"], operation);
-            return external("Read result", await client.read({ url: optionalString(value.url), query: optionalString(value.query), view: optionalReadView(value.view), maxChars: optionalNumber(value.maxChars) }, requestOptions));
+            return external("Read result", await client.read({ url: optionalString(value.url), query: optionalString(value.query), view: optionalReadView(value.view), fields: optionalStringArray(value.fields, "fields"), itemOffset: optionalNumber(value.itemOffset), itemLimit: optionalNumber(value.itemLimit), maxChars: optionalNumber(value.maxChars) }, requestOptions));
         }
         if (operation === "web.research")
             return external("Research result", await client.research({ question: requiredString(value.question, "question"), mode: optionalResearchMode(value.mode), maxQueries: optionalNumber(value.maxQueries), maxPages: optionalNumber(value.maxPages), maxBytes: optionalNumber(value.maxBytes), resume: optionalObject(value.resume) }, requestOptions));

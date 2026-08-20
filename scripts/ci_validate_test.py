@@ -50,6 +50,19 @@ class CiPolicyTest(unittest.TestCase):
         failures = ci_validate.validate(candidate)
         self.assertTrue(any("docker" in failure for failure in failures), failures)
 
+    def test_self_hosted_runner_fails(self) -> None:
+        candidate = self.workflow.replace("runs-on: ubuntu-24.04", "runs-on: self-hosted")
+        failures = ci_validate.validate(candidate)
+        self.assertTrue(any("GitHub-hosted runner" in failure for failure in failures), failures)
+        self.assertTrue(any("self-hosted" in failure for failure in failures), failures)
+
+    def test_secret_reference_fails(self) -> None:
+        candidate = self.workflow.replace(
+            'NO_COLOR: "1"', "PRIVATE_TOKEN: ${{ secrets.PRIVATE_TOKEN }}"
+        )
+        failures = ci_validate.validate(candidate)
+        self.assertTrue(any("secrets." in failure for failure in failures), failures)
+
     def test_m0_gate_order_is_exact(self) -> None:
         self.assertEqual(
             ci_m0_gate.COMMAND,

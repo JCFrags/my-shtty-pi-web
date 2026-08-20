@@ -24,7 +24,7 @@ import {
   type WebxCapabilities,
   type WebxSdk,
   type WebxSdkFactory,
-} from "./sdk.js";
+} from "./sdk-live-search-reader-v1.js";
 
 const STATUS_KEY = "pi-webx";
 const REFRESH_MS = 60_000;

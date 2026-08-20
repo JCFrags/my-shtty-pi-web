@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { Value } from "typebox/value";
-import { createPiWebxExtension } from "../src/index.js";
+import { createPiWebxExtension } from "../src/index-web-v6.js";
 import { MAX_MODEL_CHARS, presentResult } from "../src/output.js";
 import {
   ArtifactReadSchema,
@@ -91,7 +91,13 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   assert.equal(sdk.starts, 1);
   assert.ok(fx.active.includes("other_extension_tool"));
   assert.ok(fx.active.includes("web_search"));
-  assert.ok(!fx.active.includes("browser_open"));
+  assert.ok(fx.active.includes("browser_open"));
+  const searchTool = fx.tools.find((tool) => tool.name === "web_search");
+  assert.match(String(searchTool?.promptSnippet), /live internet/);
+  assert.ok(Array.isArray(searchTool?.promptGuidelines));
+  const prompt = await (fx.events.get("before_agent_start") as Function)({ systemPrompt: "base" }, fx.ctx);
+  assert.match(prompt.systemPrompt, /WebX is Pi's primary internet interface/);
+  assert.match(prompt.systemPrompt, /Do not replace WebX with curl/);
 
   await fx.execute("web_upgrade", { mode: "browser" });
   assert.ok(fx.active.includes("browser_open"));
@@ -209,7 +215,16 @@ test("output compaction and artifact recovery have deterministic bounds", () => 
   let value: unknown = "leaf";
   for (let index = 0; index < 20; index += 1) value = { value };
   const result = presentResult({ summary: "ok", data: value });
-  assert.match(JSON.stringify(result.details), /depth limit/);
+  assert.doesNotMatch(JSON.stringify(result.details), /leaf/);
+  assert.match(JSON.stringify(result.content), /depth limit/);
+
+  const continued = presentResult({ summary: "read", data: {
+    title: "Bounded page", url: "https://example.test/page", untrustedContent: "partial",
+    truncated: true, pageId: "page-1", artifactId: "artifact-1",
+    metadata: { saved: true, immediatelyRecallable: true, source: "trafilatura" },
+  } });
+  assert.match(JSON.stringify(continued.content), /Continuation: artifactId=artifact-1; pageId=page-1/);
+  assert.match(JSON.stringify(continued.content), /saved=true; recallable=true/);
 
   const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(100)]);
   const image = presentResult({

@@ -23,6 +23,9 @@ FORBIDDEN: Final = (
     "docker://",
     "continue-on-error:",
     "retry",
+    "self-hosted",
+    "webx-ephemeral",
+    "secrets.",
 )
 
 
@@ -32,9 +35,15 @@ def validate(text: str) -> list[str]:
         "pull_request trigger": "  pull_request:\n",
         "main push trigger": "      - main\n",
         "read-only contents": "  contents: read\n",
-        "self-hosted runner": "      - self-hosted\n",
-        "pinned toolchain runner": "      - webx-toolchain\n",
-        "ephemeral runner": "      - webx-ephemeral\n",
+        "GitHub-hosted runner": "    runs-on: ubuntu-24.04\n",
+        "locked Node install": "node@24.18.0\n",
+        "locked pnpm install": "pnpm@10.13.1\n",
+        "locked uv install": "uv==0.12.0\n",
+        "locked Python install": "uv python install 3.14.6\n",
+        "frozen pnpm dependencies": "pnpm install --frozen-lockfile\n",
+        "frozen Python dependencies": "uv sync --frozen --python 3.14.6\n",
+        "locked contract dependencies": "--with 'jsonschema[format-nongpl]==4.25.1' \\\n",
+        "project environment": '"$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"\n',
         "timeout": "    timeout-minutes: 30\n",
         "credential removal": "          persist-credentials: false\n",
         "shallow checkout": "          fetch-depth: 1\n",

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { availableTools, planUpgrade, TOOL_NAMES, type WebMode } from "./modes.js";
-import { presentResult } from "./output.js";
+import { presentResult } from "./output-constrained-v3.js";
 import {
   ArtifactReadSchema,
   BrowserActSchema,
@@ -24,13 +24,19 @@ import {
   type WebxCapabilities,
   type WebxSdk,
   type WebxSdkFactory,
-} from "./sdk.js";
+} from "./sdk-structured-v2.js";
 
 const STATUS_KEY = "pi-webx";
 const REFRESH_MS = 60_000;
 const REQUIRED_BROWSER_PATHS = new Set(["agent-browser/chrome", "pinchtab/chrome"]);
 
 type Timer = ReturnType<typeof setTimeout>;
+
+function isDownloadAction(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const action = (value as { action?: unknown }).action;
+  return typeof action === "object" && action !== null && (action as { kind?: unknown }).kind === "download";
+}
 
 function capabilityError(capabilities: WebxCapabilities): string | undefined {
   if (apiMajor(capabilities.apiVersion) !== SUPPORTED_API_MAJOR) {
@@ -122,6 +128,14 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
         ownerId: activeOwner,
         cwd: activeCwd,
       };
+      if (operation === "browser.act" && isDownloadAction(params)) {
+        if (!ctx.hasUI) throw new Error("A browser download requires approval, but this Pi mode has no approval UI.");
+        const choice = await ctx.ui.select(
+          "WebX approval required\nOperation: browser download\nCapability: write a remote file to local storage\nDuration: one action",
+          ["Allow once", "Deny"],
+        );
+        if (choice !== "Allow once") throw new Error("Browser download denied by the user.");
+      }
       let result = await sdk.request(operation, params, requestOptions);
       if (result.approval) {
         if (!ctx.hasUI) throw new Error("WebX approval is required, but this Pi mode has no approval UI.");

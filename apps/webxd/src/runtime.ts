@@ -39,6 +39,8 @@ export interface WebxdRuntimeOptions {
   }[];
   readonly browserConnectionFactory?: BrowserRpcConnectionFactory;
   readonly browserDestinationAuthority?: BrowserDestinationAuthority;
+  readonly searxUrl?: string;
+  readonly readerUrl?: string;
   readonly authenticateActor?: WebxActorAuthenticator["authenticate"];
 }
 
@@ -62,6 +64,8 @@ export class WebxdRuntime {
       artifacts: options.artifacts ?? PUBLIC_ARTIFACTS,
       clock: { now: () => new Date().toISOString() },
       ids: { next: (prefix) => `${prefix}-${Date.now().toString(36)}` },
+      searxUrl: options.searxUrl,
+      readerUrl: options.readerUrl,
     });
   }
 

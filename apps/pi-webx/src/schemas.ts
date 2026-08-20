@@ -63,6 +63,9 @@ export const WebReadSchema = Type.Object({
   ...address,
   query: Type.Optional(Type.String({ maxLength: 8192 })),
   view: Type.Optional(StringEnum(["main", "outline", "raw"] as const)),
+  fields: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 256 }), { maxItems: 32 })),
+  itemOffset: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000 })),
+  itemLimit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
   maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000 })),
 }, strict);
 
