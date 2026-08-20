@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type {
+  ArtifactByteExcerpt,
   ArtifactExcerpt,
   BoundedContent,
   BrowserAction,
@@ -10,6 +11,8 @@ import type {
   PageForgetRequest,
   PageLibrarySearchRequest,
   PageLibrarySearchResponse,
+  RangeReadRequest,
+  RangeReadResponse,
   ReadRequest,
   ResearchRequest,
   SearchHit,
@@ -26,7 +29,11 @@ import { BrowserPortError, isBrowserPathId } from "./ports.js";
 const DEFAULT_CONTENT_CHARS = 16_384;
 const MAX_CONTENT_CHARS = 100_000;
 const MAX_ARTIFACT_BYTES = 65_536;
-const VISIBILITY_ORDER: Readonly<Record<Visibility, number>> = { public: 0, internal: 1, private: 2, secret: 3 };
+const MAX_ARTIFACT_BINARY_BYTES = 49_152;
+const MAX_RANGE_BYTES = 1_048_576;
+const MAX_RANGE_REDIRECTS = 10;
+const MAX_BINARY_ARTIFACT_COUNT = 64;
+const MAX_BINARY_ARTIFACT_BYTES = 33_554_432;
 
 interface RawSearchHit { readonly url?: unknown; readonly title?: unknown; readonly content?: unknown; readonly score?: unknown; readonly publishedDate?: unknown; readonly engines?: unknown }
 interface ParsedSearchQuery { readonly query: string; readonly domains: readonly string[]; readonly phrases: readonly string[]; readonly terms: readonly string[]; readonly requiredTokens: readonly string[] }
@@ -37,6 +44,15 @@ interface StoredArtifact {
   readonly mediaType: string;
   readonly sha256: string;
   readonly content: string;
+  readonly visibility: Visibility;
+}
+
+interface StoredBinaryArtifact {
+  readonly artifactId: string;
+  readonly ownerPrincipalId: string;
+  readonly mediaType: string;
+  readonly sha256: string;
+  readonly bytes: Uint8Array;
   readonly visibility: Visibility;
 }
 
@@ -61,6 +77,7 @@ export class WebxAuthority {
   readonly #forgottenPages = new Set<string>();
   readonly #liveSources = new Map<string, IndexedSource>();
   readonly #liveArtifacts = new Map<string, StoredArtifact>();
+  readonly #liveBinaryArtifacts = new Map<string, StoredBinaryArtifact>();
   readonly #liveReadMetadata = new Map<string, Readonly<Record<string, unknown>>>();
 
   constructor(private readonly options: WebxAuthorityOptions) {}
@@ -114,12 +131,16 @@ export class WebxAuthority {
     }
     if (request.method === "POST" && url.pathname === "/v1/search") return ok(await this.search(actor, body<SearchRequest>(request), "search.write", request.signal));
     if (request.method === "POST" && url.pathname === "/v1/read") return ok(await this.read(actor, body<ReadRequest>(request), request.signal));
+    if (request.method === "POST" && url.pathname === "/v1/read-range") return ok(await this.readRange(actor, body<RangeReadRequest>(request), request.signal));
     if (request.method === "POST" && url.pathname === "/v1/research") return ok(await this.research(actor, body<ResearchRequest>(request), request.signal));
     if (request.method === "POST" && url.pathname === "/v1/pages/search") return ok(this.searchPages(actor, body<PageLibrarySearchRequest>(request)));
     if (request.method === "DELETE" && url.pathname === "/v1/pages") return ok(this.forgetPage(actor, body<PageForgetRequest>(request)));
     if (request.method === "GET" && segments[1] === "pages" && segments.length === 3) return ok(await this.page(actor, segments[2] ?? "", request.signal));
     if (request.method === "GET" && segments[1] === "artifacts" && segments[3] === "excerpt") {
       return ok(this.artifact(actor, segments[2] ?? "", numberQuery(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER), numberQuery(url, "max_bytes", 16_384, 1, MAX_ARTIFACT_BYTES)));
+    }
+    if (request.method === "GET" && segments[1] === "artifacts" && segments[3] === "bytes") {
+      return ok(this.artifactBytes(actor, segments[2] ?? "", numberQuery(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER), numberQuery(url, "max_bytes", MAX_ARTIFACT_BINARY_BYTES, 1, MAX_ARTIFACT_BINARY_BYTES)));
     }
     if (segments[1] === "browser") return this.browser(actor, request, segments);
     throw problem(404, "not-found", "operation was not found", false);
@@ -219,6 +240,61 @@ export class WebxAuthority {
     return { title: source.title, url: source.url, untrustedContent: bounded.text, truncated: bounded.truncated || readerTruncated, artifactId: source.artifactId, pageId: source.pageId, visibility: source.visibility, metadata } as BoundedContent;
   }
 
+  private async readRange(actor: AuthorityActor, request: RangeReadRequest, signal?: AbortSignal): Promise<RangeReadResponse> {
+    requireScope(actor, "retrieval.read");
+    if (this.options.readerUrl === undefined) throw problem(503, "range-unavailable", "bounded Range reader is unavailable", true);
+    assertPublicUrlSyntax(request.url);
+    const offset = integer(request.offset, "offset", 0, Number.MAX_SAFE_INTEGER);
+    const length = integer(request.length, "length", 1, MAX_RANGE_BYTES);
+    if (offset > Number.MAX_SAFE_INTEGER - length) throw problem(400, "invalid-request", "range end exceeds the safe integer bound", false);
+    const maxRedirects = integer(request.maxRedirects ?? 4, "maxRedirects", 0, MAX_RANGE_REDIRECTS);
+    const response = await fetch(new URL("/v1/read-range", this.options.readerUrl), {
+      method: "POST",
+      signal,
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ url: request.url, offset, length, maxRedirects }),
+    });
+    if (!response.ok) {
+      const failure = parseReaderFailure(response.status, await response.text());
+      throw problem(failure.toolStatus, "range-read-failed", failure.message, failure.retryable);
+    }
+    const value = await response.json() as Record<string, unknown>;
+    const requestedUrl = requiredString(value.requestedUrl, "requestedUrl");
+    const finalUrl = requiredString(value.finalUrl, "finalUrl");
+    if (requestedUrl !== request.url) throw new Error("range reader changed the requested URL");
+    assertPublicUrlSyntax(finalUrl);
+    if (value.statusCode !== 206) throw new Error("range reader returned a non-206 status");
+    const rangeStart = integerValue(value.rangeStart, "rangeStart", 0, Number.MAX_SAFE_INTEGER);
+    const rangeEnd = integerValue(value.rangeEnd, "rangeEnd", rangeStart, Number.MAX_SAFE_INTEGER);
+    const bodyBytes = integerValue(value.bodyBytes, "bodyBytes", 1, length);
+    if (rangeStart !== offset || rangeEnd > offset + length - 1 || bodyBytes !== rangeEnd - rangeStart + 1) {
+      throw new Error("range reader returned inconsistent bounds");
+    }
+    const totalBytes = value.totalBytes === null ? null : integerValue(value.totalBytes, "totalBytes", rangeEnd + 1, Number.MAX_SAFE_INTEGER);
+    const contentRange = requiredString(value.contentRange, "contentRange");
+    if (contentRange !== `bytes ${rangeStart}-${rangeEnd}/${totalBytes ?? "*"}`) throw new Error("range reader returned inconsistent Content-Range");
+    const redirectChain = stringArray(value.redirectChain, "redirectChain", maxRedirects + 1);
+    if (redirectChain.length === 0 || redirectChain[0] !== requestedUrl || redirectChain.at(-1) !== finalUrl) throw new Error("range reader returned an inconsistent redirect chain");
+    const bytes = decodeCanonicalBase64(requiredString(value.bodyBase64, "bodyBase64"));
+    if (bytes.byteLength !== bodyBytes) throw new Error("range reader body length mismatch");
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    if (value.sha256 !== digest) throw new Error("range reader body digest mismatch");
+    const mediaType = requiredString(value.mediaType, "mediaType");
+    const identity = createHash("sha256").update(`${actor.principalId}\0${requestedUrl}\0${rangeStart}\0${digest}`).digest("hex");
+    const artifactId = `artifact-range-${identity.slice(0, 32)}`;
+    this.#liveBinaryArtifacts.delete(artifactId);
+    this.#liveBinaryArtifacts.set(artifactId, {
+      artifactId, ownerPrincipalId: actor.principalId, mediaType, sha256: digest,
+      bytes: bytes.slice(), visibility: "internal",
+    });
+    this.pruneBinaryArtifacts();
+    return {
+      requestedUrl, finalUrl, statusCode: 206, mediaType, contentRange,
+      rangeStart, rangeEnd, totalBytes, bodyBytes, sha256: digest, artifactId,
+      redirectChain, visibility: "internal", integrityVerified: true,
+    };
+  }
+
   private async research(actor: AuthorityActor, request: ResearchRequest, signal?: AbortSignal): Promise<{ question: string; summary: string; sources: SearchHit[]; truncated: boolean }> {
     requireScope(actor, "research.write");
     if (typeof request.question !== "string" || request.question.trim().length === 0) throw problem(400, "invalid-request", "question is required", false);
@@ -311,6 +387,37 @@ export class WebxAuthority {
     return { artifactId, mediaType: artifact.mediaType, sha256: artifact.sha256, sizeBytes: bytes.byteLength, excerpt, offset, ...(end < bytes.byteLength ? { nextOffset: end } : {}), visibility: artifact.visibility, integrityVerified: true };
   }
 
+  private pruneBinaryArtifacts(): void {
+    let totalBytes = [...this.#liveBinaryArtifacts.values()].reduce((total, artifact) => total + artifact.bytes.byteLength, 0);
+    while (this.#liveBinaryArtifacts.size > MAX_BINARY_ARTIFACT_COUNT || totalBytes > MAX_BINARY_ARTIFACT_BYTES) {
+      const oldestId = this.#liveBinaryArtifacts.keys().next().value as string | undefined;
+      if (oldestId === undefined) break;
+      const oldest = this.#liveBinaryArtifacts.get(oldestId);
+      this.#liveBinaryArtifacts.delete(oldestId);
+      totalBytes -= oldest?.bytes.byteLength ?? 0;
+    }
+  }
+
+  private artifactBytes(actor: AuthorityActor, artifactId: string, offset: number, maxBytes: number): ArtifactByteExcerpt {
+    requireScope(actor, "artifacts.read");
+    const artifact = this.#liveBinaryArtifacts.get(artifactId);
+    if (artifact === undefined || !canRead(actor, artifact.ownerPrincipalId, artifact.visibility)) throw problem(404, "not-found", "artifact was not found", false);
+    const actual = createHash("sha256").update(artifact.bytes).digest("hex");
+    if (actual !== artifact.sha256) {
+      this.#liveBinaryArtifacts.delete(artifactId);
+      throw problem(500, "artifact-corrupt", "artifact integrity verification failed", false);
+    }
+    if (offset > artifact.bytes.byteLength) throw problem(416, "invalid-range", "artifact offset exceeds its size", false);
+    const end = Math.min(artifact.bytes.byteLength, offset + maxBytes);
+    const bodyBase64 = encodeBase64(artifact.bytes.slice(offset, end));
+    return {
+      artifactId, mediaType: artifact.mediaType, sha256: artifact.sha256,
+      sizeBytes: artifact.bytes.byteLength, bodyBase64, offset,
+      ...(end < artifact.bytes.byteLength ? { nextOffset: end } : {}),
+      visibility: artifact.visibility, integrityVerified: true,
+    };
+  }
+
   private async browser(actor: AuthorityActor, request: TransportRequest, segments: readonly string[]): Promise<TransportResponse> {
     const sessionId = segments[3];
     if (request.method === "POST" && segments.length === 3 && segments[2] === "workspace") {
@@ -386,8 +493,32 @@ function body<T>(request: TransportRequest): T {
 }
 function requireScope(actor: AuthorityActor, scope: string): void { if (!actor.scopes.has(scope)) throw problem(403, "forbidden", `missing scope: ${scope}`, false); }
 function canRead(actor: AuthorityActor, ownerPrincipalId: string, visibilityValue: Visibility): boolean { return visibilityValue === "public" || actor.principalId === ownerPrincipalId; }
-function visibility(value: unknown): Visibility { if (value === "public" || value === "internal" || value === "private" || value === "secret") return value; throw problem(400, "invalid-request", "invalid visibility", false); }
 function integer(value: number, name: string, minimum: number, maximum: number): number { if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw problem(400, "invalid-request", `${name} must be an integer from ${minimum} to ${maximum}`, false); return value; }
+function integerValue(value: unknown, name: string, minimum: number, maximum: number): number { if (typeof value !== "number" || !Number.isSafeInteger(value) || value < minimum || value > maximum) throw new Error(`range reader ${name} is invalid`); return value; }
+function requiredString(value: unknown, name: string): string { if (typeof value !== "string" || value.length === 0) throw new Error(`range reader ${name} is invalid`); return value; }
+function stringArray(value: unknown, name: string, maximum: number): string[] {
+  if (!Array.isArray(value) || value.length > maximum || !value.every((item) => typeof item === "string")) throw new Error(`range reader ${name} is invalid`);
+  const result = value as string[];
+  for (const item of result) assertPublicUrlSyntax(item);
+  return result;
+}
+function assertPublicUrlSyntax(value: string): void {
+  let parsed: URL;
+  try { parsed = new URL(value); } catch { throw problem(400, "invalid-request", "URL must be absolute", false); }
+  if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.username !== "" || parsed.password !== "" || parsed.hash !== "") throw problem(400, "invalid-request", "URL is not an allowed public HTTP target", false);
+}
+function decodeCanonicalBase64(value: string): Uint8Array {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value)) throw new Error("range reader body is not canonical base64");
+  const decoded = atob(value);
+  const bytes = Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+  if (encodeBase64(bytes) !== value) throw new Error("range reader body is not canonical base64");
+  return bytes;
+}
+function encodeBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
 function numberQuery(url: URL, name: string, fallback: number, minimum: number, maximum: number): number { const raw = url.searchParams.get(name); return integer(raw === null ? fallback : Number(raw), name, minimum, maximum); }
 function boundText(value: string, maxChars: number): { text: string; truncated: boolean } { const points = [...value]; return points.length <= maxChars ? { text: value, truncated: false } : { text: points.slice(0, maxChars).join(""), truncated: true }; }
 function header(request: TransportRequest, name: string): string | undefined { const entry = Object.entries(request.headers ?? {}).find(([key]) => key.toLocaleLowerCase() === name); return entry?.[1]; }

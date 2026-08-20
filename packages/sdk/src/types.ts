@@ -97,6 +97,30 @@ export interface ReadRequest {
   readonly visibility?: Visibility;
 }
 
+export interface RangeReadRequest {
+  readonly url: string;
+  readonly offset: number;
+  readonly length: number;
+  readonly maxRedirects?: number;
+}
+
+export interface RangeReadResponse {
+  readonly requestedUrl: string;
+  readonly finalUrl: string;
+  readonly statusCode: 206;
+  readonly mediaType: string;
+  readonly contentRange: string;
+  readonly rangeStart: number;
+  readonly rangeEnd: number;
+  readonly totalBytes: number | null;
+  readonly bodyBytes: number;
+  readonly sha256: string;
+  readonly artifactId: string;
+  readonly redirectChain: readonly string[];
+  readonly visibility: "internal";
+  readonly integrityVerified: true;
+}
+
 export interface BoundedContent {
   readonly title: string;
   readonly url: string;
@@ -164,6 +188,18 @@ export interface ArtifactExcerpt {
   readonly sha256: string;
   readonly sizeBytes: number;
   readonly excerpt: string;
+  readonly offset: number;
+  readonly nextOffset?: number;
+  readonly visibility: Visibility;
+  readonly integrityVerified: true;
+}
+
+export interface ArtifactByteExcerpt {
+  readonly artifactId: string;
+  readonly mediaType: string;
+  readonly sha256: string;
+  readonly sizeBytes: number;
+  readonly bodyBase64: string;
   readonly offset: number;
   readonly nextOffset?: number;
   readonly visibility: Visibility;
