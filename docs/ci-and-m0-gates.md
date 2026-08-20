@@ -50,12 +50,13 @@ The four language quality targets still reject `AC` and `PROFILE` because those 
 
 ## GitHub Actions security
 
-`.github/workflows/m0.yml` runs on a dedicated single-use self-hosted Linux runner labeled `webx-toolchain` and `webx-ephemeral`. The runner must be destroyed after the job. It must contain the exact locked toolchain and populated package caches. It must not contain repository or organization secrets. The workflow:
+`.github/workflows/m0.yml` runs on a fresh GitHub-hosted Ubuntu 24.04 runner. It installs the exact locked Node, Python, pnpm, and uv versions. It populates dependency caches from frozen lockfiles before the deterministic release gate switches to offline mode. The workflow:
 
 - grants only `contents: read`;
-- uses no secrets;
+- uses no repository or organization secrets and no private fixtures;
 - does not use `pull_request_target`;
 - checks out one revision and removes persisted credentials;
+- installs exact tool versions and frozen dependencies;
 - invokes only repository validation and Make targets;
 - has no container start, image pull, public-site test, retry, or ignored failure;
 - pins `actions/checkout` to commit `11bd71901bbe5b1630ceea73d27597364c9af683` (`v4.2.2`).

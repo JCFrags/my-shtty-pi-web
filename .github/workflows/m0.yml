@@ -12,12 +12,7 @@ permissions:
 jobs:
   m0:
     name: Local-fixture M0 gate
-    runs-on:
-      - self-hosted
-      - linux
-      - x64
-      - webx-toolchain
-      - webx-ephemeral
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Check out the exact revision
@@ -27,6 +22,24 @@ jobs:
           persist-credentials: false
       - name: Validate workflow policy
         run: python3 scripts/ci_validate.py
+      - name: Install the locked toolchain
+        run: |
+          npm install --global --prefix "$RUNNER_TEMP/node-toolchain" node@24.18.0
+          export PATH="$RUNNER_TEMP/node-toolchain/bin:$PATH"
+          npm install --global --prefix "$RUNNER_TEMP/pnpm-toolchain" pnpm@10.13.1
+          pipx install --force uv==0.12.0
+          export PATH="$RUNNER_TEMP/pnpm-toolchain/bin:$HOME/.local/bin:$PATH"
+          uv python install 3.14.6
+          python_bin="$(uv python find 3.14.6)"
+          printf '%s\n' \
+            "$RUNNER_TEMP/node-toolchain/bin" \
+            "$RUNNER_TEMP/pnpm-toolchain/bin" \
+            "$HOME/.local/bin" \
+            "$(dirname "$python_bin")" >> "$GITHUB_PATH"
+      - name: Populate locked dependency caches
+        run: |
+          pnpm install --frozen-lockfile
+          uv sync --frozen --python 3.14.6
       - name: Run M0 release preparation
         env:
           NO_COLOR: "1"
