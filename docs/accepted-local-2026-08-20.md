@@ -4,7 +4,7 @@
 
 The publication repository `JCFrags/my-shtty-pi-web` is the monorepo for the accepted local WebX product.
 
-- Prior publication main: `7bfe4370ecd58757bfbc56ef7e0070d17ba344`.
+- Prior publication main: `7bfe4370ecd58757bfbcfc56ef7e0070d17ba344`.
 - Prior publication tag: `webx-complete-2026-08-12-r1`.
 - Accepted WebX source: `ffc73a565607198b5c9cce701d54dcc7cbcf40b8`.
 - Accepted WebX tree before this publication update: `140e7d0bbe9695eb77c57b012033b4a1d37f1e49`.
