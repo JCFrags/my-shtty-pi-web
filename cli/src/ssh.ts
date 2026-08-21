@@ -158,7 +158,7 @@ export async function openSshTunnel(
   });
   if (code !== 0) throw new Error(`ssh to ${destination} failed`);
   await waitForSocks(socksPort, destination);
-  status(`connected, pages will browse from ${destination}`);
+  status(`connected ${destination}`);
   return {
     destination,
     socksPort,
