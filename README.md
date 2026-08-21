@@ -66,7 +66,7 @@ After the browser engine starts and is displaying pixels in the terminal, it nee
 The outer UI of the browser is implemented using a graphics engine built on top of rust. The actual UI is defined inside react with a custom react renderer, which allows us to build the UI for the browser using typescript. The UI of the outer browser and the browser content itself is all drawn to the same shared canvas inside the rust engine, which allows us to layer UI on top of the browser.
 
 ### SSH
-The recommended way to use terminal-browser over ssh is running `terminal-browser --ssh user@host` on your local machine (where user@host is what you would normally pass to `ssh`).
+The recommended way to use terminal-browser over ssh is running `terminal-browser --ssh <ssh arguments>`.
 
 The alternative is running terminal-browser directly on the machine you are shh'd into. This will work, but:
 - requires every single frame drawn by the website to be sent over the network
