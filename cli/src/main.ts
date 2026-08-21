@@ -23,7 +23,7 @@ import type { Browser } from "./instances";
 import { lsCommand } from "./ls";
 import { instances } from "./registry";
 import { apparmorSetup, deniedRefusal, linuxSandboxError, sandboxRefusal } from "./sandbox";
-import { openSshTunnel, parseSshTarget, startBundle, validateBundleDir } from "./ssh";
+import { openSshTunnel, startBundle, validateBundleDir, validateSshTarget } from "./ssh";
 import type { RemoteBundle } from "./ssh";
 import type { InstanceRecord } from "./registry";
 import { installedVersion, upgradeCommand } from "./upgrade";
@@ -513,7 +513,7 @@ function takeSshFlags(args: string[]): void {
     fail("--ssh-bundle-dir needs --ssh-bundle");
   }
   try {
-    if (target) parseSshTarget(target);
+    if (target) validateSshTarget(target);
     if (at >= 0) validateBundleDir(args[at].slice("--ssh-bundle=".length));
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));

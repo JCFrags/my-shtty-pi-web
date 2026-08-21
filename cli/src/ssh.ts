@@ -34,15 +34,50 @@ interface ResolvedTarget {
 }
 
 export function resolveSshTarget(target: string): ResolvedTarget {
-  if (!target.includes("@") && !target.includes(":")) {
-    const alias = shellAlias(target);
+  const words = target.trim().split(/\s+/).filter(Boolean);
+  if (words.length > 1) {
+    return { ...parseSshWords(words, target), aliasCommand: null };
+  }
+  const single = words[0] ?? "";
+  if (!single.includes("@") && !single.includes(":")) {
+    const alias = shellAlias(single);
     if (alias) {
       const parsed = parseSshCommand(alias);
       if (parsed) return { ...parsed, aliasCommand: alias.join(" ") };
     }
   }
-  const { destination, sshPort } = parseSshTarget(target);
+  const { destination, sshPort } = parseSshTarget(single);
   return { destination, hostArgs: sshPort ? ["-p", sshPort] : [], aliasCommand: null };
+}
+
+export function validateSshTarget(target: string): void {
+  const words = target.trim().split(/\s+/).filter(Boolean);
+  if (words.length > 1) parseSshWords(words, target);
+  else parseSshTarget(words[0] ?? "");
+}
+
+function parseSshWords(
+  words: string[],
+  target: string,
+): { destination: string; hostArgs: string[] } {
+  const tokens = words[0] === "ssh" ? words.slice(1) : words;
+  const hostArgs: string[] = [];
+  let found: string | null = null;
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token.startsWith("-")) {
+      hostArgs.push(token);
+      if (SSH_VALUE_FLAGS.has(token) && i + 1 < tokens.length) hostArgs.push(tokens[++i]);
+      continue;
+    }
+    if (found) {
+      throw new Error(`invalid --ssh ${target} (both ${found} and ${token} look like destinations)`);
+    }
+    found = token;
+  }
+  if (!found) throw new Error(`invalid --ssh ${target} (no destination)`);
+  const { destination, sshPort } = parseSshTarget(found);
+  return { destination, hostArgs: [...hostArgs, ...(sshPort ? ["-p", sshPort] : [])] };
 }
 
 function shellAlias(name: string): string[] | null {
