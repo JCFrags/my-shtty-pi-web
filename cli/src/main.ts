@@ -501,12 +501,12 @@ function takeSshFlags(args: string[]): void {
   if (ssh !== undefined) args.push(`--ssh=${ssh}`);
   const bundle = takeFlag(args, "--ssh-bundle");
   if (bundle !== undefined) args.push(`--ssh-bundle=${bundle}`);
+  const bundleDir = takeFlag(args, "--ssh-bundle-dir");
+  if (bundleDir !== undefined) args.push(`--ssh-bundle-dir=${bundleDir}`);
   const at = args.findIndex((arg) => arg.startsWith("--ssh-bundle="));
   if (at >= 0) {
     args[at] = `--ssh-bundle=${path.resolve(args[at].slice("--ssh-bundle=".length))}`;
   }
-  const bundleDir = takeFlag(args, "--ssh-bundle-dir");
-  if (bundleDir !== undefined) args.push(`--ssh-bundle-dir=${bundleDir}`);
   const target = args.find((arg) => arg.startsWith("--ssh="))?.slice("--ssh=".length);
   if (at >= 0 && !target) fail("--ssh-bundle needs --ssh");
   if (args.some((arg) => arg.startsWith("--ssh-bundle-dir=")) && at < 0) {
