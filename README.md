@@ -20,6 +20,7 @@ curl -fsSl https://terminal-browser.sh/install | bash
 terminal-browser # launches the browser
 terminal-browser open <url> # opens the browser at a url
 terminal-browser --split right # opens the browser in a split pane to the right
+terminal-browser open --ssh <user@host> <url> # performs all network requests through a remote server
 terminal-browser ls # lists open browsers
 terminal-browser action # an agent-browser compatible cli for interacting with open terminal-browsers
 ```
@@ -93,9 +94,14 @@ The following options are the full set of app related options available for `ter
   --app-mode            Shorthand for --no-toolbar --no-shortcuts
                         --no-context-menu --no-overlays --no-frame
                         --allow-clipboard-read --open-tabs-in-popup-stack
+  --ssh-bundle <dir>    Install and execute a bundle on a remote server. This is useful when paired with
+                        --app-mode and --ssh, allowing you to run an application server on a
+                        remote machine, then view the output over ssh
+  --ssh-bundle-dir <dir>
+                        The path --ssh-bundle should be installed to through the ssh server. Defaults to
+                        ${XDG_DATA_HOME:-~/.local/share}/terminal-browser/bundles
 
 ```
-
 
 ### Roadmap
 - linux support ✅
