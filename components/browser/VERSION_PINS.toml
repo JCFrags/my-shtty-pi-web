@@ -22,7 +22,7 @@ version = "2.115.0"
 [searxng]
 # SearXNG is a rolling release. This immutable image digest must be filled by
 # scripts/update-pins.sh and reviewed before deployment.
-image = "docker.io/searxng/searxng:2026.7.28-c01178d03"
+image = "docker.io/searxng/searxng@sha256:11a9b34cdc0b1ec2b991470a2762ecb5a1a531898289fb51dcd015260450729e"
 
 [cloakbrowser]
 wrapper_version = "0.5.3"

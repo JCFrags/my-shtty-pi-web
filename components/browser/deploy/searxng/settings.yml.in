@@ -15,10 +15,26 @@ search:
     - html
     - json
 
+# Keep ordinary web search simple. DuckDuckGo's JSON-backed web engine is the
+# primary general engine. The default HTML engine and other frequently blocked
+# scraper engines are disabled so their CAPTCHA failures cannot remove recall.
+# Bing remains a low-weight fallback when the primary engine is unavailable.
 engines:
+  - name: duckduckgo
+    disabled: true
+  - name: duckduckgo web
+    disabled: false
+    weight: 2.0
   - name: bing
     engine: bing
     disabled: false
+    weight: 0.25
+  - name: brave
+    disabled: true
+  - name: google cse
+    disabled: true
+  - name: startpage
+    disabled: true
   - name: github
     engine: github
     disabled: false

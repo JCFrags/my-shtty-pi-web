@@ -68,18 +68,20 @@ install -m 0755 "$CARGO_TARGET_DIR/release/pi-browser-workspace" "$BIN_DIR/pi-br
 
 log "Installing configuration and user services"
 mkdir -p "$CONFIG_HOME/pi-web/searxng" "$DATA_HOME/pi-web" "$CACHE_HOME/pi-web/responses" "${XDG_STATE_HOME:-$HOME/.local/state}/pi-web/audit/events" "$UNIT_DIR" "$QUADLET_DIR" "$DESKTOP_DIR" "$ICON_DIR" "$(dirname "$PI_EXTENSION")"
-chmod 0700 "$CONFIG_HOME/pi-web" "$DATA_HOME/pi-web" "$CACHE_HOME/pi-web" "$CACHE_HOME/pi-web/responses" "${XDG_STATE_HOME:-$HOME/.local/state}/pi-web" "${XDG_STATE_HOME:-$HOME/.local/state}/pi-web/audit" "${XDG_STATE_HOME:-$HOME/.local/state}/pi-web/audit/events"
+[[ -O "$CONFIG_HOME/pi-web/searxng" ]] || podman unshare chown -R 0:0 "$CONFIG_HOME/pi-web/searxng"
+chmod 0700 "$CONFIG_HOME/pi-web" "$CONFIG_HOME/pi-web/searxng" "$DATA_HOME/pi-web" "$CACHE_HOME/pi-web" "$CACHE_HOME/pi-web/responses" "${XDG_STATE_HOME:-$HOME/.local/state}/pi-web" "${XDG_STATE_HOME:-$HOME/.local/state}/pi-web/audit" "${XDG_STATE_HOME:-$HOME/.local/state}/pi-web/audit/events"
 ln -sfn "$INSTALL_ROOT/apps/pi-webx" "$PI_EXTENSION"
 [[ -f "$CONFIG_HOME/pi-web/config.toml" ]] || install -m 0600 "$BROWSER_ROOT/deploy/config.toml" "$CONFIG_HOME/pi-web/config.toml"
 [[ -f "$CONFIG_HOME/pi-web/profiles.toml" ]] || install -m 0600 "$BROWSER_ROOT/deploy/profiles.toml" "$CONFIG_HOME/pi-web/profiles.toml"
 systemctl --user stop pi-web-searxng.service >/dev/null 2>&1 || true
 secret_file="$CONFIG_HOME/pi-web/searxng/.secret"
-if [[ -e "$secret_file" && ! -r "$secret_file" ]]; then podman unshare chown -R 0:0 "$CONFIG_HOME/pi-web/searxng"; fi
 if [[ ! -s "$secret_file" ]]; then umask 077; openssl rand -hex 32 > "$secret_file"; fi
 secret="$(cat "$secret_file")"
 sed "s/__SEARXNG_SECRET__/$secret/" "$BROWSER_ROOT/deploy/searxng/settings.yml.in" > "$CONFIG_HOME/pi-web/searxng/settings.yml"
 install -m 0600 "$BROWSER_ROOT/deploy/searxng/limiter.toml" "$CONFIG_HOME/pi-web/searxng/limiter.toml"
-sed 's|__SEARXNG_IMAGE__|docker.io/searxng/searxng:2026.7.28-c01178d03|' "$BROWSER_ROOT/deploy/quadlet/pi-web-searxng.container" > "$QUADLET_DIR/pi-web-searxng.container"
+searxng_image="$(sed -n 's/^SEARXNG_IMAGE=//p' "$BROWSER_ROOT/deploy/versions.env")"
+[[ "$searxng_image" == docker.io/searxng/searxng@sha256:* ]] || die "The SearXNG image must use a reviewed immutable digest."
+sed "s|__SEARXNG_IMAGE__|$searxng_image|" "$BROWSER_ROOT/deploy/quadlet/pi-web-searxng.container" > "$QUADLET_DIR/pi-web-searxng.container"
 
 cat > "$UNIT_DIR/pi-web-egress-proxy.service" <<EOF
 [Unit]
@@ -194,6 +196,9 @@ log "Starting services"
 systemctl --user daemon-reload
 systemctl --user enable pi-web-egress-proxy.service pi-web-docling.service pi-web-reader.service pi-web-crawl.service pi-browserd.service webxd.service
 systemctl --user restart pi-web-egress-proxy.service pi-web-docling.service pi-web-reader.service pi-web-crawl.service pi-browserd.service webxd.service pi-web-searxng.service
+# The container maps this directory to its internal service user. Keep the host
+# directory private after the image entrypoint adjusts its ownership.
+podman unshare chmod 0700 "$CONFIG_HOME/pi-web/searxng"
 
 log "Verifying the installation"
 systemctl --user --quiet is-active pi-web-egress-proxy pi-web-docling pi-web-reader pi-web-crawl pi-browserd pi-web-searxng webxd
