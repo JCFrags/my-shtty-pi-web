@@ -25,7 +25,7 @@ Choose both required axes:
 - `operation: "links"` returns ranked URLs for discovery. It does not return rendered page passages.
 - `operation: "extracts"` returns separate query-focused passages with their sources. It does not synthesize across sources.
 - `effort: "fast"` runs one search. Use it for normal discovery and quick facts.
-- `effort: "quality"` uses bounded conservative query fan-out, deduplication, verification, and reranking. Use it when recall or source quality justifies more work.
+- `effort: "quality"` sends the original query and two plain query variants to SearXNG. WebX then merges, deduplicates, and reranks only the returned results. Use it when recall or source quality justifies three searches.
 
 Start with a complete natural-language query. Use `domains` only for required host names such as `docs.python.org`. Use `freshness` with `quality` only when source age matters. WebX does not send freshness to SearXNG. It uses an available publication date as a soft local reranking signal. Missing or unreliable dates do not exclude a result. Search recipes do not follow links. Use `web_research` when the task needs a cross-source conclusion.
 

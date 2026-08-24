@@ -38,7 +38,6 @@ const READ_CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
 
 interface RawSearchHit { readonly url?: unknown; readonly title?: unknown; readonly content?: unknown; readonly score?: unknown; readonly publishedDate?: unknown; readonly engines?: unknown }
 interface SearchBatch { readonly hits: RawSearchHit[]; readonly searches: number }
-interface ParsedSearchQuery { readonly query: string; readonly domains: readonly string[] }
 
 interface StoredBinaryArtifact {
   readonly artifactId: string;
@@ -136,7 +135,7 @@ export class WebxAuthority {
 
   private async search(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<SearchResponse> {
     requireScope(actor, scope);
-    const key = { formatVersion: 15, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
+    const key = { formatVersion: 16, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
     const cached = await this.#cache.get<SearchResponse>("search", key);
     if (cached !== undefined) return cached;
     const result = await this.uncachedSearch(actor, request, scope, signal);
@@ -197,11 +196,9 @@ export class WebxAuthority {
       const hits = this.options.sources.filter((source) => terms.every((term) => `${source.title} ${source.content}`.toLocaleLowerCase().includes(term))).map((source) => ({ url: source.url, title: source.title, content: source.content }));
       return { hits, searches: 1 };
     }
-    const parsedQuery = parseSearchQuery(query);
-    const domains = [...new Set([...requestedDomains.filter(Boolean), ...parsedQuery.domains])];
-    const domainQuery = domains.length === 0 ? "" : ` ${domains.map((domain) => `site:${domain}`).join(" OR ")}`;
+    const domains = [...new Set([...requestedDomains.filter(Boolean), ...searchDomains(query)])];
     const endpoint = new URL("/search", this.options.searxUrl);
-    endpoint.searchParams.set("q", `${parsedQuery.query}${domainQuery}`.trim());
+    endpoint.searchParams.set("q", query);
     endpoint.searchParams.set("format", "json");
     endpoint.searchParams.set("safesearch", "0");
     const wantedDomains = domains.map((domain) => domain.toLocaleLowerCase().replace(/^www\./u, ""));
@@ -600,14 +597,7 @@ function evidenceExcerpt(value: string, query: string, maxChars: number): string
 
 function qualitySearchQueries(query: string): string[] {
   const base = query.trim();
-  const variants = isNewsSearchQuery(base)
-    ? [base, `${base} analysis`, `${base} live updates`]
-    : [base, `${base} official`, `${base} documentation`];
-  return [...new Set(variants)];
-}
-
-function isNewsSearchQuery(query: string): boolean {
-  return /\b(?:news|headlines|breaking news|market updates?)\b/iu.test(query);
+  return [...new Set([base, `${base} official`, `${base} guide`])];
 }
 
 function searxUnavailableEngines(value: unknown): string[] {
@@ -651,10 +641,8 @@ function boundedFailure(status: number, bodyValue: WebxProblem, maxBytes: number
 interface AuthorityFailure { readonly authorityFailure: true; readonly status: number; readonly body: WebxProblem }
 function problem(status: number, code: string, message: string, retryable: boolean): AuthorityFailure { return { authorityFailure: true, status, body: { code, message, retryable } }; }
 function isAuthorityFailure(value: unknown): value is AuthorityFailure { return typeof value === "object" && value !== null && (value as { authorityFailure?: unknown }).authorityFailure === true; }
-function parseSearchQuery(raw: string): ParsedSearchQuery {
-  const domains = [...raw.matchAll(/(?:^|\s)site:([A-Za-z0-9.-]+)/giu)].map((match) => match[1] ?? "").filter(Boolean);
-  const query = raw.replace(/(?:^|\s)site:[A-Za-z0-9.-]+/giu, " ").replace(/\s+/gu, " ").trim();
-  return { query, domains };
+function searchDomains(query: string): string[] {
+  return [...query.matchAll(/(?:^|\s)site:([A-Za-z0-9.-]+)/giu)].map((match) => match[1] ?? "").filter(Boolean);
 }
 function researchSeedHits(question: string): SearchHit[] {
   const normalized = question.toLocaleLowerCase();

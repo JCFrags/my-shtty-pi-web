@@ -19,7 +19,7 @@ The tool descriptions, field descriptions, active-tool prompt guidelines, and We
 
 A normal `web_read` returns complete extracted main content up to the source limit. Omit `maxChars` for a full read. Structured API projections return one object per collection row. Use continuation values only when the prior result reports them. `contentOffset` applies to direct single-page reading and cannot be combined with linked crawling.
 
-Search has four fixed recipes from its required `operation` and `effort` axes. Fast uses one search. Quality uses bounded conservative fan-out, deduplication, verification, and reranking. Search never follows links. Extracts remain separate by source and do not synthesize a conclusion. Read crawling follows linked pages. Research crawling follows linked evidence.
+Search has four fixed recipes from its required `operation` and `effort` axes. Fast sends the query verbatim once. Quality sends the original query and two plain variants, then merges, deduplicates, and reranks only the returned results. Search never follows links. Extracts remain separate by source and do not synthesize a conclusion. Read crawling follows linked pages. Research crawling follows linked evidence.
 
 Browser work follows open, observe, act, observe, and close. Semantic refs are preferred. Coordinate actions bind to the latest visual observation. The exposed browser schema does not support upload or download.
 

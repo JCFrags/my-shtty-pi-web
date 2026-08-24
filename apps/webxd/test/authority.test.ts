@@ -84,6 +84,24 @@ describe("WebxAuthority", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("sends fast queries to SearXNG verbatim", async () => {
+    const query = `site:github.com "pi" "llm-wiki"`;
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = new URL(String(input));
+      expect(url.searchParams.get("q")).toBe(query);
+      expect(url.searchParams.get("format")).toBe("json");
+      expect(url.searchParams.get("time_range")).toBeNull();
+      return new Response(JSON.stringify({ results: [
+        { title: "pi-llm-wiki", url: "https://github.com/zosmaai/pi-llm-wiki", content: "A Pi coding-agent wiki package." },
+      ] }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
+    const result = await call(instance, actor(), "POST", "/v1/search", { query, operation: "links", effort: "fast" }, "verbatim-search");
+    expect(result).toMatchObject({ status: 200, body: { hits: [{ title: "pi-llm-wiki", rank: 1 }], metadata: { searches: 1 } } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps SearXNG discovery broad and uses publication dates only for soft quality reranking", async () => {
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = new URL(String(input));
@@ -141,7 +159,10 @@ describe("WebxAuthority", () => {
       const searches = requests.filter((item) => item.url.includes("/search"));
       const reads = requests.filter((item) => item.url.includes(":8787/"));
       expect(searches).toHaveLength(effort === "quality" ? 3 : 1);
-      expect(searches.every((item) => new URL(item.url).searchParams.get("q")?.includes("site:docs.example.org") && new URL(item.url).searchParams.get("time_range") === null)).toBe(true);
+      expect(searches.map((item) => new URL(item.url).searchParams.get("q"))).toEqual(effort === "quality"
+        ? ["Product feature support", "Product feature support official", "Product feature support guide"]
+        : ["Product feature support"]);
+      expect(searches.every((item) => new URL(item.url).searchParams.get("time_range") === null)).toBe(true);
       expect(reads).toHaveLength(operation === "links" ? 0 : effort === "quality" ? 5 : 3);
       expect(body.metadata).toEqual({ searches: searches.length, pagesRead: reads.length, linkedDepth: 0, freshnessReranked: effort === "quality" });
       expect(body.hits).toHaveLength(operation === "links" ? 10 : effort === "quality" ? 5 : 3);
