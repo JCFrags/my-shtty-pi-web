@@ -1,4 +1,4 @@
-import { type ArtifactExcerpt, type BoundedContent, type BrowserAction, type BrowserControlResult, type BrowserDebugRequest, type BrowserDebugResult, type BrowserObservation, type BrowserOperationResult, type BrowserSession, type BrowserSessionRequest, type BrowserSessionList, type BrowserVisualFrame, type BrowserWorkspaceRequest, type BrowserWorkspaceResult, type CapabilityCatalog, type PageForgetRequest, type PageForgetResult, type PageLibrarySearchRequest, type PageLibrarySearchResponse, type ReadRequest, type RequestOptions, type ResearchRequest, type ResearchResponse, type SearchRequest, type SearchResponse, type VersionInfo, type WebxTransport } from "./types.js";
+import { type ArtifactExcerpt, type BoundedContent, type BrowserAction, type BrowserControlResult, type BrowserDebugRequest, type BrowserDebugResult, type BrowserObservation, type BrowserOperationResult, type BrowserSession, type BrowserSessionRequest, type BrowserSessionList, type BrowserVisualFrame, type BrowserWorkspaceRequest, type BrowserWorkspaceResult, type CapabilityCatalog, type ReadRequest, type RequestOptions, type ResearchRequest, type ResearchResponse, type SearchRequest, type SearchResponse, type VersionInfo, type WebxTransport } from "./types.js";
 export interface WebxClientOptions {
     readonly maxResponseBytes?: number;
 }
@@ -13,9 +13,6 @@ export declare class WebxClient {
     search(request: SearchRequest, options: RequestOptions): Promise<SearchResponse>;
     read(request: ReadRequest, options: RequestOptions): Promise<BoundedContent>;
     research(request: ResearchRequest, options: RequestOptions): Promise<ResearchResponse>;
-    searchPages(request: PageLibrarySearchRequest, options: RequestOptions): Promise<PageLibrarySearchResponse>;
-    getPage(pageId: string, options?: RequestOptions): Promise<BoundedContent>;
-    forgetPage(request: PageForgetRequest, options: RequestOptions): Promise<PageForgetResult>;
     getArtifactExcerpt(artifactId: string, offset?: number, maxBytes?: number, options?: RequestOptions): Promise<ArtifactExcerpt>;
     createBrowserSession(request: BrowserSessionRequest, options: RequestOptions): Promise<BrowserSession>;
     listBrowserSessions(options?: RequestOptions): Promise<BrowserSessionList>;

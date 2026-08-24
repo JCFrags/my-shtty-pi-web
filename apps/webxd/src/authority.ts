@@ -8,9 +8,6 @@ import type {
   BrowserSessionRequest,
   BrowserWorkspaceRequest,
   CapabilityCatalog,
-  PageForgetRequest,
-  PageLibrarySearchRequest,
-  PageLibrarySearchResponse,
   RangeReadRequest,
   RangeReadResponse,
   ReadRequest,
@@ -24,6 +21,7 @@ import type {
 } from "../../../packages/sdk/src/index.js";
 import { BROWSER_PROTOCOL_VERSION, WEBX_API_VERSION } from "../../../packages/sdk/src/index.js";
 import type { AuthorityActor, AuthorityClock, AuthorityIdSource, BrowserDaemonPort, IndexedSource } from "./ports.js";
+import { WebCache } from "./cache.js";
 import { BrowserPortError, isBrowserPathId } from "./ports.js";
 
 const DEFAULT_CONTENT_CHARS = 16_384;
@@ -34,6 +32,8 @@ const MAX_RANGE_BYTES = 1_048_576;
 const MAX_RANGE_REDIRECTS = 10;
 const MAX_BINARY_ARTIFACT_COUNT = 64;
 const MAX_BINARY_ARTIFACT_BYTES = 33_554_432;
+const SEARCH_CACHE_TTL_MS = 15 * 60 * 1_000;
+const READ_CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
 
 interface RawSearchHit { readonly url?: unknown; readonly title?: unknown; readonly content?: unknown; readonly score?: unknown; readonly publishedDate?: unknown; readonly engines?: unknown }
 interface ParsedSearchQuery { readonly query: string; readonly domains: readonly string[]; readonly phrases: readonly string[]; readonly terms: readonly string[]; readonly requiredTokens: readonly string[] }
@@ -69,18 +69,21 @@ export interface WebxAuthorityOptions {
   readonly ids: AuthorityIdSource;
   readonly searxUrl?: string;
   readonly readerUrl?: string;
+  readonly cacheDirectory?: string;
 }
 
 export class WebxAuthority {
   readonly #idempotency = new Map<string, CachedResult>();
   readonly #browserOwners = new Map<string, { principalId: string; agentId: string }>();
-  readonly #forgottenPages = new Set<string>();
   readonly #liveSources = new Map<string, IndexedSource>();
   readonly #liveArtifacts = new Map<string, StoredArtifact>();
   readonly #liveBinaryArtifacts = new Map<string, StoredBinaryArtifact>();
   readonly #liveReadMetadata = new Map<string, Readonly<Record<string, unknown>>>();
+  readonly #cache: WebCache;
 
-  constructor(private readonly options: WebxAuthorityOptions) {}
+  constructor(private readonly options: WebxAuthorityOptions) {
+    this.#cache = new WebCache({ directory: options.cacheDirectory });
+  }
 
   async handle(actor: AuthorityActor, request: TransportRequest): Promise<TransportResponse> {
     try {
@@ -124,7 +127,7 @@ export class WebxAuthority {
       const paths = await this.options.browser.capabilities(request.signal);
       const catalog: CapabilityCatalog = {
         apiVersion: WEBX_API_VERSION,
-        capabilities: ["search", "read", "research", "pages", "artifacts", "browser"].map((id) => ({ id: id as CapabilityCatalog["capabilities"][number]["id"], enabled: true, healthy: id !== "browser" || paths.length === 2 })),
+        capabilities: ["search", "read", "research", "browser"].map((id) => ({ id: id as CapabilityCatalog["capabilities"][number]["id"], enabled: true, healthy: id !== "browser" || paths.length === 2 })),
         browserPaths: paths,
       };
       return ok(catalog);
@@ -133,9 +136,6 @@ export class WebxAuthority {
     if (request.method === "POST" && url.pathname === "/v1/read") return ok(await this.read(actor, body<ReadRequest>(request), request.signal));
     if (request.method === "POST" && url.pathname === "/v1/read-range") return ok(await this.readRange(actor, body<RangeReadRequest>(request), request.signal));
     if (request.method === "POST" && url.pathname === "/v1/research") return ok(await this.research(actor, body<ResearchRequest>(request), request.signal));
-    if (request.method === "POST" && url.pathname === "/v1/pages/search") return ok(this.searchPages(actor, body<PageLibrarySearchRequest>(request)));
-    if (request.method === "DELETE" && url.pathname === "/v1/pages") return ok(this.forgetPage(actor, body<PageForgetRequest>(request)));
-    if (request.method === "GET" && segments[1] === "pages" && segments.length === 3) return ok(await this.page(actor, segments[2] ?? "", request.signal));
     if (request.method === "GET" && segments[1] === "artifacts" && segments[3] === "excerpt") {
       return ok(this.artifact(actor, segments[2] ?? "", numberQuery(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER), numberQuery(url, "max_bytes", 16_384, 1, MAX_ARTIFACT_BYTES)));
     }
@@ -148,13 +148,23 @@ export class WebxAuthority {
 
   private async search(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<{ query: string; hits: SearchHit[]; truncated: boolean }> {
     requireScope(actor, scope);
+    const key = { request, searxUrl: this.options.searxUrl };
+    const cached = await this.#cache.get<{ query: string; hits: SearchHit[]; truncated: boolean }>("search", key);
+    if (cached !== undefined) return cached;
+    const result = await this.uncachedSearch(actor, request, scope, signal);
+    await this.#cache.set("search", key, result, SEARCH_CACHE_TTL_MS).catch(() => undefined);
+    return result;
+  }
+
+  private async uncachedSearch(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<{ query: string; hits: SearchHit[]; truncated: boolean }> {
+    requireScope(actor, scope);
     if (typeof request.query !== "string" || request.query.trim().length === 0 || request.query.length > 8_192) throw problem(400, "invalid-request", "query must contain 1 to 8192 characters", false);
     const limit = integer(request.limit ?? 10, "limit", 1, 50);
     const input = request as SearchRequest & { domains?: string[]; freshness?: "day" | "week" | "month" | "year" };
     if (this.options.searxUrl === undefined) {
       const terms = request.query.toLocaleLowerCase().split(/\s+/u).filter(Boolean);
       const matches = this.options.sources.filter((source) => terms.every((term) => `${source.title} ${source.content}`.toLocaleLowerCase().includes(term)));
-      const hits = matches.slice(0, limit).map((source, index): SearchHit => ({ hitId: source.hitId, title: source.title, url: source.url, snippet: boundText(source.content, 320).text, rank: index + 1, visibility: source.visibility, pageId: source.pageId, artifactId: source.artifactId }));
+      const hits = matches.slice(0, limit).map((source, index): SearchHit => ({ hitId: source.hitId, title: source.title, url: source.url, snippet: boundText(source.content, 320).text, rank: index + 1, visibility: source.visibility }));
       return { query: request.query, hits, truncated: matches.length > hits.length };
     }
     const parsedQuery = parseSearchQuery(request.query);
@@ -209,12 +219,22 @@ export class WebxAuthority {
 
   private async read(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<BoundedContent> {
     requireScope(actor, "retrieval.read");
-    if ((request.url === undefined) === (request.pageId === undefined)) throw problem(400, "invalid-request", "supply exactly one url or pageId", false);
+    const key = { principalId: actor.principalId, request, readerUrl: this.options.readerUrl };
+    const cached = await this.#cache.get<BoundedContent>("read", key);
+    if (cached !== undefined) return cached;
+    const result = await this.uncachedRead(actor, request, signal);
+    await this.#cache.set("read", key, result, READ_CACHE_TTL_MS).catch(() => undefined);
+    return result;
+  }
+
+  private async uncachedRead(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<BoundedContent> {
+    requireScope(actor, "retrieval.read");
+    if (typeof request.url !== "string" || request.url.length === 0) throw problem(400, "invalid-request", "url is required", false);
     const allSources = [...this.options.sources, ...this.#liveSources.values()];
     const input = request as ReadRequest & { query?: string; view?: string; fields?: readonly string[]; itemOffset?: number; itemLimit?: number };
     const transformed = input.query !== undefined || input.fields !== undefined || input.itemOffset !== undefined || input.itemLimit !== undefined || (input.view !== undefined && input.view !== "main");
-    let source = request.pageId === undefined && !transformed ? allSources.find((item) => item.url === request.url) : request.pageId === undefined ? undefined : allSources.find((item) => item.pageId === request.pageId);
-    if (source === undefined && request.url !== undefined && this.options.readerUrl !== undefined) {
+    let source = !transformed ? allSources.find((item) => item.url === request.url) : undefined;
+    if (source === undefined && this.options.readerUrl !== undefined) {
       const response = await fetch(new URL("/v1/read", this.options.readerUrl), {
         method: "POST", signal, headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify({ url: request.url, query: input.query, view: input.view ?? "main", fields: input.fields ?? [], itemOffset: integer(input.itemOffset ?? 0, "itemOffset", 0, 1_000_000), itemLimit: integer(input.itemLimit ?? 50, "itemLimit", 1, 500), maxChars: 1_000_000 }),
@@ -237,7 +257,7 @@ export class WebxAuthority {
     const bounded = boundText(source.content, maxChars);
     const metadata = this.#liveReadMetadata.get(source.pageId);
     const readerTruncated = metadata?.reader !== null && typeof metadata?.reader === "object" && (metadata.reader as { truncated?: unknown }).truncated === true;
-    return { title: source.title, url: source.url, untrustedContent: bounded.text, truncated: bounded.truncated || readerTruncated, artifactId: source.artifactId, pageId: source.pageId, visibility: source.visibility, metadata } as BoundedContent;
+    return { title: source.title, url: source.url, untrustedContent: bounded.text, truncated: bounded.truncated || readerTruncated, visibility: source.visibility, metadata } as BoundedContent;
   }
 
   private async readRange(actor: AuthorityActor, request: RangeReadRequest, signal?: AbortSignal): Promise<RangeReadResponse> {
@@ -339,42 +359,6 @@ export class WebxAuthority {
       : `Insufficient relevant evidence. Found ${readableSources} readable source${readableSources === 1 ? "" : "s"}; at least ${minimumReadable} are required.\n\n${sections.join("\n\n")}`;
     const outputLimit = Math.min(MAX_CONTENT_CHARS, input.maxBytes ?? 24_000);
     return { question: request.question, summary: boundText(summary, outputLimit).text, sources, truncated: searchTruncated || summary.length > outputLimit };
-  }
-
-  private searchPages(actor: AuthorityActor, request: PageLibrarySearchRequest): PageLibrarySearchResponse {
-    requireScope(actor, "pages.read");
-    if (typeof request.query !== "string" || request.query.trim().length === 0 || request.query.length > 8_192) throw problem(400, "invalid-request", "query must contain 1 to 8192 characters", false);
-    const limit = integer(request.limit ?? 10, "limit", 1, 100);
-    const query = request.query.toLocaleLowerCase();
-    const queryTerms = query.match(/[\p{L}\p{N}._+-]+/gu)?.filter((term) => term.length > 1) ?? [];
-    const matches = [...this.options.sources, ...this.#liveSources.values()].filter((source) => {
-      if (source.visibility !== "public" || this.#forgottenPages.has(source.pageId)) return false;
-      const searchable = `${source.title} ${source.content} ${source.url}`.toLocaleLowerCase();
-      if (queryTerms.length === 0) return searchable.includes(query);
-      const matched = queryTerms.filter((term) => searchable.includes(term)).length;
-      return matched >= Math.max(1, Math.ceil(queryTerms.length / 2));
-    });
-    return {
-      query: request.query,
-      pages: matches.slice(0, limit).map((source) => ({ pageId: source.pageId, ownerPrincipalId: source.ownerPrincipalId, title: source.title, url: source.url, visibility: source.visibility, artifactId: source.artifactId })),
-      truncated: matches.length > limit,
-    };
-  }
-
-  private forgetPage(actor: AuthorityActor, request: PageForgetRequest): { forgotten: true; pageId: string } {
-    requireScope(actor, "pages.write");
-    if ((request.pageId === undefined) === (request.url === undefined)) throw problem(400, "invalid-request", "supply exactly one pageId or url", false);
-    const sources = [...this.options.sources, ...this.#liveSources.values()];
-    const source = request.pageId === undefined ? sources.find((item) => item.url === request.url) : sources.find((item) => item.pageId === request.pageId);
-    if (source === undefined || source.visibility !== "public" || source.ownerPrincipalId !== actor.principalId || this.#forgottenPages.has(source.pageId)) throw problem(404, "not-found", "page was not found", false);
-    this.#forgottenPages.add(source.pageId);
-    return { forgotten: true, pageId: source.pageId };
-  }
-
-  private async page(actor: AuthorityActor, pageId: string, signal?: AbortSignal): Promise<BoundedContent> {
-    requireScope(actor, "pages.read");
-    if (this.#forgottenPages.has(pageId)) throw problem(404, "not-found", "page was not found", false);
-    return this.read({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, { pageId }, signal);
   }
 
   private artifact(actor: AuthorityActor, artifactId: string, offset: number, maxBytes: number): ArtifactExcerpt {

@@ -12,7 +12,7 @@ const paths = [
 ] as const;
 
 function actor(principalId = "principal-a", agentId = "agent-a"): AuthorityActor {
-  return { principalId, agentId, scopes: new Set(["system.read", "search.write", "retrieval.read", "research.write", "pages.read", "pages.write", "artifacts.read", "browser.read", "browser.write", "browser.control", "browser.debug"]) };
+  return { principalId, agentId, scopes: new Set(["system.read", "search.write", "retrieval.read", "research.write", "artifacts.read", "browser.read", "browser.write", "browser.control", "browser.debug"]) };
 }
 
 function browser(): BrowserDaemonPort {
@@ -47,13 +47,12 @@ async function call(instance: WebxAuthority, owner: AuthorityActor, method: "GET
 }
 
 describe("WebxAuthority", () => {
-  it("serves bounded deterministic search, read, research, page, and artifact operations", async () => {
+  it("serves bounded deterministic search, read, research, and internal artifact operations", async () => {
     const instance = authority();
     expect((await call(instance, actor(), "POST", "/v1/search", { query: "WebX routes", limit: 1 }, "search-key-001")).status).toBe(200);
-    const read = await call(instance, actor(), "POST", "/v1/read", { pageId: "page-webx-001", maxChars: 4 }, "read-key-001");
-    expect(read.body).toMatchObject({ untrustedContent: "WebX", truncated: true, artifactId: "artifact-webx-001" });
+    const read = await call(instance, actor(), "POST", "/v1/read", { url: "https://fixture.invalid/webx", maxChars: 4 }, "read-key-001");
+    expect(read.body).toMatchObject({ untrustedContent: "WebX", truncated: true });
     expect((await call(instance, actor(), "POST", "/v1/research", { question: "browser paths", maxSources: 2 }, "research-key-001")).status).toBe(200);
-    expect((await call(instance, actor(), "GET", "/v1/pages/page-webx-001")).status).toBe(200);
     const artifact = await call(instance, actor(), "GET", "/v1/artifacts/artifact-webx-001/excerpt?offset=0&max_bytes=4");
     expect(artifact.body).toMatchObject({ excerpt: "WebX", integrityVerified: true, nextOffset: 4 });
   });
@@ -145,29 +144,6 @@ describe("WebxAuthority", () => {
     expect(seenSignal?.aborted).toBe(true);
   });
 
-  it("searches and forgets only owner-visible public page-library records", async () => {
-    const fixture = PUBLIC_SOURCES[0];
-    if (fixture === undefined) throw new Error("fixture source is missing");
-    const source = { ...fixture, ownerPrincipalId: "principal-a", pageId: "owned-page", artifactId: "owned-artifact" };
-    const instance = new WebxAuthority({ browser: browser(), sources: [source], artifacts: [], clock: { now: () => "" }, ids: { next: () => "" } });
-    const found = await call(instance, actor(), "POST", "/v1/pages/search", { query: "WebX" }, "pages-search-001");
-    expect(found).toMatchObject({ status: 200, body: { pages: [{ pageId: "owned-page", visibility: "public" }] } });
-    const tokenFound = await call(instance, actor(), "POST", "/v1/pages/search", { query: "routes WebX" }, "pages-search-token-001");
-    expect(tokenFound).toMatchObject({ status: 200, body: { pages: [{ pageId: "owned-page" }] } });
-    expect(await call(instance, actor(), "DELETE", "/v1/pages", { pageId: "owned-page" }, "pages-forget-001")).toMatchObject({ status: 200, body: { forgotten: true, pageId: "owned-page" } });
-    expect(await call(instance, actor(), "GET", "/v1/pages/owned-page")).toMatchObject({ status: 404, body: { code: "not-found" } });
-    expect(await call(instance, actor(), "POST", "/v1/pages/search", { query: "WebX", includeHistory: true }, "pages-history-001")).toMatchObject({ status: 200, body: { pages: [] } });
-  });
-
-  it("rejects private content for the wrong principal without revealing it", async () => {
-    const publicSource = PUBLIC_SOURCES[0];
-    if (publicSource === undefined) throw new Error("fixture source is missing");
-    const privateSource = { ...publicSource, pageId: "private-page", artifactId: "private-artifact", ownerPrincipalId: "principal-a", visibility: "private" as const };
-    const instance = new WebxAuthority({ browser: browser(), sources: [privateSource], artifacts: [], clock: { now: () => "" }, ids: { next: () => "" } });
-    const response = await call(instance, actor("principal-b", "agent-b"), "GET", "/v1/pages/private-page");
-    expect(response).toMatchObject({ status: 404, body: { code: "not-found" } });
-  });
-
   it("replays one idempotent browser mutation and rejects changed reuse", async () => {
     const port = browser();
     const instance = authority(port);
@@ -220,7 +196,7 @@ describe("WebxAuthority", () => {
 
   it("reports response limits and cancellation without fallback", async () => {
     const instance = authority();
-    const limited = await call(instance, actor(), "GET", "/v1/pages/page-webx-001", undefined, undefined, 20);
+    const limited = await call(instance, actor(), "GET", "/v1/capabilities", undefined, undefined, 20);
     expect(limited.status).toBe(413);
     expect(new TextEncoder().encode(JSON.stringify(limited.body ?? null)).byteLength).toBeLessThanOrEqual(20);
     const controller = new AbortController();

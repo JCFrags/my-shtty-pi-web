@@ -3,10 +3,6 @@ export declare const FACADE_OPERATION_INVENTORY: {
     readonly "web.search": "search";
     readonly "web.read": "read";
     readonly "web.research": "research";
-    readonly "library.search": "searchPages";
-    readonly "library.get": "getPage";
-    readonly "library.forget": "forgetPage";
-    readonly "artifact.read": "getArtifactExcerpt";
     readonly "browser.open": "createBrowserSession";
     readonly "browser.tabs": "list/closeBrowserTab/closeBrowserSession; discard and restore unavailable";
     readonly "browser.observe": "observeBrowser plus getBrowserVisualFrame for visual binding";
@@ -49,7 +45,6 @@ export interface FacadeCapabilities {
         readonly web: boolean;
         readonly browser: boolean;
         readonly browserDebug: boolean;
-        readonly artifacts: boolean;
     };
     readonly browserPathIds: readonly [string, string];
 }

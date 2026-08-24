@@ -7,10 +7,6 @@ export const FACADE_OPERATION_INVENTORY = {
   "web.search": "search",
   "web.read": "read",
   "web.research": "research",
-  "library.search": "searchPages",
-  "library.get": "getPage",
-  "library.forget": "forgetPage",
-  "artifact.read": "getArtifactExcerpt",
   "browser.open": "createBrowserSession",
   "browser.tabs": "list/closeBrowserTab/closeBrowserSession; discard and restore unavailable",
   "browser.observe": "observeBrowser plus getBrowserVisualFrame for visual binding",
@@ -27,7 +23,7 @@ export interface FacadeResult {
   readonly artifactPayload?: { readonly artifactId: string; readonly mediaType: string; readonly dataBase64: string; readonly size: number; readonly complete: boolean; readonly mode: "image" | "raw"; readonly offset?: number; readonly nextOffset?: number | null; readonly eof?: boolean };
   readonly trust?: "untrusted-external" | "local";
 }
-export interface FacadeCapabilities { readonly apiVersion: string; readonly daemon: "ready" | "unavailable"; readonly groups: { readonly web: boolean; readonly browser: boolean; readonly browserDebug: boolean; readonly artifacts: boolean }; readonly browserPathIds: readonly [string, string] }
+export interface FacadeCapabilities { readonly apiVersion: string; readonly daemon: "ready" | "unavailable"; readonly groups: { readonly web: boolean; readonly browser: boolean; readonly browserDebug: boolean }; readonly browserPathIds: readonly [string, string] }
 interface ObservationBinding { readonly ownerId: string; readonly sessionId: string; readonly frame: BrowserVisualFrame }
 
 /** SDK adapter for the singular Pi facade operation names. */
@@ -54,10 +50,10 @@ export class WebxFacadeClient {
       const catalog = await client.capabilities({ signal: options.signal });
       const paths = catalog.browserPaths.map((path) => path.pathId);
       if (paths.length !== 2 || paths[0] !== "agent-browser/chrome" || paths[1] !== "pinchtab/chrome") throw new Error("WebX returned an invalid browser path inventory");
-      return { apiVersion: catalog.apiVersion, daemon: "ready", groups: { web: true, browser: true, browserDebug: true, artifacts: true }, browserPathIds: [paths[0], paths[1]] };
+      return { apiVersion: catalog.apiVersion, daemon: "ready", groups: { web: true, browser: true, browserDebug: true }, browserPathIds: [paths[0], paths[1]] };
     } catch (error) {
       if (options.signal.aborted) throw error;
-      return { apiVersion: "1.0.0", daemon: "unavailable", groups: { web: false, browser: false, browserDebug: false, artifacts: false }, browserPathIds: ["agent-browser/chrome", "pinchtab/chrome"] };
+      return { apiVersion: "1.0.0", daemon: "unavailable", groups: { web: false, browser: false, browserDebug: false }, browserPathIds: ["agent-browser/chrome", "pinchtab/chrome"] };
     }
   }
 
@@ -68,10 +64,6 @@ export class WebxFacadeClient {
     if (operation === "web.search") return external("Search results", await client.search({ query: requiredString(value.query, "query"), limit: optionalNumber(value.limit), domains: optionalStringArray(value.domains, "domains"), freshness: optionalFreshness(value.freshness) }, requestOptions));
     if (operation === "web.read") { rejectPresent(value, ["browserSessionId", "tabId"], operation); return external("Read result", await client.read({ url: optionalString(value.url), query: optionalString(value.query), view: optionalReadView(value.view), fields: optionalStringArray(value.fields, "fields"), itemOffset: optionalNumber(value.itemOffset), itemLimit: optionalNumber(value.itemLimit), maxChars: optionalNumber(value.maxChars) }, requestOptions)); }
     if (operation === "web.research") return external("Research result", await client.research({ question: requiredString(value.question, "question"), mode: optionalResearchMode(value.mode), maxQueries: optionalNumber(value.maxQueries), maxPages: optionalNumber(value.maxPages), maxBytes: optionalNumber(value.maxBytes), resume: optionalObject(value.resume) }, requestOptions));
-    if (operation === "library.search") return external("Page-library results", await client.searchPages({ query: requiredString(value.query, "query"), limit: optionalNumber(value.limit), includeHistory: optionalBoolean(value.includeHistory) }, requestOptions));
-    if (operation === "library.get") return external("Page-library record", await client.getPage(requiredString(value.versionId, "versionId"), { signal: options.signal }));
-    if (operation === "library.forget") return local("Page-library record forgotten", await client.forgetPage({ pageId: optionalString(value.versionId), url: optionalString(value.url) }, requestOptions));
-    if (operation === "artifact.read") return this.artifact(client, value, options.signal);
     if (operation === "browser.open") { rejectPresent(value, ["newTab"], operation); return local("Browser session opened", await client.createBrowserSession({ pathId: browserPath(value.pathId), url: optionalString(value.url), visible: optionalBoolean(value.visible), label: optionalString(value.label) }, requestOptions)); }
     if (operation === "browser.tabs") return this.browserTabs(client, value, requestOptions);
     if (operation === "browser.observe") return this.observe(client, value, options, requestOptions);
@@ -89,13 +81,6 @@ export class WebxFacadeClient {
   importObservationBindingForTest(observationId: string, ownerId: string, sessionId: string, frame: BrowserVisualFrame): void { this.#observations.set(observationId, { ownerId, sessionId, frame }); }
 
   private client(ownerId: string): WebxClient { if (this.#client === undefined || this.#ownerId !== ownerId) throw new Error("WebX facade client is not started for this owner"); return this.#client; }
-
-  private async artifact(client: WebxClient, value: Record<string, unknown>, signal: AbortSignal): Promise<FacadeResult> {
-    const offset = optionalNumber(value.offset) ?? 0;
-    const artifact = await client.getArtifactExcerpt(requiredString(value.artifactId, "artifactId"), offset, optionalNumber(value.limit) ?? 16_384, { signal });
-    const bytes = new TextEncoder().encode(artifact.excerpt);
-    return { summary: "Artifact excerpt", data: artifact, artifacts: [{ id: artifact.artifactId, kind: artifact.mediaType }], artifactPayload: { artifactId: artifact.artifactId, mediaType: artifact.mediaType, dataBase64: bytesToBase64(bytes), size: artifact.sizeBytes, complete: artifact.nextOffset === undefined && offset === 0, mode: "raw", offset, nextOffset: artifact.nextOffset ?? null, eof: artifact.nextOffset === undefined }, trust: "local" };
-  }
 
   private async browserTabs(client: WebxClient, input: Record<string, unknown>, options: RequestOptions): Promise<FacadeResult> {
     const action = requiredString(input.action, "action");
@@ -183,7 +168,6 @@ function observationView(value: unknown): "main" | "interactive" | "visual" | "f
 function debugOperation(value: unknown): "console" | "network" | "html" | "pdf" | "record-start" | "record-stop" { if (value === "console" || value === "network" || value === "html" || value === "pdf" || value === "record-start" || value === "record-stop") return value; throw unavailable("browser.debug", "secret-bearing or unknown debug operation is refused"); }
 function workspaceAction(value: unknown): "show" | "hide" | "list" | "attach" | "takeover" | "return" { if (value === "show" || value === "hide" || value === "list" || value === "attach" || value === "takeover" || value === "return") return value; throw unavailable("browser.workspace", `${String(value)} is unsupported`); }
 function rejectPresent(value: Record<string, unknown>, names: readonly string[], operation: string): void { for (const name of names) if (value[name] !== undefined) throw unavailable(operation, `${name} is not supported by the daemon route`); }
-function bytesToBase64(bytes: Uint8Array): string { let binary = ""; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary); }
 function pointerButton(value: unknown): "left" | "middle" | "right" { if (value === undefined || value === "left") return "left"; if (value === "middle" || value === "right") return value; throw new TypeError("action.button is invalid"); }
 function scrollDirection(value: unknown): "up" | "down" | "left" | "right" { if (value === "up" || value === "down" || value === "left" || value === "right") return value; throw new TypeError("action.direction is invalid"); }
 function stringArray(value: unknown, name: string): readonly string[] { if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) throw new TypeError(`${name} is invalid`); return value as string[]; }

@@ -5,10 +5,6 @@ export const FACADE_OPERATION_INVENTORY = {
     "web.search": "search",
     "web.read": "read",
     "web.research": "research",
-    "library.search": "searchPages",
-    "library.get": "getPage",
-    "library.forget": "forgetPage",
-    "artifact.read": "getArtifactExcerpt",
     "browser.open": "createBrowserSession",
     "browser.tabs": "list/closeBrowserTab/closeBrowserSession; discard and restore unavailable",
     "browser.observe": "observeBrowser plus getBrowserVisualFrame for visual binding",
@@ -43,12 +39,12 @@ export class WebxFacadeClient {
             const paths = catalog.browserPaths.map((path) => path.pathId);
             if (paths.length !== 2 || paths[0] !== "agent-browser/chrome" || paths[1] !== "pinchtab/chrome")
                 throw new Error("WebX returned an invalid browser path inventory");
-            return { apiVersion: catalog.apiVersion, daemon: "ready", groups: { web: true, browser: true, browserDebug: true, artifacts: true }, browserPathIds: [paths[0], paths[1]] };
+            return { apiVersion: catalog.apiVersion, daemon: "ready", groups: { web: true, browser: true, browserDebug: true }, browserPathIds: [paths[0], paths[1]] };
         }
         catch (error) {
             if (options.signal.aborted)
                 throw error;
-            return { apiVersion: "1.0.0", daemon: "unavailable", groups: { web: false, browser: false, browserDebug: false, artifacts: false }, browserPathIds: ["agent-browser/chrome", "pinchtab/chrome"] };
+            return { apiVersion: "1.0.0", daemon: "unavailable", groups: { web: false, browser: false, browserDebug: false }, browserPathIds: ["agent-browser/chrome", "pinchtab/chrome"] };
         }
     }
     async request(operation, input, options) {
@@ -63,14 +59,6 @@ export class WebxFacadeClient {
         }
         if (operation === "web.research")
             return external("Research result", await client.research({ question: requiredString(value.question, "question"), mode: optionalResearchMode(value.mode), maxQueries: optionalNumber(value.maxQueries), maxPages: optionalNumber(value.maxPages), maxBytes: optionalNumber(value.maxBytes), resume: optionalObject(value.resume) }, requestOptions));
-        if (operation === "library.search")
-            return external("Page-library results", await client.searchPages({ query: requiredString(value.query, "query"), limit: optionalNumber(value.limit), includeHistory: optionalBoolean(value.includeHistory) }, requestOptions));
-        if (operation === "library.get")
-            return external("Page-library record", await client.getPage(requiredString(value.versionId, "versionId"), { signal: options.signal }));
-        if (operation === "library.forget")
-            return local("Page-library record forgotten", await client.forgetPage({ pageId: optionalString(value.versionId), url: optionalString(value.url) }, requestOptions));
-        if (operation === "artifact.read")
-            return this.artifact(client, value, options.signal);
         if (operation === "browser.open") {
             rejectPresent(value, ["newTab"], operation);
             return local("Browser session opened", await client.createBrowserSession({ pathId: browserPath(value.pathId), url: optionalString(value.url), visible: optionalBoolean(value.visible), label: optionalString(value.label) }, requestOptions));
@@ -96,12 +84,6 @@ export class WebxFacadeClient {
     importObservationBindingForTest(observationId, ownerId, sessionId, frame) { this.#observations.set(observationId, { ownerId, sessionId, frame }); }
     client(ownerId) { if (this.#client === undefined || this.#ownerId !== ownerId)
         throw new Error("WebX facade client is not started for this owner"); return this.#client; }
-    async artifact(client, value, signal) {
-        const offset = optionalNumber(value.offset) ?? 0;
-        const artifact = await client.getArtifactExcerpt(requiredString(value.artifactId, "artifactId"), offset, optionalNumber(value.limit) ?? 16_384, { signal });
-        const bytes = new TextEncoder().encode(artifact.excerpt);
-        return { summary: "Artifact excerpt", data: artifact, artifacts: [{ id: artifact.artifactId, kind: artifact.mediaType }], artifactPayload: { artifactId: artifact.artifactId, mediaType: artifact.mediaType, dataBase64: bytesToBase64(bytes), size: artifact.sizeBytes, complete: artifact.nextOffset === undefined && offset === 0, mode: "raw", offset, nextOffset: artifact.nextOffset ?? null, eof: artifact.nextOffset === undefined }, trust: "local" };
-    }
     async browserTabs(client, input, options) {
         const action = requiredString(input.action, "action");
         if (action === "list")
@@ -228,8 +210,6 @@ function workspaceAction(value) { if (value === "show" || value === "hide" || va
 function rejectPresent(value, names, operation) { for (const name of names)
     if (value[name] !== undefined)
         throw unavailable(operation, `${name} is not supported by the daemon route`); }
-function bytesToBase64(bytes) { let binary = ""; for (const byte of bytes)
-    binary += String.fromCharCode(byte); return btoa(binary); }
 function pointerButton(value) { if (value === undefined || value === "left")
     return "left"; if (value === "middle" || value === "right")
     return value; throw new TypeError("action.button is invalid"); }

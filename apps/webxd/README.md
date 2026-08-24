@@ -28,8 +28,14 @@ The server:
 
 Browser operations use only `BrowserDaemonPort`. Semantic actions use the frozen `browser.act` shape. Visual CUA uses the frozen scoped workspace lease, frame, control, and input methods.
 
+## Short-lived cache
+
+Search results use a 15-minute cache. Extracted page reads use a six-hour cache. The cache keeps up to 512 recent entries in RAM and up to 2 GiB on SSD. Files default to `$XDG_CACHE_HOME/pi-web/responses` with user-only permissions. `WEBX_CACHE_DIR` can select another directory. Cache failures never block a live request.
+
+This cache reduces repeated search-provider and website traffic. It is not a durable research archive and has no Pi-facing recall operations.
+
 ## Public routes
 
-The authority has tested routes for search, read, research, public page-library search/get/forget, artifact excerpt, capabilities, browser workspace, and browser create/list/get/observe/frame/act/debug/control/cancel/close-session/close-tab.
+The Pi-facing authority covers search, read, research, capabilities, browser workspace, and browser create/list/get/observe/frame/act/debug/control/cancel/close-session/close-tab. Page-library functions are reserved for a future separate research-archive extension. Internal artifact routes support bounded component transfers and are not Pi tools.
 
 Page history search returns explicit `501 unavailable`. Safe browser debug permits `console`, `network`, `html`, `pdf`, `record-start`, and `record-stop`. Secret-bearing `evaluate`, `cookies`, and `storage` operations are refused.

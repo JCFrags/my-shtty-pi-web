@@ -40,15 +40,6 @@ export class WebxClient {
     research(request, options) {
         return this.call("POST", "/v1/research", request, requireIdempotency(options));
     }
-    searchPages(request, options) {
-        return this.call("POST", "/v1/pages/search", request, requireIdempotency(options));
-    }
-    getPage(pageId, options = {}) {
-        return this.call("GET", `/v1/pages/${encodeURIComponent(pageId)}`, undefined, options);
-    }
-    forgetPage(request, options) {
-        return this.call("DELETE", "/v1/pages", request, requireIdempotency(options));
-    }
     getArtifactExcerpt(artifactId, offset = 0, maxBytes = 16_384, options = {}) {
         const query = new URLSearchParams({ offset: String(offset), max_bytes: String(maxBytes) });
         return this.call("GET", `/v1/artifacts/${encodeURIComponent(artifactId)}/excerpt?${query}`, undefined, options);

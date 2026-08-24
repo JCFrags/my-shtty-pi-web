@@ -5,7 +5,7 @@ export const BROWSER_PATH_IDS = ["agent-browser/chrome", "pinchtab/chrome"] as c
 
 export type BrowserPathId = (typeof BROWSER_PATH_IDS)[number];
 export type Visibility = "public" | "internal" | "private" | "secret";
-export type CapabilityId = "search" | "read" | "research" | "pages" | "artifacts" | "browser";
+export type CapabilityId = "search" | "read" | "research" | "artifacts" | "browser";
 
 export interface RequestOptions {
   readonly signal?: AbortSignal;
@@ -86,8 +86,7 @@ export interface SearchResponse {
 }
 
 export interface ReadRequest {
-  readonly url?: string;
-  readonly pageId?: string;
+  readonly url: string;
   readonly query?: string;
   readonly view?: "main" | "outline" | "raw";
   readonly fields?: readonly string[];
@@ -149,37 +148,6 @@ export interface ResearchResponse {
   readonly sources: readonly SearchHit[];
   readonly truncated: boolean;
   readonly artifactId?: string;
-}
-
-export interface PageLibrarySearchRequest {
-  readonly query: string;
-  readonly limit?: number;
-  readonly includeHistory?: boolean;
-}
-
-export interface PageLibrarySearchResponse {
-  readonly query: string;
-  readonly pages: readonly PageRecord[];
-  readonly truncated: boolean;
-}
-
-export interface PageForgetRequest {
-  readonly pageId?: string;
-  readonly url?: string;
-}
-
-export interface PageForgetResult {
-  readonly forgotten: boolean;
-  readonly pageId: string;
-}
-
-export interface PageRecord {
-  readonly pageId: string;
-  readonly ownerPrincipalId: string;
-  readonly title: string;
-  readonly url: string;
-  readonly visibility: Visibility;
-  readonly artifactId: string;
 }
 
 export interface ArtifactExcerpt {

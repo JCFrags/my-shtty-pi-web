@@ -18,10 +18,6 @@ import {
   type BrowserWorkspaceRequest,
   type BrowserWorkspaceResult,
   type CapabilityCatalog,
-  type PageForgetRequest,
-  type PageForgetResult,
-  type PageLibrarySearchRequest,
-  type PageLibrarySearchResponse,
   type RangeReadRequest,
   type RangeReadResponse,
   type ReadRequest,
@@ -91,18 +87,6 @@ export class WebxClient {
 
   research(request: ResearchRequest, options: RequestOptions): Promise<ResearchResponse> {
     return this.call("POST", "/v1/research", request, requireIdempotency(options));
-  }
-
-  searchPages(request: PageLibrarySearchRequest, options: RequestOptions): Promise<PageLibrarySearchResponse> {
-    return this.call("POST", "/v1/pages/search", request, requireIdempotency(options));
-  }
-
-  getPage(pageId: string, options: RequestOptions = {}): Promise<BoundedContent> {
-    return this.call("GET", `/v1/pages/${encodeURIComponent(pageId)}`, undefined, options);
-  }
-
-  forgetPage(request: PageForgetRequest, options: RequestOptions): Promise<PageForgetResult> {
-    return this.call("DELETE", "/v1/pages", request, requireIdempotency(options));
   }
 
   getArtifactExcerpt(artifactId: string, offset = 0, maxBytes = 16_384, options: RequestOptions = {}): Promise<ArtifactExcerpt> {

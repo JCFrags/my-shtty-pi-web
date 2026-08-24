@@ -33,7 +33,7 @@ describe("WebxClient", () => {
 
   it("maps the complete facade inventory to SDK methods or explicit unavailable results", async () => {
     expect(Object.keys(FACADE_OPERATION_INVENTORY)).toEqual([
-      "web.search", "web.read", "web.research", "library.search", "library.get", "library.forget", "artifact.read",
+      "web.search", "web.read", "web.research",
       "browser.open", "browser.tabs", "browser.observe", "browser.act", "browser.cancel", "browser.debug", "browser.workspace",
     ]);
     expect(FACADE_OPERATION_INVENTORY["browser.workspace"]).toBe("manageBrowserWorkspace");
@@ -44,9 +44,6 @@ describe("WebxClient", () => {
     const wire = transport();
     const client = new WebxClient(wire);
     await client.readRange({ url: "https://data.example/warc", offset: 0, length: 10 }, { idempotencyKey: "range-read-001" });
-    await client.searchPages({ query: "q" }, { idempotencyKey: "library-search-1" });
-    await client.getPage("page-1");
-    await client.forgetPage({ pageId: "page-1" }, { idempotencyKey: "library-forget-1" });
     await client.getArtifactExcerpt("artifact-1");
     await client.getArtifactBytes("artifact-1", 0, 10);
     await client.listBrowserSessions();
@@ -61,7 +58,7 @@ describe("WebxClient", () => {
     await client.cancelBrowserOperation("operation-1", { idempotencyKey: "browser-cancel-01" });
     await client.closeBrowserSession("session-1", { idempotencyKey: "browser-close-01" });
     expect(wire.request.mock.calls.map(([request]) => `${request.method} ${request.path}`)).toEqual(expect.arrayContaining([
-      "POST /v1/read-range", "POST /v1/pages/search", "GET /v1/pages/page-1", "DELETE /v1/pages", "GET /v1/artifacts/artifact-1/excerpt?offset=0&max_bytes=16384", "GET /v1/artifacts/artifact-1/bytes?offset=0&max_bytes=10",
+      "POST /v1/read-range", "GET /v1/artifacts/artifact-1/excerpt?offset=0&max_bytes=16384", "GET /v1/artifacts/artifact-1/bytes?offset=0&max_bytes=10",
       "GET /v1/browser/sessions", "POST /v1/browser/workspace", "DELETE /v1/browser/sessions/session-1/tabs/tab-1", "GET /v1/browser/sessions/session-1", "POST /v1/browser/sessions/session-1/observe", "POST /v1/browser/sessions/session-1/frame",
       "POST /v1/browser/sessions/session-1/actions", "POST /v1/browser/sessions/session-1/debug", "POST /v1/browser/sessions/session-1/control",
       "POST /v1/browser/operations/operation-1/cancel", "DELETE /v1/browser/sessions/session-1",

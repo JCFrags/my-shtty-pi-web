@@ -69,9 +69,9 @@ See [Fedora installation](docs/fedora-install.md) for profiles, extensions, pass
 
 ## Pi tool surface
 
-`web_upgrade`, `web_search`, `web_read`, `browser_open`, `browser_tabs`, `browser_observe`, `browser_act`, `browser_debug`, and `artifact_read` form one backend-neutral surface. Every daemon browser operation resolves through an explicit agent/session/tab address. Tool defaults only reuse the invoking agent’s own last tab.
+`web_search`, `web_read`, `web_research`, `browser_open`, `browser_tabs`, `browser_observe`, `browser_act`, and `browser_debug` form the Pi-facing surface. Every daemon browser operation resolves through an explicit agent, session, and tab address. Tool defaults only reuse the invoking agent’s own last tab.
 
-The model can call `web_upgrade` to additively escalate `read` → `browser` → `debug` when a task needs more capability, including during the same turn. It cannot downgrade modes or override an explicit user `/web off`; only the user can re-enable web tools after opting out. `browser_tabs` lets the model review all of its owned sessions/tabs, reuse relevant ones, and explicitly close transient tabs or whole sessions when they are no longer needed.
+Only the user changes capability modes. `browser_tabs` lets the model review its owned sessions and tabs, reuse relevant ones, and close transient tabs or sessions when they are no longer needed. Internal artifacts and short-lived caches are implementation details rather than separate Pi tools.
 
 The default observation is `main`. `interactive` returns compact refs, `visual` adds an optional image artifact, `full` keeps the complete structure artifact-backed, and `diff` reports page changes after actions. Typed JSON stays internal. TOON is considered only for regular model-facing arrays and only when it is measurably smaller than compact JSON or line format.
 

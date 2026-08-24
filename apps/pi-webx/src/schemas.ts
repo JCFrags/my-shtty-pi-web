@@ -22,10 +22,6 @@ const point = {
   coordinateSpace: Type.Optional(StringEnum(["viewport", "image"] as const)),
 };
 
-export const WebUpgradeSchema = Type.Object({
-  mode: StringEnum(["browser", "debug"] as const),
-}, strict);
-
 export const WebSearchSchema = Type.Object({
   query: Type.String({ minLength: 1, maxLength: 8192 }),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
@@ -42,25 +38,8 @@ export const WebResearchSchema = Type.Object({
   resume: Type.Optional(Type.Record(Type.String({ maxLength: 128 }), Type.Unknown(), { maxProperties: 64 })),
 }, strict);
 
-export const WebRecallSchema = Type.Object({
-  query: Type.String({ minLength: 1, maxLength: 8192 }),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
-  includeHistory: Type.Optional(Type.Boolean()),
-}, strict);
-
-export const WebRecallGetSchema = Type.Object({
-  versionId: id(),
-  maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000 })),
-}, strict);
-
-export const WebRecallForgetSchema = Type.Union([
-  Type.Object({ versionId: id() }, strict),
-  Type.Object({ url: Type.String({ minLength: 1, maxLength: 8192 }) }, strict),
-]);
-
 export const WebReadSchema = Type.Object({
-  url: Type.Optional(Type.String({ minLength: 1, maxLength: 8192 })),
-  ...address,
+  url: Type.String({ minLength: 1, maxLength: 8192 }),
   query: Type.Optional(Type.String({ maxLength: 8192 })),
   view: Type.Optional(StringEnum(["main", "outline", "raw"] as const)),
   fields: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 256 }), { maxItems: 32 })),
@@ -127,18 +106,3 @@ export const BrowserDebugSchema = Type.Object({
   args: Type.Optional(Type.Record(Type.String({ maxLength: 128 }), Type.Unknown(), { maxProperties: 64 })),
   maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 4_000_000 })),
 }, strict);
-
-export const ArtifactReadSchema = Type.Union([
-  Type.Object({
-    artifactId: id(),
-    mode: Type.Optional(Type.Literal("default")),
-    offset: Type.Optional(Type.Integer({ minimum: 0 })),
-    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 4_194_304 })),
-  }, strict),
-  Type.Object({
-    artifactId: id(),
-    mode: Type.Literal("raw"),
-    offset: Type.Optional(Type.Integer({ minimum: 0 })),
-    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 65_536 })),
-  }, strict),
-]);

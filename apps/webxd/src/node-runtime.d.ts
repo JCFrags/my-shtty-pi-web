@@ -28,7 +28,16 @@ declare module "node:dns/promises" {
 declare module "node:fs/promises" {
   export function chmod(path: string, mode: number): Promise<void>;
   export function lstat(path: string): Promise<{ isSocket(): boolean }>;
+  export function mkdir(path: string, options?: { recursive?: boolean; mode?: number }): Promise<string | undefined>;
+  export function readFile(path: string, encoding: "utf8"): Promise<string>;
+  export function readdir(path: string): Promise<string[]>;
+  export function rename(oldPath: string, newPath: string): Promise<void>;
+  export function stat(path: string): Promise<{ size: number; mtimeMs: number }>;
   export function unlink(path: string): Promise<void>;
+  export function writeFile(path: string, data: string, options?: { mode?: number }): Promise<void>;
+}
+declare module "node:path" {
+  export function join(...parts: string[]): string;
 }
 declare module "node:process" {
   const process: {

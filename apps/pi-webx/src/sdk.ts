@@ -9,7 +9,6 @@ export interface WebxCapabilities {
     web: boolean;
     browser: boolean;
     browserDebug: boolean;
-    artifacts: boolean;
   };
   browserPathIds: readonly [string, string];
 }

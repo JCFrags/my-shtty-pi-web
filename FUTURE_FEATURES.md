@@ -12,14 +12,23 @@ The first goal is a small and reliable Pi internet tool set: search, direct page
 - Support feeds such as RSS and Atom.
 - Optionally add a private local search engine for a larger saved corpus.
 
-## Research and recall
+## Separate research archive extension
 
+A future extension can preserve websites for long-term research and gradually build a local library or encyclopedia from high-quality sources. It must remain separate from the core Pi web tools so that storage, indexing, retention, and archival complexity do not affect normal search, reading, or browser control.
+
+Possible features:
+
+- Save reviewed copies of useful public pages and their source provenance.
+- Search the local collection before using the public internet.
+- Track page versions and meaningful changes.
+- Build curated topics from stronger sources gathered over long-term use.
 - Run bounded multi-source research with citations and disagreement checks.
 - Resume a long research task from a saved manifest.
-- Keep an owner-scoped library of useful public pages.
-- Track page versions and meaningful changes.
-- Let the user forget one saved version or an entire URL.
-- Build source collections that can be exported and imported.
+- Forget one saved version or an entire URL.
+- Export and import source collections.
+- Operate as its own Pi extension with its own storage and retention controls.
+
+The core web tools can use a short-lived RAM and SSD cache to reduce repeated traffic. That cache is not a research archive and is not exposed as recall tools.
 
 ## Crawling and monitoring
 

@@ -4,7 +4,7 @@ This repository is the single source for Pi's internet tools.
 
 It contains:
 
-- web search, direct page reading, research, recall, and artifact access;
+- web search, direct page reading, and bounded multi-source research;
 - browser automation with explicit sessions and tabs;
 - a Tauri desktop workspace for live viewing and user control;
 - PDF and office-document conversion;
@@ -19,7 +19,7 @@ The components can share infrastructure when that gives a clear benefit. They re
 - `apps/webxd`: local authority for web and browser operations.
 - `components/browser`: browser coordinator, backends, Tauri workspace, reader, Docling integration, and browser protocol.
 - `packages/sdk`: client interface used by the Pi extension.
-- `packages/artifacts`: bounded large-result storage primitives.
+- `packages/artifacts`: internal large-result storage primitives.
 - `packages/policy`: destination and ownership policy primitives.
 - `packages/test-fixtures`: local deterministic fixtures.
 - `deploy`: retained local deployment files.

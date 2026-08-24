@@ -5,10 +5,8 @@ import { Value } from "typebox/value";
 import { createPiWebxExtension } from "../src/index.js";
 import { MAX_MODEL_CHARS, presentResult } from "../src/output.js";
 import {
-  ArtifactReadSchema,
   BrowserActSchema,
   BrowserOpenSchema,
-  WebRecallForgetSchema,
   WebSearchSchema,
 } from "../src/schemas.js";
 import type { WebxCapabilities, WebxRequestOptions, WebxResult, WebxSdk } from "../src/sdk.js";
@@ -16,7 +14,7 @@ import type { WebxCapabilities, WebxRequestOptions, WebxResult, WebxSdk } from "
 const readyCapabilities: WebxCapabilities = {
   apiVersion: "1.0.0",
   daemon: "ready",
-  groups: { web: true, browser: true, browserDebug: true, artifacts: true },
+  groups: { web: true, browser: true, browserDebug: true },
   browserPathIds: ["agent-browser/chrome", "pinchtab/chrome"],
 };
 
@@ -82,8 +80,8 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   const sdk = new MockSdk();
   const fx = harness(sdk);
   assert.deepEqual(fx.tools.map((tool) => tool.name), [
-    "web_upgrade", "web_search", "web_research", "web_recall", "web_recall_get", "web_recall_forget", "web_read",
-    "browser_open", "browser_tabs", "browser_observe", "browser_act", "browser_debug", "artifact_read",
+    "web_search", "web_research", "web_read",
+    "browser_open", "browser_tabs", "browser_observe", "browser_act", "browser_debug",
   ]);
   assert.deepEqual([...fx.commands.keys()], ["web", "browser"]);
   assert.deepEqual([...fx.shortcuts.keys()], ["ctrl+alt+g"]);
@@ -99,16 +97,14 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   assert.match(prompt.systemPrompt, /WebX is Pi's primary internet interface/);
   assert.match(prompt.systemPrompt, /Do not replace WebX with curl/);
 
-  await fx.execute("web_upgrade", { mode: "browser" });
   assert.ok(fx.active.includes("browser_open"));
   assert.ok(!fx.active.includes("browser_debug"));
-  await fx.execute("web_upgrade", { mode: "debug" });
+  await fx.commands.get("web")?.handler("debug", fx.ctx);
   assert.ok(fx.active.includes("browser_debug"));
 
   await fx.commands.get("web")?.handler("off", fx.ctx);
   assert.ok(!fx.active.includes("web_search"));
   assert.ok(fx.active.includes("other_extension_tool"));
-  await assert.rejects(fx.execute("web_upgrade", { mode: "browser" }), /explicitly disabled/);
   await fx.events.get("session_shutdown")?.();
   assert.equal(sdk.stops, 1);
 });
@@ -116,8 +112,6 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
 test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
   assert.equal(Value.Check(WebSearchSchema, { query: "ok", unexpected: true }), false);
   assert.equal(Value.Check(WebSearchSchema, { query: "ok", limit: 21 }), false);
-  assert.equal(Value.Check(ArtifactReadSchema, { artifactId: "a", limit: 4_194_305 }), false);
-  assert.equal(Value.Check(ArtifactReadSchema, { artifactId: "a", mode: "raw", limit: 65_537 }), false);
   assert.equal(Value.Check(BrowserOpenSchema, { pathId: "agent-browser/chrome" }), true);
   assert.equal(Value.Check(BrowserOpenSchema, { pathId: "pinchtab/chrome" }), true);
   for (const pathId of ["agent-browser", "rustwright", "other"]) {
@@ -129,7 +123,6 @@ test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
   assert.equal(Value.Check(BrowserActSchema, { action: { kind: "mouse-click", x: 1, y: 2 } }), false);
   assert.equal(Value.Check(BrowserActSchema, { action: { kind: "upload", ref: "e1", uploadHandle: "handle-1" } }), false);
   assert.equal(Value.Check(BrowserActSchema, { action: { kind: "upload", ref: "e1", uploadHandleIds: ["handle-1"] } }), false);
-  assert.equal(Value.Check(WebRecallForgetSchema, { versionId: "v", extra: true }), false);
 });
 
 test("tool calls use only the SDK seam with owner, idempotency, cancellation, and bounded untrusted output", async () => {
@@ -186,7 +179,7 @@ test("API mismatch, daemon outage, wrong paths, and untrusted projects fail clos
     sdk.capabilitiesValue = capabilitiesValue;
     const fx = harness(sdk);
     await fx.events.get("session_start")?.({}, fx.ctx);
-    assert.equal(fx.active.some((name) => name.startsWith("web_") || name.startsWith("browser_") || name === "artifact_read"), false);
+    assert.equal(fx.active.some((name) => name.startsWith("web_") || name.startsWith("browser_")), false);
     await assert.rejects(fx.execute("web_search", { query: "x" }));
     assert.equal(sdk.calls.length, 0);
     await fx.events.get("session_shutdown")?.();

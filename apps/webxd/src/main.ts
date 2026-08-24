@@ -5,6 +5,7 @@ import { WebxdRuntime, sameUserPiActorAuthenticator } from "./runtime.js";
 const runtimeDirectory = process.env.XDG_RUNTIME_DIR;
 if (runtimeDirectory === undefined) throw new Error("XDG_RUNTIME_DIR is required for the same-user WebX runtime");
 
+const cacheHome = process.env.XDG_CACHE_HOME ?? `${process.env.HOME ?? process.cwd()}/.cache`;
 const proxyUrl = process.env.WEBX_EGRESS_PROXY;
 const destinationAuthority = proxyUrl === undefined ? undefined : proxyDestinationAuthority(proxyUrl);
 
@@ -14,6 +15,7 @@ const runtime = new WebxdRuntime({
   cwd: process.cwd(),
   searxUrl: process.env.WEBX_SEARX_URL ?? "http://127.0.0.1:8888",
   readerUrl: process.env.WEBX_READER_URL ?? "http://127.0.0.1:8787",
+  cacheDirectory: process.env.WEBX_CACHE_DIR ?? `${cacheHome}/pi-web/responses`,
   authenticateActor: sameUserPiActorAuthenticator,
   browserDestinationAuthority: destinationAuthority,
 });

@@ -12,7 +12,7 @@ import type { AuthorityActor, IndexedSource } from "./ports.js";
 const MAX_REQUEST_BYTES = 1_048_576;
 const MAX_RESPONSE_BYTES = 4_194_304;
 const ACTOR_ID = /^[A-Za-z0-9._:-]{1,256}$/u;
-const AUTHORITY_SCOPES = new Set(["system.read", "search.write", "retrieval.read", "research.write", "pages.read", "pages.write", "artifacts.read", "browser.read", "browser.write", "browser.control", "browser.debug"]);
+const AUTHORITY_SCOPES = new Set(["system.read", "search.write", "retrieval.read", "research.write", "artifacts.read", "browser.read", "browser.write", "browser.control", "browser.debug"]);
 
 export interface WebxActorAuthenticator {
   authenticate(identity: { readonly principalId: string; readonly agentId: string }): AuthorityActor;
@@ -41,6 +41,7 @@ export interface WebxdRuntimeOptions {
   readonly browserDestinationAuthority?: BrowserDestinationAuthority;
   readonly searxUrl?: string;
   readonly readerUrl?: string;
+  readonly cacheDirectory?: string;
   readonly authenticateActor?: WebxActorAuthenticator["authenticate"];
 }
 
@@ -66,6 +67,7 @@ export class WebxdRuntime {
       ids: { next: (prefix) => `${prefix}-${Date.now().toString(36)}` },
       searxUrl: options.searxUrl,
       readerUrl: options.readerUrl,
+      cacheDirectory: options.cacheDirectory,
     });
   }
 
