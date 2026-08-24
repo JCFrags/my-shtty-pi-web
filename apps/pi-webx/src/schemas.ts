@@ -23,7 +23,7 @@ export const WebSearchSchema = Type.Object({
   operation: StringEnum(["links", "extracts"] as const, { description: "Required product. links discovers URLs without returning page passages. extracts returns separate query-focused passages from selected sources without cross-source synthesis." }),
   effort: StringEnum(["fast", "quality"] as const, { description: "Required effort. fast uses one search. quality uses bounded conservative query fan-out, deduplication, verification, and reranking." }),
   domains: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 253, pattern: "^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$", description: "Host name only, such as docs.python.org. Do not pass a URL, path, or site: prefix." }), { maxItems: 32, description: "Optional strict source-host requirements. Every search recipe retains these domains." })),
-  freshness: Type.Optional(StringEnum(["day", "week", "month", "year"] as const, { description: "Optional preferred age filter. Omit unless source age matters. If the filter returns no eligible result, the tool retries without it and reports that relaxation." })),
+  freshness: Type.Optional(StringEnum(["day", "week", "month", "year"] as const, { description: "Optional recency preference. Use with quality when source age matters. Search remains broad and applies a soft local reranking signal when a publication date is available. Missing or unreliable dates never exclude a result." })),
 }, strict);
 
 export const WebResearchSchema = Type.Object({

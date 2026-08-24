@@ -84,24 +84,27 @@ describe("WebxAuthority", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("retries ordinary SearXNG search without an unsupported freshness filter", async () => {
+  it("keeps SearXNG discovery broad and uses publication dates only for soft quality reranking", async () => {
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = new URL(String(input));
       expect(url.searchParams.get("categories")).toBeNull();
-      if (fetchMock.mock.calls.length === 1) {
-        expect(url.searchParams.get("time_range")).toBe("day");
-        return new Response(JSON.stringify({ results: [] }), { status: 200, headers: { "content-type": "application/json" } });
-      }
       expect(url.searchParams.get("time_range")).toBeNull();
       return new Response(JSON.stringify({ results: [
-        { title: "Stock market today: S&P 500 and Nasdaq slip", url: "https://finance.example/markets/today", content: "Current Dow, Nasdaq, and S&P 500 market news.", engines: ["duckduckgo web"] },
+        { title: "Stock market latest news archive", url: "https://finance.example/markets/archive", content: "U.S. stock market today latest news.", publishedDate: "2025-01-01" },
+        { title: "Stock market latest news update", url: "https://finance.example/markets/today", content: "U.S. stock market today latest news.", publishedDate: "2026-08-24" },
+        { title: "Stock market latest news overview", url: "https://finance.example/markets/overview", content: "U.S. stock market today latest news." },
       ] }), { status: 200, headers: { "content-type": "application/json" } });
     });
     vi.stubGlobal("fetch", fetchMock);
     const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
-    const result = await call(instance, actor(), "POST", "/v1/search", { query: "U.S. stock market today latest news", operation: "links", effort: "fast", freshness: "day" }, "stock-news");
-    expect(result).toMatchObject({ status: 200, body: { hits: [{ title: "Stock market today: S&P 500 and Nasdaq slip", rank: 1 }], metadata: { searches: 2, pagesRead: 0, linkedDepth: 0, freshnessRelaxed: true } } });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const result = await call(instance, actor(), "POST", "/v1/search", { query: "U.S. stock market today latest news", operation: "links", effort: "quality", freshness: "day" }, "stock-news");
+    expect(result).toMatchObject({ status: 200, body: { metadata: { searches: 3, pagesRead: 0, linkedDepth: 0, freshnessReranked: true } } });
+    expect((result.body as { hits: Array<{ title: string }> }).hits.map((hit) => hit.title)).toEqual([
+      "Stock market latest news update",
+      "Stock market latest news overview",
+      "Stock market latest news archive",
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("reports unavailable providers instead of a false successful empty search", async () => {
@@ -138,9 +141,9 @@ describe("WebxAuthority", () => {
       const searches = requests.filter((item) => item.url.includes("/search"));
       const reads = requests.filter((item) => item.url.includes(":8787/"));
       expect(searches).toHaveLength(effort === "quality" ? 3 : 1);
-      expect(searches.every((item) => new URL(item.url).searchParams.get("q")?.includes("site:docs.example.org") && new URL(item.url).searchParams.get("time_range") === "month")).toBe(true);
+      expect(searches.every((item) => new URL(item.url).searchParams.get("q")?.includes("site:docs.example.org") && new URL(item.url).searchParams.get("time_range") === null)).toBe(true);
       expect(reads).toHaveLength(operation === "links" ? 0 : effort === "quality" ? 5 : 3);
-      expect(body.metadata).toEqual({ searches: searches.length, pagesRead: reads.length, linkedDepth: 0, freshnessRelaxed: false });
+      expect(body.metadata).toEqual({ searches: searches.length, pagesRead: reads.length, linkedDepth: 0, freshnessReranked: effort === "quality" });
       expect(body.hits).toHaveLength(operation === "links" ? 10 : effort === "quality" ? 5 : 3);
       if (operation === "extracts") expect(body.hits.every((hit) => hit.snippet.includes("independent source passage"))).toBe(true);
       return result;

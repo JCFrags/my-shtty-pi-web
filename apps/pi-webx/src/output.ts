@@ -45,7 +45,7 @@ function renderData(value: unknown): string | undefined {
     });
     const metadata = typeof data.metadata === "object" && data.metadata !== null ? data.metadata as Record<string, unknown> : {};
     const execution = `[${effort} ${operation}; ${String(metadata.searches ?? 1)} search(es); ${String(metadata.pagesRead ?? 0)} page read(s); linked depth 0]`;
-    const freshnessNotice = metadata.freshnessRelaxed === true ? "\n[The requested freshness filter returned no eligible results. Results use the same query without that filter.]" : "";
+    const freshnessNotice = metadata.freshnessReranked === true ? "\n[Quality reranking used available publication dates as a soft freshness signal. Missing or unreliable dates did not exclude results.]" : "";
     return hits.length ? `${execution}${freshnessNotice}\n\n${hits.join("\n")}` : `${execution}${freshnessNotice}\n\nNo results.`;
   }
   if (typeof data.untrustedContent === "string") {

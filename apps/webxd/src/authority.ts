@@ -37,7 +37,7 @@ const SEARCH_CACHE_TTL_MS = 15 * 60 * 1_000;
 const READ_CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
 
 interface RawSearchHit { readonly url?: unknown; readonly title?: unknown; readonly content?: unknown; readonly score?: unknown; readonly publishedDate?: unknown; readonly engines?: unknown }
-interface SearchBatch { readonly hits: RawSearchHit[]; readonly searches: number; readonly freshnessRelaxed: boolean }
+interface SearchBatch { readonly hits: RawSearchHit[]; readonly searches: number }
 interface ParsedSearchQuery { readonly query: string; readonly domains: readonly string[] }
 
 interface StoredBinaryArtifact {
@@ -136,7 +136,7 @@ export class WebxAuthority {
 
   private async search(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<SearchResponse> {
     requireScope(actor, scope);
-    const key = { formatVersion: 14, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
+    const key = { formatVersion: 15, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
     const cached = await this.#cache.get<SearchResponse>("search", key);
     if (cached !== undefined) return cached;
     const result = await this.uncachedSearch(actor, request, scope, signal);
@@ -153,13 +153,12 @@ export class WebxAuthority {
     const batches: SearchBatch[] = [];
     const failures: string[] = [];
     for (const query of queries) {
-      try { batches.push(await this.searchOne(query, request.domains ?? [], request.freshness, signal)); }
+      try { batches.push(await this.searchOne(query, request.domains ?? [], signal)); }
       catch (error) { failures.push(safeMessage(error)); }
     }
     if (batches.every((batch) => batch.hits.length === 0) && failures.length > 0) throw new Error(`search providers returned no results: ${[...new Set(failures)].join("; ")}`);
     const merged = [...new Map(batches.flatMap((batch) => batch.hits).filter((item) => typeof item.url === "string" && typeof item.title === "string").map((item) => [String(item.url).replace(/#.*$/u, ""), item])).values()];
-    const newsSearch = isNewsSearchQuery(request.query);
-    const candidates = merged.map((item, index) => ({ item, index, score: request.effort === "quality" ? searchCandidateScore(item, request.query) + (newsSearch ? newsRecencyScore(item.publishedDate) : 0) : 0 }));
+    const candidates = merged.map((item, index) => ({ item, index, score: request.effort === "quality" ? searchCandidateScore(item, request.query) + freshnessScore(item.publishedDate, request.freshness, this.options.clock.now()) : 0 }));
     if (request.effort === "quality") candidates.sort((left, right) => right.score - left.score || left.index - right.index);
     const selected = candidates.slice(0, request.operation === "links" ? 10 : request.effort === "quality" ? 5 : 3);
     let pagesRead = 0;
@@ -189,14 +188,14 @@ export class WebxAuthority {
         metadata: { score: item.score, publishedDate: item.publishedDate, engines: item.engines },
       } as SearchHit);
     }
-    return { query: request.query, operation: request.operation, effort: request.effort, hits, truncated: merged.length > hits.length, metadata: { searches: batches.reduce((total, batch) => total + batch.searches, 0), pagesRead, linkedDepth: 0, freshnessRelaxed: batches.some((batch) => batch.freshnessRelaxed) } };
+    return { query: request.query, operation: request.operation, effort: request.effort, hits, truncated: merged.length > hits.length, metadata: { searches: batches.reduce((total, batch) => total + batch.searches, 0), pagesRead, linkedDepth: 0, freshnessReranked: request.effort === "quality" && request.freshness !== undefined } };
   }
 
-  private async searchOne(query: string, requestedDomains: readonly string[], freshness: SearchRequest["freshness"], signal?: AbortSignal): Promise<SearchBatch> {
+  private async searchOne(query: string, requestedDomains: readonly string[], signal?: AbortSignal): Promise<SearchBatch> {
     if (this.options.searxUrl === undefined) {
       const terms = query.toLocaleLowerCase().split(/\s+/u).filter(Boolean);
       const hits = this.options.sources.filter((source) => terms.every((term) => `${source.title} ${source.content}`.toLocaleLowerCase().includes(term))).map((source) => ({ url: source.url, title: source.title, content: source.content }));
-      return { hits, searches: 1, freshnessRelaxed: false };
+      return { hits, searches: 1 };
     }
     const parsedQuery = parseSearchQuery(query);
     const domains = [...new Set([...requestedDomains.filter(Boolean), ...parsedQuery.domains])];
@@ -205,7 +204,6 @@ export class WebxAuthority {
     endpoint.searchParams.set("q", `${parsedQuery.query}${domainQuery}`.trim());
     endpoint.searchParams.set("format", "json");
     endpoint.searchParams.set("safesearch", "0");
-    if (freshness !== undefined) endpoint.searchParams.set("time_range", freshness);
     const wantedDomains = domains.map((domain) => domain.toLocaleLowerCase().replace(/^www\./u, ""));
     const request = async (): Promise<{ eligible: RawSearchHit[]; rawCount: number; unavailable: string[] }> => {
       const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
@@ -221,17 +219,9 @@ export class WebxAuthority {
       });
       return { eligible, rawCount: raw.length, unavailable: searxUnavailableEngines(payload.unresponsive_engines) };
     };
-    let result = await request();
-    let searches = 1;
-    let freshnessRelaxed = false;
-    if (freshness !== undefined && result.eligible.length === 0) {
-      endpoint.searchParams.delete("time_range");
-      result = await request();
-      searches += 1;
-      freshnessRelaxed = true;
-    }
+    const result = await request();
     if (result.rawCount === 0 && result.unavailable.length > 0) throw new Error(`unavailable engines: ${result.unavailable.join(", ")}`);
-    return { hits: result.eligible, searches, freshnessRelaxed };
+    return { hits: result.eligible, searches: 1 };
   }
 
   private async read(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<BoundedContent> {
@@ -625,16 +615,17 @@ function searxUnavailableEngines(value: unknown): string[] {
   return value.flatMap((item) => Array.isArray(item) && typeof item[0] === "string" ? [`${item[0]}${typeof item[1] === "string" ? ` (${item[1]})` : ""}`] : []);
 }
 
-function newsRecencyScore(value: unknown): number {
-  if (typeof value !== "string") return 0;
+function freshnessScore(value: unknown, freshness: SearchRequest["freshness"], now: string): number {
+  if (freshness === undefined || typeof value !== "string") return 0;
   const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return 0;
-  const ageDays = (Date.now() - timestamp) / (24 * 60 * 60 * 1_000);
-  if (ageDays <= 2) return 24;
-  if (ageDays <= 14) return 16;
-  if (ageDays <= 45) return 8;
-  if (ageDays > 365) return -8;
-  return 0;
+  const currentTimestamp = Date.parse(now);
+  if (!Number.isFinite(timestamp) || !Number.isFinite(currentTimestamp)) return 0;
+  const ageDays = (currentTimestamp - timestamp) / (24 * 60 * 60 * 1_000);
+  if (ageDays < -2) return 0;
+  const windowDays = { day: 1, week: 7, month: 31, year: 366 }[freshness];
+  if (ageDays <= windowDays) return 6;
+  if (ageDays <= windowDays * 2) return 2;
+  return -2;
 }
 
 function searchCandidateScore(item: RawSearchHit, query: string): number {
