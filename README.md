@@ -12,7 +12,7 @@ A real browser that runs inside your terminal
 ### Install (macOS & Linux):
 
 ```bash
-curl -fsSl https://terminal-browser.sh/install | bash
+curl -fsSL https://terminal-browser.sh/install | bash
 ```
 
 ### Usage
