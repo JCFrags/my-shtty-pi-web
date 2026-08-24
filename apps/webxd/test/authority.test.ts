@@ -60,7 +60,9 @@ describe("WebxAuthority", () => {
   it("returns clean SearXNG order without lexical intent filtering or rescoring", async () => {
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = new URL(String(input));
+      expect(url.pathname).toBe("/search");
       expect(url.searchParams.get("q")).toBe("major changes in Fedora Linux 44 for desktop users");
+      expect(url.searchParams.get("format")).toBe("json");
       return new Response(JSON.stringify({ results: [
         { title: "Major definition", url: "https://dictionary.example/major", content: "A dictionary definition." },
         { title: "Fedora Linux 44 Changes", url: "https://fedoraproject.org/wiki/Releases/44/ChangeSet", content: "Major approved changes for Fedora Linux 44." },
@@ -75,9 +77,9 @@ describe("WebxAuthority", () => {
     });
     const result = await call(instance, actor(), "POST", "/v1/search", { query: "major changes in Fedora Linux 44 for desktop users", operation: "links", effort: "fast" }, "search-fedora");
     expect(result).toMatchObject({ status: 200, body: { hits: [
-      { title: "Fedora Linux 44 Changes", rank: 1 },
-      { title: "Fedora 44 desktop overview", rank: 2 },
-      { title: "Major definition", rank: 3 },
+      { title: "Major definition", rank: 1 },
+      { title: "Fedora Linux 44 Changes", rank: 2 },
+      { title: "Fedora 44 desktop overview", rank: 3 },
     ] } });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -133,7 +135,7 @@ describe("WebxAuthority", () => {
       const reads = requests.filter((item) => item.url.includes(":8787/"));
       expect(searches).toHaveLength(effort === "quality" ? 3 : 1);
       expect(searches.every((item) => new URL(item.url).searchParams.get("q")?.includes("site:docs.example.org") && new URL(item.url).searchParams.get("time_range") === "month")).toBe(true);
-      expect(reads).toHaveLength(operation === "links" ? effort === "quality" ? 5 : 0 : effort === "quality" ? 5 : 3);
+      expect(reads).toHaveLength(operation === "links" ? 0 : effort === "quality" ? 5 : 3);
       expect(body.metadata).toEqual({ searches: searches.length, pagesRead: reads.length, linkedDepth: 0 });
       expect(body.hits).toHaveLength(operation === "links" ? 10 : effort === "quality" ? 5 : 3);
       if (operation === "extracts") expect(body.hits.every((hit) => hit.snippet.includes("independent source passage"))).toBe(true);

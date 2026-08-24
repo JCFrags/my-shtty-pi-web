@@ -36,7 +36,7 @@ const MAX_BINARY_ARTIFACT_BYTES = 33_554_432;
 const SEARCH_CACHE_TTL_MS = 15 * 60 * 1_000;
 const READ_CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
 
-interface RawSearchHit { readonly url?: unknown; readonly title?: unknown; readonly content?: unknown; readonly score?: unknown; readonly publishedDate?: unknown; readonly engines?: unknown; readonly repository?: unknown }
+interface RawSearchHit { readonly url?: unknown; readonly title?: unknown; readonly content?: unknown; readonly score?: unknown; readonly publishedDate?: unknown; readonly engines?: unknown }
 interface ParsedSearchQuery { readonly query: string; readonly domains: readonly string[] }
 
 interface StoredBinaryArtifact {
@@ -135,7 +135,7 @@ export class WebxAuthority {
 
   private async search(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<SearchResponse> {
     requireScope(actor, scope);
-    const key = { formatVersion: 12, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
+    const key = { formatVersion: 13, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
     const cached = await this.#cache.get<SearchResponse>("search", key);
     if (cached !== undefined) return cached;
     const result = await this.uncachedSearch(actor, request, scope, signal);
@@ -158,12 +158,11 @@ export class WebxAuthority {
     if (batches.every((batch) => batch.length === 0) && failures.length > 0) throw new Error(`search providers returned no results: ${[...new Set(failures)].join("; ")}`);
     const merged = [...new Map(batches.flat().filter((item) => typeof item.url === "string" && typeof item.title === "string").map((item) => [String(item.url).replace(/#.*$/u, ""), item])).values()];
     const newsSearch = isNewsSearchQuery(request.query);
-    const candidates = merged.map((item, index) => ({ item, index, score: request.effort === "quality" ? searchCandidateScore(item, request.query) + (newsSearch ? newsRecencyScore(item.publishedDate) : 0) : newsSearch ? newsRecencyScore(item.publishedDate) : 0 }));
-    if (request.effort === "quality" || newsSearch) candidates.sort((left, right) => right.score - left.score || left.index - right.index);
+    const candidates = merged.map((item, index) => ({ item, index, score: request.effort === "quality" ? searchCandidateScore(item, request.query) + (newsSearch ? newsRecencyScore(item.publishedDate) : 0) : 0 }));
+    if (request.effort === "quality") candidates.sort((left, right) => right.score - left.score || left.index - right.index);
     const selected = candidates.slice(0, request.operation === "links" ? 10 : request.effort === "quality" ? 5 : 3);
     let pagesRead = 0;
-    let hits: SearchHit[] = [];
-    const verifiedUrls = new Set<string>();
+    const hits: SearchHit[] = [];
     const readerActor = { ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) };
     for (const candidate of selected) {
       const item = candidate.item;
@@ -172,31 +171,22 @@ export class WebxAuthority {
       let snippet = request.operation === "links"
         ? boundText(typeof item.content === "string" ? item.content : "", 320).text
         : evidenceExcerpt(typeof item.content === "string" ? item.content : "", request.query, 1_200);
-      if (request.operation === "extracts" || (request.effort === "quality" && hits.length < 5)) {
+      if (request.operation === "extracts") {
         try {
           const page = await this.uncachedRead(readerActor, { url, query: request.query, maxChars: 8_000, maxPages: 1, maxDepth: 0 }, signal);
           pagesRead += 1;
           title = page.title || title;
           url = page.url || url;
-          verifiedUrls.add(url);
-          if (request.operation === "extracts") {
-            const extracted = evidenceExcerpt(page.untrustedContent, request.query, 1_200);
-            if (extracted.length >= 60) snippet = extracted;
-          }
+          const extracted = evidenceExcerpt(page.untrustedContent, request.query, 1_200);
+          if (extracted.length >= 60) snippet = extracted;
         } catch { /* Keep usable discovery results when bounded verification fails. */ }
       }
       if (request.operation === "extracts" && snippet.length < 60) continue;
       hits.push({
         hitId: `search-${createHash("sha256").update(url).digest("hex").slice(0, 20)}`,
         title, url, snippet, rank: hits.length + 1, visibility: "public",
-        metadata: { score: item.score, publishedDate: item.publishedDate, engines: item.engines, repository: item.repository },
+        metadata: { score: item.score, publishedDate: item.publishedDate, engines: item.engines },
       } as SearchHit);
-    }
-    if (request.operation === "links" && request.effort === "quality") {
-      hits = hits
-        .map((hit, index) => ({ hit, index, score: searchCandidateScore({ title: hit.title, url: hit.url, content: hit.snippet }, request.query) + (verifiedUrls.has(hit.url) ? 2 : 0) }))
-        .sort((left, right) => right.score - left.score || left.index - right.index)
-        .map(({ hit }, index) => ({ ...hit, rank: index + 1 }));
     }
     return { query: request.query, operation: request.operation, effort: request.effort, hits, truncated: merged.length > hits.length, metadata: { searches: queries.length, pagesRead, linkedDepth: 0 } };
   }
@@ -228,12 +218,8 @@ export class WebxAuthority {
         return wantedDomains.length === 0 || wantedDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
       } catch { return false; }
     });
-    const discoveryDomains = domains.length > 0 ? domains : inferredAuthoritativeDomains(parsedQuery.query);
-    const platform = discoveryDomains.length > 0 ? await authoritativeSearchAdapters(parsedQuery.query, discoveryDomains, signal) : [];
-    const combined = domains.length > 0 && platform.length > 0 ? [...platform, ...eligible] : [...eligible, ...platform];
-    if (combined.length === 0 && unavailable.length > 0) throw new Error(`unavailable engines: ${unavailable.join(", ")}`);
-    const preferred = domains.length === 0 ? preferredDomainsForQuery(parsedQuery.query) : [];
-    return preferred.length > 0 ? [...combined.filter((item) => searchHitMatchesDomains(item, preferred)), ...combined.filter((item) => !searchHitMatchesDomains(item, preferred))] : combined;
+    if (eligible.length === 0 && unavailable.length > 0) throw new Error(`unavailable engines: ${unavailable.join(", ")}`);
+    return eligible;
   }
 
   private async read(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<BoundedContent> {
@@ -662,117 +648,6 @@ function boundedFailure(status: number, bodyValue: WebxProblem, maxBytes: number
 interface AuthorityFailure { readonly authorityFailure: true; readonly status: number; readonly body: WebxProblem }
 function problem(status: number, code: string, message: string, retryable: boolean): AuthorityFailure { return { authorityFailure: true, status, body: { code, message, retryable } }; }
 function isAuthorityFailure(value: unknown): value is AuthorityFailure { return typeof value === "object" && value !== null && (value as { authorityFailure?: unknown }).authorityFailure === true; }
-function preferredDomainsForQuery(query: string): string[] {
-  if (/\bfedora(?:\s+linux)?\b/iu.test(query)) return ["fedoraproject.org", "fedoramagazine.org"];
-  if (/\bpython\b/iu.test(query)) return ["python.org"];
-  if (/\b(?:google\s+)?chrome\b/iu.test(query)) return ["chromereleases.googleblog.com", "google.com"];
-  if (/\bnode(?:\.js|js)?\b/iu.test(query)) return ["nodejs.org"];
-  if (/\brust\b/iu.test(query)) return ["rust-lang.org"];
-  return [];
-}
-
-function searchHitMatchesDomains(item: RawSearchHit, domains: readonly string[]): boolean {
-  if (typeof item.url !== "string") return false;
-  try {
-    const hostname = new URL(item.url).hostname.toLocaleLowerCase().replace(/^www\./u, "");
-    return domains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
-  } catch { return false; }
-}
-
-function inferredAuthoritativeDomains(query: string): string[] {
-  const domains: string[] = [];
-  if (/github|\brepositor(?:y|ies)\b|\bissue\b|source code/iu.test(query)) domains.push("github.com");
-  if (/hugging\s*face|model card|\bmodel\b|embedding|transformer/iu.test(query)) domains.push("huggingface.co");
-  return domains;
-}
-
-function platformSearchQuery(query: string): string {
-  return query.replace(/\b(?:official|github|hugging\s*face|repository|repositories|model card|release|issue|issues)\b/giu, " ").replace(/\s+/gu, " ").trim();
-}
-
-async function authoritativeSearchAdapters(query: string, domains: readonly string[], signal?: AbortSignal): Promise<RawSearchHit[]> {
-  const hits: RawSearchHit[] = [];
-  if (domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "fedoraproject.org") && /fedora/iu.test(query) && /upgrad/iu.test(query)) {
-    hits.push({
-      title: "Upgrading Fedora Linux Using DNF System Plugin",
-      url: "https://docs.fedoraproject.org/en-US/quick-docs/upgrading-fedora-offline/",
-      content: "Official supported method to upgrade Fedora Workstation to the next release with DNF system-upgrade.",
-      engines: ["official-route"],
-    });
-  }
-  const combinedFedoraUpgrade = domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "fedoraproject.org") && /upgrad/iu.test(query);
-  if (domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "fedoramagazine.org") && !combinedFedoraUpgrade) {
-    const endpoint = new URL("https://fedoramagazine.org/wp-json/wp/v2/search");
-    const wordpressQuery = /fedora/iu.test(query) && /upgrad/iu.test(query) ? "Fedora Workstation upgrade" : query.replaceAll('"', "");
-    endpoint.searchParams.set("search", wordpressQuery);
-    endpoint.searchParams.set("per_page", "20");
-    const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
-    if (response.ok) {
-      const payload = await response.json() as Array<{ title?: unknown; url?: unknown }>;
-      if (Array.isArray(payload)) for (const item of payload) hits.push({ title: decodeBasicEntities(String(item.title ?? "")), url: item.url, content: "Official Fedora Magazine search result", engines: ["wordpress-api"] });
-    }
-  }
-  if (domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "ecb.europa.eu")) {
-    const endpoint = new URL("https://api.addsearch.com/v1/search/61893af990d2673c4a92b492dd7f6631");
-    endpoint.searchParams.set("term", query.replaceAll('"', ""));
-    endpoint.searchParams.set("limit", "100");
-    const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
-    if (response.ok) {
-      const payload = await response.json() as { hits?: Array<{ title?: unknown; url?: unknown; meta_description?: unknown; highlight?: unknown }> };
-      if (Array.isArray(payload.hits)) for (const item of payload.hits) hits.push({ title: item.title, url: item.url, content: typeof item.meta_description === "string" ? item.meta_description : typeof item.highlight === "string" ? item.highlight : "Official ECB search result", engines: ["ecb-addsearch-api"] });
-    }
-  }
-  if (domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "github.com")) {
-    const endpoint = new URL("https://api.github.com/search/repositories");
-    const repositoryTerms = platformSearchQuery(query).split(/\s+/u).filter(Boolean);
-    endpoint.searchParams.set("q", repositoryTerms.length > 1 ? `${repositoryTerms[0]} in:name` : platformSearchQuery(query));
-    endpoint.searchParams.set("per_page", "10");
-    const response = await fetch(endpoint, { signal, headers: { accept: "application/vnd.github+json", "user-agent": "Pi-WebX/0.1" } });
-    let repositories: string[] = [];
-    if (response.ok) {
-      const payload = await response.json() as { items?: Array<{ full_name?: unknown; html_url?: unknown; description?: unknown; updated_at?: unknown }> };
-      if (Array.isArray(payload.items)) {
-        repositories = payload.items.map((item) => String(item.full_name ?? "")).filter(Boolean);
-        for (const item of payload.items) hits.push({ title: item.full_name, url: item.html_url, content: `${String(item.description ?? "GitHub repository")} Updated ${String(item.updated_at ?? "unknown")}.`, engines: ["github-api"], repository: item.full_name });
-      }
-    }
-    if (/\b(?:issue|discussion|adaptive|extract)\w*\b/iu.test(query)) {
-      const featureTerms = platformSearchQuery(query).split(/\s+/u).slice(1).filter((term) => !/^discussions?$/iu.test(term));
-      const issueTerms = featureTerms.length > 0 ? featureTerms.join(" OR ") : platformSearchQuery(query);
-      const repository = repositories[0];
-      const issuesEndpoint = new URL("https://api.github.com/search/issues");
-      issuesEndpoint.searchParams.set("q", `${issueTerms}${repository ? ` repo:${repository}` : ""} is:issue`.trim());
-      issuesEndpoint.searchParams.set("per_page", "10");
-      const issuesResponse = await fetch(issuesEndpoint, { signal, headers: { accept: "application/vnd.github+json", "user-agent": "Pi-WebX/0.1" } });
-      if (issuesResponse.ok) {
-        const payload = await issuesResponse.json() as { items?: Array<{ title?: unknown; html_url?: unknown; body?: unknown; updated_at?: unknown; repository_url?: unknown }> };
-        if (Array.isArray(payload.items)) for (const item of payload.items) {
-          const relatedRepository = typeof item.repository_url === "string" ? item.repository_url.replace("https://api.github.com/repos/", "") : repository;
-          const issueHit = { title: item.title, url: item.html_url, content: `${String(item.body ?? "GitHub issue").slice(0, 500)} Updated ${String(item.updated_at ?? "unknown")}.`, engines: ["github-api"], repository: relatedRepository };
-          const insertion = Math.min(1, hits.length);
-          hits.splice(insertion, 0, issueHit);
-        }
-      }
-    }
-  }
-  if (domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "huggingface.co")) {
-    const endpoint = new URL("https://huggingface.co/api/models");
-    endpoint.searchParams.set("search", platformSearchQuery(query));
-    endpoint.searchParams.set("limit", "10");
-    const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
-    if (response.ok) {
-      const payload = await response.json() as Array<{ modelId?: unknown; id?: unknown; pipeline_tag?: unknown; downloads?: unknown; likes?: unknown }>;
-      if (Array.isArray(payload)) for (const item of payload) {
-        const id = String(item.modelId ?? item.id ?? "");
-        if (id) hits.push({ title: id, url: `https://huggingface.co/${id}`, content: `Hugging Face model. Task: ${String(item.pipeline_tag ?? "unknown")}. Downloads: ${String(item.downloads ?? "unknown")}. Likes: ${String(item.likes ?? "unknown")}.`, engines: ["huggingface-api"] });
-      }
-    }
-  }
-  return hits;
-}
-function decodeBasicEntities(value: string): string {
-  return value.replace(/&#(\d+);/gu, (_match, code: string) => String.fromCodePoint(Number(code))).replaceAll("&amp;", "&").replaceAll("&quot;", '"').replaceAll("&#039;", "'");
-}
 function parseSearchQuery(raw: string): ParsedSearchQuery {
   const domains = [...raw.matchAll(/(?:^|\s)site:([A-Za-z0-9.-]+)/giu)].map((match) => match[1] ?? "").filter(Boolean);
   const query = raw.replace(/(?:^|\s)site:[A-Za-z0-9.-]+/giu, " ").replace(/\s+/gu, " ").trim();
