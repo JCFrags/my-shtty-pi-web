@@ -30,7 +30,7 @@ Browser operations use only `BrowserDaemonPort`. Semantic actions use the frozen
 
 ## Search recipes
 
-Every search request selects `links` or `extracts` and `fast` or `quality`. Fast runs one search. Quality runs at most three conservative entity-preserving searches, merges and deduplicates candidates, verifies a bounded set, and reranks them. Links return URL discovery results. Extracts return separate query-focused passages. Search never follows links or synthesizes a cross-source answer.
+Every search request selects `links` or `extracts` and `fast` or `quality`. Fast runs one search. Quality runs at most three conservative entity-preserving searches, merges and deduplicates candidates, verifies a bounded set, and reranks them. Explicit news and headline queries use SearXNG's news engines. News quality variants add analysis and live-update intent instead of documentation intent, and dated recent results rank before stale coverage. Links return URL discovery results. Extracts return separate query-focused passages, with a useful search excerpt as fallback when a selected page cannot provide one. Search never follows links or synthesizes a cross-source answer. If all providers fail and no result remains, the operation reports the unavailable engines instead of returning a false successful empty result.
 
 ## Short-lived cache
 

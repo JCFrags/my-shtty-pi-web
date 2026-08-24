@@ -82,6 +82,30 @@ describe("WebxAuthority", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("routes explicit current-news intent to news engines and preserves freshness", async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = new URL(String(input));
+      expect(url.searchParams.get("categories")).toBe("news");
+      expect(url.searchParams.get("time_range")).toBe("day");
+      return new Response(JSON.stringify({ results: [
+        { title: "Stock market today: S&P 500 and Nasdaq slip", url: "https://finance.example/markets/today", content: "Current Dow, Nasdaq, and S&P 500 market news.", publishedDate: "2026-08-24T15:00:00Z", engines: ["bing news"] },
+      ] }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
+    const result = await call(instance, actor(), "POST", "/v1/search", { query: "U.S. stock market today latest news", operation: "links", effort: "fast", freshness: "day" }, "stock-news");
+    expect(result).toMatchObject({ status: 200, body: { hits: [{ title: "Stock market today: S&P 500 and Nasdaq slip", rank: 1 }], metadata: { searches: 1, pagesRead: 0, linkedDepth: 0 } } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports unavailable providers instead of a false successful empty search", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ results: [], unresponsive_engines: [["bing news", "too many requests"], ["brave.news", "CAPTCHA"]] }), { status: 200, headers: { "content-type": "application/json" } })));
+    const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
+    const result = await call(instance, actor(), "POST", "/v1/search", { query: "market news", operation: "links", effort: "fast" }, "failed-news");
+    expect(result).toMatchObject({ status: 502, body: { code: "backend-failure", retryable: true } });
+    expect((result.body as { message: string }).message).toMatch(/bing news.*too many requests.*brave\.news.*CAPTCHA/iu);
+  });
+
   it("executes the four fixed search recipes without linked traversal or synthesis", async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     vi.stubGlobal("fetch", vi.fn(async (input: unknown, init?: RequestInit) => {

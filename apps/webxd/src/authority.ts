@@ -135,7 +135,7 @@ export class WebxAuthority {
 
   private async search(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<SearchResponse> {
     requireScope(actor, scope);
-    const key = { formatVersion: 9, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
+    const key = { formatVersion: 11, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
     const cached = await this.#cache.get<SearchResponse>("search", key);
     if (cached !== undefined) return cached;
     const result = await this.uncachedSearch(actor, request, scope, signal);
@@ -150,10 +150,16 @@ export class WebxAuthority {
     if (request.effort !== "fast" && request.effort !== "quality") throw problem(400, "invalid-request", "effort must be fast or quality", false);
     const queries = request.effort === "quality" ? qualitySearchQueries(request.query) : [request.query];
     const batches: RawSearchHit[][] = [];
-    for (const query of queries) batches.push(await this.searchOne(query, request.domains ?? [], request.freshness, signal));
+    const failures: string[] = [];
+    for (const query of queries) {
+      try { batches.push(await this.searchOne(query, request.domains ?? [], request.freshness, signal)); }
+      catch (error) { failures.push(safeMessage(error)); }
+    }
+    if (batches.every((batch) => batch.length === 0) && failures.length > 0) throw new Error(`search providers returned no results: ${[...new Set(failures)].join("; ")}`);
     const merged = [...new Map(batches.flat().filter((item) => typeof item.url === "string" && typeof item.title === "string").map((item) => [String(item.url).replace(/#.*$/u, ""), item])).values()];
-    const candidates = merged.map((item, index) => ({ item, index, score: request.effort === "quality" ? searchCandidateScore(item, request.query) : 0 }));
-    if (request.effort === "quality") candidates.sort((left, right) => right.score - left.score || left.index - right.index);
+    const newsSearch = isNewsSearchQuery(request.query);
+    const candidates = merged.map((item, index) => ({ item, index, score: request.effort === "quality" ? searchCandidateScore(item, request.query) + (newsSearch ? newsRecencyScore(item.publishedDate) : 0) : newsSearch ? newsRecencyScore(item.publishedDate) : 0 }));
+    if (request.effort === "quality" || newsSearch) candidates.sort((left, right) => right.score - left.score || left.index - right.index);
     const selected = candidates.slice(0, request.operation === "links" ? 10 : request.effort === "quality" ? 5 : 3);
     let pagesRead = 0;
     let hits: SearchHit[] = [];
@@ -163,7 +169,9 @@ export class WebxAuthority {
       const item = candidate.item;
       let title = String(item.title);
       let url = String(item.url);
-      let snippet = request.operation === "links" ? boundText(typeof item.content === "string" ? item.content : "", 320).text : "";
+      let snippet = request.operation === "links"
+        ? boundText(typeof item.content === "string" ? item.content : "", 320).text
+        : evidenceExcerpt(typeof item.content === "string" ? item.content : "", request.query, 1_200);
       if (request.operation === "extracts" || (request.effort === "quality" && hits.length < 5)) {
         try {
           const page = await this.uncachedRead(readerActor, { url, query: request.query, maxChars: 8_000, maxPages: 1, maxDepth: 0 }, signal);
@@ -171,9 +179,13 @@ export class WebxAuthority {
           title = page.title || title;
           url = page.url || url;
           verifiedUrls.add(url);
-          if (request.operation === "extracts") snippet = evidenceExcerpt(page.untrustedContent, request.query, 1_200);
+          if (request.operation === "extracts") {
+            const extracted = evidenceExcerpt(page.untrustedContent, request.query, 1_200);
+            if (extracted.length >= 60) snippet = extracted;
+          }
         } catch { /* Keep usable discovery results when bounded verification fails. */ }
       }
+      if (request.operation === "extracts" && snippet.length < 60) continue;
       hits.push({
         hitId: `search-${createHash("sha256").update(url).digest("hex").slice(0, 20)}`,
         title, url, snippet, rank: hits.length + 1, visibility: "public",
@@ -201,11 +213,13 @@ export class WebxAuthority {
     endpoint.searchParams.set("q", `${parsedQuery.query}${domainQuery}`.trim());
     endpoint.searchParams.set("format", "json");
     endpoint.searchParams.set("safesearch", "0");
+    if (isNewsSearchQuery(parsedQuery.query)) endpoint.searchParams.set("categories", "news");
     if (freshness !== undefined) endpoint.searchParams.set("time_range", freshness);
     const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
     if (!response.ok) throw new Error(`SearXNG returned HTTP ${response.status}`);
-    const payload = await response.json() as { results?: RawSearchHit[] };
+    const payload = await response.json() as { results?: RawSearchHit[]; unresponsive_engines?: unknown };
     const raw = Array.isArray(payload.results) ? payload.results : [];
+    const unavailable = searxUnavailableEngines(payload.unresponsive_engines);
     const wantedDomains = domains.map((domain) => domain.toLocaleLowerCase().replace(/^www\./u, ""));
     const eligible = raw.filter((item) => {
       if (typeof item.url !== "string" || typeof item.title !== "string") return false;
@@ -217,6 +231,7 @@ export class WebxAuthority {
     const discoveryDomains = domains.length > 0 ? domains : inferredAuthoritativeDomains(parsedQuery.query);
     const platform = discoveryDomains.length > 0 ? await authoritativeSearchAdapters(parsedQuery.query, discoveryDomains, signal) : [];
     const combined = domains.length > 0 && platform.length > 0 ? [...platform, ...eligible] : [...eligible, ...platform];
+    if (combined.length === 0 && unavailable.length > 0) throw new Error(`unavailable engines: ${unavailable.join(", ")}`);
     const preferred = domains.length === 0 ? preferredDomainsForQuery(parsedQuery.query) : [];
     return preferred.length > 0 ? [...combined.filter((item) => searchHitMatchesDomains(item, preferred)), ...combined.filter((item) => !searchHitMatchesDomains(item, preferred))] : combined;
   }
@@ -597,8 +612,31 @@ function evidenceExcerpt(value: string, query: string, maxChars: number): string
 
 function qualitySearchQueries(query: string): string[] {
   const base = query.trim();
-  const variants = [base, `${base} official`, `${base} documentation`];
+  const variants = isNewsSearchQuery(base)
+    ? [base, `${base} analysis`, `${base} live updates`]
+    : [base, `${base} official`, `${base} documentation`];
   return [...new Set(variants)];
+}
+
+function isNewsSearchQuery(query: string): boolean {
+  return /\b(?:news|headlines|breaking news|market updates?)\b/iu.test(query);
+}
+
+function searxUnavailableEngines(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => Array.isArray(item) && typeof item[0] === "string" ? [`${item[0]}${typeof item[1] === "string" ? ` (${item[1]})` : ""}`] : []);
+}
+
+function newsRecencyScore(value: unknown): number {
+  if (typeof value !== "string") return 0;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return 0;
+  const ageDays = (Date.now() - timestamp) / (24 * 60 * 60 * 1_000);
+  if (ageDays <= 2) return 24;
+  if (ageDays <= 14) return 16;
+  if (ageDays <= 45) return 8;
+  if (ageDays > 365) return -8;
+  return 0;
 }
 
 function searchCandidateScore(item: RawSearchHit, query: string): number {
