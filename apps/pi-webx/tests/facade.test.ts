@@ -6,7 +6,12 @@ import { createPiWebxExtension } from "../src/index.js";
 import { MAX_MODEL_CHARS, presentResult } from "../src/output.js";
 import {
   BrowserActSchema,
+  BrowserDebugSchema,
+  BrowserObserveSchema,
   BrowserOpenSchema,
+  BrowserTabsSchema,
+  WebReadSchema,
+  WebResearchSchema,
   WebSearchSchema,
 } from "../src/schemas.js";
 import type { WebxCapabilities, WebxRequestOptions, WebxResult, WebxSdk } from "../src/sdk.js";
@@ -91,11 +96,20 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   assert.ok(fx.active.includes("web_search"));
   assert.ok(fx.active.includes("browser_open"));
   const searchTool = fx.tools.find((tool) => tool.name === "web_search");
-  assert.match(String(searchTool?.promptSnippet), /live internet/);
+  assert.match(String(searchTool?.promptSnippet), /Discover and rank current public web sources/);
   assert.ok(Array.isArray(searchTool?.promptGuidelines));
+  for (const tool of fx.tools) {
+    assert.ok(String(tool.description ?? "").length >= 80, `${String(tool.name)} needs a useful model-facing description`);
+    if (tool.promptGuidelines !== undefined) {
+      assert.ok((tool.promptGuidelines as string[]).every((line) => line.includes(String(tool.name))), `${String(tool.name)} guidelines must name the tool`);
+    }
+  }
   const prompt = await (fx.events.get("before_agent_start") as Function)({ systemPrompt: "base" }, fx.ctx);
   assert.match(prompt.systemPrompt, /WebX is Pi's primary internet interface/);
   assert.match(prompt.systemPrompt, /Do not replace WebX with curl/);
+  assert.match(prompt.systemPrompt, /Do not run all three by default/);
+  assert.match(prompt.systemPrompt, /Do not invent a continuation offset/);
+  assert.match(prompt.systemPrompt, /does not expose uploads or downloads/);
 
   assert.ok(fx.active.includes("browser_open"));
   assert.ok(!fx.active.includes("browser_debug"));
@@ -112,15 +126,32 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
 test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
   assert.equal(Value.Check(WebSearchSchema, { query: "ok", unexpected: true }), false);
   assert.equal(Value.Check(WebSearchSchema, { query: "ok", limit: 21 }), false);
+  assert.equal(Value.Check(WebSearchSchema, { query: "ok", domains: ["https://example.com/path"] }), false);
+  assert.equal(Value.Check(WebReadSchema, { url: "not-a-url" }), false);
+  assert.equal(Value.Check(WebResearchSchema, { question: "compare sources", resume: {} }), false);
   assert.equal(Value.Check(BrowserOpenSchema, { pathId: "agent-browser/chrome" }), true);
+  assert.equal(Value.Check(BrowserOpenSchema, { newTab: true }), false);
+  assert.equal(Value.Check(BrowserTabsSchema, { action: "discard-tab" }), false);
+  assert.equal(Value.Check(BrowserTabsSchema, { action: "restore-tab" }), false);
+  assert.equal(Value.Check(BrowserTabsSchema, { action: "close-tab", browserSessionId: "s" }), false);
+  assert.equal(Value.Check(BrowserTabsSchema, { action: "close-session", browserSessionId: "s" }), true);
+  assert.equal(Value.Check(BrowserObserveSchema, { browserSessionId: "s", view: "hybrid" }), false);
+  assert.equal(Value.Check(BrowserObserveSchema, { view: "main" }), false);
+  assert.equal(Value.Check(BrowserDebugSchema, { browserSessionId: "s", operation: "cookies" }), false);
+  assert.equal(Value.Check(BrowserDebugSchema, { browserSessionId: "s", operation: "console" }), true);
   assert.equal(Value.Check(BrowserOpenSchema, { pathId: "pinchtab/chrome" }), true);
   for (const pathId of ["agent-browser", "rustwright", "other"]) {
     assert.equal(Value.Check(BrowserOpenSchema, { pathId }), false, `legacy or unknown path must fail: ${pathId}`);
   }
   assert.equal(Value.Check(BrowserActSchema, {
-    action: { kind: "mouse-click", observationId: "o", viewportId: "v", x: 1, y: 2, extra: true },
+    browserSessionId: "s", action: { kind: "mouse-click", observationId: "o", viewportId: "v", x: 1, y: 2, extra: true },
   }), false);
+  assert.equal(Value.Check(BrowserActSchema, { action: { kind: "reload" } }), false);
+  assert.equal(Value.Check(BrowserActSchema, { browserSessionId: "s", action: { kind: "tab-new" } }), false);
+  assert.equal(Value.Check(BrowserActSchema, { browserSessionId: "s", action: { kind: "reload" }, feedback: "delta" }), false);
   assert.equal(Value.Check(BrowserActSchema, { action: { kind: "mouse-click", x: 1, y: 2 } }), false);
+  assert.equal(Value.Check(BrowserActSchema, { browserSessionId: "s", action: { kind: "click", selector: "button" } }), false);
+  assert.equal(Value.Check(BrowserActSchema, { browserSessionId: "s", action: { kind: "click", ref: "e1" } }), true);
   assert.equal(Value.Check(BrowserActSchema, { action: { kind: "upload", ref: "e1", uploadHandle: "handle-1" } }), false);
   assert.equal(Value.Check(BrowserActSchema, { action: { kind: "upload", ref: "e1", uploadHandleIds: ["handle-1"] } }), false);
   assert.equal(Value.Check(BrowserActSchema, { action: { kind: "download", ref: "e1" } }), false);
@@ -156,13 +187,13 @@ test("approval UI offers only allow-once or deny and returns the SDK decision", 
   sdk.result = {
     summary: "approval required",
     approval: {
-      id: "approval-1", operation: "download", target: "public fixture", capability: "browser.download",
-      budget: "one file", credentialRef: "fixture-ref", reason: "test", duration: "one operation",
+      id: "approval-1", operation: "sensitive interaction", target: "public fixture", capability: "browser.write",
+      budget: "one action", credentialRef: "fixture-ref", reason: "test", duration: "one operation",
     },
   };
   const fx = harness(sdk);
   await fx.events.get("session_start")?.({}, fx.ctx);
-  const result = await fx.execute("browser_act", { action: { kind: "download", ref: "e1" } });
+  const result = await fx.execute("browser_act", { browserSessionId: "session-1", action: { kind: "navigate", url: "https://example.test" } });
   assert.deepEqual(sdk.decisions, [{ approvalId: "approval-1", decision: "allow-once" }]);
   assert.match(result.content[0].text, /approved/);
   await fx.events.get("session_shutdown")?.();

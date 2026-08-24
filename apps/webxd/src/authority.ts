@@ -247,6 +247,9 @@ export class WebxAuthority {
     if (typeof request.url !== "string" || request.url.length === 0) throw problem(400, "invalid-request", "url is required", false);
     const crawlPages = integer(request.maxPages ?? 1, "maxPages", 1, 20);
     const crawlDepth = integer(request.maxDepth ?? 0, "maxDepth", 0, 3);
+    if (request.contentOffset !== undefined && (crawlPages > 1 || crawlDepth > 0)) {
+      throw problem(400, "invalid-request", "contentOffset continues a direct single-page read and cannot be combined with maxPages above 1 or maxDepth above 0", false);
+    }
     if (crawlPages > 1 || crawlDepth > 0) {
       const maxChars = integer(request.maxChars ?? 1_000_000, "maxChars", 1, 1_000_000);
       const crawled = await this.crawl(actor, { url: request.url, maxPages: crawlPages, maxDepth: crawlDepth, maxChars, sameDomain: request.sameDomain, query: request.query }, signal);

@@ -52,6 +52,8 @@ describe("WebxAuthority", () => {
     expect((await call(instance, actor(), "POST", "/v1/search", { query: "WebX routes", limit: 1 }, "search-key-001")).status).toBe(200);
     const read = await call(instance, actor(), "POST", "/v1/read", { url: "https://fixture.invalid/webx", maxChars: 4 }, "read-key-001");
     expect(read.body).toMatchObject({ untrustedContent: "WebX", truncated: true });
+    const incompatibleContinuation = await call(instance, actor(), "POST", "/v1/read", { url: "https://fixture.invalid/webx", contentOffset: 10, maxPages: 2 }, "read-key-002");
+    expect(incompatibleContinuation).toMatchObject({ status: 400, body: { code: "invalid-request" } });
     expect((await call(instance, actor(), "POST", "/v1/research", { question: "browser paths", maxSources: 2 }, "research-key-001")).status).toBe(200);
   });
 

@@ -1,22 +1,30 @@
 # Pi WebX
 
-This Pi extension presents the repository's web and browser capabilities as one small tool set.
+This Pi extension presents the repository's internet capabilities as one small, strict tool set.
 
-## Tools
+## Tool selection
 
-- `web_search`: discover public web sources.
-- `web_read`: fetch and extract a known page, API, feed, PDF, or document.
-- `web_research`: gather and compare bounded evidence from several sources.
-- `browser_open`: open a browser when direct reading is insufficient.
-- `browser_tabs`: list and close owned browser tabs and sessions.
-- `browser_observe`: inspect browser content or visual state.
-- `browser_act`: interact with an observed browser tab.
-- `browser_debug`: request advanced diagnostics in explicit debug mode.
+- `web_read`: read a known public URL, API, feed, PDF, or document. It supports full main content, section selection, structured JSON rows, item pagination, reported continuations, and explicit linked crawling.
+- `web_search`: discover and rank public sources when the exact URL is unknown.
+- `web_research`: synthesize and validate bounded evidence from multiple sources.
+- `browser_open`: open an owned browser only when direct reading cannot provide required dynamic state, interaction, DOM evidence, or pixels.
+- `browser_tabs`: list or close owned browser tabs and sessions.
+- `browser_observe`: inspect current browser text, semantic controls, DOM state, changes, or screenshot-bound pixels.
+- `browser_act`: perform one action based on the latest observation.
+- `browser_debug`: request bounded advanced diagnostics in explicit debug mode.
 
-The default mode includes normal browser tools. Only the user changes modes with `/web off|read|browser|debug`. There is no model-facing upgrade tool.
+The tool descriptions, field descriptions, active-tool prompt guidelines, and WebX system guidance use the same routing rules. Schema descriptions state parameter purpose, defaults, continuation rules, and incompatible uses. Strict schemas reject unknown fields and unsupported browser operations.
 
-Repeated searches and page reads use an internal short-lived RAM and SSD cache. The cache reduces rate-limit pressure and repeated website traffic. It is not a durable research library and is not exposed through recall tools.
+## Important behavior
+
+A normal `web_read` returns complete extracted main content up to the source limit. Omit `maxChars` for a full read. Structured API projections return one object per collection row. Use continuation values only when the prior result reports them. `contentOffset` applies to direct single-page reading and cannot be combined with linked crawling.
+
+Search crawling verifies returned results. Read crawling follows linked pages. Research crawling follows linked evidence. Crawling is optional and remains off unless requested by its parameters.
+
+Browser work follows open, observe, act, observe, and close. Semantic refs are preferred. Coordinate actions bind to the latest visual observation. The exposed browser schema does not support upload or download.
+
+Only the user changes modes with `/web off|read|browser|debug`. Browser tools are available by default. There is no model-facing upgrade tool.
+
+Repeated searches and reads use a short-lived RAM and SSD traffic cache. It is not a durable research library or a recall tool.
 
 The extension calls the local WebX SDK over a same-user Unix socket. It does not call websites, browser providers, or subprocesses directly. It fails closed when the local daemon is unavailable.
-
-Use direct reading before browser automation. Sensitive authentication, uploads, downloads, purchases, credentials, and destructive actions require explicit user approval.

@@ -3,17 +3,13 @@ import { Type } from "typebox";
 
 const strict = { additionalProperties: false } as const;
 const id = () => Type.String({ minLength: 1, maxLength: 256 });
-const address = {
-  browserSessionId: Type.Optional(id()),
-  tabId: Type.Optional(id()),
-};
 const target = {
-  ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
-  selector: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
+  ref: Type.String({ minLength: 1, maxLength: 256, description: "Current semantic element ref from the latest interactive observation." }),
+  selector: Type.Optional(Type.String({ minLength: 1, maxLength: 4096, description: "Optional selector fallback for the same observed target. Prefer ref." })),
 };
 const binding = {
-  observationId: id(),
-  viewportId: id(),
+  observationId: Type.String({ minLength: 1, maxLength: 256, description: "Identifier from the latest visual observation of this session." }),
+  viewportId: Type.String({ minLength: 1, maxLength: 256, description: "Viewport identifier paired with the latest visual observation." }),
 };
 const point = {
   ...binding,
@@ -23,57 +19,54 @@ const point = {
 };
 
 export const WebSearchSchema = Type.Object({
-  query: Type.String({ minLength: 1, maxLength: 8192 }),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
-  domains: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 253 }), { maxItems: 32 })),
-  freshness: Type.Optional(StringEnum(["day", "week", "month", "year"] as const)),
-  crawlPages: Type.Optional(Type.Integer({ minimum: 0, maximum: 5 })),
-  crawlDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 1 })),
+  query: Type.String({ minLength: 1, maxLength: 8192, description: "Natural-language search query. Include quoted phrases or site:host only when they are required." }),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Maximum ranked results to return. Default: 10." })),
+  domains: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 253, pattern: "^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$", description: "Host name only, such as docs.python.org. Do not pass a URL, path, or site: prefix." }), { maxItems: 32, description: "Optional strict first-party or site restrictions. Omit for broad discovery." })),
+  freshness: Type.Optional(StringEnum(["day", "week", "month", "year"] as const, { description: "Optional age filter for time-sensitive results. Omit for stable documentation or when recall matters more." })),
+  crawlPages: Type.Optional(Type.Integer({ minimum: 0, maximum: 5, description: "Number of returned results to render and verify. Default: 0. This does not increase search breadth." })),
+  crawlDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 1, description: "Linked-page depth used only for crawlPages verification. Default: 0." })),
 }, strict);
 
 export const WebResearchSchema = Type.Object({
-  question: Type.String({ minLength: 1, maxLength: 8192 }),
-  mode: Type.Optional(StringEnum(["quick", "research", "deep"] as const)),
-  maxQueries: Type.Optional(Type.Integer({ minimum: 1, maximum: 24 })),
-  maxPages: Type.Optional(Type.Integer({ minimum: 0, maximum: 40 })),
-  maxBytes: Type.Optional(Type.Integer({ minimum: 0, maximum: 16_777_216 })),
-  crawlDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 2 })),
-  resume: Type.Optional(Type.Record(Type.String({ maxLength: 128 }), Type.Unknown(), { maxProperties: 64 })),
+  question: Type.String({ minLength: 1, maxLength: 8192, description: "One complete factual question that needs multi-source synthesis or validation." }),
+  mode: Type.Optional(StringEnum(["quick", "research", "deep"] as const, { description: "Effort preset. quick uses fewer sources; research is the normal default; deep uses wider bounded evidence collection." })),
+  maxQueries: Type.Optional(Type.Integer({ minimum: 1, maximum: 24, description: "Hard search-query budget. Usually omit and use the mode default." })),
+  maxPages: Type.Optional(Type.Integer({ minimum: 1, maximum: 40, description: "Hard readable-source budget. Usually omit and use the mode default." })),
+  maxBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 16_777_216, description: "Hard synthesized-output budget in characters. This does not return complete crawled pages." })),
+  crawlDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 2, description: "Depth for following citations or linked evidence from selected sources. Default: 0." })),
 }, strict);
 
 export const WebReadSchema = Type.Object({
-  url: Type.String({ minLength: 1, maxLength: 8192 }),
-  query: Type.Optional(Type.String({ maxLength: 8192 })),
-  view: Type.Optional(StringEnum(["main", "outline", "raw"] as const)),
-  fields: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 256 }), { maxItems: 32 })),
-  itemOffset: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000 })),
-  itemLimit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
-  maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000 })),
-  contentOffset: Type.Optional(Type.Integer({ minimum: 0, maximum: 100_000_000 })),
-  maxPages: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
-  maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 3 })),
-  sameDomain: Type.Optional(Type.Boolean()),
+  url: Type.String({ minLength: 1, maxLength: 8192, pattern: "^https?://", description: "Exact public HTTP(S) URL to read. Use web_search first when the URL is unknown." }),
+  query: Type.Optional(Type.String({ maxLength: 8192, description: "Optional topic or section selector. Omit for the complete extracted main content." })),
+  view: Type.Optional(StringEnum(["main", "outline", "raw"] as const, { description: "Extraction view. main is the readable default; outline returns structure; raw preserves source-oriented text." })),
+  fields: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 256, description: "JSON property name or dotted field path." }), { maxItems: 32, description: "Structured JSON projection. Each returned collection item remains one complete object with these fields." })),
+  itemOffset: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000, description: "Zero-based item offset for a structured JSON collection. Reuse the same URL and fields." })),
+  itemLimit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500, description: "Maximum structured JSON collection items. Use with itemOffset for item pagination." })),
+  maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000, description: "Explicit content bound. Omit for a full read. If it binds the result, use the reported nextContentOffset." })),
+  contentOffset: Type.Optional(Type.Integer({ minimum: 0, maximum: 100_000_000, description: "Continuation offset reported by a prior direct read. Keep the same URL and options. Do not invent this value or combine it with linked crawling." })),
+  maxPages: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Maximum linked pages to read. Default: 1. Set above 1 only when linked sources are explicitly needed." })),
+  maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 3, description: "Maximum link-following depth. Default: 0. Any positive value enables linked crawling." })),
+  sameDomain: Type.Optional(Type.Boolean({ description: "Keep linked crawling on the starting domain. Default: true. Set false only when cited external primary sources are required." })),
 }, strict);
 
 export const BrowserOpenSchema = Type.Object({
-  url: Type.Optional(Type.String({ minLength: 1, maxLength: 8192 })),
-  pathId: Type.Optional(StringEnum(["agent-browser/chrome", "pinchtab/chrome"] as const)),
-  visible: Type.Optional(Type.Boolean()),
-  newTab: Type.Optional(Type.Boolean()),
-  label: Type.Optional(Type.String({ maxLength: 256 })),
+  url: Type.Optional(Type.String({ minLength: 1, maxLength: 8192, pattern: "^https?://", description: "Optional initial public HTTP(S) URL. Omit to open a blank owned session." })),
+  pathId: Type.Optional(StringEnum(["agent-browser/chrome", "pinchtab/chrome"] as const, { description: "Browser path. Omit for the required agent-browser/chrome default. Use pinchtab/chrome only when capabilities report it." })),
+  visible: Type.Optional(Type.Boolean({ description: "Request a visible browser window for human observation or takeover. Omit unless visibility is useful." })),
+  label: Type.Optional(Type.String({ maxLength: 256, description: "Short human-readable session label." })),
 }, strict);
 
-export const BrowserTabsSchema = Type.Object({
-  action: StringEnum(["list", "discard-tab", "restore-tab", "close-tab", "close-session"] as const),
-  ...address,
-}, strict);
+export const BrowserTabsSchema = Type.Union([
+  Type.Object({ action: Type.Literal("list", { description: "List this agent's owned sessions and tabs." }) }, strict),
+  Type.Object({ action: Type.Literal("close-session", { description: "Close one complete owned session." }), browserSessionId: Type.String({ minLength: 1, maxLength: 256, description: "Owned session identifier." }) }, strict),
+  Type.Object({ action: Type.Literal("close-tab", { description: "Close one owned tab." }), browserSessionId: Type.String({ minLength: 1, maxLength: 256, description: "Owned session identifier." }), tabId: Type.String({ minLength: 1, maxLength: 256, description: "Owned tab identifier." }) }, strict),
+], { description: "List owned browser state or close one tab or session. Identifiers are required for close actions." });
 
 export const BrowserObserveSchema = Type.Object({
-  ...address,
-  view: Type.Optional(StringEnum(["main", "interactive", "visual", "hybrid", "adaptive", "full", "diff"] as const)),
-  selector: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
-  maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000 })),
-  includeBounds: Type.Optional(Type.Boolean()),
+  browserSessionId: Type.String({ minLength: 1, maxLength: 256, description: "Owned session identifier returned by browser_open or browser_tabs list." }),
+  view: Type.Optional(StringEnum(["main", "interactive", "visual", "full", "diff"] as const, { description: "Observation form: interactive for semantic refs; main for compact text; visual for screenshot-bound pixels; full for more DOM; diff after a state change." })),
+  maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000, description: "Explicit text bound. Omit for the normal view default." })),
 }, strict);
 
 const pointerButton = Type.Optional(StringEnum(["left", "right", "middle"] as const));
@@ -95,20 +88,16 @@ const action = Type.Union([
   Type.Object({ kind: Type.Literal("text-input"), ...binding, text: Type.String({ maxLength: 100_000 }) }, strict),
   Type.Object({ kind: StringEnum(["back", "forward", "reload"] as const) }, strict),
   Type.Object({ kind: Type.Literal("wait"), milliseconds: Type.Optional(Type.Integer({ minimum: 0, maximum: 30_000 })), selector: Type.Optional(Type.String({ maxLength: 4096 })), text: Type.Optional(Type.String({ maxLength: 4096 })) }, strict),
-  Type.Object({ kind: Type.Literal("tab-new"), url: Type.Optional(Type.String({ maxLength: 8192 })) }, strict),
-  Type.Object({ kind: Type.Literal("tab-close"), tabId: Type.Optional(id()) }, strict),
-  Type.Object({ kind: Type.Literal("tab-focus"), tabId: id() }, strict),
 ]);
 
 export const BrowserActSchema = Type.Object({
-  ...address,
-  action,
-  feedback: Type.Optional(StringEnum(["none", "delta", "visual", "hybrid"] as const)),
+  browserSessionId: Type.String({ minLength: 1, maxLength: 256, description: "Owned session identifier from browser_open or browser_tabs list." }),
+  action: Type.Unsafe({ ...action, description: "One smallest suitable action. Semantic ref/selector actions use current interactive evidence. Coordinate actions require the latest observationId and viewportId." }),
 }, strict);
 
 export const BrowserDebugSchema = Type.Object({
-  ...address,
-  operation: StringEnum(["evaluate", "console", "network", "html", "cookies", "storage", "pdf", "record-start", "record-stop"] as const),
-  args: Type.Optional(Type.Record(Type.String({ maxLength: 128 }), Type.Unknown(), { maxProperties: 64 })),
-  maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 4_000_000 })),
+  browserSessionId: Type.String({ minLength: 1, maxLength: 256, description: "Owned session identifier." }),
+  operation: StringEnum(["console", "network", "html", "pdf", "record-start", "record-stop"] as const, { description: "Bounded diagnostic operation. Secret-bearing cookie, storage, and arbitrary evaluation operations are not exposed." }),
+  args: Type.Optional(Type.Record(Type.String({ maxLength: 128 }), Type.Unknown(), { maxProperties: 64, description: "Operation-specific diagnostic arguments. Keep them minimal." })),
+  maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 4_000_000, description: "Hard diagnostic output bound. Use the smallest value that can explain the failure." })),
 }, strict);
