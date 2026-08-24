@@ -137,10 +137,12 @@ export interface CrawlRequest {
   readonly maxDepth?: number;
   readonly maxChars?: number;
   readonly sameDomain?: boolean;
+  readonly query?: string;
 }
 
 export interface CrawlPage {
   readonly url: string;
+  readonly title?: string;
   readonly depth: number;
   readonly ok: boolean;
   readonly content?: string;

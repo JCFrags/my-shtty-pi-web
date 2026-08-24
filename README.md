@@ -68,6 +68,8 @@ Review `~/.config/pi-web`, `~/.local/share/pi-web`, and `~/.cache/pi-web` before
 
 Only the user changes capability modes with `/web off|read|browser|debug`.
 
+Search, read, and research are capability groups rather than thin provider wrappers. WebX can select direct fetch, structured JSON, main-content extraction, Crawl4AI rendering, document conversion, source ranking, and evidence extraction behind these three stable Pi tools. Normal reads return main content without repeated source URLs or page navigation. Source and crawl-link details remain structured metadata. Research returns concise findings, bounded evidence excerpts, and one compact source list instead of complete crawled pages.
+
 ## Development
 
 ```bash

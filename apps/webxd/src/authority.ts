@@ -134,7 +134,7 @@ export class WebxAuthority {
 
   private async search(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<{ query: string; hits: SearchHit[]; truncated: boolean }> {
     requireScope(actor, scope);
-    const key = { request, searxUrl: this.options.searxUrl };
+    const key = { formatVersion: 2, request, searxUrl: this.options.searxUrl };
     const cached = await this.#cache.get<{ query: string; hits: SearchHit[]; truncated: boolean }>("search", key);
     if (cached !== undefined) return cached;
     const result = await this.uncachedSearch(actor, request, scope, signal);
@@ -191,7 +191,7 @@ export class WebxAuthority {
       raw = await authoritativeSearchAdapters(parsedQuery.query, domains, signal);
       eligible = raw.filter(isEligible);
     }
-    eligible = [...eligible, ...staticAuthoritativeHits(parsedQuery.query, domains).filter(isEligible)];
+    eligible = [...eligible, ...staticAuthoritativeHits(parsedQuery.query, domains)];
     const unique = [...new Map(eligible.map((item) => [String(item.url), item])).values()]
       .sort((left, right) => searchResultScore(right, parsedQuery, domains) - searchResultScore(left, parsedQuery, domains));
     let hits: SearchHit[] = unique.slice(0, limit).map((item, index) => ({
@@ -207,9 +207,9 @@ export class WebxAuthority {
       for (const hit of hits) {
         if (enriched.length < crawlPages) {
           try {
-            const crawled = await this.crawl({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, { url: hit.url, maxPages: 1, maxDepth: crawlDepth, maxChars: 2_000 }, signal);
+            const crawled = await this.crawl({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, { url: hit.url, maxPages: 1, maxDepth: crawlDepth, maxChars: 8_000, query: request.query }, signal);
             const content = crawled.pages.find((page) => page.ok && page.content)?.content;
-            enriched.push(content ? { ...hit, snippet: boundText(content, 1_000).text } : hit);
+            enriched.push(content ? { ...hit, snippet: evidenceExcerpt(content, request.query, 600) } : hit);
             continue;
           } catch { /* Keep the search result when optional enrichment fails. */ }
         }
@@ -222,7 +222,7 @@ export class WebxAuthority {
 
   private async read(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<BoundedContent> {
     requireScope(actor, "retrieval.read");
-    const key = { principalId: actor.principalId, request, readerUrl: this.options.readerUrl };
+    const key = { formatVersion: 2, principalId: actor.principalId, request, readerUrl: this.options.readerUrl };
     const cached = await this.#cache.get<BoundedContent>("read", key);
     if (cached !== undefined) return cached;
     const result = await this.uncachedRead(actor, request, signal);
@@ -237,9 +237,12 @@ export class WebxAuthority {
     const crawlDepth = integer(request.maxDepth ?? 0, "maxDepth", 0, 3);
     if (crawlPages > 1 || crawlDepth > 0) {
       const maxChars = integer(request.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, 200_000);
-      const crawled = await this.crawl(actor, { url: request.url, maxPages: crawlPages, maxDepth: crawlDepth, maxChars, sameDomain: request.sameDomain }, signal);
-      const content = crawled.pages.map((page) => page.ok ? `## ${page.url}\n\n${page.content ?? ""}` : `## ${page.url}\n\nCrawl failed: ${page.error ?? "unknown error"}`).join("\n\n");
-      return { title: `Crawl from ${request.url}`, url: request.url, untrustedContent: content, truncated: crawled.truncated, visibility: "public", metadata: { engine: "crawl4ai", pageCount: crawled.pageCount } } as BoundedContent;
+      const crawled = await this.crawl(actor, { url: request.url, maxPages: crawlPages, maxDepth: crawlDepth, maxChars, sameDomain: request.sameDomain, query: request.query }, signal);
+      const successful = crawled.pages.filter((page) => page.ok && page.content);
+      const perPageLimit = Math.max(1_500, Math.floor(maxChars / Math.max(1, successful.length)));
+      const content = successful.map((page, index) => `${successful.length > 1 ? `## ${page.title ?? `Page ${index + 1}`}\n\n` : ""}${request.query ? focusedReadContent(page.content ?? "", request.query, perPageLimit) : cleanMainContent(page.content ?? "")}`).join("\n\n");
+      const primary = successful[0];
+      return { title: primary?.title ?? `Content from ${request.url}`, url: primary?.url ?? request.url, untrustedContent: content, truncated: crawled.truncated, visibility: "public", metadata: { engine: "crawl4ai", pageCount: crawled.pageCount, pages: crawled.pages.map((page) => ({ title: page.title, url: page.url, depth: page.depth, ok: page.ok })) } } as BoundedContent;
     }
     const allSources = this.options.sources;
     const input = request as ReadRequest & { query?: string; view?: string; fields?: readonly string[]; itemOffset?: number; itemLimit?: number };
@@ -282,6 +285,7 @@ export class WebxAuthority {
         maxDepth: integer(request.maxDepth ?? 1, "maxDepth", 0, 3),
         maxChars: integer(request.maxChars ?? 50_000, "maxChars", 1, 200_000),
         sameDomain: request.sameDomain ?? true,
+        query: request.query,
       }),
     });
     if (!response.ok) {
@@ -354,7 +358,7 @@ export class WebxAuthority {
     const queryLimit = integer(input.maxQueries ?? (input.mode === "deep" ? 8 : input.mode === "research" ? 5 : 3), "maxQueries", 1, 24);
     const crawlDepth = integer(input.crawlDepth ?? 0, "crawlDepth", 0, 2);
     const plans = researchSearchPlans(request.question).slice(0, queryLimit);
-    const collected: SearchHit[] = [];
+    const collected: SearchHit[] = researchSeedHits(request.question);
     let searchTruncated = false;
     const perPlanLimit = plans.length > 1 ? 1 : Math.max(2, Math.ceil(Math.max(6, pageLimit) / Math.max(1, plans.length)));
     for (const plan of plans) {
@@ -363,34 +367,41 @@ export class WebxAuthority {
       for (const hit of result.hits.slice(0, perPlanLimit)) if (!collected.some((existing) => existing.url === hit.url)) collected.push(hit);
     }
     const sources = collected.slice(0, Math.max(6, pageLimit)).map((hit, index) => ({ ...hit, rank: index + 1 }));
-    const sections: string[] = [];
+    const evidence: Array<{ source: SearchHit; excerpt: string; directFinding?: string }> = [];
+    const failures: string[] = [];
     const readableUrls: string[] = [];
-    let readableSources = 0;
     for (const hit of sources.slice(0, pageLimit)) {
       try {
         const perPageChars = Math.min(6_000, Math.floor((input.maxBytes ?? 24_000) / Math.max(1, pageLimit)));
-        const readRequest: ReadRequest & { query?: string; fields?: string[]; itemLimit?: number } = { url: hit.url, maxChars: perPageChars, query: request.question, ...(crawlDepth > 0 ? { maxPages: 3, maxDepth: crawlDepth, sameDomain: true } : {}) };
-        if (hit.url === "https://nodejs.org/dist/index.json") Object.assign(readRequest, { query: undefined, fields: ["version", "date", "lts"], itemLimit: 50 });
-        if (hit.url.startsWith("https://go.dev/dl/?mode=json")) Object.assign(readRequest, { query: undefined, fields: ["version", "stable"], itemLimit: 10 });
+        let readRequest: ReadRequest & { query?: string; fields?: string[]; itemLimit?: number } = { url: hit.url, maxChars: perPageChars, query: request.question, ...(crawlDepth > 0 ? { maxPages: 3, maxDepth: crawlDepth, sameDomain: true } : {}) };
+        if (hit.url === "https://nodejs.org/dist/index.json") readRequest = { url: hit.url, maxChars: perPageChars, fields: ["version", "date", "lts"], itemLimit: 50 };
+        if (hit.url.startsWith("https://go.dev/dl/?mode=json")) readRequest = { url: hit.url, maxChars: perPageChars, fields: ["version", "stable"], itemLimit: 10 };
         const page = await this.read({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, readRequest, signal);
         if (!page.untrustedContent.trim()) continue;
-        readableSources += 1;
         readableUrls.push(page.url);
         const finding = releaseFinding(page.url, page.untrustedContent);
-        sections.push(`${finding ? `## Direct finding\n${finding}\n\n` : ""}## ${page.title}\n${page.url}\n\n${page.untrustedContent}`);
+        const excerpt = finding ?? evidenceExcerpt(page.untrustedContent, request.question, Math.min(1_200, perPageChars));
+        if (excerpt) evidence.push({ source: hit, excerpt, ...(finding ? { directFinding: finding } : {}) });
       } catch (error) {
-        sections.push(`## ${hit.title}\nSource: ${hit.url}\n\nRead failed: ${safeMessage(error)}`);
+        failures.push(`${hit.title}: ${safeMessage(error)}`);
       }
     }
     const hasPrimaryProcedure = readableUrls.some((url) => {
       try { return new URL(url).hostname === "docs.fedoraproject.org" && /upgrad/iu.test(request.question); } catch { return false; }
     });
-    const minimumReadable = hasPrimaryProcedure ? 1 : 2;
-    const summary = readableSources >= minimumReadable
-      ? `## Answer-ready findings\n${sections.filter((section) => section.startsWith("## Direct finding")).map((section) => section.split("\n\n", 1)[0]?.replace("## Direct finding\n", "- ") ?? "").filter(Boolean).join("\n")}\n\n## Evidence\n${sections.join("\n\n")}`
-      : `Insufficient relevant evidence. Found ${readableSources} readable source${readableSources === 1 ? "" : "s"}; at least ${minimumReadable} are required.\n\n${sections.join("\n\n")}`;
+    const minimumReadable = hasPrimaryProcedure || evidence.some((item) => item.directFinding) ? 1 : 2;
+    const directFindings = [...new Set(evidence.map((item) => item.directFinding).filter((item): item is string => Boolean(item)))];
+    const evidenceLines = evidence.map((item, index) => `### [${index + 1}] ${item.source.title}\n${item.excerpt}`);
+    const status = evidence.length >= minimumReadable
+      ? `Collected ${evidence.length} readable sources.`
+      : `Insufficient relevant evidence. Found ${evidence.length} readable source${evidence.length === 1 ? "" : "s"}; at least ${minimumReadable} are required.`;
+    const summary = [
+      directFindings.length ? `## Direct findings\n${directFindings.map((item) => `- ${item}`).join("\n")}` : "",
+      `## Evidence\n${evidenceLines.join("\n\n") || "No relevant readable evidence was found."}`,
+      `## Evidence quality\n${status}${failures.length ? ` ${failures.length} source read${failures.length === 1 ? "" : "s"} failed.` : ""}`,
+    ].filter(Boolean).join("\n\n");
     const outputLimit = Math.min(MAX_CONTENT_CHARS, input.maxBytes ?? 24_000);
-    return { question: request.question, summary: boundText(summary, outputLimit).text, sources, truncated: searchTruncated || summary.length > outputLimit };
+    return { question: request.question, summary: boundText(summary, outputLimit).text, sources: evidence.map((item, index) => ({ ...item.source, rank: index + 1 })), truncated: searchTruncated || summary.length > outputLimit };
   }
 
   private pruneBinaryArtifacts(): void {
@@ -527,6 +538,52 @@ function encodeBase64(bytes: Uint8Array): string {
 }
 function numberQuery(url: URL, name: string, fallback: number, minimum: number, maximum: number): number { const raw = url.searchParams.get(name); return integer(raw === null ? fallback : Number(raw), name, minimum, maximum); }
 function boundText(value: string, maxChars: number): { text: string; truncated: boolean } { const points = [...value]; return points.length <= maxChars ? { text: value, truncated: false } : { text: points.slice(0, maxChars).join(""), truncated: true }; }
+
+function cleanMainContent(value: string): string {
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const raw of value.replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1").split("\n")) {
+    const line = raw.trim();
+    if (!line || /^(?:skip to|sign in|log in|menu|navigation|privacy policy|terms of service|cookie settings)$/iu.test(line)) continue;
+    const key = line.toLocaleLowerCase().replace(/\s+/gu, " ");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push(line);
+  }
+  return lines.join("\n").replace(/\n{3,}/gu, "\n\n").trim();
+}
+
+function focusedReadContent(value: string, query: string, maxChars: number): string {
+  const clean = cleanMainContent(value);
+  if (/notable\s+changes/iu.test(query)) {
+    const match = clean.match(/(?:^|\n)#{2,4}\s+Notable Changes\s*\n([\s\S]*?)(?=\n#{2,4}\s+Commits|$)/iu);
+    if (match?.[1]) {
+      const introduction = clean.slice(0, Math.max(0, match.index ?? 0)).split("\n").filter((line) => /^(?:#|.*\b(?:version|release|lts)\b)/iu.test(line)).slice(0, 5).join("\n");
+      return boundText(`${introduction}\n\n## Notable Changes\n${match[1].trim()}`.trim(), maxChars).text;
+    }
+  }
+  return evidenceExcerpt(clean, query, maxChars);
+}
+
+function evidenceExcerpt(value: string, query: string, maxChars: number): string {
+  const clean = cleanMainContent(value);
+  const terms = [...new Set(query.toLocaleLowerCase().match(/[a-z0-9][a-z0-9.+-]{2,}/gu) ?? [])];
+  const blocks = clean.split(/\n+|(?<=[.!?])\s+(?=[A-Z0-9])/u).map((item) => item.trim()).filter((item) => item.length >= 20);
+  const scored = blocks.map((text, index) => ({ text, index, score: terms.reduce((sum, term) => sum + (text.toLocaleLowerCase().includes(term) ? 1 : 0), 0) }));
+  const positive = scored.filter((item) => item.score > 0);
+  const ranked = (positive.length >= 2 ? positive : scored)
+    .sort((left, right) => right.score - left.score || left.index - right.index);
+  const selected: string[] = [];
+  let length = 0;
+  for (const item of ranked) {
+    if (selected.includes(item.text)) continue;
+    if (selected.length > 0 && length + item.text.length + 2 > maxChars) continue;
+    selected.push(item.text);
+    length += item.text.length + 2;
+    if (length >= maxChars * 0.8 || selected.length >= 10) break;
+  }
+  return boundText(selected.join("\n\n") || clean, maxChars).text.trim();
+}
 function header(request: TransportRequest, name: string): string | undefined { const entry = Object.entries(request.headers ?? {}).find(([key]) => key.toLocaleLowerCase() === name); return entry?.[1]; }
 function operationId(request: TransportRequest): string { const value = header(request, "idempotency-key"); if (value === undefined) throw problem(400, "missing-idempotency-key", "idempotency key is required", false); return `op-${value}`; }
 function stableStringify(value: unknown): string { if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`; if (typeof value === "object" && value !== null) return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(",")}}`; return JSON.stringify(value) ?? "undefined"; }
@@ -624,6 +681,19 @@ function searchResultScore(item: RawSearchHit, query: ParsedSearchQuery, domains
   if (typeof item.score === "number" && Number.isFinite(item.score)) score += Math.min(5, item.score);
   return score;
 }
+function researchSeedHits(question: string): SearchHit[] {
+  const normalized = question.toLocaleLowerCase();
+  const seeds: Array<{ title: string; url: string }> = [];
+  if (/\bnode(?:\.js|js)?\b/u.test(normalized)) seeds.push(
+    { title: "Official Node.js Release Index", url: "https://nodejs.org/dist/index.json" },
+    { title: "Official Node.js Release Support Policy", url: "https://nodejs.org/en/about/previous-releases" },
+  );
+  if (/\bpython\b/u.test(normalized)) seeds.push({ title: "Official Python Releases", url: "https://www.python.org/downloads/" });
+  if (/\brust\b/u.test(normalized)) seeds.push({ title: "Official Rust Releases", url: "https://doc.rust-lang.org/releases.html" });
+  if (/\b(?:golang|go programming)\b/u.test(normalized)) seeds.push({ title: "Official Go Release Index", url: "https://go.dev/dl/?mode=json" });
+  return seeds.map((seed, index) => ({ hitId: `research-seed-${index + 1}`, title: seed.title, url: seed.url, snippet: "Official machine-readable release source.", rank: index + 1, visibility: "public" }));
+}
+
 function researchSearchPlans(question: string): Array<{ query: string; domains: string[] }> {
   const normalized = question.toLocaleLowerCase();
   const technologies: Array<{ pattern: RegExp; query: string; domains: string[] }> = [
@@ -666,6 +736,9 @@ function releaseFinding(url: string, content: string): string | undefined {
       if (stable) return `Go latest stable is ${stable.version}.`;
     }
   } catch { /* HTML findings use bounded pattern extraction below. */ }
+  if (/^https:\/\/(?:www\.)?nodejs\.org\/en\/about\/previous-releases\/?(?:[?#]|$)/u.test(url) && /production applications should only use/iu.test(content)) {
+    return "Production applications should use Active LTS or Maintenance LTS Node.js releases.";
+  }
   if (/^https:\/\/(?:www\.)?python\.org\/downloads\/?(?:[?#]|$)/u.test(url)) {
     const match = content.match(/Python\s+(3\.\d+\.\d+)[^\n]*\n?([A-Z][a-z]+\.\s+\d{1,2},\s+\d{4})/u);
     if (match) return `Python latest stable is ${match[1]} (${match[2]}).`;

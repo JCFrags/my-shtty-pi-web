@@ -215,7 +215,7 @@ test("output compaction and visual transfer have deterministic bounds", () => {
     truncated: true,
     metadata: { source: "trafilatura" },
   } });
-  assert.match(JSON.stringify(continued.content), /truncated=true/);
+  assert.match(JSON.stringify(continued.content), /Content truncated/);
   assert.doesNotMatch(JSON.stringify(continued.content), /artifactId|pageId|saved=|recallable=/);
 
   const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(100)]);

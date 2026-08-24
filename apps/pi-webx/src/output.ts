@@ -44,9 +44,7 @@ function renderData(value: unknown): string | undefined {
     return hits.length ? hits.join("\n") : "No results.";
   }
   if (typeof data.untrustedContent === "string") {
-    const metadata = typeof data.metadata === "object" && data.metadata !== null ? data.metadata as Record<string, unknown> : undefined;
-    const status = metadata ? `Read status: source=${String(metadata.source ?? "unknown")}; requested=${String(metadata.requestedUrl ?? data.url ?? "")}; final=${String(metadata.finalUrl ?? data.url ?? "")}; substituted=${String(metadata.substituted ?? false)}; truncated=${String(data.truncated ?? false)}` : undefined;
-    const header = [data.title, data.url, status].filter((item) => typeof item === "string" && item.length > 0).join("\n");
+    const header = [data.title, data.truncated === true ? "[Content truncated]" : undefined].filter((item) => typeof item === "string" && item.length > 0).join("\n");
     return `${header}${header ? "\n\n" : ""}${clip(data.untrustedContent, 30_000)}`;
   }
   if (typeof data.question === "string" && typeof data.summary === "string") {
@@ -76,7 +74,9 @@ export function presentResult(result: WebxResult) {
     { type: "text", text: clip(lines.join("\n"), MAX_MODEL_CHARS) },
   ];
   const { artifactPayload, ...safeResult } = result;
-  let details: unknown = compactUnknown({ summary: safeResult.summary, title: safeResult.title, url: safeResult.url, artifacts: safeResult.artifacts, trust });
+  const resultData = typeof safeResult.data === "object" && safeResult.data !== null ? safeResult.data as Record<string, unknown> : undefined;
+  const sourceDetails = resultData && typeof resultData.untrustedContent === "string" ? { title: resultData.title, url: resultData.url, metadata: resultData.metadata, truncated: resultData.truncated } : undefined;
+  let details: unknown = compactUnknown({ summary: safeResult.summary, title: safeResult.title, url: safeResult.url, source: sourceDetails, artifacts: safeResult.artifacts, trust });
   if (artifactPayload) {
     const bytes = Buffer.from(artifactPayload.dataBase64, "base64");
     const validSize = bytes.byteLength === artifactPayload.size;
