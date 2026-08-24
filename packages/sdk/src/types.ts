@@ -88,6 +88,7 @@ export interface SearchResponse {
     readonly searches: number;
     readonly pagesRead: number;
     readonly linkedDepth: 0;
+    readonly freshnessRelaxed: boolean;
   };
 }
 

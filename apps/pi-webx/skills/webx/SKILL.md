@@ -27,7 +27,7 @@ Choose both required axes:
 - `effort: "fast"` runs one search. Use it for normal discovery and quick facts.
 - `effort: "quality"` uses bounded conservative query fan-out, deduplication, verification, and reranking. Use it when recall or source quality justifies more work.
 
-Start with a complete natural-language query. Use `domains` only for required host names such as `docs.python.org`. Use freshness only when source age is part of the request. Search recipes do not follow links. Use `web_research` when the task needs a cross-source conclusion.
+Start with a complete natural-language query. Use `domains` only for required host names such as `docs.python.org`. Use freshness only when source age is part of the request. If that SearXNG filter returns no eligible result, WebX retries without it and marks the result as freshness-relaxed. Search recipes do not follow links. Use `web_research` when the task needs a cross-source conclusion.
 
 ## Read
 

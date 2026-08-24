@@ -279,8 +279,9 @@ test("output compaction and visual transfer have deterministic bounds", () => {
   assert.match(JSON.stringify(paged.content), /Returned 5 of 10 items; continue with itemOffset=5/);
   assert.match(JSON.stringify(paged.content), /Returned 2 characters; extracted total 2; complete/);
 
-  const extracts = presentResult({ summary: "search", data: { query: "feature", operation: "extracts", effort: "quality", hits: [{ title: "Source", url: "https://example.test/source", snippet: "Focused supporting passage." }], metadata: { searches: 3, pagesRead: 1, linkedDepth: 0 } } });
+  const extracts = presentResult({ summary: "search", data: { query: "feature", operation: "extracts", effort: "quality", hits: [{ title: "Source", url: "https://example.test/source", snippet: "Focused supporting passage." }], metadata: { searches: 3, pagesRead: 1, linkedDepth: 0, freshnessRelaxed: true } } });
   assert.match(JSON.stringify(extracts.content), /quality extracts; 3 search\(es\); 1 page read\(s\); linked depth 0/);
+  assert.match(JSON.stringify(extracts.content), /freshness filter returned no eligible results/);
   assert.match(JSON.stringify(extracts.content), /Extract: Focused supporting passage/);
 
   const completePage = "main-content-".repeat(5_000);
