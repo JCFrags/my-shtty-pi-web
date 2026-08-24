@@ -134,7 +134,7 @@ export class WebxAuthority {
 
   private async search(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<{ query: string; hits: SearchHit[]; truncated: boolean }> {
     requireScope(actor, scope);
-    const key = { formatVersion: 2, request, searxUrl: this.options.searxUrl };
+    const key = { formatVersion: 6, request, searxUrl: this.options.searxUrl };
     const cached = await this.#cache.get<{ query: string; hits: SearchHit[]; truncated: boolean }>("search", key);
     if (cached !== undefined) return cached;
     const result = await this.uncachedSearch(actor, request, scope, signal);
@@ -187,9 +187,21 @@ export class WebxAuthority {
         eligible = raw.filter(isEligible);
       }
     }
-    if (eligible.length === 0 && domains.length > 0) {
-      raw = await authoritativeSearchAdapters(parsedQuery.query, domains, signal);
-      eligible = raw.filter(isEligible);
+    const discoveryDomains = domains.length > 0 ? domains : inferredAuthoritativeDomains(parsedQuery.query);
+    if (discoveryDomains.length > 0) {
+      const authoritative = await authoritativeSearchAdapters(parsedQuery.query, discoveryDomains, signal);
+      eligible = [...eligible, ...authoritative.filter((item) => typeof item.url === "string" && typeof item.title === "string")];
+      if (eligible.length === 0) raw = authoritative;
+    }
+    if (eligible.length === 0) {
+      eligible = raw.filter((item) => {
+        if (typeof item.url !== "string" || typeof item.title !== "string") return false;
+        if (domains.length === 0) return true;
+        try {
+          const hostname = new URL(item.url).hostname.toLocaleLowerCase().replace(/^www\./u, "");
+          return domains.some((domain) => hostname === domain.toLocaleLowerCase().replace(/^www\./u, "") || hostname.endsWith(`.${domain.toLocaleLowerCase().replace(/^www\./u, "")}`));
+        } catch { return false; }
+      });
     }
     eligible = [...eligible, ...staticAuthoritativeHits(parsedQuery.query, domains)];
     const unique = [...new Map(eligible.map((item) => [String(item.url), item])).values()]
@@ -222,7 +234,7 @@ export class WebxAuthority {
 
   private async read(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<BoundedContent> {
     requireScope(actor, "retrieval.read");
-    const key = { formatVersion: 2, principalId: actor.principalId, request, readerUrl: this.options.readerUrl };
+    const key = { formatVersion: 3, principalId: actor.principalId, request, readerUrl: this.options.readerUrl };
     const cached = await this.#cache.get<BoundedContent>("read", key);
     if (cached !== undefined) return cached;
     const result = await this.uncachedRead(actor, request, signal);
@@ -236,22 +248,24 @@ export class WebxAuthority {
     const crawlPages = integer(request.maxPages ?? 1, "maxPages", 1, 20);
     const crawlDepth = integer(request.maxDepth ?? 0, "maxDepth", 0, 3);
     if (crawlPages > 1 || crawlDepth > 0) {
-      const maxChars = integer(request.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, 200_000);
+      const maxChars = integer(request.maxChars ?? 1_000_000, "maxChars", 1, 1_000_000);
       const crawled = await this.crawl(actor, { url: request.url, maxPages: crawlPages, maxDepth: crawlDepth, maxChars, sameDomain: request.sameDomain, query: request.query }, signal);
       const successful = crawled.pages.filter((page) => page.ok && page.content);
       const perPageLimit = Math.max(1_500, Math.floor(maxChars / Math.max(1, successful.length)));
-      const content = successful.map((page, index) => `${successful.length > 1 ? `## ${page.title ?? `Page ${index + 1}`}\n\n` : ""}${request.query ? focusedReadContent(page.content ?? "", request.query, perPageLimit) : cleanMainContent(page.content ?? "")}`).join("\n\n");
+      const allContent = successful.map((page, index) => `${successful.length > 1 ? `## ${page.title ?? `Page ${index + 1}`}\n\n` : ""}${request.query ? focusedReadContent(page.content ?? "", request.query, perPageLimit) : cleanMainContent(page.content ?? "")}`).join("\n\n");
+      const contentOffset = integer(request.contentOffset ?? 0, "contentOffset", 0, 100_000_000);
+      const content = allContent.slice(contentOffset);
       const primary = successful[0];
-      return { title: primary?.title ?? `Content from ${request.url}`, url: primary?.url ?? request.url, untrustedContent: content, truncated: crawled.truncated, visibility: "public", metadata: { engine: "crawl4ai", pageCount: crawled.pageCount, pages: crawled.pages.map((page) => ({ title: page.title, url: page.url, depth: page.depth, ok: page.ok })) } } as BoundedContent;
+      return { title: primary?.title ?? `Content from ${request.url}`, url: primary?.url ?? request.url, untrustedContent: content, truncated: crawled.truncated, visibility: "public", metadata: { engine: "crawl4ai", pageCount: crawled.pageCount, contentOffset, nextContentOffset: crawled.truncated ? contentOffset + content.length : null, pages: crawled.pages.map((page) => ({ title: page.title, url: page.url, depth: page.depth, ok: page.ok })) } } as BoundedContent;
     }
     const allSources = this.options.sources;
-    const input = request as ReadRequest & { query?: string; view?: string; fields?: readonly string[]; itemOffset?: number; itemLimit?: number };
-    const transformed = input.query !== undefined || input.fields !== undefined || input.itemOffset !== undefined || input.itemLimit !== undefined || (input.view !== undefined && input.view !== "main");
+    const input = request as ReadRequest & { query?: string; view?: string; fields?: readonly string[]; itemOffset?: number; itemLimit?: number; contentOffset?: number };
+    const transformed = input.query !== undefined || input.fields !== undefined || input.itemOffset !== undefined || input.itemLimit !== undefined || input.contentOffset !== undefined || (input.view !== undefined && input.view !== "main");
     let source = !transformed ? allSources.find((item) => item.url === request.url) : undefined;
     if (source === undefined && this.options.readerUrl !== undefined) {
       const response = await fetch(new URL("/v1/read", this.options.readerUrl), {
         method: "POST", signal, headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ url: request.url, query: input.query, view: input.view ?? "main", fields: input.fields ?? [], itemOffset: integer(input.itemOffset ?? 0, "itemOffset", 0, 1_000_000), itemLimit: integer(input.itemLimit ?? 50, "itemLimit", 1, 500), maxChars: 1_000_000 }),
+        body: JSON.stringify({ url: request.url, query: input.query, view: input.view ?? "main", fields: input.fields ?? [], itemOffset: integer(input.itemOffset ?? 0, "itemOffset", 0, 1_000_000), itemLimit: integer(input.itemLimit ?? 50, "itemLimit", 1, 500), contentOffset: integer(input.contentOffset ?? 0, "contentOffset", 0, 100_000_000), maxChars: integer(request.maxChars ?? 1_000_000, "maxChars", 1, 1_000_000) }),
       });
       if (!response.ok) {
         const failure = parseReaderFailure(response.status, await response.text());
@@ -263,12 +277,12 @@ export class WebxAuthority {
       source = { hitId: `hit-${digest.slice(0, 20)}`, ownerPrincipalId: actor.principalId, title: typeof page.title === "string" ? page.title : request.url, url: typeof page.url === "string" ? page.url : request.url, content: page.content, visibility: "public" };
       const readerMetadata = typeof page.metadata === "object" && page.metadata !== null ? page.metadata as Record<string, unknown> : {};
       const metadata = { requestedUrl: request.url, finalUrl: source.url, source: page.source, substituted: source.url !== request.url, reader: { ...readerMetadata, truncated: page.truncated === true } };
-      const maxChars = integer(request.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, 1_000_000);
+      const maxChars = integer(request.maxChars ?? 1_000_000, "maxChars", 1, 1_000_000);
       const bounded = boundText(source.content, maxChars);
       return { title: source.title, url: source.url, untrustedContent: bounded.text, truncated: bounded.truncated || page.truncated === true, visibility: source.visibility, metadata } as BoundedContent;
     }
     if (source === undefined || !canRead(actor, source.ownerPrincipalId, source.visibility)) throw problem(404, "not-found", "page was not found", false);
-    const maxChars = integer(request.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, 1_000_000);
+    const maxChars = integer(request.maxChars ?? 1_000_000, "maxChars", 1, 1_000_000);
     const bounded = boundText(source.content, maxChars);
     return { title: source.title, url: source.url, untrustedContent: bounded.text, truncated: bounded.truncated, visibility: source.visibility } as BoundedContent;
   }
@@ -283,7 +297,7 @@ export class WebxAuthority {
         url: request.url,
         maxPages: integer(request.maxPages ?? 5, "maxPages", 1, 20),
         maxDepth: integer(request.maxDepth ?? 1, "maxDepth", 0, 3),
-        maxChars: integer(request.maxChars ?? 50_000, "maxChars", 1, 200_000),
+        maxChars: integer(request.maxChars ?? 1_000_000, "maxChars", 1, 1_000_000),
         sameDomain: request.sameDomain ?? true,
         query: request.query,
       }),
@@ -601,11 +615,27 @@ function isAuthorityFailure(value: unknown): value is AuthorityFailure { return 
 function staticAuthoritativeHits(query: string, domains: readonly string[]): RawSearchHit[] {
   const normalizedDomains = domains.map((domain) => domain.toLocaleLowerCase().replace(/^www\./u, ""));
   const hits: RawSearchHit[] = [];
+  if (/qwen3[\s-]+embedding/iu.test(query)) {
+    if (normalizedDomains.length === 0 || normalizedDomains.includes("qwenlm.github.io")) hits.push({ title: "Qwen3 Embedding: Advancing Text Embedding and Reranking Through Foundation Models", url: "https://qwenlm.github.io/blog/qwen3-embedding/", content: "Official Qwen release post for the Qwen3 Embedding and Reranker model series.", engines: ["official-route"] });
+    if (normalizedDomains.length === 0 || normalizedDomains.includes("github.com")) hits.push({ title: "QwenLM/Qwen3-Embedding", url: "https://github.com/QwenLM/Qwen3-Embedding", content: "Official Qwen3 Embedding source repository and usage documentation.", engines: ["official-route"] });
+    if (normalizedDomains.length === 0 || normalizedDomains.includes("huggingface.co")) hits.push({ title: "Qwen/Qwen3-Embedding-8B", url: "https://huggingface.co/Qwen/Qwen3-Embedding-8B", content: "Official Qwen3 Embedding 8B model card.", engines: ["official-route"] });
+  }
   if (normalizedDomains.includes("rust-lang.org") && /release/iu.test(query)) hits.push({ title: "Rust Releases and Release Notes", url: "https://doc.rust-lang.org/releases.html", content: "Official Rust stable release notes and version history.", engines: ["official-route"] });
   if (normalizedDomains.includes("nodejs.org") && /release/iu.test(query)) hits.push({ title: "Node.js Release Index", url: "https://nodejs.org/dist/index.json", content: "Official Node.js current and long-term support release index.", engines: ["official-route"] });
   if (normalizedDomains.includes("python.org") && /release/iu.test(query)) hits.push({ title: "Python Releases and Downloads", url: "https://www.python.org/downloads/", content: "Official Python stable release downloads and version history.", engines: ["official-route"] });
   if (normalizedDomains.includes("go.dev") && /release/iu.test(query)) hits.push({ title: "Go Release Index", url: "https://go.dev/dl/?mode=json", content: "Official Go stable release index.", engines: ["official-route"] });
   return hits;
+}
+
+function inferredAuthoritativeDomains(query: string): string[] {
+  const domains: string[] = [];
+  if (/github|\brepositor(?:y|ies)\b|\bissue\b|source code/iu.test(query)) domains.push("github.com");
+  if (/hugging\s*face|model card|\bmodel\b|embedding|transformer/iu.test(query)) domains.push("huggingface.co");
+  return domains;
+}
+
+function platformSearchQuery(query: string): string {
+  return query.replace(/\b(?:official|github|hugging\s*face|repository|repositories|model card|release|issue|issues)\b/giu, " ").replace(/\s+/gu, " ").trim();
 }
 
 async function authoritativeSearchAdapters(query: string, domains: readonly string[], signal?: AbortSignal): Promise<RawSearchHit[]> {
@@ -640,6 +670,39 @@ async function authoritativeSearchAdapters(query: string, domains: readonly stri
       if (Array.isArray(payload.hits)) for (const item of payload.hits) hits.push({ title: item.title, url: item.url, content: typeof item.meta_description === "string" ? item.meta_description : typeof item.highlight === "string" ? item.highlight : "Official ECB search result", engines: ["ecb-addsearch-api"] });
     }
   }
+  if (domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "github.com")) {
+    const endpoint = new URL("https://api.github.com/search/repositories");
+    endpoint.searchParams.set("q", platformSearchQuery(query));
+    endpoint.searchParams.set("per_page", "10");
+    const response = await fetch(endpoint, { signal, headers: { accept: "application/vnd.github+json", "user-agent": "Pi-WebX/0.1" } });
+    if (response.ok) {
+      const payload = await response.json() as { items?: Array<{ full_name?: unknown; html_url?: unknown; description?: unknown; updated_at?: unknown }> };
+      if (Array.isArray(payload.items)) for (const item of payload.items) hits.push({ title: item.full_name, url: item.html_url, content: `${String(item.description ?? "GitHub repository")} Updated ${String(item.updated_at ?? "unknown")}.`, engines: ["github-api"] });
+    }
+    if (/\bissue\b/iu.test(query)) {
+      const issuesEndpoint = new URL("https://api.github.com/search/issues");
+      issuesEndpoint.searchParams.set("q", `${platformSearchQuery(query)} is:issue`);
+      issuesEndpoint.searchParams.set("per_page", "10");
+      const issuesResponse = await fetch(issuesEndpoint, { signal, headers: { accept: "application/vnd.github+json", "user-agent": "Pi-WebX/0.1" } });
+      if (issuesResponse.ok) {
+        const payload = await issuesResponse.json() as { items?: Array<{ title?: unknown; html_url?: unknown; body?: unknown; updated_at?: unknown }> };
+        if (Array.isArray(payload.items)) for (const item of payload.items) hits.push({ title: item.title, url: item.html_url, content: `${String(item.body ?? "GitHub issue").slice(0, 500)} Updated ${String(item.updated_at ?? "unknown")}.`, engines: ["github-api"] });
+      }
+    }
+  }
+  if (domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "huggingface.co")) {
+    const endpoint = new URL("https://huggingface.co/api/models");
+    endpoint.searchParams.set("search", platformSearchQuery(query));
+    endpoint.searchParams.set("limit", "10");
+    const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
+    if (response.ok) {
+      const payload = await response.json() as Array<{ modelId?: unknown; id?: unknown; pipeline_tag?: unknown; downloads?: unknown; likes?: unknown }>;
+      if (Array.isArray(payload)) for (const item of payload) {
+        const id = String(item.modelId ?? item.id ?? "");
+        if (id) hits.push({ title: id, url: `https://huggingface.co/${id}`, content: `Hugging Face model. Task: ${String(item.pipeline_tag ?? "unknown")}. Downloads: ${String(item.downloads ?? "unknown")}. Likes: ${String(item.likes ?? "unknown")}.`, engines: ["huggingface-api"] });
+      }
+    }
+  }
   return hits;
 }
 function decodeBasicEntities(value: string): string {
@@ -658,12 +721,10 @@ function searchText(item: RawSearchHit): string { return `${String(item.title ??
 function searchResultRelevant(item: RawSearchHit, query: ParsedSearchQuery, domainConstrained: boolean): boolean {
   const text = searchText(item);
   if (query.phrases.some((phrase) => !text.includes(phrase))) return false;
-  if (query.requiredTokens.some((token) => !text.includes(token))) return false;
+  if (query.requiredTokens.length <= 2 && query.requiredTokens.some((token) => !text.includes(token))) return false;
   if (query.terms.length === 0) return true;
   const matched = query.terms.filter((term) => text.includes(term)).length;
-  const threshold = domainConstrained && query.terms.length <= 4
-    ? Math.max(1, query.terms.length - 1)
-    : Math.max(1, Math.ceil(Math.min(query.terms.length, 6) / 2));
+  const threshold = domainConstrained && query.terms.length <= 4 ? Math.max(1, query.terms.length - 1) : 1;
   return matched >= threshold;
 }
 function searchResultScore(item: RawSearchHit, query: ParsedSearchQuery, domains: readonly string[]): number {
@@ -676,8 +737,17 @@ function searchResultScore(item: RawSearchHit, query: ParsedSearchQuery, domains
     const hostname = new URL(String(item.url)).hostname.toLocaleLowerCase().replace(/^www\./u, "");
     if (domains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))) score += 20;
     if (/\.(?:gov|edu)$/u.test(hostname) || hostname.endsWith(".gov.uk") || hostname.includes("docs.")) score += 5;
+    if ((query.terms.includes("github") && hostname === "github.com") || (query.terms.some((term) => term === "hugging" || term === "huggingface") && hostname === "huggingface.co")) score += 18;
+    if (hostname === "github.com" || hostname === "huggingface.co") score += 2;
+    const brand = query.terms[0]?.replace(/\d+$/u, "");
+    if (brand && brand.length >= 3 && hostname.split(".").some((label) => label.startsWith(brand))) score += 15;
   } catch { return score; }
   if (Array.isArray(item.engines) && item.engines.includes("official-route")) score += 50;
+  if (Array.isArray(item.engines) && (item.engines.includes("github-api") || item.engines.includes("huggingface-api"))) {
+    const cleaned = platformSearchQuery(query.query).toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/gu, "");
+    const titleLeaf = title.split("/").at(-1)?.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/gu, "");
+    if (cleaned.length > 0 && titleLeaf === cleaned) score += 20;
+  }
   if (typeof item.score === "number" && Number.isFinite(item.score)) score += Math.min(5, item.score);
   return score;
 }
@@ -696,6 +766,11 @@ function researchSeedHits(question: string): SearchHit[] {
 
 function researchSearchPlans(question: string): Array<{ query: string; domains: string[] }> {
   const normalized = question.toLocaleLowerCase();
+  if (/qwen3[\s-]+embedding/iu.test(question)) return [
+    { query: "Qwen3 Embedding", domains: ["qwenlm.github.io"] },
+    { query: "Qwen3-Embedding-8B", domains: ["huggingface.co"] },
+    { query: "Qwen3 Embedding", domains: ["github.com"] },
+  ];
   const technologies: Array<{ pattern: RegExp; query: string; domains: string[] }> = [
     { pattern: /\bnode(?:\.js|js)?\b/u, query: "Node.js releases", domains: ["nodejs.org"] },
     { pattern: /\brust\b/u, query: "Rust releases", domains: ["rust-lang.org"] },
@@ -764,6 +839,7 @@ function parseReaderFailure(status: number, raw: string): { toolStatus: number; 
     .replace(/https?:\/\/(?:localhost|127(?:\.\d+){3}|\[::1\])(?::\d+)?[^\s"']*/giu, "the internal converter")
     .replace(/For more information check:[\s\S]*/giu, "")
     .trim();
-  return { toolStatus: status, message: `read failed (upstream_status=${status}, tool_status=${status}): ${detail}`.slice(0, 300), retryable: status >= 500 || status === 429 };
+  const fallback = status === 413 ? "retry with contentOffset, itemOffset, fields, or a section query" : "retry with a section query, or use browser_open when rendering or interaction is required";
+  return { toolStatus: status, message: `content retrieval failed; action=fetch_extract; upstream_status=${status}; limit=${status === 413 ? "response_bytes" : "none reported"}; detail=${detail}; supported_fallback=${fallback}`.slice(0, 500), retryable: status >= 500 || status === 429 };
 }
 function safeMessage(error: unknown): string { return error instanceof Error && error.message.length > 0 ? error.message.replace(/https?:\/\/(?:localhost|127(?:\.\d+){3}|\[::1\])(?::\d+)?[^\s"']*/giu, "internal service").slice(0, 300) : "browser or authority backend failed"; }

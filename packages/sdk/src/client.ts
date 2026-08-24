@@ -32,7 +32,7 @@ import {
   type WebxTransport,
 } from "./types.js";
 
-const DEFAULT_MAX_RESPONSE_BYTES = 1_048_576;
+const DEFAULT_MAX_RESPONSE_BYTES = 4_194_304;
 
 export interface WebxClientOptions {
   readonly maxResponseBytes?: number;

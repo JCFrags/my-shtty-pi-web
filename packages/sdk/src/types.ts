@@ -93,6 +93,7 @@ export interface ReadRequest {
   readonly itemOffset?: number;
   readonly itemLimit?: number;
   readonly maxChars?: number;
+  readonly contentOffset?: number;
   readonly maxPages?: number;
   readonly maxDepth?: number;
   readonly sameDomain?: boolean;

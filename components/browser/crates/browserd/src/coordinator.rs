@@ -820,9 +820,9 @@ impl Coordinator {
         self.agent_browser.capabilities().await.map_err(backend_rpc_error)?;
         let mut paths = vec![json!({
             "pathId": BrowserPathId::AgentBrowserChrome,
-            "actions": ["navigate", "mouse-move", "mouse-down", "mouse-up", "click", "double-click", "wheel", "drag", "key-press", "key-down", "key-up", "text-input", "fill", "select", "upload", "download", "back", "forward", "reload", "wait"],
+            "actions": ["navigate", "mouse-move", "mouse-down", "mouse-up", "click", "double-click", "wheel", "drag", "key-press", "key-down", "key-up", "text-input", "fill", "select", "back", "forward", "reload", "wait"],
             "observations": ["main", "interactive", "visual", "full", "diff"],
-            "touch": false, "uploads": true, "downloads": true, "visual": true
+            "touch": false, "uploads": false, "downloads": false, "visual": true
         })];
         if self.pinchtab.capabilities().await.is_ok() {
             paths.push(json!({

@@ -38,12 +38,13 @@ class ReadPayload(BaseModel):
     url: str
     query: str | None = None
     view: str = "main"
-    max_chars: int = Field(default=20_000, alias="maxChars")
+    max_chars: int = Field(default=1_000_000, ge=1, le=1_000_000, alias="maxChars")
     require_markdown: bool = Field(default=False, alias="requireMarkdown")
     allow_llms_full: bool = Field(default=False, alias="allowLlmsFull")
     fields: list[str] = Field(default_factory=list, max_length=32)
     item_offset: int = Field(default=0, ge=0, alias="itemOffset")
     item_limit: int = Field(default=50, ge=1, le=500, alias="itemLimit")
+    content_offset: int = Field(default=0, ge=0, le=100_000_000, alias="contentOffset")
 
 
 pipeline = ReaderPipeline()
@@ -97,6 +98,7 @@ async def read(payload: ReadPayload) -> dict[str, Any]:
             fields=tuple(payload.fields),
             item_offset=payload.item_offset,
             item_limit=payload.item_limit,
+            content_offset=payload.content_offset,
         )
         return (await pipeline.read(request)).to_dict()
     except ValueError as error:

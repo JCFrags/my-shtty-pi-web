@@ -60,6 +60,7 @@ class ReadRequest:
     fields: tuple[str, ...] = ()
     item_offset: int = 0
     item_limit: int = 50
+    content_offset: int = 0
 
 
 @dataclass(slots=True)
@@ -719,10 +720,22 @@ def finalize_json_result(fetched: FetchResult, request: ReadRequest) -> ReadResu
         else:
             container = {**value, collection_key: selected}
     if request.fields:
-        projected: dict[str, Any] = {}
-        for path in request.fields:
-            projected[path] = json_path_value(container, path.split("."))
-        container = projected
+        if selected is not None:
+            projected_rows = []
+            for item in selected:
+                row: dict[str, Any] = {}
+                for path in request.fields:
+                    segments = path.split(".")
+                    if collection_key is not None and segments[0] == collection_key:
+                        segments = segments[1:]
+                    key = ".".join(segments) or path
+                    row[key] = json_path_value(item, segments)
+                projected_rows.append(row)
+            container = projected_rows if collection_key is None else {collection_key: projected_rows}
+        else:
+            container = {
+                path: json_path_value(container, path.split(".")) for path in request.fields
+            }
     rendered = json.dumps(container, ensure_ascii=False, indent=2)
     result = finalize_text_result(fetched, rendered, request, "structured-json")
     returned_items = len(selected) if selected is not None else None
@@ -772,7 +785,9 @@ def finalize_text_result(
     if request.view == "outline":
         normalized = outline_from_markdown(normalized)
     limit = max(256, min(request.max_chars, 1_000_000))
-    bounded, truncated = truncate_chars(normalized, limit)
+    offset = max(0, request.content_offset)
+    remaining = normalized[offset:]
+    bounded, truncated = truncate_chars(remaining, limit)
     return ReadResult(
         url=fetched.url,
         title=title or infer_title(normalized, fetched.url),
@@ -790,6 +805,8 @@ def finalize_text_result(
             "requestedUrl": request.url,
             "finalUrl": fetched.url,
             "substituted": fetched.url != request.url,
+            "contentOffset": offset,
+            "nextContentOffset": offset + max(0, limit - 32) if truncated else None,
         },
     )
 

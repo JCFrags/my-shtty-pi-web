@@ -15,6 +15,14 @@ search:
     - html
     - json
 
+engines:
+  - name: bing
+    engine: bing
+    disabled: false
+  - name: github
+    engine: github
+    disabled: false
+
 ui:
   static_use_hash: true
 

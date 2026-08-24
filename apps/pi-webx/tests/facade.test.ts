@@ -123,6 +123,7 @@ test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
   assert.equal(Value.Check(BrowserActSchema, { action: { kind: "mouse-click", x: 1, y: 2 } }), false);
   assert.equal(Value.Check(BrowserActSchema, { action: { kind: "upload", ref: "e1", uploadHandle: "handle-1" } }), false);
   assert.equal(Value.Check(BrowserActSchema, { action: { kind: "upload", ref: "e1", uploadHandleIds: ["handle-1"] } }), false);
+  assert.equal(Value.Check(BrowserActSchema, { action: { kind: "download", ref: "e1" } }), false);
 });
 
 test("tool calls use only the SDK seam with owner, idempotency, cancellation, and bounded untrusted output", async () => {
@@ -217,6 +218,11 @@ test("output compaction and visual transfer have deterministic bounds", () => {
   } });
   assert.match(JSON.stringify(continued.content), /Content truncated/);
   assert.doesNotMatch(JSON.stringify(continued.content), /artifactId|pageId|saved=|recallable=/);
+
+  const completePage = "main-content-".repeat(5_000);
+  const complete = presentResult({ summary: "read", data: { title: "Full page", url: "https://example.test/full", untrustedContent: completePage, truncated: false } });
+  assert.ok((complete.content[0]?.type === "text" ? complete.content[0].text : "").includes(completePage));
+  assert.doesNotMatch(JSON.stringify(complete.content), /truncated by Pi WebX facade/);
 
   const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(100)]);
   const image = presentResult({

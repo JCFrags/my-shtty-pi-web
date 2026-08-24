@@ -25,7 +25,7 @@ class CrawlPayload(BaseModel):
     url: str = Field(min_length=1, max_length=8192)
     maxPages: int = Field(default=5, ge=1, le=20)
     maxDepth: int = Field(default=1, ge=0, le=3)
-    maxChars: int = Field(default=50000, ge=1, le=200000)
+    maxChars: int = Field(default=1_000_000, ge=1, le=1_000_000)
     sameDomain: bool = True
     query: str | None = Field(default=None, max_length=8192)
 

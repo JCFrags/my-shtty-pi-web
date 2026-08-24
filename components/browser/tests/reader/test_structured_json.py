@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from pi_web_reader.pipeline import FetchResult, ReadRequest, finalize_json_result
+from pi_web_reader.pipeline import FetchResult, ReadRequest, finalize_json_result, finalize_text_result
 
 
 def fetched(value: object, media_type: str = "application/json") -> FetchResult:
@@ -37,8 +37,7 @@ def test_json_filter_projection_and_pagination() -> None:
         ),
     )
     assert json.loads(result.content) == {
-        "results.name": ["beta"],
-        "results.version": ["3.0"],
+        "results": [{"name": "beta", "version": "3.0"}],
     }
     assert result.source == "structured-json"
     assert result.metadata["structured"] is True
@@ -46,6 +45,20 @@ def test_json_filter_projection_and_pagination() -> None:
     assert result.metadata["matchedItems"] == 2
     assert result.metadata["returnedItems"] == 1
     assert result.metadata["nextItemOffset"] is None
+
+
+def test_text_continuation_uses_content_offset() -> None:
+    source = fetched({"unused": True}, "text/plain")
+    source.text = "a" * 300 + "b" * 300
+    source.content = source.text.encode()
+    first = finalize_text_result(source, source.text, ReadRequest(url=source.url, max_chars=256), "raw")
+    assert first.content.startswith("a" * 200)
+    assert first.truncated is True
+    next_offset = first.metadata["nextContentOffset"]
+    assert isinstance(next_offset, int) and next_offset > 0
+    second = finalize_text_result(source, source.text, ReadRequest(url=source.url, max_chars=256, content_offset=next_offset), "raw")
+    assert second.content != first.content
+    assert second.metadata["contentOffset"] == next_offset
 
 
 def test_json_vendor_media_type_is_structured() -> None:
