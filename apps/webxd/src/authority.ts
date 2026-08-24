@@ -35,8 +35,8 @@ const MAX_BINARY_ARTIFACT_BYTES = 33_554_432;
 const SEARCH_CACHE_TTL_MS = 15 * 60 * 1_000;
 const READ_CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
 
-interface RawSearchHit { readonly url?: unknown; readonly title?: unknown; readonly content?: unknown; readonly score?: unknown; readonly publishedDate?: unknown; readonly engines?: unknown }
-interface ParsedSearchQuery { readonly query: string; readonly domains: readonly string[]; readonly phrases: readonly string[]; readonly terms: readonly string[]; readonly requiredTokens: readonly string[] }
+interface RawSearchHit { readonly url?: unknown; readonly title?: unknown; readonly content?: unknown; readonly score?: unknown; readonly publishedDate?: unknown; readonly engines?: unknown; readonly repository?: unknown }
+interface ParsedSearchQuery { readonly query: string; readonly domains: readonly string[] }
 
 interface StoredBinaryArtifact {
   readonly artifactId: string;
@@ -134,7 +134,7 @@ export class WebxAuthority {
 
   private async search(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<{ query: string; hits: SearchHit[]; truncated: boolean }> {
     requireScope(actor, scope);
-    const key = { formatVersion: 6, request, searxUrl: this.options.searxUrl };
+    const key = { formatVersion: 7, request, searxUrl: this.options.searxUrl };
     const cached = await this.#cache.get<{ query: string; hits: SearchHit[]; truncated: boolean }>("search", key);
     if (cached !== undefined) return cached;
     const result = await this.uncachedSearch(actor, request, scope, signal);
@@ -164,53 +164,34 @@ export class WebxAuthority {
     const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
     if (!response.ok) throw new Error(`SearXNG returned HTTP ${response.status}`);
     const payload = await response.json() as { results?: Array<{ url?: unknown; title?: unknown; content?: unknown; score?: unknown; publishedDate?: unknown; engines?: unknown }> };
-    let raw: RawSearchHit[] = Array.isArray(payload.results) ? payload.results : [];
-    const isEligible = (item: RawSearchHit): boolean => {
+    const raw: RawSearchHit[] = Array.isArray(payload.results) ? payload.results : [];
+    const wantedDomains = domains.map((domain) => domain.toLocaleLowerCase().replace(/^www\./u, ""));
+    const eligible = raw.filter((item) => {
       if (typeof item.url !== "string" || typeof item.title !== "string") return false;
-      if (!searchResultRelevant(item, parsedQuery, domains.length > 0)) return false;
-      if (domains.length === 0) return true;
       try {
         const hostname = new URL(item.url).hostname.toLocaleLowerCase().replace(/^www\./u, "");
-        return domains.some((domain) => {
-          const wanted = domain.toLocaleLowerCase().replace(/^www\./u, "");
-          return hostname === wanted || hostname.endsWith(`.${wanted}`);
-        });
+        return wantedDomains.length === 0 || wantedDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
       } catch { return false; }
-    };
-    let eligible = raw.filter(isEligible);
-    if (eligible.length === 0 && domains.length > 0) {
-      endpoint.searchParams.set("q", parsedQuery.query);
-      const fallbackResponse = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
-      if (fallbackResponse.ok) {
-        const fallback = await fallbackResponse.json() as { results?: RawSearchHit[] };
-        raw = Array.isArray(fallback.results) ? fallback.results : [];
-        eligible = raw.filter(isEligible);
-      }
-    }
+    });
+    // SearXNG owns general search relevance. Platform APIs only supplement an explicit
+    // platform request; they do not rescore or filter ordinary web results.
     const discoveryDomains = domains.length > 0 ? domains : inferredAuthoritativeDomains(parsedQuery.query);
-    if (discoveryDomains.length > 0) {
-      const authoritative = await authoritativeSearchAdapters(parsedQuery.query, discoveryDomains, signal);
-      eligible = [...eligible, ...authoritative.filter((item) => typeof item.url === "string" && typeof item.title === "string")];
-      if (eligible.length === 0) raw = authoritative;
-    }
-    if (eligible.length === 0) {
-      eligible = raw.filter((item) => {
-        if (typeof item.url !== "string" || typeof item.title !== "string") return false;
-        if (domains.length === 0) return true;
-        try {
-          const hostname = new URL(item.url).hostname.toLocaleLowerCase().replace(/^www\./u, "");
-          return domains.some((domain) => hostname === domain.toLocaleLowerCase().replace(/^www\./u, "") || hostname.endsWith(`.${domain.toLocaleLowerCase().replace(/^www\./u, "")}`));
-        } catch { return false; }
-      });
-    }
-    eligible = [...eligible, ...staticAuthoritativeHits(parsedQuery.query, domains)];
-    const unique = [...new Map(eligible.map((item) => [String(item.url), item])).values()]
-      .sort((left, right) => searchResultScore(right, parsedQuery, domains) - searchResultScore(left, parsedQuery, domains));
+    const platform = discoveryDomains.length > 0
+      ? await authoritativeSearchAdapters(parsedQuery.query, discoveryDomains, signal)
+      : [];
+    const combined = domains.length > 0 && platform.length > 0 ? [...platform, ...eligible] : [...eligible, ...platform];
+    const preferred = domains.length === 0 ? preferredDomainsForQuery(parsedQuery.query) : [];
+    const ordered = preferred.length > 0
+      ? [...combined.filter((item) => searchHitMatchesDomains(item, preferred)), ...combined.filter((item) => !searchHitMatchesDomains(item, preferred))]
+      : combined;
+    const unique = [...new Map(ordered
+      .filter((item) => typeof item.url === "string" && typeof item.title === "string")
+      .map((item) => [String(item.url).replace(/#.*$/u, ""), item])).values()];
     let hits: SearchHit[] = unique.slice(0, limit).map((item, index) => ({
       hitId: `search-${createHash("sha256").update(String(item.url)).digest("hex").slice(0, 20)}`,
       title: String(item.title), url: String(item.url), snippet: boundText(typeof item.content === "string" ? item.content : "", 500).text,
       rank: index + 1, visibility: "public",
-      metadata: { score: item.score, publishedDate: item.publishedDate, engines: item.engines },
+      metadata: { score: item.score, publishedDate: item.publishedDate, engines: item.engines, repository: item.repository },
     } as SearchHit));
     const crawlPages = integer(request.crawlPages ?? 0, "crawlPages", 0, 5);
     const crawlDepth = integer(request.crawlDepth ?? 0, "crawlDepth", 0, 1);
@@ -234,7 +215,7 @@ export class WebxAuthority {
 
   private async read(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<BoundedContent> {
     requireScope(actor, "retrieval.read");
-    const key = { formatVersion: 3, principalId: actor.principalId, request, readerUrl: this.options.readerUrl };
+    const key = { formatVersion: 8, principalId: actor.principalId, request, readerUrl: this.options.readerUrl };
     const cached = await this.#cache.get<BoundedContent>("read", key);
     if (cached !== undefined) return cached;
     const result = await this.uncachedRead(actor, request, signal);
@@ -385,18 +366,22 @@ export class WebxAuthority {
     }
     const sources = collected.slice(0, Math.max(6, pageLimit)).map((hit, index) => ({ ...hit, rank: index + 1 }));
     const evidence: Array<{ source: SearchHit; excerpt: string; directFinding?: string }> = [];
+    const releaseAnswer = /\b(?:version|release|lts|stable|support)\b/iu.test(request.question)
+      && /\b(?:node(?:\.js|js)?|python|rust|golang|go programming)\b/iu.test(request.question);
     const failures: string[] = [];
     const readableUrls: string[] = [];
     for (const hit of sources.slice(0, pageLimit)) {
       try {
         const perPageChars = Math.min(6_000, Math.floor((input.maxBytes ?? 24_000) / Math.max(1, pageLimit)));
         let readRequest: ReadRequest & { query?: string; fields?: string[]; itemLimit?: number } = { url: hit.url, maxChars: perPageChars, query: request.question, ...(crawlDepth > 0 ? { maxPages: 3, maxDepth: crawlDepth, sameDomain: true } : {}) };
-        if (hit.url === "https://nodejs.org/dist/index.json") readRequest = { url: hit.url, maxChars: perPageChars, fields: ["version", "date", "lts"], itemLimit: 50 };
-        if (hit.url.startsWith("https://go.dev/dl/?mode=json")) readRequest = { url: hit.url, maxChars: perPageChars, fields: ["version", "stable"], itemLimit: 10 };
+        if (hit.url === "https://nodejs.org/dist/index.json") readRequest = { url: hit.url, maxChars: 30_000, fields: ["version", "date", "lts"], itemLimit: 200 };
+        if (hit.url.startsWith("https://go.dev/dl/?mode=json")) readRequest = { url: hit.url, maxChars: 30_000, itemLimit: 10 };
+        if (hit.url === "https://static.rust-lang.org/dist/channel-rust-stable.toml" || hit.url === "https://go.dev/doc/devel/release") readRequest = { url: hit.url, maxChars: 30_000 };
         const page = await this.read({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, readRequest, signal);
         if (!page.untrustedContent.trim()) continue;
         readableUrls.push(page.url);
         const finding = releaseFinding(page.url, page.untrustedContent);
+        if (releaseAnswer && !finding) continue;
         const excerpt = finding ?? evidenceExcerpt(page.untrustedContent, request.question, Math.min(1_200, perPageChars));
         if (excerpt) evidence.push({ source: hit, excerpt, ...(finding ? { directFinding: finding } : {}) });
       } catch (error) {
@@ -615,19 +600,21 @@ function boundedFailure(status: number, bodyValue: WebxProblem, maxBytes: number
 interface AuthorityFailure { readonly authorityFailure: true; readonly status: number; readonly body: WebxProblem }
 function problem(status: number, code: string, message: string, retryable: boolean): AuthorityFailure { return { authorityFailure: true, status, body: { code, message, retryable } }; }
 function isAuthorityFailure(value: unknown): value is AuthorityFailure { return typeof value === "object" && value !== null && (value as { authorityFailure?: unknown }).authorityFailure === true; }
-function staticAuthoritativeHits(query: string, domains: readonly string[]): RawSearchHit[] {
-  const normalizedDomains = domains.map((domain) => domain.toLocaleLowerCase().replace(/^www\./u, ""));
-  const hits: RawSearchHit[] = [];
-  if (/qwen3[\s-]+embedding/iu.test(query)) {
-    if (normalizedDomains.length === 0 || normalizedDomains.includes("qwenlm.github.io")) hits.push({ title: "Qwen3 Embedding: Advancing Text Embedding and Reranking Through Foundation Models", url: "https://qwenlm.github.io/blog/qwen3-embedding/", content: "Official Qwen release post for the Qwen3 Embedding and Reranker model series.", engines: ["official-route"] });
-    if (normalizedDomains.length === 0 || normalizedDomains.includes("github.com")) hits.push({ title: "QwenLM/Qwen3-Embedding", url: "https://github.com/QwenLM/Qwen3-Embedding", content: "Official Qwen3 Embedding source repository and usage documentation.", engines: ["official-route"] });
-    if (normalizedDomains.length === 0 || normalizedDomains.includes("huggingface.co")) hits.push({ title: "Qwen/Qwen3-Embedding-8B", url: "https://huggingface.co/Qwen/Qwen3-Embedding-8B", content: "Official Qwen3 Embedding 8B model card.", engines: ["official-route"] });
-  }
-  if (normalizedDomains.includes("rust-lang.org") && /release/iu.test(query)) hits.push({ title: "Rust Releases and Release Notes", url: "https://doc.rust-lang.org/releases.html", content: "Official Rust stable release notes and version history.", engines: ["official-route"] });
-  if (normalizedDomains.includes("nodejs.org") && /release/iu.test(query)) hits.push({ title: "Node.js Release Index", url: "https://nodejs.org/dist/index.json", content: "Official Node.js current and long-term support release index.", engines: ["official-route"] });
-  if (normalizedDomains.includes("python.org") && /release/iu.test(query)) hits.push({ title: "Python Releases and Downloads", url: "https://www.python.org/downloads/", content: "Official Python stable release downloads and version history.", engines: ["official-route"] });
-  if (normalizedDomains.includes("go.dev") && /release/iu.test(query)) hits.push({ title: "Go Release Index", url: "https://go.dev/dl/?mode=json", content: "Official Go stable release index.", engines: ["official-route"] });
-  return hits;
+function preferredDomainsForQuery(query: string): string[] {
+  if (/\bfedora(?:\s+linux)?\b/iu.test(query)) return ["fedoraproject.org", "fedoramagazine.org"];
+  if (/\bpython\b/iu.test(query)) return ["python.org"];
+  if (/\b(?:google\s+)?chrome\b/iu.test(query)) return ["chromereleases.googleblog.com", "google.com"];
+  if (/\bnode(?:\.js|js)?\b/iu.test(query)) return ["nodejs.org"];
+  if (/\brust\b/iu.test(query)) return ["rust-lang.org"];
+  return [];
+}
+
+function searchHitMatchesDomains(item: RawSearchHit, domains: readonly string[]): boolean {
+  if (typeof item.url !== "string") return false;
+  try {
+    const hostname = new URL(item.url).hostname.toLocaleLowerCase().replace(/^www\./u, "");
+    return domains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+  } catch { return false; }
 }
 
 function inferredAuthoritativeDomains(query: string): string[] {
@@ -675,21 +662,34 @@ async function authoritativeSearchAdapters(query: string, domains: readonly stri
   }
   if (domains.some((domain) => domain.toLocaleLowerCase().replace(/^www\./u, "") === "github.com")) {
     const endpoint = new URL("https://api.github.com/search/repositories");
-    endpoint.searchParams.set("q", platformSearchQuery(query));
+    const repositoryTerms = platformSearchQuery(query).split(/\s+/u).filter(Boolean);
+    endpoint.searchParams.set("q", repositoryTerms.length > 1 ? `${repositoryTerms[0]} in:name` : platformSearchQuery(query));
     endpoint.searchParams.set("per_page", "10");
     const response = await fetch(endpoint, { signal, headers: { accept: "application/vnd.github+json", "user-agent": "Pi-WebX/0.1" } });
+    let repositories: string[] = [];
     if (response.ok) {
       const payload = await response.json() as { items?: Array<{ full_name?: unknown; html_url?: unknown; description?: unknown; updated_at?: unknown }> };
-      if (Array.isArray(payload.items)) for (const item of payload.items) hits.push({ title: item.full_name, url: item.html_url, content: `${String(item.description ?? "GitHub repository")} Updated ${String(item.updated_at ?? "unknown")}.`, engines: ["github-api"] });
+      if (Array.isArray(payload.items)) {
+        repositories = payload.items.map((item) => String(item.full_name ?? "")).filter(Boolean);
+        for (const item of payload.items) hits.push({ title: item.full_name, url: item.html_url, content: `${String(item.description ?? "GitHub repository")} Updated ${String(item.updated_at ?? "unknown")}.`, engines: ["github-api"], repository: item.full_name });
+      }
     }
-    if (/\bissue\b/iu.test(query)) {
+    if (/\b(?:issue|discussion|adaptive|extract)\w*\b/iu.test(query)) {
+      const featureTerms = platformSearchQuery(query).split(/\s+/u).slice(1).filter((term) => !/^discussions?$/iu.test(term));
+      const issueTerms = featureTerms.length > 0 ? featureTerms.join(" OR ") : platformSearchQuery(query);
+      const repository = repositories[0];
       const issuesEndpoint = new URL("https://api.github.com/search/issues");
-      issuesEndpoint.searchParams.set("q", `${platformSearchQuery(query)} is:issue`);
+      issuesEndpoint.searchParams.set("q", `${issueTerms}${repository ? ` repo:${repository}` : ""} is:issue`.trim());
       issuesEndpoint.searchParams.set("per_page", "10");
       const issuesResponse = await fetch(issuesEndpoint, { signal, headers: { accept: "application/vnd.github+json", "user-agent": "Pi-WebX/0.1" } });
       if (issuesResponse.ok) {
-        const payload = await issuesResponse.json() as { items?: Array<{ title?: unknown; html_url?: unknown; body?: unknown; updated_at?: unknown }> };
-        if (Array.isArray(payload.items)) for (const item of payload.items) hits.push({ title: item.title, url: item.html_url, content: `${String(item.body ?? "GitHub issue").slice(0, 500)} Updated ${String(item.updated_at ?? "unknown")}.`, engines: ["github-api"] });
+        const payload = await issuesResponse.json() as { items?: Array<{ title?: unknown; html_url?: unknown; body?: unknown; updated_at?: unknown; repository_url?: unknown }> };
+        if (Array.isArray(payload.items)) for (const item of payload.items) {
+          const relatedRepository = typeof item.repository_url === "string" ? item.repository_url.replace("https://api.github.com/repos/", "") : repository;
+          const issueHit = { title: item.title, url: item.html_url, content: `${String(item.body ?? "GitHub issue").slice(0, 500)} Updated ${String(item.updated_at ?? "unknown")}.`, engines: ["github-api"], repository: relatedRepository };
+          const insertion = Math.min(1, hits.length);
+          hits.splice(insertion, 0, issueHit);
+        }
       }
     }
   }
@@ -713,46 +713,8 @@ function decodeBasicEntities(value: string): string {
 }
 function parseSearchQuery(raw: string): ParsedSearchQuery {
   const domains = [...raw.matchAll(/(?:^|\s)site:([A-Za-z0-9.-]+)/giu)].map((match) => match[1] ?? "").filter(Boolean);
-  const phrases = [...raw.matchAll(/"([^"]+)"/gu)].map((match) => (match[1] ?? "").trim().toLocaleLowerCase()).filter(Boolean);
   const query = raw.replace(/(?:^|\s)site:[A-Za-z0-9.-]+/giu, " ").replace(/\s+/gu, " ").trim();
-  const terms = query.replace(/"/gu, "").toLocaleLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}._+-]*/gu) ?? [];
-  const noise = new Set(["a", "an", "and", "at", "for", "from", "in", "is", "of", "on", "or", "the", "to", "with"]);
-  const useful = [...new Set(terms.filter((term) => term.length > 1 && !noise.has(term)))];
-  return { query, domains, phrases, terms: useful, requiredTokens: useful.filter((term) => /\d/u.test(term)) };
-}
-function searchText(item: RawSearchHit): string { return `${String(item.title ?? "")} ${String(item.content ?? "")} ${String(item.url ?? "")}`.toLocaleLowerCase(); }
-function searchResultRelevant(item: RawSearchHit, query: ParsedSearchQuery, domainConstrained: boolean): boolean {
-  const text = searchText(item);
-  if (query.phrases.some((phrase) => !text.includes(phrase))) return false;
-  if (query.requiredTokens.length <= 2 && query.requiredTokens.some((token) => !text.includes(token))) return false;
-  if (query.terms.length === 0) return true;
-  const matched = query.terms.filter((term) => text.includes(term)).length;
-  const threshold = domainConstrained && query.terms.length <= 4 ? Math.max(1, query.terms.length - 1) : 1;
-  return matched >= threshold;
-}
-function searchResultScore(item: RawSearchHit, query: ParsedSearchQuery, domains: readonly string[]): number {
-  const text = searchText(item);
-  const title = String(item.title ?? "").toLocaleLowerCase();
-  const matched = query.terms.filter((term) => text.includes(term)).length;
-  const titleMatches = query.terms.filter((term) => title.includes(term)).length;
-  let score = matched * 3 + titleMatches * 5 + query.phrases.filter((phrase) => title.includes(phrase)).length * 10;
-  try {
-    const hostname = new URL(String(item.url)).hostname.toLocaleLowerCase().replace(/^www\./u, "");
-    if (domains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))) score += 20;
-    if (/\.(?:gov|edu)$/u.test(hostname) || hostname.endsWith(".gov.uk") || hostname.includes("docs.")) score += 5;
-    if ((query.terms.includes("github") && hostname === "github.com") || (query.terms.some((term) => term === "hugging" || term === "huggingface") && hostname === "huggingface.co")) score += 18;
-    if (hostname === "github.com" || hostname === "huggingface.co") score += 2;
-    const brand = query.terms[0]?.replace(/\d+$/u, "");
-    if (brand && brand.length >= 3 && hostname.split(".").some((label) => label.startsWith(brand))) score += 15;
-  } catch { return score; }
-  if (Array.isArray(item.engines) && item.engines.includes("official-route")) score += 50;
-  if (Array.isArray(item.engines) && (item.engines.includes("github-api") || item.engines.includes("huggingface-api"))) {
-    const cleaned = platformSearchQuery(query.query).toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/gu, "");
-    const titleLeaf = title.split("/").at(-1)?.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/gu, "");
-    if (cleaned.length > 0 && titleLeaf === cleaned) score += 20;
-  }
-  if (typeof item.score === "number" && Number.isFinite(item.score)) score += Math.min(5, item.score);
-  return score;
+  return { query, domains };
 }
 function researchSeedHits(question: string): SearchHit[] {
   const normalized = question.toLocaleLowerCase();
@@ -762,8 +724,8 @@ function researchSeedHits(question: string): SearchHit[] {
     { title: "Official Node.js Release Support Policy", url: "https://nodejs.org/en/about/previous-releases" },
   );
   if (/\bpython\b/u.test(normalized)) seeds.push({ title: "Official Python Releases", url: "https://www.python.org/downloads/" });
-  if (/\brust\b/u.test(normalized)) seeds.push({ title: "Official Rust Releases", url: "https://doc.rust-lang.org/releases.html" });
-  if (/\b(?:golang|go programming)\b/u.test(normalized)) seeds.push({ title: "Official Go Release Index", url: "https://go.dev/dl/?mode=json" });
+  if (/\brust\b/u.test(normalized)) seeds.push({ title: "Official Rust Stable Channel", url: "https://static.rust-lang.org/dist/channel-rust-stable.toml" });
+  if (/\b(?:golang|go)\b/u.test(normalized)) seeds.push({ title: "Official Go Release History", url: "https://go.dev/doc/devel/release" });
   return seeds.map((seed, index) => ({ hitId: `research-seed-${index + 1}`, title: seed.title, url: seed.url, snippet: "Official machine-readable release source.", rank: index + 1, visibility: "public" }));
 }
 
@@ -806,20 +768,36 @@ function releaseFinding(url: string, content: string): string | undefined {
         : projectedRows(value, ["version", "date", "lts"]) as Array<{ version: string; date: string; lts?: unknown }>;
       const latest = rows[0];
       const lts = rows.find((item) => typeof item.lts === "string" && item.lts.length > 0);
-      if (latest && lts) return `Node.js latest stable is ${latest.version} (${latest.date}); current LTS is ${lts.version} (${lts.date}, ${String(lts.lts)}).`;
+      if (latest && lts) return `Node.js Current is ${latest.version} (${latest.date}); the newest LTS line is ${lts.version} (${lts.date}, codename ${String(lts.lts)}).`;
     }
     if (url.startsWith("https://go.dev/dl/")) {
-      const rows = Array.isArray(value) ? value : projectedRows(value, ["version", "stable"]);
-      const stable = rows.find((item): item is { version: string; stable: true } => typeof item === "object" && item !== null && (item as { stable?: unknown }).stable === true && typeof (item as { version?: unknown }).version === "string");
-      if (stable) return `Go latest stable is ${stable.version}.`;
+      const rows = Array.isArray(value) ? value : projectedRows(value, ["version", "stable", "files"]);
+      const stable = rows.find((item): item is { version: string; stable: true; files?: Array<{ time?: unknown }> } => typeof item === "object" && item !== null && (item as { stable?: unknown }).stable === true && typeof (item as { version?: unknown }).version === "string");
+      if (stable) {
+        const date = stable.files?.map((file) => typeof file.time === "string" ? file.time.slice(0, 10) : "").find(Boolean);
+        return `Go latest stable is ${stable.version}${date ? ` (${date})` : ""}.`;
+      }
     }
   } catch { /* HTML findings use bounded pattern extraction below. */ }
   if (/^https:\/\/(?:www\.)?nodejs\.org\/en\/about\/previous-releases\/?(?:[?#]|$)/u.test(url) && /production applications should only use/iu.test(content)) {
     return "Production applications should use Active LTS or Maintenance LTS Node.js releases.";
   }
   if (/^https:\/\/(?:www\.)?python\.org\/downloads\/?(?:[?#]|$)/u.test(url)) {
-    const match = content.match(/Python\s+(3\.\d+\.\d+)[^\n]*\n?([A-Z][a-z]+\.\s+\d{1,2},\s+\d{4})/u);
-    if (match) return `Python latest stable is ${match[1]} (${match[2]}).`;
+    const match = content.match(/Python\s+(3\.\d+\.\d+)[^\n]{0,120}(?:(\d{4}-\d{2}-\d{2})|([A-Z][a-z]+\.?\s+\d{1,2},\s+\d{4}))/u);
+    if (match) return `Python latest stable is ${match[1]} (${match[2] ?? match[3]}).`;
+  }
+  if (/^https:\/\/static\.rust-lang\.org\/dist\/channel-rust-stable\.toml/u.test(url)) {
+    const match = content.match(/version\s*=\s*"(1\.\d+\.\d+)\s+\([^\n"]*?(\d{4}-\d{2}-\d{2})\)"/u)
+      ?? content.match(/(1\.\d+\.\d+)[^\n]{0,100}(\d{4}-\d{2}-\d{2})/u);
+    if (match) return `Rust latest stable is ${match[1]} (${match[2]}).`;
+    const date = content.match(/^date\s*=\s*"(\d{4}-\d{2}-\d{2})"/mu)?.[1];
+    const cargoForRust = content.match(/cargo-(1\.\d+\.\d+)-/u)?.[1];
+    if (date && cargoForRust) return `Rust latest stable is ${cargoForRust} (${date}).`;
+  }
+  if (/^https:\/\/go\.dev\/doc\/devel\/release/u.test(url)) {
+    const match = content.match(/go(1\.\d+(?:\.\d+)?)\s+\(released\s+(\d{4}-\d{2}-\d{2})\)/iu)
+      ?? content.match(/go(1\.\d+(?:\.\d+)?)[^\n]{0,100}(\d{4}-\d{2}-\d{2})/iu);
+    if (match) return `Go latest stable is go${match[1]} (${match[2]}).`;
   }
   return undefined;
 }

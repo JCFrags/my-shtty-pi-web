@@ -47,6 +47,8 @@ Protocol 2 supports navigation, mouse move/down/up/click/double-click/wheel/drag
 
 Coordinate actions use CSS viewport pixels with a top-left origin. The daemon rejects non-finite, negative, or out-of-range coordinates before backend dispatch. Coordinate actions also include a `VisualGuard`. It binds the action to the current viewport ID, viewport generation, screenshot SHA-256, and screenshot sequence.
 
+Semantic refs are scoped to one observation. The agent-browser path emits refs such as `o7-e163`. A semantic action must use the complete ref from the latest observation. Navigation or a later observation makes an older ref stale. The adapter rejects stale and unscoped refs before dispatch.
+
 An action result includes post-action semantic evidence. Backend dispatch alone is not success evidence.
 
 ## Operations and cancellation

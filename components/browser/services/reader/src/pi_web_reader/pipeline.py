@@ -659,8 +659,14 @@ def extract_html(document: str, request: ReadRequest) -> tuple[str, str, dict[st
     title = extract_title(document)
     if request.view == "raw":
         return document, title, {"extractor": "raw-html"}
+    if request.view == "outline":
+        outline = outline_from_html(document)
+        if outline:
+            return outline, title, {"extractor": "html-headings"}
     if trafilatura is not None:
-        output_format = "markdown" if request.view == "main" else "txt"
+        # Keep Markdown headings for both main and outline views. Outline rendering
+        # removes body text after extraction.
+        output_format = "markdown"
         extracted = trafilatura.extract(
             document,
             output_format=output_format,
@@ -755,6 +761,11 @@ def finalize_json_result(fetched: FetchResult, request: ReadRequest) -> ReadResu
                 and request.item_offset + returned_items < matched_items
                 else None
             ),
+            "itemsComplete": (
+                matched_items is not None
+                and returned_items is not None
+                and request.item_offset + returned_items >= matched_items
+            ),
         }
     )
     return result
@@ -786,8 +797,13 @@ def finalize_text_result(
         normalized = outline_from_markdown(normalized)
     limit = max(256, min(request.max_chars, 1_000_000))
     offset = max(0, request.content_offset)
+    if offset > len(normalized):
+        raise ValueError(
+            f"contentOffset {offset} exceeds extracted content length {len(normalized)}"
+        )
     remaining = normalized[offset:]
     bounded, truncated = truncate_chars(remaining, limit)
+    consumed = min(len(remaining), max(0, limit - 32) if truncated else len(remaining))
     return ReadResult(
         url=fetched.url,
         title=title or infer_title(normalized, fetched.url),
@@ -806,7 +822,12 @@ def finalize_text_result(
             "finalUrl": fetched.url,
             "substituted": fetched.url != request.url,
             "contentOffset": offset,
-            "nextContentOffset": offset + max(0, limit - 32) if truncated else None,
+            "returnedCharacters": len(bounded),
+            "sourceCharactersReturned": consumed,
+            "totalCharacters": len(normalized),
+            "complete": not truncated and offset + consumed >= len(normalized),
+            "hardLimitApplied": truncated,
+            "nextContentOffset": offset + consumed if truncated else None,
         },
     )
 
@@ -894,36 +915,80 @@ def outline_from_html(document: str) -> str:
 
 
 def outline_from_markdown(markdown: str) -> str:
-    headings = [
-        line.strip() for line in markdown.splitlines() if re.match(r"^#{1,6}\s+\S", line.strip())
-    ]
-    if headings:
-        return "\n".join(headings)
-    # Plain-text fallback: preserve short title-like lines.
-    return "\n".join(line for line in markdown.splitlines() if 0 < len(line.strip()) <= 120)[
-        :10_000
-    ]
+    return "\n".join(
+        line.strip()
+        for line in markdown.splitlines()
+        if re.match(r"^#{1,6}\s+\S", line.strip())
+    )
 
 
-def select_query_context(text: str, query: str | None, *, radius: int = 2) -> str:
+def select_query_context(text: str, query: str | None, *, radius: int = 1) -> str:
     if not query:
         return text
-    terms = [term.lower() for term in re.findall(r"[\w-]{3,}", query)]
+    noise = {"and", "for", "from", "into", "only", "that", "the", "this", "with"}
+    terms = list(dict.fromkeys(
+        term.casefold()
+        for term in re.findall(r"[\w-]{3,}", query)
+        if term.casefold() not in noise
+    ))
     if not terms:
         return text
+
+    # Prefer complete Markdown sections. This keeps a matching table or list with
+    # its heading and omits unrelated sections instead of returning nearby chunks.
+    heading_matches = list(re.finditer(r"(?m)^#{1,6}\s+\S.*$", text))
+    if heading_matches:
+        sections: list[tuple[int, int, str]] = []
+        preamble = text[: heading_matches[0].start()].strip()
+        if preamble:
+            lowered = preamble.casefold()
+            score = sum(1 for term in terms if query_term_matches(term, lowered))
+            if score:
+                sections.append((score, -1, preamble))
+        for index, match in enumerate(heading_matches):
+            end = heading_matches[index + 1].start() if index + 1 < len(heading_matches) else len(text)
+            section = text[match.start():end].strip()
+            lowered = section.casefold()
+            heading = match.group(0).casefold()
+            score = sum(
+                (4 if term in heading else 1)
+                for term in terms
+                if query_term_matches(term, lowered)
+            )
+            if score:
+                sections.append((score, index, section))
+        if sections:
+            covered: set[str] = set()
+            best: list[tuple[int, int, str]] = []
+            for item in sorted(sections, key=lambda candidate: (-candidate[0], candidate[1])):
+                lowered = item[2].casefold()
+                matched = {term for term in terms if query_term_matches(term, lowered)}
+                if not matched - covered:
+                    continue
+                best.append(item)
+                covered.update(matched)
+                if len(best) >= 12 or len(covered) == len(terms):
+                    break
+            return "\n\n".join(section for _, _, section in sorted(best, key=lambda item: item[1]))
+
     paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
-    scored: list[tuple[int, int]] = []
-    for index, paragraph in enumerate(paragraphs):
-        lowered = paragraph.lower()
-        score = sum(lowered.count(term) for term in terms)
-        if score:
-            scored.append((score, index))
-    if not scored:
+    scored = [
+        (sum(1 for term in terms if query_term_matches(term, paragraph.casefold())), index)
+        for index, paragraph in enumerate(paragraphs)
+    ]
+    matches = [(score, index) for score, index in scored if score > 0]
+    if not matches:
         return text
     selected: set[int] = set()
-    for _, index in sorted(scored, reverse=True)[:8]:
+    for _, index in sorted(matches, reverse=True)[:8]:
         selected.update(range(max(0, index - radius), min(len(paragraphs), index + radius + 1)))
     return "\n\n".join(paragraphs[index] for index in sorted(selected))
+
+
+def query_term_matches(term: str, lowered_text: str) -> bool:
+    if term in lowered_text:
+        return True
+    return term == "context" and "sequence length" in lowered_text
 
 
 def truncate_chars(value: str, limit: int) -> tuple[str, bool]:

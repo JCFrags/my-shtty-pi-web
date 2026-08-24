@@ -67,6 +67,7 @@ struct HostRuntime {
     tab_map: Mutex<HashMap<TabId, String>>,
     visual_bindings: Mutex<HashMap<TabId, VisualBinding>>,
     visual_sequences: Mutex<HashMap<TabId, u64>>,
+    semantic_sequences: Mutex<HashMap<TabId, u64>>,
     engine_generation: String,
     launch: StartHostRequest,
 }
@@ -340,6 +341,7 @@ impl AgentBrowserController {
             tab_map: Mutex::new(HashMap::new()),
             visual_bindings: Mutex::new(HashMap::new()),
             visual_sequences: Mutex::new(HashMap::new()),
+            semantic_sequences: Mutex::new(HashMap::new()),
             engine_generation,
             launch,
         });
@@ -355,6 +357,7 @@ impl AgentBrowserController {
             tab_map: Mutex::new(runtime.tab_map.lock().await.clone()),
             visual_bindings: Mutex::new(runtime.visual_bindings.lock().await.clone()),
             visual_sequences: Mutex::new(runtime.visual_sequences.lock().await.clone()),
+            semantic_sequences: Mutex::new(runtime.semantic_sequences.lock().await.clone()),
             engine_generation: runtime.engine_generation.clone(),
             launch: runtime.launch.clone(),
         });
@@ -1136,6 +1139,7 @@ impl BrowserController for AgentBrowserController {
             tab_map: Mutex::new(HashMap::new()),
             visual_bindings: Mutex::new(HashMap::new()),
             visual_sequences: Mutex::new(HashMap::new()),
+            semantic_sequences: Mutex::new(HashMap::new()),
             engine_generation,
             launch: request.clone(),
         });
@@ -1188,6 +1192,7 @@ impl BrowserController for AgentBrowserController {
             tab_map: Mutex::new(runtime.tab_map.lock().await.clone()),
             visual_bindings: Mutex::new(runtime.visual_bindings.lock().await.clone()),
             visual_sequences: Mutex::new(runtime.visual_sequences.lock().await.clone()),
+            semantic_sequences: Mutex::new(runtime.semantic_sequences.lock().await.clone()),
             engine_generation: runtime.engine_generation.clone(),
             launch: request,
         });
@@ -1252,6 +1257,7 @@ impl BrowserController for AgentBrowserController {
             let _ = std::fs::remove_file(binding.screenshot_path);
         }
         runtime.visual_sequences.lock().await.remove(&tab_id);
+        runtime.semantic_sequences.lock().await.remove(&tab_id);
         Ok(())
     }
 
@@ -1331,7 +1337,14 @@ impl BrowserController for AgentBrowserController {
                 json!({ "screenshot": shot, "snapshot": snapshot })
             }
         };
-        let raw = extract_primary_text(&value);
+        let mut raw = extract_primary_text(&value);
+        let semantic_sequence = {
+            let mut sequences = runtime.semantic_sequences.lock().await;
+            let sequence = sequences.entry(address.tab_id.clone()).or_insert(0);
+            *sequence = sequence.saturating_add(1);
+            *sequence
+        };
+        scope_semantic_refs(&mut raw, &mut controls, semantic_sequence)?;
         let (content, truncated) = truncate_chars(&raw, request.max_chars);
         metadata.insert("backendOutputChars".into(), json!(raw.chars().count()));
         if truncated || request.view == ObservationView::Full {
@@ -1354,6 +1367,9 @@ impl BrowserController for AgentBrowserController {
         let (runtime, backend_tab) = self.runtime_for_address(address).await?;
         let _guard = runtime.operation_lock.lock().await;
         self.run_json(&runtime, &["tab".into(), backend_tab]).await?;
+        let semantic_sequence = runtime.semantic_sequences.lock().await
+            .get(&address.tab_id).copied().unwrap_or(0);
+        validate_semantic_action(&action, semantic_sequence)?;
         // Prime the upstream diff baseline before action so the result reports the
         // visible consequence instead of successful input dispatch only.
         let _ = self.run_json(&runtime, &["diff".into(), "snapshot".into(), "--compact".into()]).await;
@@ -1403,6 +1419,7 @@ impl BrowserController for AgentBrowserController {
                 let _ = std::fs::remove_file(binding.screenshot_path);
             }
             runtime.visual_sequences.lock().await.remove(&tab_id);
+        runtime.semantic_sequences.lock().await.remove(&tab_id);
         }
         let changed = self.post_action_delta(&runtime).await;
         let (title, url) = self.title_and_url(&runtime).await;
@@ -2384,9 +2401,48 @@ fn action_name(action: &BrowserAction) -> &'static str {
     }
 }
 
+fn scope_semantic_refs(raw: &mut String, controls: &mut [InteractiveControl], sequence: u64) -> Result<()> {
+    let matcher = Regex::new(r"(?P<prefix>@?)(?P<ref>e[0-9]+)\b")
+        .map_err(|error| BackendError::Protocol(error.to_string()))?;
+    *raw = matcher.replace_all(raw, |captures: &regex::Captures<'_>| {
+        format!("{}o{sequence}-{}", &captures["prefix"], &captures["ref"])
+    }).into_owned();
+    for control in controls {
+        control.r#ref = format!("o{sequence}-{}", control.r#ref.trim_start_matches('@'));
+    }
+    Ok(())
+}
+
+fn validate_semantic_action(action: &BrowserAction, current_sequence: u64) -> Result<()> {
+    let refs: Vec<&str> = match action {
+        BrowserAction::Click { r#ref, .. }
+        | BrowserAction::Fill { r#ref, .. }
+        | BrowserAction::Type { r#ref, .. }
+        | BrowserAction::Select { r#ref, .. }
+        | BrowserAction::Hover { r#ref, .. }
+        | BrowserAction::Upload { r#ref, .. }
+        | BrowserAction::Download { r#ref, .. } => r#ref.iter().map(String::as_str).collect(),
+        BrowserAction::Drag { r#ref, target_ref } => vec![r#ref.as_str(), target_ref.as_str()],
+        _ => Vec::new(),
+    };
+    let matcher = Regex::new(r"^o([0-9]+)-e[0-9]+$")
+        .map_err(|error| BackendError::Protocol(error.to_string()))?;
+    for value in refs {
+        let issued = matcher.captures(value)
+            .and_then(|captures| captures.get(1))
+            .and_then(|number| number.as_str().parse::<u64>().ok());
+        if issued != Some(current_sequence) {
+            return Err(BackendError::Protocol(
+                "semantic ref is stale or unscoped; observe the current page and use a ref from that observation".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn target(r#ref: &Option<String>, selector: &Option<String>) -> Result<String> {
     match (r#ref, selector) {
-        (Some(value), _) => Ok(if value.starts_with('@') { value.clone() } else { format!("@{value}") }),
+        (Some(value), _) => Ok(normalize_ref(value)),
         (None, Some(value)) => Ok(value.clone()),
         (None, None) => Err(BackendError::Protocol("action requires ref or selector".into())),
     }
@@ -2464,7 +2520,11 @@ fn debug_args(operation: DebugOperation, args: &BTreeMap<String, Value>) -> Resu
 }
 
 fn normalize_ref(value: &str) -> String {
-    if value.starts_with('@') { value.to_owned() } else { format!("@{value}") }
+    let unscoped = Regex::new(r"^o\d+-(e\d+)$").ok()
+        .and_then(|matcher| matcher.captures(value))
+        .and_then(|captures| captures.get(1).map(|item| item.as_str()))
+        .unwrap_or(value);
+    if unscoped.starts_with('@') { unscoped.to_owned() } else { format!("@{unscoped}") }
 }
 
 fn stable_tab_id(host_id: &HostId, backend_tab_id: &str) -> TabId {
@@ -2649,6 +2709,24 @@ mod tests {
         let controls = extract_controls(&value, false);
         assert_eq!(controls.len(), 1);
         assert_eq!(controls[0].r#ref, "e1");
+    }
+
+    #[test]
+    fn semantic_refs_are_observation_scoped() {
+        let mut raw = "- link Issue [ref=e163]".to_owned();
+        let mut controls = vec![InteractiveControl {
+            r#ref: "e163".into(), role: "link".into(), name: "Issue".into(),
+            state: None, value: None, bounds: None,
+        }];
+        scope_semantic_refs(&mut raw, &mut controls, 7).unwrap();
+        assert!(raw.contains("o7-e163"));
+        assert_eq!(controls[0].r#ref, "o7-e163");
+        let current = BrowserAction::Click { r#ref: Some("o7-e163".into()), selector: None };
+        assert!(validate_semantic_action(&current, 7).is_ok());
+        assert_eq!(action_args(&current).unwrap(), ["click", "@e163"]);
+        assert!(validate_semantic_action(&current, 8).is_err());
+        let unscoped = BrowserAction::Click { r#ref: Some("e163".into()), selector: None };
+        assert!(validate_semantic_action(&unscoped, 7).is_err());
     }
 
     #[test]

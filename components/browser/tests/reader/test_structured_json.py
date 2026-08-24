@@ -76,3 +76,32 @@ def test_json_defaults_bound_large_lists_by_item_count() -> None:
     )
     assert len(json.loads(result.content)) == 50
     assert result.metadata["nextItemOffset"] == 50
+    assert result.metadata["itemsComplete"] is False
+
+
+def test_out_of_range_content_offset_is_rejected() -> None:
+    source = fetched({"unused": True}, "text/plain")
+    source.text = "short content"
+    source.content = source.text.encode()
+    try:
+        finalize_text_result(
+            source,
+            source.text,
+            ReadRequest(url=source.url, content_offset=99),
+            "raw",
+        )
+    except ValueError as error:
+        assert "exceeds extracted content length" in str(error)
+    else:
+        raise AssertionError("out-of-range content offset was accepted")
+
+
+def test_full_read_reports_character_completion() -> None:
+    source = fetched({"unused": True}, "text/plain")
+    source.text = "complete content"
+    source.content = source.text.encode()
+    result = finalize_text_result(source, source.text, ReadRequest(url=source.url), "raw")
+    assert result.metadata["returnedCharacters"] == len("complete content")
+    assert result.metadata["totalCharacters"] == len("complete content")
+    assert result.metadata["complete"] is True
+    assert result.metadata["hardLimitApplied"] is False

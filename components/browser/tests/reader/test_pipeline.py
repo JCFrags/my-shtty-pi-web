@@ -60,6 +60,34 @@ def test_query_context_selects_relevant_paragraphs() -> None:
     assert "First unrelated" not in selected
 
 
+def test_focused_markdown_keeps_matching_sections_and_omits_other_sections() -> None:
+    text = """# Model release
+
+Intro.
+
+## Context and dimensions
+
+The context is 32K and dimensions range from 32 to 4096.
+
+## Architecture benchmarks
+
+Many unrelated benchmark details.
+
+## Tasks
+
+Embedding, ranking, and retrieval are supported.
+"""
+    selected = module.select_query_context(text, "context dimensions tasks")
+    assert "## Context and dimensions" in selected
+    assert "## Tasks" in selected
+    assert "Architecture benchmarks" not in selected
+
+
+def test_outline_contains_headings_only() -> None:
+    outline = module.outline_from_markdown("# Root\n\nIntro prose.\n\n## Child\n\nBody.")
+    assert outline == "# Root\n## Child"
+
+
 def test_javascript_shell_requests_render() -> None:
     source = '<html><body><div id="root"></div><script src="a.js"></script><script src="b.js"></script><script src="c.js"></script></body></html>'
     assert module.looks_like_javascript_shell(source, "")

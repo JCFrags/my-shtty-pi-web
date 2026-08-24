@@ -50,7 +50,18 @@ function renderData(value: unknown): string | undefined {
     const continuation = data.truncated === true
       ? typeof nextOffset === "number" ? `[Content truncated. Continue with web_read using contentOffset=${nextOffset}.]` : "[Content truncated. Retry web_read with a section query or explicit pagination.]"
       : undefined;
-    const header = [data.title, continuation].filter((item) => typeof item === "string" && item.length > 0).join("\n");
+    const totalCharacters = reader?.totalCharacters;
+    const returnedCharacters = reader?.returnedCharacters;
+    const readStatus = typeof totalCharacters === "number" && typeof returnedCharacters === "number"
+      ? `[Returned ${returnedCharacters} characters; extracted total ${totalCharacters}; ${reader?.complete === true ? "complete" : "partial"}.]`
+      : undefined;
+    const returnedItems = reader?.returnedItems;
+    const totalItems = reader?.matchedItems ?? reader?.totalItems;
+    const nextItemOffset = reader?.nextItemOffset;
+    const itemStatus = typeof returnedItems === "number" && typeof totalItems === "number"
+      ? `[Returned ${returnedItems} of ${totalItems} items${typeof nextItemOffset === "number" ? `; continue with itemOffset=${nextItemOffset}` : "; complete"}.]`
+      : undefined;
+    const header = [data.title, readStatus, itemStatus, continuation].filter((item) => typeof item === "string" && item.length > 0).join("\n");
     return `${header}${header ? "\n\n" : ""}${data.untrustedContent}`;
   }
   if (typeof data.question === "string" && typeof data.summary === "string") {

@@ -250,6 +250,13 @@ test("output compaction and visual transfer have deterministic bounds", () => {
   assert.match(JSON.stringify(continued.content), /Content truncated/);
   assert.doesNotMatch(JSON.stringify(continued.content), /artifactId|pageId|saved=|recallable=/);
 
+  const paged = presentResult({ summary: "read", data: {
+    title: "API rows", url: "https://example.test/api", untrustedContent: "[]", truncated: false,
+    metadata: { reader: { returnedItems: 5, matchedItems: 10, nextItemOffset: 5, returnedCharacters: 2, totalCharacters: 2, complete: true } },
+  } });
+  assert.match(JSON.stringify(paged.content), /Returned 5 of 10 items; continue with itemOffset=5/);
+  assert.match(JSON.stringify(paged.content), /Returned 2 characters; extracted total 2; complete/);
+
   const completePage = "main-content-".repeat(5_000);
   const complete = presentResult({ summary: "read", data: { title: "Full page", url: "https://example.test/full", untrustedContent: completePage, truncated: false } });
   assert.ok((complete.content[0]?.type === "text" ? complete.content[0].text : "").includes(completePage));
