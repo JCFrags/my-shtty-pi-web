@@ -5,7 +5,7 @@ This Pi extension presents the repository's internet capabilities as one small, 
 ## Tool selection
 
 - `web_read`: read a known public URL, API, feed, PDF, or document. It supports full main content, section selection, structured JSON rows, item pagination, reported continuations, and explicit linked crawling.
-- `web_search`: discover and rank public sources when the exact URL is unknown.
+- `web_search`: choose URL discovery (`links`) or separate sourced passages (`extracts`), with a fixed `fast` or `quality` recipe.
 - `web_research`: synthesize and validate bounded evidence from multiple sources.
 - `browser_open`: open an owned browser only when direct reading cannot provide required dynamic state, interaction, DOM evidence, or pixels.
 - `browser_tabs`: list or close owned browser tabs and sessions.
@@ -19,7 +19,7 @@ The tool descriptions, field descriptions, active-tool prompt guidelines, and We
 
 A normal `web_read` returns complete extracted main content up to the source limit. Omit `maxChars` for a full read. Structured API projections return one object per collection row. Use continuation values only when the prior result reports them. `contentOffset` applies to direct single-page reading and cannot be combined with linked crawling.
 
-Search crawling verifies returned results. Read crawling follows linked pages. Research crawling follows linked evidence. Crawling is optional and remains off unless requested by its parameters.
+Search has four fixed recipes from its required `operation` and `effort` axes. Fast uses one search. Quality uses bounded conservative fan-out, deduplication, verification, and reranking. Search never follows links. Extracts remain separate by source and do not synthesize a conclusion. Read crawling follows linked pages. Research crawling follows linked evidence.
 
 Browser work follows open, observe, act, observe, and close. Semantic refs are preferred. Coordinate actions bind to the latest visual observation. The exposed browser schema does not support upload or download.
 

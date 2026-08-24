@@ -62,12 +62,11 @@ export interface BrowserPathCapability {
 
 export interface SearchRequest {
   readonly query: string;
-  readonly limit?: number;
+  readonly operation: "links" | "extracts";
+  readonly effort: "fast" | "quality";
   readonly visibility?: Visibility;
   readonly domains?: readonly string[];
   readonly freshness?: "day" | "week" | "month" | "year";
-  readonly crawlPages?: number;
-  readonly crawlDepth?: number;
 }
 
 export interface SearchHit {
@@ -81,8 +80,15 @@ export interface SearchHit {
 
 export interface SearchResponse {
   readonly query: string;
+  readonly operation: "links" | "extracts";
+  readonly effort: "fast" | "quality";
   readonly hits: readonly SearchHit[];
   readonly truncated: boolean;
+  readonly metadata: {
+    readonly searches: number;
+    readonly pagesRead: number;
+    readonly linkedDepth: 0;
+  };
 }
 
 export interface ReadRequest {

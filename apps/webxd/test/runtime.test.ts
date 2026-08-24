@@ -142,7 +142,7 @@ describe("actual WebX Unix runtime", () => {
     };
     const forged = new WebxClient(new UnixSocketTransport(webxPath, forgedFactory));
     await expect(forged.version()).rejects.toMatchObject<WebxError>({ status: 400 });
-    expect((await client.search({ query: "WebX" }, { idempotencyKey: "runtime-search-001" })).hits).toHaveLength(1);
+    expect((await client.search({ query: "WebX", operation: "links", effort: "fast" }, { idempotencyKey: "runtime-search-001" })).hits).toHaveLength(1);
     const publicPaths = (await client.capabilities()).browserPaths;
     expect(publicPaths.map((item) => item.pathId)).toEqual(["agent-browser/chrome", "pinchtab/chrome"]);
     expect(publicPaths.every((item) => item.uploads === false && !item.actions.includes("upload"))).toBe(true);
@@ -153,6 +153,11 @@ describe("actual WebX Unix runtime", () => {
     const facade = new WebxFacadeClient(webxPath);
     const facadeSignal = new AbortController();
     await facade.start({ signal: facadeSignal.signal, ownerId: "facade-owner", cwd: "/deterministic/project" });
+    const facadeOptions = { signal: facadeSignal.signal, idempotencyKey: "facade-search-1", ownerId: "facade-owner", cwd: "/deterministic/project" };
+    await expect(facade.request("web.search", { query: "WebX", operation: "links", effort: "fast" }, facadeOptions)).resolves.toMatchObject({ data: { operation: "links", effort: "fast" } });
+    for (const legacy of [{ limit: 5 }, { crawlPages: 1 }, { crawlDepth: 1 }]) {
+      await expect(facade.request("web.search", { query: "WebX", operation: "links", effort: "fast", ...legacy }, facadeOptions)).rejects.toThrow("is not supported");
+    }
     await expect(facade.request("browser.workspace", { action: "show" }, { signal: facadeSignal.signal, idempotencyKey: "facade-workspace-1", ownerId: "facade-owner", cwd: "/deterministic/project" })).resolves.toMatchObject({ summary: "Browser workspace show" });
     await expect(facade.request("browser.tabs", { action: "discard-tab", browserSessionId: "session-runtime", tabId: "tab-runtime" }, { signal: facadeSignal.signal, idempotencyKey: "facade-tabs-0001", ownerId: "facade-owner", cwd: "/deterministic/project" })).rejects.toThrow("no safe Pi 0.84.1 equivalent");
     await expect(facade.request("browser.act", { browserSessionId: "session-runtime", action: { kind: "hover", ref: "e1" } }, { signal: facadeSignal.signal, idempotencyKey: "facade-action-001", ownerId: "facade-owner", cwd: "/deterministic/project" })).rejects.toBeInstanceOf(WebxError);

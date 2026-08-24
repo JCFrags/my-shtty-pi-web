@@ -15,6 +15,7 @@ import type {
   ResearchRequest,
   SearchHit,
   SearchRequest,
+  SearchResponse,
   TransportRequest,
   TransportResponse,
   Visibility,
@@ -132,39 +133,79 @@ export class WebxAuthority {
     throw problem(404, "not-found", "operation was not found", false);
   }
 
-  private async search(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<{ query: string; hits: SearchHit[]; truncated: boolean }> {
+  private async search(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<SearchResponse> {
     requireScope(actor, scope);
-    const key = { formatVersion: 7, request, searxUrl: this.options.searxUrl };
-    const cached = await this.#cache.get<{ query: string; hits: SearchHit[]; truncated: boolean }>("search", key);
+    const key = { formatVersion: 9, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
+    const cached = await this.#cache.get<SearchResponse>("search", key);
     if (cached !== undefined) return cached;
     const result = await this.uncachedSearch(actor, request, scope, signal);
     await this.#cache.set("search", key, result, SEARCH_CACHE_TTL_MS).catch(() => undefined);
     return result;
   }
 
-  private async uncachedSearch(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<{ query: string; hits: SearchHit[]; truncated: boolean }> {
+  private async uncachedSearch(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<SearchResponse> {
     requireScope(actor, scope);
     if (typeof request.query !== "string" || request.query.trim().length === 0 || request.query.length > 8_192) throw problem(400, "invalid-request", "query must contain 1 to 8192 characters", false);
-    const limit = integer(request.limit ?? 10, "limit", 1, 50);
-    const input = request as SearchRequest & { domains?: string[]; freshness?: "day" | "week" | "month" | "year" };
-    if (this.options.searxUrl === undefined) {
-      const terms = request.query.toLocaleLowerCase().split(/\s+/u).filter(Boolean);
-      const matches = this.options.sources.filter((source) => terms.every((term) => `${source.title} ${source.content}`.toLocaleLowerCase().includes(term)));
-      const hits = matches.slice(0, limit).map((source, index): SearchHit => ({ hitId: source.hitId, title: source.title, url: source.url, snippet: boundText(source.content, 320).text, rank: index + 1, visibility: source.visibility }));
-      return { query: request.query, hits, truncated: matches.length > hits.length };
+    if (request.operation !== "links" && request.operation !== "extracts") throw problem(400, "invalid-request", "operation must be links or extracts", false);
+    if (request.effort !== "fast" && request.effort !== "quality") throw problem(400, "invalid-request", "effort must be fast or quality", false);
+    const queries = request.effort === "quality" ? qualitySearchQueries(request.query) : [request.query];
+    const batches: RawSearchHit[][] = [];
+    for (const query of queries) batches.push(await this.searchOne(query, request.domains ?? [], request.freshness, signal));
+    const merged = [...new Map(batches.flat().filter((item) => typeof item.url === "string" && typeof item.title === "string").map((item) => [String(item.url).replace(/#.*$/u, ""), item])).values()];
+    const candidates = merged.map((item, index) => ({ item, index, score: request.effort === "quality" ? searchCandidateScore(item, request.query) : 0 }));
+    if (request.effort === "quality") candidates.sort((left, right) => right.score - left.score || left.index - right.index);
+    const selected = candidates.slice(0, request.operation === "links" ? 10 : request.effort === "quality" ? 5 : 3);
+    let pagesRead = 0;
+    let hits: SearchHit[] = [];
+    const verifiedUrls = new Set<string>();
+    const readerActor = { ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) };
+    for (const candidate of selected) {
+      const item = candidate.item;
+      let title = String(item.title);
+      let url = String(item.url);
+      let snippet = request.operation === "links" ? boundText(typeof item.content === "string" ? item.content : "", 320).text : "";
+      if (request.operation === "extracts" || (request.effort === "quality" && hits.length < 5)) {
+        try {
+          const page = await this.uncachedRead(readerActor, { url, query: request.query, maxChars: 8_000, maxPages: 1, maxDepth: 0 }, signal);
+          pagesRead += 1;
+          title = page.title || title;
+          url = page.url || url;
+          verifiedUrls.add(url);
+          if (request.operation === "extracts") snippet = evidenceExcerpt(page.untrustedContent, request.query, 1_200);
+        } catch { /* Keep usable discovery results when bounded verification fails. */ }
+      }
+      hits.push({
+        hitId: `search-${createHash("sha256").update(url).digest("hex").slice(0, 20)}`,
+        title, url, snippet, rank: hits.length + 1, visibility: "public",
+        metadata: { score: item.score, publishedDate: item.publishedDate, engines: item.engines, repository: item.repository },
+      } as SearchHit);
     }
-    const parsedQuery = parseSearchQuery(request.query);
-    const domains = [...new Set([...(input.domains?.filter((domain) => domain.length > 0) ?? []), ...parsedQuery.domains])];
+    if (request.operation === "links" && request.effort === "quality") {
+      hits = hits
+        .map((hit, index) => ({ hit, index, score: searchCandidateScore({ title: hit.title, url: hit.url, content: hit.snippet }, request.query) + (verifiedUrls.has(hit.url) ? 2 : 0) }))
+        .sort((left, right) => right.score - left.score || left.index - right.index)
+        .map(({ hit }, index) => ({ ...hit, rank: index + 1 }));
+    }
+    return { query: request.query, operation: request.operation, effort: request.effort, hits, truncated: merged.length > hits.length, metadata: { searches: queries.length, pagesRead, linkedDepth: 0 } };
+  }
+
+  private async searchOne(query: string, requestedDomains: readonly string[], freshness: SearchRequest["freshness"], signal?: AbortSignal): Promise<RawSearchHit[]> {
+    if (this.options.searxUrl === undefined) {
+      const terms = query.toLocaleLowerCase().split(/\s+/u).filter(Boolean);
+      return this.options.sources.filter((source) => terms.every((term) => `${source.title} ${source.content}`.toLocaleLowerCase().includes(term))).map((source) => ({ url: source.url, title: source.title, content: source.content }));
+    }
+    const parsedQuery = parseSearchQuery(query);
+    const domains = [...new Set([...requestedDomains.filter(Boolean), ...parsedQuery.domains])];
     const domainQuery = domains.length === 0 ? "" : ` ${domains.map((domain) => `site:${domain}`).join(" OR ")}`;
-    const endpoint = new URL("/search", this.options.searxUrl ?? "http://127.0.0.1:8888");
+    const endpoint = new URL("/search", this.options.searxUrl);
     endpoint.searchParams.set("q", `${parsedQuery.query}${domainQuery}`.trim());
     endpoint.searchParams.set("format", "json");
     endpoint.searchParams.set("safesearch", "0");
-    if (input.freshness !== undefined) endpoint.searchParams.set("time_range", input.freshness);
+    if (freshness !== undefined) endpoint.searchParams.set("time_range", freshness);
     const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
     if (!response.ok) throw new Error(`SearXNG returned HTTP ${response.status}`);
-    const payload = await response.json() as { results?: Array<{ url?: unknown; title?: unknown; content?: unknown; score?: unknown; publishedDate?: unknown; engines?: unknown }> };
-    const raw: RawSearchHit[] = Array.isArray(payload.results) ? payload.results : [];
+    const payload = await response.json() as { results?: RawSearchHit[] };
+    const raw = Array.isArray(payload.results) ? payload.results : [];
     const wantedDomains = domains.map((domain) => domain.toLocaleLowerCase().replace(/^www\./u, ""));
     const eligible = raw.filter((item) => {
       if (typeof item.url !== "string" || typeof item.title !== "string") return false;
@@ -173,44 +214,11 @@ export class WebxAuthority {
         return wantedDomains.length === 0 || wantedDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
       } catch { return false; }
     });
-    // SearXNG owns general search relevance. Platform APIs only supplement an explicit
-    // platform request; they do not rescore or filter ordinary web results.
     const discoveryDomains = domains.length > 0 ? domains : inferredAuthoritativeDomains(parsedQuery.query);
-    const platform = discoveryDomains.length > 0
-      ? await authoritativeSearchAdapters(parsedQuery.query, discoveryDomains, signal)
-      : [];
+    const platform = discoveryDomains.length > 0 ? await authoritativeSearchAdapters(parsedQuery.query, discoveryDomains, signal) : [];
     const combined = domains.length > 0 && platform.length > 0 ? [...platform, ...eligible] : [...eligible, ...platform];
     const preferred = domains.length === 0 ? preferredDomainsForQuery(parsedQuery.query) : [];
-    const ordered = preferred.length > 0
-      ? [...combined.filter((item) => searchHitMatchesDomains(item, preferred)), ...combined.filter((item) => !searchHitMatchesDomains(item, preferred))]
-      : combined;
-    const unique = [...new Map(ordered
-      .filter((item) => typeof item.url === "string" && typeof item.title === "string")
-      .map((item) => [String(item.url).replace(/#.*$/u, ""), item])).values()];
-    let hits: SearchHit[] = unique.slice(0, limit).map((item, index) => ({
-      hitId: `search-${createHash("sha256").update(String(item.url)).digest("hex").slice(0, 20)}`,
-      title: String(item.title), url: String(item.url), snippet: boundText(typeof item.content === "string" ? item.content : "", 500).text,
-      rank: index + 1, visibility: "public",
-      metadata: { score: item.score, publishedDate: item.publishedDate, engines: item.engines, repository: item.repository },
-    } as SearchHit));
-    const crawlPages = integer(request.crawlPages ?? 0, "crawlPages", 0, 5);
-    const crawlDepth = integer(request.crawlDepth ?? 0, "crawlDepth", 0, 1);
-    if (crawlPages > 0) {
-      const enriched: SearchHit[] = [];
-      for (const hit of hits) {
-        if (enriched.length < crawlPages) {
-          try {
-            const crawled = await this.crawl({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, { url: hit.url, maxPages: 1, maxDepth: crawlDepth, maxChars: 8_000, query: request.query }, signal);
-            const content = crawled.pages.find((page) => page.ok && page.content)?.content;
-            enriched.push(content ? { ...hit, snippet: evidenceExcerpt(content, request.query, 600) } : hit);
-            continue;
-          } catch { /* Keep the search result when optional enrichment fails. */ }
-        }
-        enriched.push(hit);
-      }
-      hits = enriched;
-    }
-    return { query: request.query, hits, truncated: unique.length > hits.length };
+    return preferred.length > 0 ? [...combined.filter((item) => searchHitMatchesDomains(item, preferred)), ...combined.filter((item) => !searchHitMatchesDomains(item, preferred))] : combined;
   }
 
   private async read(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<BoundedContent> {
@@ -360,7 +368,7 @@ export class WebxAuthority {
     let searchTruncated = false;
     const perPlanLimit = plans.length > 1 ? 1 : Math.max(2, Math.ceil(Math.max(6, pageLimit) / Math.max(1, plans.length)));
     for (const plan of plans) {
-      const result = await this.search(actor, { query: plan.query, limit: perPlanLimit, ...(plan.domains.length > 0 ? { domains: plan.domains } : {}) }, "research.write", signal);
+      const result = await this.search(actor, { query: plan.query, operation: "links", effort: "fast", ...(plan.domains.length > 0 ? { domains: plan.domains } : {}) }, "research.write", signal);
       searchTruncated ||= result.truncated;
       for (const hit of result.hits.slice(0, perPlanLimit)) if (!collected.some((existing) => existing.url === hit.url)) collected.push(hit);
     }
@@ -586,6 +594,22 @@ function evidenceExcerpt(value: string, query: string, maxChars: number): string
   }
   return boundText(selected.join("\n\n") || clean, maxChars).text.trim();
 }
+
+function qualitySearchQueries(query: string): string[] {
+  const base = query.trim();
+  const variants = [base, `${base} official`, `${base} documentation`];
+  return [...new Set(variants)];
+}
+
+function searchCandidateScore(item: RawSearchHit, query: string): number {
+  const terms = [...new Set(query.toLocaleLowerCase().match(/[a-z0-9][a-z0-9.+-]{1,}/gu) ?? [])];
+  const title = typeof item.title === "string" ? item.title.toLocaleLowerCase() : "";
+  const content = typeof item.content === "string" ? item.content.toLocaleLowerCase() : "";
+  const titleMatches = terms.filter((term) => title.includes(term)).length;
+  const contentMatches = terms.filter((term) => content.includes(term)).length;
+  return titleMatches * 3 + contentMatches + (title.includes(query.toLocaleLowerCase()) ? 8 : 0);
+}
+
 function header(request: TransportRequest, name: string): string | undefined { const entry = Object.entries(request.headers ?? {}).find(([key]) => key.toLocaleLowerCase() === name); return entry?.[1]; }
 function operationId(request: TransportRequest): string { const value = header(request, "idempotency-key"); if (value === undefined) throw problem(400, "missing-idempotency-key", "idempotency key is required", false); return `op-${value}`; }
 function stableStringify(value: unknown): string { if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`; if (typeof value === "object" && value !== null) return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(",")}}`; return JSON.stringify(value) ?? "undefined"; }

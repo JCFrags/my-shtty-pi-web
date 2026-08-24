@@ -14,8 +14,8 @@ describe("WebxClient", () => {
   it("negotiates once and preserves an idempotency key", async () => {
     const wire = transport();
     const client = new WebxClient(wire);
-    await client.search({ query: "q" }, { idempotencyKey: "search-key-1" });
-    await client.search({ query: "q" }, { idempotencyKey: "search-key-1" });
+    await client.search({ query: "q", operation: "links", effort: "fast" }, { idempotencyKey: "search-key-1" });
+    await client.search({ query: "q", operation: "links", effort: "fast" }, { idempotencyKey: "search-key-1" });
     expect(wire.request.mock.calls.filter(([request]) => request.path === "/v1/version")).toHaveLength(1);
     expect(wire.request.mock.calls.at(-1)?.[0].headers).toEqual({ "idempotency-key": "search-key-1" });
   });
@@ -104,7 +104,7 @@ describe("WebxClient", () => {
     const wire = transport();
     const client = new WebxClient(wire);
     const controller = new AbortController();
-    await client.search({ query: "q" }, { signal: controller.signal, idempotencyKey: "search-key-2" });
+    await client.search({ query: "q", operation: "links", effort: "fast" }, { signal: controller.signal, idempotencyKey: "search-key-2" });
     expect(wire.request.mock.calls.at(-1)?.[0].signal).toBe(controller.signal);
   });
 });

@@ -49,7 +49,7 @@ async function call(instance: WebxAuthority, owner: AuthorityActor, method: "GET
 describe("WebxAuthority", () => {
   it("serves bounded deterministic search, read, and research operations", async () => {
     const instance = authority();
-    expect((await call(instance, actor(), "POST", "/v1/search", { query: "WebX routes", limit: 1 }, "search-key-001")).status).toBe(200);
+    expect((await call(instance, actor(), "POST", "/v1/search", { query: "WebX routes", operation: "links", effort: "fast" }, "search-key-001")).status).toBe(200);
     const read = await call(instance, actor(), "POST", "/v1/read", { url: "https://fixture.invalid/webx", maxChars: 4 }, "read-key-001");
     expect(read.body).toMatchObject({ untrustedContent: "WebX", truncated: true });
     const incompatibleContinuation = await call(instance, actor(), "POST", "/v1/read", { url: "https://fixture.invalid/webx", contentOffset: 10, maxPages: 2 }, "read-key-002");
@@ -73,13 +73,52 @@ describe("WebxAuthority", () => {
       clock: { now: () => "2026-08-12T00:00:00Z" },
       ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888",
     });
-    const result = await call(instance, actor(), "POST", "/v1/search", { query: "major changes in Fedora Linux 44 for desktop users" }, "search-fedora");
+    const result = await call(instance, actor(), "POST", "/v1/search", { query: "major changes in Fedora Linux 44 for desktop users", operation: "links", effort: "fast" }, "search-fedora");
     expect(result).toMatchObject({ status: 200, body: { hits: [
       { title: "Fedora Linux 44 Changes", rank: 1 },
       { title: "Fedora 44 desktop overview", rank: 2 },
       { title: "Major definition", rank: 3 },
     ] } });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("executes the four fixed search recipes without linked traversal or synthesis", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, init });
+      if (url.startsWith("http://127.0.0.1:8888/search")) {
+        return new Response(JSON.stringify({ results: Array.from({ length: 10 }, (_, index) => ({
+          title: `Product guide ${index + 1}`, url: `https://docs.example.org/page-${index + 1}`,
+          content: `Short search description ${index + 1}.`,
+        })) }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      const body = JSON.parse(String(init?.body)) as { url: string; query: string; maxPages?: number; maxDepth?: number };
+      expect(body.query).toBe("Product feature support");
+      expect(body).not.toHaveProperty("maxPages");
+      expect(body).not.toHaveProperty("maxDepth");
+      return new Response(JSON.stringify({ url: body.url, title: `Verified ${body.url.split("-").at(-1)}`, content: "Product feature support is documented in this independent source passage with useful detail.", truncated: false }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888", readerUrl: "http://127.0.0.1:8787" });
+    const run = async (operation: "links" | "extracts", effort: "fast" | "quality", key: string) => {
+      requests.length = 0;
+      const result = await call(instance, actor(), "POST", "/v1/search", { query: "Product feature support", operation, effort, domains: ["docs.example.org"], freshness: "month" }, key);
+      expect(result.status).toBe(200);
+      const body = result.body as { hits: Array<{ snippet: string }>; metadata: { searches: number; pagesRead: number; linkedDepth: number } };
+      const searches = requests.filter((item) => item.url.includes("/search"));
+      const reads = requests.filter((item) => item.url.includes(":8787/"));
+      expect(searches).toHaveLength(effort === "quality" ? 3 : 1);
+      expect(searches.every((item) => new URL(item.url).searchParams.get("q")?.includes("site:docs.example.org") && new URL(item.url).searchParams.get("time_range") === "month")).toBe(true);
+      expect(reads).toHaveLength(operation === "links" ? effort === "quality" ? 5 : 0 : effort === "quality" ? 5 : 3);
+      expect(body.metadata).toEqual({ searches: searches.length, pagesRead: reads.length, linkedDepth: 0 });
+      expect(body.hits).toHaveLength(operation === "links" ? 10 : effort === "quality" ? 5 : 3);
+      if (operation === "extracts") expect(body.hits.every((hit) => hit.snippet.includes("independent source passage"))).toBe(true);
+      return result;
+    };
+    await run("links", "fast", "recipe-fast-links");
+    await run("links", "quality", "recipe-quality-links");
+    await run("extracts", "fast", "recipe-fast-extracts");
+    await run("extracts", "quality", "recipe-quality-extracts");
   });
 
   it("reads a bounded byte range into an integrity-checked owner artifact", async () => {

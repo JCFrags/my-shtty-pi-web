@@ -19,12 +19,11 @@ const point = {
 };
 
 export const WebSearchSchema = Type.Object({
-  query: Type.String({ minLength: 1, maxLength: 8192, description: "Natural-language search query. Include quoted phrases or site:host only when they are required." }),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Maximum ranked results to return. Default: 10." })),
-  domains: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 253, pattern: "^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$", description: "Host name only, such as docs.python.org. Do not pass a URL, path, or site: prefix." }), { maxItems: 32, description: "Optional strict first-party or site restrictions. Omit for broad discovery." })),
-  freshness: Type.Optional(StringEnum(["day", "week", "month", "year"] as const, { description: "Optional age filter for time-sensitive results. Omit for stable documentation or when recall matters more." })),
-  crawlPages: Type.Optional(Type.Integer({ minimum: 0, maximum: 5, description: "Number of returned results to render and verify. Default: 0. This does not increase search breadth." })),
-  crawlDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 1, description: "Linked-page depth used only for crawlPages verification. Default: 0." })),
+  query: Type.String({ minLength: 1, maxLength: 8192, description: "Natural-language search query. Keep the named entity and intent complete." }),
+  operation: StringEnum(["links", "extracts"] as const, { description: "Required product. links discovers URLs without returning page passages. extracts returns separate query-focused passages from selected sources without cross-source synthesis." }),
+  effort: StringEnum(["fast", "quality"] as const, { description: "Required effort. fast uses one search. quality uses bounded conservative query fan-out, deduplication, verification, and reranking." }),
+  domains: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 253, pattern: "^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$", description: "Host name only, such as docs.python.org. Do not pass a URL, path, or site: prefix." }), { maxItems: 32, description: "Optional strict source-host requirements. Every search recipe retains these domains." })),
+  freshness: Type.Optional(StringEnum(["day", "week", "month", "year"] as const, { description: "Optional required age filter. Omit unless source age is part of the request." })),
 }, strict);
 
 export const WebResearchSchema = Type.Object({

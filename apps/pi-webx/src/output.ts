@@ -36,12 +36,16 @@ function renderData(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const data = value as Record<string, unknown>;
   if (Array.isArray(data.hits)) {
+    const operation = data.operation === "extracts" ? "extracts" : "links";
+    const effort = data.effort === "quality" ? "quality" : "fast";
     const hits = data.hits.slice(0, 20).map((item, index) => {
       const hit = item as Record<string, unknown>;
-      const snippet = typeof hit.snippet === "string" && hit.snippet.trim() ? `\n   ${clip(hit.snippet.trim(), 360)}` : "";
+      const snippet = typeof hit.snippet === "string" && hit.snippet.trim() ? `\n   ${operation === "extracts" ? "Extract: " : ""}${clip(hit.snippet.trim(), operation === "extracts" ? 1_200 : 360)}` : "";
       return `${index + 1}. **${String(hit.title ?? "Untitled")}**\n   ${String(hit.url ?? "")}${snippet}`;
     });
-    return hits.length ? hits.join("\n") : "No results.";
+    const metadata = typeof data.metadata === "object" && data.metadata !== null ? data.metadata as Record<string, unknown> : {};
+    const execution = `[${effort} ${operation}; ${String(metadata.searches ?? 1)} search(es); ${String(metadata.pagesRead ?? 0)} page read(s); linked depth 0]`;
+    return hits.length ? `${execution}\n\n${hits.join("\n")}` : `${execution}\n\nNo results.`;
   }
   if (typeof data.untrustedContent === "string") {
     const metadata = typeof data.metadata === "object" && data.metadata !== null ? data.metadata as Record<string, unknown> : undefined;

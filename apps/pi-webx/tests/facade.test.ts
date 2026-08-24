@@ -96,7 +96,7 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   assert.ok(fx.active.includes("web_search"));
   assert.ok(fx.active.includes("browser_open"));
   const searchTool = fx.tools.find((tool) => tool.name === "web_search");
-  assert.match(String(searchTool?.promptSnippet), /Discover and rank current public web sources/);
+  assert.match(String(searchTool?.promptSnippet), /Discover URLs or retrieve separate source passages/);
   assert.ok(Array.isArray(searchTool?.promptGuidelines));
   for (const tool of fx.tools) {
     assert.ok(String(tool.description ?? "").length >= 80, `${String(tool.name)} needs a useful model-facing description`);
@@ -124,9 +124,14 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
 });
 
 test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
-  assert.equal(Value.Check(WebSearchSchema, { query: "ok", unexpected: true }), false);
-  assert.equal(Value.Check(WebSearchSchema, { query: "ok", limit: 21 }), false);
-  assert.equal(Value.Check(WebSearchSchema, { query: "ok", domains: ["https://example.com/path"] }), false);
+  for (const operation of ["links", "extracts"]) for (const effort of ["fast", "quality"]) {
+    assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation, effort }), true);
+  }
+  assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation: "links" }), false);
+  assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation: "links", effort: "fast", unexpected: true }), false);
+  assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation: "links", effort: "fast", limit: 20 }), false);
+  assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation: "links", effort: "fast", crawlPages: 1 }), false);
+  assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation: "links", effort: "fast", domains: ["https://example.com/path"] }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "not-a-url" }), false);
   assert.equal(Value.Check(WebResearchSchema, { question: "compare sources", resume: {} }), false);
   assert.equal(Value.Check(BrowserOpenSchema, { pathId: "agent-browser/chrome" }), true);
@@ -169,7 +174,7 @@ test("tool calls use only the SDK seam with owner, idempotency, cancellation, an
   const fx = harness(sdk);
   await fx.events.get("session_start")?.({}, fx.ctx);
   const caller = new AbortController();
-  const result = await fx.execute("web_search", { query: "evidence" }, caller.signal);
+  const result = await fx.execute("web_search", { query: "evidence", operation: "links", effort: "fast" }, caller.signal);
   assert.equal(sdk.calls.length, 1);
   assert.equal(sdk.calls[0]?.operation, "web.search");
   assert.equal(sdk.calls[0]?.options.ownerId, "owner-session");
@@ -256,6 +261,10 @@ test("output compaction and visual transfer have deterministic bounds", () => {
   } });
   assert.match(JSON.stringify(paged.content), /Returned 5 of 10 items; continue with itemOffset=5/);
   assert.match(JSON.stringify(paged.content), /Returned 2 characters; extracted total 2; complete/);
+
+  const extracts = presentResult({ summary: "search", data: { query: "feature", operation: "extracts", effort: "quality", hits: [{ title: "Source", url: "https://example.test/source", snippet: "Focused supporting passage." }], metadata: { searches: 3, pagesRead: 1, linkedDepth: 0 } } });
+  assert.match(JSON.stringify(extracts.content), /quality extracts; 3 search\(es\); 1 page read\(s\); linked depth 0/);
+  assert.match(JSON.stringify(extracts.content), /Extract: Focused supporting passage/);
 
   const completePage = "main-content-".repeat(5_000);
   const complete = presentResult({ summary: "read", data: { title: "Full page", url: "https://example.test/full", untrustedContent: completePage, truncated: false } });

@@ -28,6 +28,10 @@ The server:
 
 Browser operations use only `BrowserDaemonPort`. Semantic actions use the frozen `browser.act` shape. Visual CUA uses the frozen scoped workspace lease, frame, control, and input methods.
 
+## Search recipes
+
+Every search request selects `links` or `extracts` and `fast` or `quality`. Fast runs one search. Quality runs at most three conservative entity-preserving searches, merges and deduplicates candidates, verifies a bounded set, and reranks them. Links return URL discovery results. Extracts return separate query-focused passages. Search never follows links or synthesizes a cross-source answer.
+
 ## Short-lived cache
 
 Search results use a 15-minute cache. Extracted page reads use a six-hour cache. The cache keeps up to 512 recent entries in RAM and up to 10 GiB on SSD. Files default to `$XDG_CACHE_HOME/pi-web/responses` with user-only permissions. `WEBX_CACHE_DIR` can select another directory. Cache failures never block a live request.

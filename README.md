@@ -57,7 +57,7 @@ Review `~/.config/pi-web`, `~/.local/share/pi-web`, and `~/.cache/pi-web` before
 
 ## Pi tools
 
-- `web_search` — includes optional bounded Crawl4AI result enrichment
+- `web_search` — fixed fast/quality recipes for URL links or separate sourced extracts
 - `web_read` — includes optional bounded Crawl4AI rendering and linked-page extraction
 - `web_research` — includes optional bounded Crawl4AI evidence collection
 - `browser_open`
@@ -68,7 +68,7 @@ Review `~/.config/pi-web`, `~/.local/share/pi-web`, and `~/.cache/pi-web` before
 
 Only the user changes capability modes with `/web off|read|browser|debug`.
 
-Search, read, and research are capability groups rather than thin provider wrappers. WebX can select direct fetch, structured JSON, main-content extraction, Crawl4AI rendering, document conversion, first-party source discovery, source ranking, and evidence extraction behind these three stable Pi tools. Full reads return complete main content up to the explicit 1,000,000-character source bound. WebX does not add a smaller facade limit. Structured API projections return complete row objects. If a source applies a bound, `contentOffset`, item pagination, or a section query provides a precise continuation. Source and crawl-link details remain structured metadata. Research returns concise findings, bounded evidence excerpts, and one compact source list instead of complete crawled pages. Browser capabilities advertise only actions that the installed path can execute.
+Search, read, and research are capability groups rather than thin provider wrappers. Search uses required `operation` (`links` or `extracts`) and `effort` (`fast` or `quality`) axes. Its four fixed recipes hide provider counts and crawling controls. Search never follows links, and extracts do not synthesize across sources. WebX can select direct fetch, structured JSON, main-content extraction, Crawl4AI rendering, document conversion, first-party source discovery, source ranking, and evidence extraction behind these three stable Pi tools. Full reads return complete main content up to the explicit 1,000,000-character source bound. WebX does not add a smaller facade limit. Structured API projections return complete row objects. If a source applies a bound, `contentOffset`, item pagination, or a section query provides a precise continuation. Source and crawl-link details remain structured metadata. Research returns concise findings, bounded evidence excerpts, and one compact source list instead of complete crawled pages. Browser capabilities advertise only actions that the installed path can execute.
 
 ## Development
 

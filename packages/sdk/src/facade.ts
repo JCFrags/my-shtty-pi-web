@@ -61,7 +61,10 @@ export class WebxFacadeClient {
     const client = this.client(options.ownerId);
     const value = object(input);
     const requestOptions: RequestOptions = { signal: options.signal, idempotencyKey: options.idempotencyKey };
-    if (operation === "web.search") return external("Search results", await client.search({ query: requiredString(value.query, "query"), limit: optionalNumber(value.limit), domains: optionalStringArray(value.domains, "domains"), freshness: optionalFreshness(value.freshness), crawlPages: optionalNumber(value.crawlPages), crawlDepth: optionalNumber(value.crawlDepth) }, requestOptions));
+    if (operation === "web.search") {
+      rejectPresent(value, ["limit", "crawlPages", "crawlDepth"], operation);
+      return external("Search results", await client.search({ query: requiredString(value.query, "query"), operation: searchOperation(value.operation), effort: searchEffort(value.effort), domains: optionalStringArray(value.domains, "domains"), freshness: optionalFreshness(value.freshness) }, requestOptions));
+    }
     if (operation === "web.read") { rejectPresent(value, ["browserSessionId", "tabId"], operation); return external("Read result", await client.read({ url: requiredString(value.url, "url"), query: optionalString(value.query), view: optionalReadView(value.view), fields: optionalStringArray(value.fields, "fields"), itemOffset: optionalNumber(value.itemOffset), itemLimit: optionalNumber(value.itemLimit), maxChars: optionalNumber(value.maxChars), contentOffset: optionalNumber(value.contentOffset), maxPages: optionalNumber(value.maxPages), maxDepth: optionalNumber(value.maxDepth), sameDomain: optionalBoolean(value.sameDomain) }, requestOptions)); }
     if (operation === "web.research") return external("Research result", await client.research({ question: requiredString(value.question, "question"), mode: optionalResearchMode(value.mode), maxQueries: optionalNumber(value.maxQueries), maxPages: optionalNumber(value.maxPages), maxBytes: optionalNumber(value.maxBytes), crawlDepth: optionalNumber(value.crawlDepth), resume: optionalObject(value.resume) }, requestOptions));
     if (operation === "browser.open") { rejectPresent(value, ["newTab"], operation); return local("Browser session opened", await client.createBrowserSession({ pathId: browserPath(value.pathId), url: optionalString(value.url), visible: optionalBoolean(value.visible), label: optionalString(value.label) }, requestOptions)); }
@@ -159,6 +162,8 @@ function requiredNumber(value: unknown, name: string): number { if (typeof value
 function optionalNumber(value: unknown): number | undefined { return typeof value === "number" ? value : undefined; }
 function optionalBoolean(value: unknown): boolean | undefined { return typeof value === "boolean" ? value : undefined; }
 function optionalStringArray(value: unknown, name: string): readonly string[] | undefined { return value === undefined ? undefined : stringArray(value, name); }
+function searchOperation(value: unknown): "links" | "extracts" { if (value === "links" || value === "extracts") return value; throw new TypeError("operation must be links or extracts"); }
+function searchEffort(value: unknown): "fast" | "quality" { if (value === "fast" || value === "quality") return value; throw new TypeError("effort must be fast or quality"); }
 function optionalFreshness(value: unknown): "day" | "week" | "month" | "year" | undefined { if (value === undefined) return undefined; if (value === "day" || value === "week" || value === "month" || value === "year") return value; throw new TypeError("freshness is invalid"); }
 function optionalReadView(value: unknown): "main" | "outline" | "raw" | undefined { if (value === undefined) return undefined; if (value === "main" || value === "outline" || value === "raw") return value; throw new TypeError("view is invalid"); }
 function optionalResearchMode(value: unknown): "quick" | "research" | "deep" | undefined { if (value === undefined) return undefined; if (value === "quick" || value === "research" || value === "deep") return value; throw new TypeError("mode is invalid"); }
