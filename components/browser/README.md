@@ -111,7 +111,7 @@ Run the fixture server:
 node packages/test-fixtures/src/server.mjs
 ```
 
-Architectural invariants and the active phase are in `AGENTS.md`. Protocol details, concurrency guarantees, observation formats, and ADRs are under `docs/`.
+Protocol details and the retained architecture are under `docs/`.
 
 ## Operational boundaries
 

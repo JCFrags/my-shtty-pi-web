@@ -6,14 +6,14 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const required = [
-  "Cargo.toml", "package.json", "pnpm-workspace.yaml", "AGENTS.md",
+  "Cargo.toml", "package.json", "pnpm-workspace.yaml",
   "schema/protocol.schema.json", "crates/browserd/src/coordinator.rs",
   "crates/backend-agent-browser/src/lib.rs",
   "apps/workspace/src/App.tsx", "services/reader/src/pi_web_reader/pipeline.py",
   "services/docling/src/pi_web_docling/converter.py", "deploy/install-fedora.sh",
   "tools/stream-viewer/index.html", "scripts/password-manager-spike.mjs",
   "tests/observations/corpus.json", "docs/implementation-brief.md", "BUILD_REPORT.md",
-  "VALIDATION.json", "apps/workspace/src-tauri/icons/icon.svg",
+  "apps/workspace/src-tauri/icons/icon.svg",
 ];
 
 for (const relative of required) {
