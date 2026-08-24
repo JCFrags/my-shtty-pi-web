@@ -44,7 +44,7 @@ class MockSdk implements WebxSdk {
   async stop(): Promise<void> { this.stops += 1; }
 }
 
-function harness(sdk: MockSdk, trusted = true) {
+function harness(sdk: MockSdk, trusted = true, audit: { record(input: unknown): Promise<void> } = { record: async () => undefined }) {
   const tools: Array<Record<string, unknown>> = [];
   const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
   const shortcuts = new Map<string, { handler: (ctx: unknown) => Promise<void> }>();
@@ -60,7 +60,7 @@ function harness(sdk: MockSdk, trusted = true) {
     getActiveTools() { return active; },
     setActiveTools(value: string[]) { active = value; },
   };
-  createPiWebxExtension(() => sdk)(pi as never);
+  createPiWebxExtension(() => sdk, audit)(pi as never);
   const controller = new AbortController();
   const ctx = {
     cwd: "/trusted/project",
@@ -184,6 +184,23 @@ test("tool calls use only the SDK seam with owner, idempotency, cancellation, an
   assert.ok(JSON.stringify(result.details).length < 25_000);
   caller.abort();
   assert.equal(sdk.calls[0]?.options.signal.aborted, true);
+  await fx.events.get("session_shutdown")?.();
+});
+
+test("real search and read calls send structured and agent-visible evidence to the audit boundary", async () => {
+  const sdk = new MockSdk();
+  sdk.result = { summary: "search", data: { operation: "links", effort: "fast", hits: [], metadata: { searches: 1, pagesRead: 0, linkedDepth: 0 } }, trust: "untrusted-external" };
+  const records: unknown[] = [];
+  const fx = harness(sdk, true, { record: async (input) => { records.push(input); } });
+  await fx.events.get("session_start")?.({}, fx.ctx);
+  await fx.execute("web_search", { query: "evidence", operation: "links", effort: "fast" });
+  await fx.execute("web_research", { question: "evidence" });
+  assert.equal(records.length, 1);
+  const record = records[0] as { operation: string; input: { query: string }; result: { summary: string }; presentation: { content: unknown[] } };
+  assert.equal(record.operation, "web.search");
+  assert.equal(record.input.query, "evidence");
+  assert.equal(record.result.summary, "search");
+  assert.ok(Array.isArray(record.presentation.content));
   await fx.events.get("session_shutdown")?.();
 });
 

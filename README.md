@@ -45,6 +45,8 @@ Useful commands:
 pi-web status
 pi-web doctor --json
 pi-web workspace
+pi-web audit list --limit 20
+pi-web audit show RECORD_ID
 ```
 
 To remove installed code and services while preserving user data:
@@ -53,7 +55,7 @@ To remove installed code and services while preserving user data:
 ./uninstall-fedora.sh
 ```
 
-Review `~/.config/pi-web`, `~/.local/share/pi-web`, and `~/.cache/pi-web` before deleting retained user data.
+Review `~/.config/pi-web`, `~/.local/share/pi-web`, `~/.cache/pi-web`, and `~/.local/state/pi-web` before deleting retained user data.
 
 ## Pi tools
 
@@ -69,6 +71,23 @@ Review `~/.config/pi-web`, `~/.local/share/pi-web`, and `~/.cache/pi-web` before
 Only the user changes capability modes with `/web off|read|browser|debug`.
 
 Search, read, and research are capability groups rather than thin provider wrappers. Search uses required `operation` (`links` or `extracts`) and `effort` (`fast` or `quality`) axes. Its four fixed recipes hide provider counts and crawling controls. Search never follows links, and extracts do not synthesize across sources. WebX can select direct fetch, structured JSON, main-content extraction, Crawl4AI rendering, document conversion, first-party source discovery, source ranking, and evidence extraction behind these three stable Pi tools. Full reads return complete main content up to the explicit 1,000,000-character source bound. WebX does not add a smaller facade limit. Structured API projections return complete row objects. If a source applies a bound, `contentOffset`, item pagination, or a section query provides a precise continuation. Source and crawl-link details remain structured metadata. Research returns concise findings, bounded evidence excerpts, and one compact source list instead of complete crawled pages. Browser capabilities advertise only actions that the installed path can execute.
+
+## Real-usage audit history
+
+The Pi extension records each real `web_search` and `web_read` call at its agent-facing boundary. Each user-only record contains the input, structured SDK result, final agent-visible output, timing, status, and failure details. Obvious credential fields and sensitive URL parameters are redacted. Browser and research calls are not recorded.
+
+Records are stored under `${XDG_STATE_HOME:-~/.local/state}/pi-web/audit` with directory mode `0700` and file mode `0600`. The extension removes records older than 90 days and removes the oldest records when total storage exceeds 10 GiB. This history is separate from the traffic cache and is not exposed as model-facing recall.
+
+Use:
+
+```bash
+pi-web audit list --limit 50
+pi-web audit show RECORD_ID
+pi-web audit path
+pi-web audit prune
+```
+
+A later agent can inspect exact real-use evidence with these commands. Run `pnpm test:live` for the separate live acceptance harness.
 
 ## Development
 

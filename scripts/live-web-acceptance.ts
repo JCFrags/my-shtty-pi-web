@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { WebxFacadeClient } from "../apps/pi-webx/vendor/sdk/facade-structured-v2.js";
+import { WebxFacadeClient } from "../packages/sdk/src/facade.js";
 
 const runtime = process.env.XDG_RUNTIME_DIR;
 assert(runtime, "XDG_RUNTIME_DIR is required");
@@ -19,8 +19,8 @@ function hostname(url) {
   return new URL(url).hostname.replace(/^www\./u, "");
 }
 
-async function search(query, expectedDomain, requiredPattern) {
-  const result = await client.request("web.search", { query, limit: 5 }, options());
+async function search(query, expectedDomain, requiredPattern, operation = "links", effort = "fast") {
+  const result = await client.request("web.search", { query, operation, effort, domains: [expectedDomain] }, options());
   assert(result.data.hits.length > 0, `${query}: no eligible results`);
   for (const hit of result.data.hits) {
     const host = hostname(hit.url);
@@ -35,9 +35,10 @@ async function search(query, expectedDomain, requiredPattern) {
 let browserSession;
 try {
   await client.start({ ownerId, cwd: process.cwd(), signal });
-  await search("San Francisco weather forecast site:weather.gov", "weather.gov", /san francisco|forecast/iu);
-  await search("ECB interest rates 2026 site:ecb.europa.eu", "ecb.europa.eu", /(?:interest|rate).*(?:2026)|(?:2026).*(?:interest|rate)/iu);
-  await search('"Fedora Workstation 44" site:fedoramagazine.org', "fedoramagazine.org", /fedora workstation 44/iu);
+  await search("San Francisco weather forecast", "weather.gov", /san francisco|forecast/iu, "links", "fast");
+  await search("ECB interest rates 2026", "ecb.europa.eu", /(?:interest|rate).*(?:2026)|(?:2026).*(?:interest|rate)/iu, "links", "quality");
+  await search("Fedora Linux 44 desktop changes", "fedoraproject.org", /fedora.*44|desktop/iu, "extracts", "fast");
+  await search("Python 3.14 release support status", "python.org", /python.*3\.14|support/iu, "extracts", "quality");
 
   const structured = await client.request("web.read", {
     url: "https://api.github.com/repos/nodejs/node/releases",
@@ -110,7 +111,7 @@ try {
     /loopback|blocked|denied/iu,
   );
 
-  console.log(JSON.stringify({ ok: true, scenarios: 9 }));
+  console.log(JSON.stringify({ ok: true, scenarios: 10 }));
 } finally {
   if (browserSession?.sessionId) {
     await client.request("browser.tabs", {

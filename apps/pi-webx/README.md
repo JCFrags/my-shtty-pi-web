@@ -27,4 +27,6 @@ Only the user changes modes with `/web off|read|browser|debug`. Browser tools ar
 
 Repeated searches and reads use a short-lived RAM and SSD traffic cache. It is not a durable research library or a recall tool.
 
+The extension also writes a separate user-only audit record for each real `web_search` and `web_read` call. A record contains sanitized input, the structured result, final agent-visible output, duration, and failure state. Records remain for at most 90 days and 10 GiB. Inspect them with `pi-web audit list` and `pi-web audit show RECORD_ID`. Audit history is not a Pi tool and is not automatic model recall.
+
 The extension calls the local WebX SDK over a same-user Unix socket. It does not call websites, browser providers, or subprocesses directly. It fails closed when the local daemon is unavailable.

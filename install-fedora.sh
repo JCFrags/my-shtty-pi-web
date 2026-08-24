@@ -67,8 +67,8 @@ install -m 0755 "$CARGO_TARGET_DIR/release/pi-browserd" "$BIN_DIR/pi-browserd"
 install -m 0755 "$CARGO_TARGET_DIR/release/pi-browser-workspace" "$BIN_DIR/pi-browser-workspace"
 
 log "Installing configuration and user services"
-mkdir -p "$CONFIG_HOME/pi-web/searxng" "$DATA_HOME/pi-web" "$CACHE_HOME/pi-web/responses" "$UNIT_DIR" "$QUADLET_DIR" "$DESKTOP_DIR" "$ICON_DIR" "$(dirname "$PI_EXTENSION")"
-chmod 0700 "$CONFIG_HOME/pi-web" "$DATA_HOME/pi-web" "$CACHE_HOME/pi-web" "$CACHE_HOME/pi-web/responses"
+mkdir -p "$CONFIG_HOME/pi-web/searxng" "$DATA_HOME/pi-web" "$CACHE_HOME/pi-web/responses" "${XDG_STATE_HOME:-$HOME/.local/state}/pi-web/audit/events" "$UNIT_DIR" "$QUADLET_DIR" "$DESKTOP_DIR" "$ICON_DIR" "$(dirname "$PI_EXTENSION")"
+chmod 0700 "$CONFIG_HOME/pi-web" "$DATA_HOME/pi-web" "$CACHE_HOME/pi-web" "$CACHE_HOME/pi-web/responses" "${XDG_STATE_HOME:-$HOME/.local/state}/pi-web" "${XDG_STATE_HOME:-$HOME/.local/state}/pi-web/audit" "${XDG_STATE_HOME:-$HOME/.local/state}/pi-web/audit/events"
 ln -sfn "$INSTALL_ROOT/apps/pi-webx" "$PI_EXTENSION"
 [[ -f "$CONFIG_HOME/pi-web/config.toml" ]] || install -m 0600 "$BROWSER_ROOT/deploy/config.toml" "$CONFIG_HOME/pi-web/config.toml"
 [[ -f "$CONFIG_HOME/pi-web/profiles.toml" ]] || install -m 0600 "$BROWSER_ROOT/deploy/profiles.toml" "$CONFIG_HOME/pi-web/profiles.toml"
@@ -172,8 +172,9 @@ set -euo pipefail
 case "\${1:-}" in
   doctor) shift; exec "$BIN_DIR/pi-browserd" doctor "\$@" ;;
   workspace) shift; exec "$BIN_DIR/pi-browser-workspace" "\$@" ;;
+  audit) shift; exec /usr/bin/node "$INSTALL_ROOT/scripts/pi-web-audit.mjs" "\$@" ;;
   status) exec systemctl --user status webxd pi-browserd pi-web-reader pi-web-crawl pi-web-docling pi-web-searxng ;;
-  *) echo 'usage: pi-web {doctor|workspace|status}' >&2; exit 2 ;;
+  *) echo 'usage: pi-web {doctor|workspace|audit|status}' >&2; exit 2 ;;
 esac
 EOF
 chmod 0755 "$BIN_DIR/pi-web"

@@ -13,5 +13,5 @@ rm -f "$DATA_HOME/applications/pi-browser-workspace.desktop" "$DATA_HOME/icons/h
 rm -f "$HOME/.pi/agent/extensions/pi-web"
 rm -rf "$PREFIX/lib/pi-web-tools" "$PREFIX/lib/pi-web-tools.old"
 systemctl --user daemon-reload
-printf 'Pi Web Tools was removed. Configuration, cache, profiles, and browser data remain under XDG user directories.\n'
-printf 'To remove retained user data, review these paths first: %s %s %s\n' "$CONFIG_HOME/pi-web" "$DATA_HOME/pi-web" "${XDG_CACHE_HOME:-$HOME/.cache}/pi-web"
+printf 'Pi Web Tools was removed. Configuration, cache, profiles, browser data, and audit history remain under XDG user directories.\n'
+printf 'To remove retained user data, review these paths first: %s %s %s %s\n' "$CONFIG_HOME/pi-web" "$DATA_HOME/pi-web" "${XDG_CACHE_HOME:-$HOME/.cache}/pi-web" "${XDG_STATE_HOME:-$HOME/.local/state}/pi-web"

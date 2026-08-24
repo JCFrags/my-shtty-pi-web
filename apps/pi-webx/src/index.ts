@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { WebAuditLog } from "./audit.js";
 import { availableTools, TOOL_NAMES, type WebMode } from "./modes.js";
 import { presentResult } from "./output.js";
 import {
@@ -58,7 +59,7 @@ function assertTrusted(ctx: ExtensionContext): void {
   if (!ctx.isProjectTrusted()) throw new Error("Pi WebX is disabled because this project is not trusted.");
 }
 
-export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClient) {
+export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClient, audit: Pick<WebAuditLog, "record"> = new WebAuditLog()) {
   return function piWebxExtension(pi: ExtensionAPI): void {
     let mode: WebMode = "browser";
     let sdk: WebxSdk | undefined;
@@ -68,6 +69,15 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
     let activeOwner: string | undefined;
     let activeCwd: string | undefined;
     let diagnostic = "WebX has not started.";
+    let auditDiagnostic: string | undefined;
+    const writeAudit = async (record: Parameters<typeof audit.record>[0]): Promise<void> => {
+      try {
+        await audit.record(record);
+        auditDiagnostic = undefined;
+      } catch (error) {
+        auditDiagnostic = `Audit history write failed: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    };
 
     const applyTools = () => {
       const unrelated = pi.getActiveTools().filter((name) => !TOOL_NAMES.includes(name as (typeof TOOL_NAMES)[number]));
@@ -128,19 +138,28 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
         ownerId: activeOwner,
         cwd: activeCwd,
       };
-      let result = await sdk.request(operation, params, requestOptions);
-      if (result.approval) {
-        if (!ctx.hasUI) throw new Error("WebX approval is required, but this Pi mode has no approval UI.");
-        const approval = result.approval;
-        const credential = approval.credentialRef ? `\nCredential reference: ${approval.credentialRef}` : "";
-        const choice = await ctx.ui.select(
-          `WebX approval required\nOperation: ${approval.operation}\nTarget: ${approval.target}\nCapability: ${approval.capability}\nBudget: ${approval.budget}${credential}\nReason: ${approval.reason}\nDuration: ${approval.duration}`,
-          ["Allow once", "Deny"],
-        );
-        const decision = choice === "Allow once" ? "allow-once" : "deny";
-        result = await sdk.decideApproval(approval.id, decision, requestOptions);
+      const auditedOperation = operation === "web.search" || operation === "web.read" ? operation : undefined;
+      const startedAt = new Date();
+      try {
+        let result = await sdk.request(operation, params, requestOptions);
+        if (result.approval) {
+          if (!ctx.hasUI) throw new Error("WebX approval is required, but this Pi mode has no approval UI.");
+          const approval = result.approval;
+          const credential = approval.credentialRef ? `\nCredential reference: ${approval.credentialRef}` : "";
+          const choice = await ctx.ui.select(
+            `WebX approval required\nOperation: ${approval.operation}\nTarget: ${approval.target}\nCapability: ${approval.capability}\nBudget: ${approval.budget}${credential}\nReason: ${approval.reason}\nDuration: ${approval.duration}`,
+            ["Allow once", "Deny"],
+          );
+          const decision = choice === "Allow once" ? "allow-once" : "deny";
+          result = await sdk.decideApproval(approval.id, decision, requestOptions);
+        }
+        const presentation = presentResult(result);
+        if (auditedOperation !== undefined) await writeAudit({ operation: auditedOperation, ownerId: activeOwner, toolCallId, startedAt, durationMs: Date.now() - startedAt.getTime(), input: params, result, presentation });
+        return presentation;
+      } catch (error) {
+        if (auditedOperation !== undefined) await writeAudit({ operation: auditedOperation, ownerId: activeOwner, toolCallId, startedAt, durationMs: Date.now() - startedAt.getTime(), input: params, error });
+        throw error;
       }
-      return presentResult(result);
     };
 
     pi.registerTool({ name: "web_search", label: "Web search", description: "Search through one of four fixed recipes. Choose links for URL discovery or extracts for separate query-focused source passages. Choose fast for one search or quality for bounded conservative fan-out, verification, and reranking. Search does not follow links or synthesize across sources.", promptSnippet: "Discover URLs or retrieve separate source passages with a fixed fast or quality recipe", promptGuidelines: ["Use web_search when the URL is unknown. Always choose operation and effort. Use links for discovery, extracts for sourced passages, and quality only when its extra bounded work is useful."], parameters: WebSearchSchema, execute: invoke("web.search") });
@@ -163,7 +182,7 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
         assertTrusted(ctx);
         const requested = args.trim() || "status";
         if (requested === "status") {
-          ctx.ui.notify(diagnostic, capabilities ? "info" : "error");
+          ctx.ui.notify(auditDiagnostic ? `${diagnostic} ${auditDiagnostic}` : diagnostic, capabilities && !auditDiagnostic ? "info" : "error");
           return;
         }
         if (requested === "help") {
