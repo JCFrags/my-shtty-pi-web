@@ -23,7 +23,7 @@ export interface FacadeResult {
   readonly artifactPayload?: { readonly artifactId: string; readonly mediaType: string; readonly dataBase64: string; readonly size: number; readonly complete: boolean; readonly mode: "image" | "raw"; readonly offset?: number; readonly nextOffset?: number | null; readonly eof?: boolean };
   readonly trust?: "untrusted-external" | "local";
 }
-export interface FacadeCapabilities { readonly apiVersion: string; readonly daemon: "ready" | "unavailable"; readonly groups: { readonly web: boolean; readonly browser: boolean; readonly browserDebug: boolean }; readonly browserPathIds: readonly [string, string] }
+export interface FacadeCapabilities { readonly apiVersion: string; readonly daemon: "ready" | "unavailable"; readonly groups: { readonly web: boolean; readonly browser: boolean; readonly browserDebug: boolean }; readonly browserPathIds: readonly string[] }
 interface ObservationBinding { readonly ownerId: string; readonly sessionId: string; readonly frame: BrowserVisualFrame }
 
 /** SDK adapter for the singular Pi facade operation names. */
@@ -49,11 +49,11 @@ export class WebxFacadeClient {
     try {
       const catalog = await client.capabilities({ signal: options.signal });
       const paths = catalog.browserPaths.map((path) => path.pathId);
-      if (paths.length !== 2 || paths[0] !== "agent-browser/chrome" || paths[1] !== "pinchtab/chrome") throw new Error("WebX returned an invalid browser path inventory");
-      return { apiVersion: catalog.apiVersion, daemon: "ready", groups: { web: true, browser: true, browserDebug: true }, browserPathIds: [paths[0], paths[1]] };
+      if (!paths.includes("agent-browser/chrome")) throw new Error("WebX did not report the required visual browser path");
+      return { apiVersion: catalog.apiVersion, daemon: "ready", groups: { web: true, browser: true, browserDebug: true }, browserPathIds: paths };
     } catch (error) {
       if (options.signal.aborted) throw error;
-      return { apiVersion: "1.0.0", daemon: "unavailable", groups: { web: false, browser: false, browserDebug: false }, browserPathIds: ["agent-browser/chrome", "pinchtab/chrome"] };
+      return { apiVersion: "1.0.0", daemon: "unavailable", groups: { web: false, browser: false, browserDebug: false }, browserPathIds: [] };
     }
   }
 
@@ -62,7 +62,7 @@ export class WebxFacadeClient {
     const value = object(input);
     const requestOptions: RequestOptions = { signal: options.signal, idempotencyKey: options.idempotencyKey };
     if (operation === "web.search") return external("Search results", await client.search({ query: requiredString(value.query, "query"), limit: optionalNumber(value.limit), domains: optionalStringArray(value.domains, "domains"), freshness: optionalFreshness(value.freshness) }, requestOptions));
-    if (operation === "web.read") { rejectPresent(value, ["browserSessionId", "tabId"], operation); return external("Read result", await client.read({ url: optionalString(value.url), query: optionalString(value.query), view: optionalReadView(value.view), fields: optionalStringArray(value.fields, "fields"), itemOffset: optionalNumber(value.itemOffset), itemLimit: optionalNumber(value.itemLimit), maxChars: optionalNumber(value.maxChars) }, requestOptions)); }
+    if (operation === "web.read") { rejectPresent(value, ["browserSessionId", "tabId"], operation); return external("Read result", await client.read({ url: requiredString(value.url, "url"), query: optionalString(value.query), view: optionalReadView(value.view), fields: optionalStringArray(value.fields, "fields"), itemOffset: optionalNumber(value.itemOffset), itemLimit: optionalNumber(value.itemLimit), maxChars: optionalNumber(value.maxChars) }, requestOptions)); }
     if (operation === "web.research") return external("Research result", await client.research({ question: requiredString(value.question, "question"), mode: optionalResearchMode(value.mode), maxQueries: optionalNumber(value.maxQueries), maxPages: optionalNumber(value.maxPages), maxBytes: optionalNumber(value.maxBytes), resume: optionalObject(value.resume) }, requestOptions));
     if (operation === "browser.open") { rejectPresent(value, ["newTab"], operation); return local("Browser session opened", await client.createBrowserSession({ pathId: browserPath(value.pathId), url: optionalString(value.url), visible: optionalBoolean(value.visible), label: optionalString(value.label) }, requestOptions)); }
     if (operation === "browser.tabs") return this.browserTabs(client, value, requestOptions);

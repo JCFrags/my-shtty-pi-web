@@ -97,8 +97,8 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     const anonymous: AuthorityActor = { principalId: systemIdentity, agentId: systemIdentity, scopes: new Set() };
     const raw = record(await (await this.connection(anonymous)).call("system.capabilities", {}, signal));
     const paths = array(raw.paths).map(pathCapability);
-    if (paths.length !== 2 || paths[0]?.pathId !== "agent-browser/chrome" || paths[1]?.pathId !== "pinchtab/chrome") {
-      throw new BrowserPortError("unsupported", "browser daemon did not report exactly the two supported paths", 503, true);
+    if (paths[0]?.pathId !== "agent-browser/chrome" || paths.some((path) => path.pathId !== "agent-browser/chrome" && path.pathId !== "pinchtab/chrome")) {
+      throw new BrowserPortError("unsupported", "browser daemon did not report the required visual path", 503, true);
     }
     return paths;
   }

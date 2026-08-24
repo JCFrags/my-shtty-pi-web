@@ -1,4 +1,4 @@
-import { WebxFacadeClient } from "../vendor/sdk/facade.js";
+import { WebxFacadeClient } from "../../../packages/sdk/src/facade.js";
 
 export const SUPPORTED_API_MAJOR = 1;
 
@@ -10,7 +10,7 @@ export interface WebxCapabilities {
     browser: boolean;
     browserDebug: boolean;
   };
-  browserPathIds: readonly [string, string];
+  browserPathIds: readonly string[];
 }
 
 export interface WebxRequestOptions {

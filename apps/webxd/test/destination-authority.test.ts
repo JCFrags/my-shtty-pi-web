@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   FailClosedBrowserDestinationAuthority,
-  IsolatedQualificationDestinationAuthority,
   type DestinationResolver,
 } from "../src/destination-authority.js";
 import type { AuthorityActor } from "../src/ports.js";
@@ -32,40 +31,6 @@ describe("fail-closed browser destination authority", () => {
     await expect(authority.authorize(request("https://example.com/"))).rejects.toMatchObject({
       code: "WEBX_POLICY_EGRESS_REQUIRED",
       status: 403,
-    });
-  });
-});
-
-describe("isolated actual-qualification authority", () => {
-  it("permits one exact non-redirecting loopback fixture document", async () => {
-    const authority = new IsolatedQualificationDestinationAuthority(resolver(["127.0.0.1"]));
-    await expect(authority.authorize(request("http://127.0.0.1:43123/static"))).resolves.toMatchObject({
-      mode: "qualification-only",
-      resolvedAddresses: ["127.0.0.1"],
-      redirectPolicy: { revalidateEveryHop: true, maxRedirects: 0 },
-    });
-  });
-
-  it("permits only exact marked journey documents", async () => {
-    const authority = new IsolatedQualificationDestinationAuthority(resolver(["127.0.0.1"]));
-    await expect(
-      authority.authorize(
-        request("http://127.0.0.1:43123/qualification-journey?case=J2&state=visual-binding"),
-      ),
-    ).resolves.toMatchObject({ mode: "qualification-only" });
-  });
-
-  it.each([
-    "http://127.0.0.1:43123/redirect/private",
-    "http://127.0.0.1:43123/static?next=http://169.254.169.254/",
-    "http://127.0.0.1:43123/qualification-journey?case=J2&state=wrong",
-    "http://127.0.0.1:43123/qualification-journey?case=J4&state=visual-binding",
-    "http://localhost:43123/static",
-    "https://127.0.0.1:43123/static",
-  ])("refuses non-fixture or redirect-capable qualification URL %s", async (url) => {
-    const authority = new IsolatedQualificationDestinationAuthority(resolver(["127.0.0.1"]));
-    await expect(authority.authorize(request(url))).rejects.toMatchObject({
-      code: "WEBX_POLICY_QUALIFICATION_TARGET_DENIED",
     });
   });
 });

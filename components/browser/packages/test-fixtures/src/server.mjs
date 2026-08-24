@@ -39,9 +39,8 @@ export function createFixtureServer({ uploadRoot = defaultUploadRoot } = {}) {
       if (url.pathname === "/artifacts/oversized") return text(response, 200, "0123456789abcdef".repeat(8192));
       if (url.pathname === "/artifacts/pdf") return bytes(response, 200, pdfBytes, "application/pdf");
       if (url.pathname === "/artifacts/image") return serveFile(response, join(root, "viewer", "fixture.svg"));
-      if (url.pathname === "/llms.txt") return text(response, 200, "# Pi Web fixture\n\nThis deterministic loopback site exercises browser qualification.\n", "text/plain; charset=utf-8");
+      if (url.pathname === "/llms.txt") return text(response, 200, "# Pi Web fixture\n\nThis deterministic loopback site exercises browser reading.\n", "text/plain; charset=utf-8");
       if (url.pathname === "/docs.md") return text(response, 200, "# Fixture documentation\n\nThe Markdown fallback returns main content without browser execution.\n", "text/markdown; charset=utf-8");
-      if (url.pathname === "/qualification-journey") return journeyMarker(response, url);
 
       const route = routeToFile(url.pathname);
       if (!route) return text(response, 404, "not found");
@@ -155,15 +154,6 @@ async function body(request, limit = 10 * 1024 * 1024) {
     chunks.push(chunk);
   }
   return Buffer.concat(chunks);
-}
-
-function journeyMarker(response, url) {
-  const caseId = url.searchParams.get("case");
-  const state = url.searchParams.get("state");
-  if (!["J1", "J2", "J5"].includes(caseId) || !/^[a-z-]{1,40}$/u.test(state || "")) return text(response, 400, "invalid public journey marker");
-  const marker = `PI-WEB-JOURNEY:${caseId}:${state}`;
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${marker}</title><style>html,body{margin:0;background:#f4f7fb;color:#10213b;font:28px sans-serif}.marker{box-sizing:border-box;width:100vw;min-height:180px;padding:28px;background:#d9ebff;border:8px solid #175ea8}.action{margin:24px;padding:24px;border:4px solid #175ea8;background:#fff;font:24px sans-serif}</style></head><body><main class="marker" id="journey-marker"><strong>${marker}</strong><p>Deterministic public qualification evidence.</p></main><button class="action" id="journey-action" onclick="this.textContent='ACTION-COMPLETE:${caseId}'">TEST ACTION ${caseId}</button></body></html>`;
-  return text(response, 200, html, "text/html; charset=utf-8");
 }
 
 function download(response) {

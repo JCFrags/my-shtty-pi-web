@@ -1,6 +1,6 @@
-# Pi web tools
+# Pi Web Tools
 
-This repository is the single source for Pi's internet tools.
+This repository is the single source for Pi's internet capabilities on Fedora.
 
 It contains:
 
@@ -8,24 +8,76 @@ It contains:
 - browser automation with explicit sessions and tabs;
 - a Tauri desktop workspace for live viewing and user control;
 - PDF and office-document conversion;
-- the Pi extension that presents these capabilities as one tool set;
-- local deployment files.
+- the Pi extension that presents one clear tool set;
+- one Fedora installer and uninstaller.
 
-The components can share infrastructure when that gives a clear benefit. They remain separate where separation keeps simple operations reliable. Search and direct reading do not require the visual browser. Browser automation and the desktop workspace are available for dynamic pages, interaction, and user supervision.
+Search and direct reading do not require the visual browser. Browser automation starts only when a dynamic page, interaction, or visual check needs it.
 
 ## Main directories
 
 - `apps/pi-webx`: Pi extension.
-- `apps/webxd`: local authority for web and browser operations.
-- `components/browser`: browser coordinator, backends, Tauri workspace, reader, Docling integration, and browser protocol.
-- `packages/sdk`: client interface used by the Pi extension.
-- `packages/artifacts`: internal large-result storage primitives.
-- `packages/policy`: destination and ownership policy primitives.
-- `packages/test-fixtures`: local deterministic fixtures.
-- `deploy`: retained local deployment files.
+- `apps/webxd`: local web and browser authority.
+- `components/browser`: browser coordinator, Agent Browser adapter, optional PinchTab adapter, Tauri workspace, reader, and document converter.
+- `packages/sdk`: the canonical client interface used directly by the Pi extension.
+- `packages/artifacts`: internal bounded-transfer primitives.
+- `packages/policy`: destination and ownership policy.
+- `packages/test-fixtures`: deterministic local test inputs.
 
-See [`FUTURE_FEATURES.md`](FUTURE_FEATURES.md) for useful ideas intentionally deferred until the core is stable.
+The separate research archive concept is recorded in [`FUTURE_FEATURES.md`](FUTURE_FEATURES.md). Core web traffic uses only a short-lived cache. The cache holds 512 recent RAM entries and targets at most 10 GiB on SSD.
 
-## Current state
+## Browser support
 
-The source is retained for consolidation and rebuilding. It is not installed or connected to Pi on this computer. The next work is to simplify component boundaries, replace copied build output with one packaging path, and create one clear installer.
+`agent-browser/chrome` is the required visual browser path. It supports the visible workspace and user takeover. `pinchtab/chrome` is an optional non-visual adapter. Optional adapters never block the main browser path from starting.
+
+## Install on Fedora
+
+Pi must already be installed. Then run:
+
+```bash
+./install-fedora.sh
+```
+
+The installer stages the source at `~/.local/lib/pi-web-tools`, installs locked dependencies, builds the services and Tauri app, links the Pi extension, and starts user services.
+
+Useful commands:
+
+```bash
+pi-web status
+pi-web doctor --json
+pi-web workspace
+```
+
+To remove installed code and services while preserving user data:
+
+```bash
+./uninstall-fedora.sh
+```
+
+Review `~/.config/pi-web`, `~/.local/share/pi-web`, and `~/.cache/pi-web` before deleting retained user data.
+
+## Pi tools
+
+- `web_search`
+- `web_read`
+- `web_research`
+- `browser_open`
+- `browser_tabs`
+- `browser_observe`
+- `browser_act`
+- `browser_debug`
+
+Only the user changes capability modes with `/web off|read|browser|debug`.
+
+## Development
+
+```bash
+pnpm install --frozen-lockfile
+pnpm lint
+pnpm typecheck
+pnpm test
+cd components/browser
+uv run pytest tests/reader tests/docling
+cargo test --workspace
+```
+
+Generated dependencies and build output are not source and must not be committed.

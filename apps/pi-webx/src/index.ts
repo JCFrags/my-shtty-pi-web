@@ -23,7 +23,7 @@ import {
 
 const STATUS_KEY = "pi-webx";
 const REFRESH_MS = 60_000;
-const REQUIRED_BROWSER_PATHS = new Set(["agent-browser/chrome", "pinchtab/chrome"]);
+const REQUIRED_BROWSER_PATH = "agent-browser/chrome";
 const WEBX_AGENT_GUIDANCE = `
 WebX is Pi's primary internet interface. Use WebX automatically when the task needs current online facts, a URL, an API, a document, or website interaction. Do not ask the user to enable web mode.
 - Use web_read first when a useful URL or machine-readable API endpoint is known. Use fields, query, itemOffset, and itemLimit for structured JSON.
@@ -48,8 +48,8 @@ function capabilityError(capabilities: WebxCapabilities): string | undefined {
   }
   if (capabilities.daemon !== "ready") return "WebX daemon is unavailable. Direct fallback is disabled.";
   const paths = capabilities.browserPathIds;
-  if (paths.length !== 2 || new Set(paths).size !== 2 || paths.some((path) => !REQUIRED_BROWSER_PATHS.has(path))) {
-    return "WebX capability contract must report exactly agent-browser/chrome and pinchtab/chrome browser paths.";
+  if (!paths.includes(REQUIRED_BROWSER_PATH)) {
+    return "WebX capability contract must report the required visual agent-browser/chrome path.";
   }
   return undefined;
 }

@@ -11,7 +11,6 @@ use pi_web_artifact_store::{ArtifactContext, ArtifactRecord as StoredArtifactRec
 use pi_web_backend_agent_browser::{AgentBrowserController, Cancellation as CuaCancellation, CuaAction, VisualBinding as BackendVisualBinding};
 use pi_web_backend_core::{BackendError, BrowserController};
 use pi_web_backend_pinchtab::PinchTabController;
-use pi_web_backend_rustwright::RustwrightController;
 use pi_web_protocol::*;
 use pi_web_reader_client::{ReadRequest, ReadResponse, ReadSource, ReaderClient, SearchClient, SearchQuery};
 use serde::{Deserialize, Serialize};
@@ -49,7 +48,6 @@ pub struct Coordinator {
     profile_locks: Arc<DashMap<ProfileId, Arc<Mutex<()>>>>,
     controls: Arc<DashMap<TabId, Arc<ControlGate>>>,
     agent_browser: Arc<AgentBrowserController>,
-    rustwright: Arc<RustwrightController>,
     pinchtab: Arc<PinchTabController>,
     search: SearchClient,
     reader: ReaderClient,
@@ -248,7 +246,6 @@ enum EngineSelection {
 enum BackendSelection {
     #[default]
     AgentBrowser,
-    Rustwright,
     Pinchtab,
 }
 
@@ -482,7 +479,6 @@ fn workspace_backend(backend: BrowserBackend) -> &'static str {
     match backend {
         BrowserBackend::AgentBrowser => "agent-browser",
         BrowserBackend::Pinchtab => "pinchtab",
-        BrowserBackend::Rustwright => "unsupported",
     }
 }
 
@@ -606,7 +602,6 @@ impl Coordinator {
             profile_locks: Arc::new(DashMap::new()),
             controls: Arc::new(DashMap::new()),
             agent_browser,
-            rustwright: Arc::new(RustwrightController),
             pinchtab: Arc::new(PinchTabController::new("pinchtab")?),
             search,
             reader,
@@ -823,24 +818,24 @@ impl Coordinator {
 
     async fn system_capabilities(&self) -> Result<Value, RpcError> {
         self.agent_browser.capabilities().await.map_err(backend_rpc_error)?;
-        self.pinchtab.capabilities().await.map_err(backend_rpc_error)?;
+        let mut paths = vec![json!({
+            "pathId": BrowserPathId::AgentBrowserChrome,
+            "actions": ["navigate", "mouse-move", "mouse-down", "mouse-up", "click", "double-click", "wheel", "drag", "key-press", "key-down", "key-up", "text-input", "fill", "select", "upload", "download", "back", "forward", "reload", "wait"],
+            "observations": ["main", "interactive", "visual", "full", "diff"],
+            "touch": false, "uploads": true, "downloads": true, "visual": true
+        })];
+        if self.pinchtab.capabilities().await.is_ok() {
+            paths.push(json!({
+                "pathId": BrowserPathId::PinchtabChrome,
+                "actions": ["navigate", "click", "fill"],
+                "observations": ["main", "interactive"],
+                "touch": false, "uploads": false, "downloads": false, "visual": false
+            }));
+        }
         Ok(json!({
             "protocolVersion": PROTOCOL_VERSION,
             "supportedPathIds": SUPPORTED_PATH_IDS,
-            "paths": [
-                {
-                    "pathId": BrowserPathId::AgentBrowserChrome,
-                    "actions": ["navigate", "mouse-move", "mouse-down", "mouse-up", "click", "double-click", "wheel", "drag", "key-press", "key-down", "key-up", "text-input", "fill", "select", "upload", "download", "back", "forward", "reload", "wait"],
-                    "observations": ["main", "interactive", "visual", "full", "diff"],
-                    "touch": false, "uploads": true, "downloads": true, "visual": true
-                },
-                {
-                    "pathId": BrowserPathId::PinchtabChrome,
-                    "actions": ["navigate", "click", "fill"],
-                    "observations": ["main", "interactive"],
-                    "touch": false, "uploads": false, "downloads": false, "visual": false
-                }
-            ],
+            "paths": paths,
             "transports": ["unix-ndjson", "loopback-http", "loopback-websocket"],
             "coordination": { "explicitAddressing": true, "humanTakeover": true, "perHostQueues": true },
         }))
@@ -1373,7 +1368,6 @@ impl Coordinator {
         let backend = match params.backend {
             BackendSelection::AgentBrowser => BrowserBackend::AgentBrowser,
             BackendSelection::Pinchtab => BrowserBackend::Pinchtab,
-            BackendSelection::Rustwright => return Err(RpcError { code: -32040, message: "unsupported browser path".into(), data: Some(json!({ "requested": "rustwright", "supportedPathIds": SUPPORTED_PATH_IDS })) }),
         };
         if backend == BrowserBackend::Pinchtab && (profile.is_some() || params.visible.unwrap_or(false)) {
             return Err(RpcError { code: -32040, message: "unsupported capability on pinchtab/chrome".into(), data: Some(json!({ "pathId": BrowserPathId::PinchtabChrome, "capability": "profile-or-visual" })) });
@@ -2208,7 +2202,6 @@ impl Coordinator {
     fn controller(&self, backend: BrowserBackend) -> Arc<dyn BrowserController> {
         match backend {
             BrowserBackend::AgentBrowser => self.agent_browser.clone(),
-            BrowserBackend::Rustwright => self.rustwright.clone(),
             BrowserBackend::Pinchtab => self.pinchtab.clone(),
         }
     }
@@ -2422,7 +2415,7 @@ impl Coordinator {
                 tracing::info!(host_id=%recovered.handle.host.host_id, "discarded ephemeral browser host during recovery");
                 continue;
             }
-            if recovered.handle.host.engine != BrowserEngine::Chromium || recovered.handle.host.backend == BrowserBackend::Rustwright {
+            if recovered.handle.host.engine != BrowserEngine::Chromium {
                 tracing::warn!(host_id=%recovered.handle.host.host_id, "refused recovery of unsupported browser path");
                 continue;
             }
@@ -2579,7 +2572,6 @@ fn action_supported(backend: BrowserBackend, action: &BrowserAction) -> bool {
         BrowserBackend::Pinchtab => matches!(action,
             BrowserAction::Navigate { .. } | BrowserAction::Click { .. } | BrowserAction::Fill { .. }
         ),
-        BrowserBackend::Rustwright => false,
     }
 }
 
@@ -2601,7 +2593,6 @@ fn path_id(backend: BrowserBackend) -> &'static str {
     match backend {
         BrowserBackend::AgentBrowser => BrowserPathId::AgentBrowserChrome.as_str(),
         BrowserBackend::Pinchtab => BrowserPathId::PinchtabChrome.as_str(),
-        BrowserBackend::Rustwright => "unsupported",
     }
 }
 

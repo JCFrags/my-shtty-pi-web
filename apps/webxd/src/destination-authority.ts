@@ -14,7 +14,7 @@ export interface BrowserDestinationRequest {
 }
 
 export interface BrowserDestinationAuthorization {
-  readonly mode: "egress-bound" | "qualification-only";
+  readonly mode: "egress-bound";
   readonly normalizedUrl: string;
   readonly asciiHostname: string;
   readonly port: number;
@@ -114,62 +114,6 @@ export class FailClosedBrowserDestinationAuthority implements BrowserDestination
       403,
     );
   }
-}
-
-const qualificationPaths = new Set([
-  "/api/never",
-  "/qualification-journey",
-  "/spa",
-  "/static",
-  "/visual-controls",
-  "/workspace-states",
-]);
-
-/**
- * This authority exists only for the isolated actual-qualification executable.
- * It permits exact non-redirecting fixture documents on 127.0.0.1. Production
- * main.ts never constructs it.
- */
-export class IsolatedQualificationDestinationAuthority implements BrowserDestinationAuthority {
-  constructor(private readonly resolver: DestinationResolver = new SystemDestinationResolver()) {}
-
-  async authorize(request: BrowserDestinationRequest, signal?: AbortSignal): Promise<BrowserDestinationAuthorization> {
-    const parsed = parseBrowserUrl(request.url);
-    if (
-      parsed.protocol !== "http:" ||
-      parsed.hostname !== "127.0.0.1" ||
-      parsed.username !== "" ||
-      parsed.password !== "" ||
-      parsed.hash !== "" ||
-      !qualificationPaths.has(parsed.pathname) ||
-      (parsed.pathname !== "/qualification-journey" && parsed.search !== "") ||
-      (parsed.pathname === "/qualification-journey" && !isQualificationJourneySearch(parsed.searchParams))
-    ) {
-      throw new BrowserPortError("WEBX_POLICY_QUALIFICATION_TARGET_DENIED", "qualification permits only an exact isolated fixture document", 403);
-    }
-    const addresses = await this.resolver.resolve(parsed.hostname.replace(/^\[|\]$/gu, ""), signal);
-    if (addresses.length !== 1 || addresses[0] !== "127.0.0.1") {
-      throw new BrowserPortError("WEBX_POLICY_QUALIFICATION_TARGET_DENIED", "qualification fixture resolution changed", 403);
-    }
-    return Object.freeze({
-      mode: "qualification-only",
-      normalizedUrl: parsed.toString(),
-      asciiHostname: parsed.hostname,
-      port: parsed.port === "" ? 80 : Number(parsed.port),
-      resolvedAddresses: Object.freeze([...addresses]),
-      redirectPolicy: Object.freeze({ revalidateEveryHop: true, maxRedirects: 0 }),
-    });
-  }
-}
-
-function isQualificationJourneySearch(parameters: URLSearchParams): boolean {
-  const expected = new Map([
-    ["J1", "semantic-inspect"],
-    ["J2", "visual-binding"],
-    ["J5", "takeover-return"],
-  ]);
-  return [...parameters.keys()].sort().join(",") === "case,state"
-    && expected.get(parameters.get("case") ?? "") === parameters.get("state");
 }
 
 export function actionDestination(action: BrowserAction): { operation: "navigate" | "new-tab"; url: string } | undefined {

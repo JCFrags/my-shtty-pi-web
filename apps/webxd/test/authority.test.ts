@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebxAuthority } from "../src/authority.js";
-import { PUBLIC_ARTIFACTS, PUBLIC_SOURCES } from "../src/fixtures.js";
+import { PUBLIC_SOURCES } from "../src/fixtures.js";
 import type { AuthorityActor, BrowserDaemonPort } from "../src/ports.js";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -39,7 +39,7 @@ function browser(): BrowserDaemonPort {
 }
 
 function authority(browserPort = browser(), readerUrl?: string) {
-  return new WebxAuthority({ browser: browserPort, sources: PUBLIC_SOURCES, artifacts: PUBLIC_ARTIFACTS, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, readerUrl });
+  return new WebxAuthority({ browser: browserPort, sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, readerUrl });
 }
 
 async function call(instance: WebxAuthority, owner: AuthorityActor, method: "GET" | "POST" | "DELETE", path: string, body?: unknown, key?: string, maxResponseBytes = 1_048_576) {
@@ -47,14 +47,12 @@ async function call(instance: WebxAuthority, owner: AuthorityActor, method: "GET
 }
 
 describe("WebxAuthority", () => {
-  it("serves bounded deterministic search, read, research, and internal artifact operations", async () => {
+  it("serves bounded deterministic search, read, and research operations", async () => {
     const instance = authority();
     expect((await call(instance, actor(), "POST", "/v1/search", { query: "WebX routes", limit: 1 }, "search-key-001")).status).toBe(200);
     const read = await call(instance, actor(), "POST", "/v1/read", { url: "https://fixture.invalid/webx", maxChars: 4 }, "read-key-001");
     expect(read.body).toMatchObject({ untrustedContent: "WebX", truncated: true });
     expect((await call(instance, actor(), "POST", "/v1/research", { question: "browser paths", maxSources: 2 }, "research-key-001")).status).toBe(200);
-    const artifact = await call(instance, actor(), "GET", "/v1/artifacts/artifact-webx-001/excerpt?offset=0&max_bytes=4");
-    expect(artifact.body).toMatchObject({ excerpt: "WebX", integrityVerified: true, nextOffset: 4 });
   });
 
   it("reads a bounded byte range into an integrity-checked owner artifact", async () => {

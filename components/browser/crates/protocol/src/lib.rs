@@ -133,7 +133,6 @@ pub struct AgentRegistration {
 #[serde(rename_all = "kebab-case")]
 pub enum BrowserBackend {
     AgentBrowser,
-    Rustwright,
     Pinchtab,
 }
 

@@ -5,12 +5,15 @@
   "type": "module",
   "packageManager": "pnpm@10.13.1",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "scripts": {
     "lint": "eslint .",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm -r --if-present test"
+    "test": "pnpm -r --if-present test",
+    "test:python": "cd components/browser && uv run pytest tests/reader tests/docling",
+    "check:rust": "cd components/browser && cargo check --workspace",
+    "test:rust": "cd components/browser && cargo test --workspace"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

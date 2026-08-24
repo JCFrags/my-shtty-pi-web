@@ -5,7 +5,10 @@
     "authenticationId": "unix-peer-1000"
   },
   "valid": {
-    "owner": { "principalId": "principal-a", "agentId": "agent-a" },
+    "owner": {
+      "principalId": "principal-a",
+      "agentId": "agent-a"
+    },
     "path": {
       "pathId": "agent-browser/chrome",
       "backendVersion": "0.33.1",
@@ -31,7 +34,10 @@
     },
     "action": {
       "kind": "click",
-      "point": { "x": 180, "y": 120 },
+      "point": {
+        "x": 180,
+        "y": 120
+      },
       "button": "left",
       "visualGuard": {
         "viewportId": "viewport-a",
@@ -46,15 +52,23 @@
       "name": "malformed-empty-session",
       "expectedCode": "invalid-request",
       "address": {
-        "agentId": "agent-a", "sessionId": "", "tabId": "tab-a",
-        "pathId": "agent-browser/chrome", "hostGeneration": 4, "engineGeneration": 7, "controlEpoch": 3
+        "agentId": "agent-a",
+        "sessionId": "",
+        "tabId": "tab-a",
+        "pathId": "agent-browser/chrome",
+        "hostGeneration": 4,
+        "engineGeneration": 7,
+        "controlEpoch": 3
       }
     },
     {
       "name": "wrong-owner",
       "expectedCode": "wrong-owner",
       "principalId": "principal-b",
-      "owner": { "principalId": "principal-a", "agentId": "agent-a" }
+      "owner": {
+        "principalId": "principal-a",
+        "agentId": "agent-a"
+      }
     },
     {
       "name": "wrong-path",
@@ -65,7 +79,7 @@
     {
       "name": "unsupported-path",
       "expectedCode": "invalid-request",
-      "requestedPathId": "rustwright/chrome"
+      "requestedPathId": "unknown/chrome"
     },
     {
       "name": "stale-host-generation",

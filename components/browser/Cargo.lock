@@ -2636,7 +2636,6 @@ dependencies = [
  "pi-web-backend-agent-browser",
  "pi-web-backend-core",
  "pi-web-backend-pinchtab",
- "pi-web-backend-rustwright",
  "pi-web-protocol",
  "pi-web-reader-client",
  "serde",
@@ -2715,15 +2714,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
-]
-
-[[package]]
-name = "pi-web-backend-rustwright"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "pi-web-backend-core",
- "pi-web-protocol",
 ]
 
 [[package]]

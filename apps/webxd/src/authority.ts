@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import type {
   ArtifactByteExcerpt,
-  ArtifactExcerpt,
   BoundedContent,
   BrowserAction,
   BrowserDebugRequest,
@@ -26,7 +25,6 @@ import { BrowserPortError, isBrowserPathId } from "./ports.js";
 
 const DEFAULT_CONTENT_CHARS = 16_384;
 const MAX_CONTENT_CHARS = 100_000;
-const MAX_ARTIFACT_BYTES = 65_536;
 const MAX_ARTIFACT_BINARY_BYTES = 49_152;
 const MAX_RANGE_BYTES = 1_048_576;
 const MAX_RANGE_REDIRECTS = 10;
@@ -37,15 +35,6 @@ const READ_CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
 
 interface RawSearchHit { readonly url?: unknown; readonly title?: unknown; readonly content?: unknown; readonly score?: unknown; readonly publishedDate?: unknown; readonly engines?: unknown }
 interface ParsedSearchQuery { readonly query: string; readonly domains: readonly string[]; readonly phrases: readonly string[]; readonly terms: readonly string[]; readonly requiredTokens: readonly string[] }
-
-interface StoredArtifact {
-  readonly artifactId: string;
-  readonly ownerPrincipalId: string;
-  readonly mediaType: string;
-  readonly sha256: string;
-  readonly content: string;
-  readonly visibility: Visibility;
-}
 
 interface StoredBinaryArtifact {
   readonly artifactId: string;
@@ -64,7 +53,6 @@ interface CachedResult {
 export interface WebxAuthorityOptions {
   readonly browser: BrowserDaemonPort;
   readonly sources: readonly IndexedSource[];
-  readonly artifacts: readonly StoredArtifact[];
   readonly clock: AuthorityClock;
   readonly ids: AuthorityIdSource;
   readonly searxUrl?: string;
@@ -75,10 +63,7 @@ export interface WebxAuthorityOptions {
 export class WebxAuthority {
   readonly #idempotency = new Map<string, CachedResult>();
   readonly #browserOwners = new Map<string, { principalId: string; agentId: string }>();
-  readonly #liveSources = new Map<string, IndexedSource>();
-  readonly #liveArtifacts = new Map<string, StoredArtifact>();
   readonly #liveBinaryArtifacts = new Map<string, StoredBinaryArtifact>();
-  readonly #liveReadMetadata = new Map<string, Readonly<Record<string, unknown>>>();
   readonly #cache: WebCache;
 
   constructor(private readonly options: WebxAuthorityOptions) {
@@ -127,7 +112,7 @@ export class WebxAuthority {
       const paths = await this.options.browser.capabilities(request.signal);
       const catalog: CapabilityCatalog = {
         apiVersion: WEBX_API_VERSION,
-        capabilities: ["search", "read", "research", "browser"].map((id) => ({ id: id as CapabilityCatalog["capabilities"][number]["id"], enabled: true, healthy: id !== "browser" || paths.length === 2 })),
+        capabilities: ["search", "read", "research", "browser"].map((id) => ({ id: id as CapabilityCatalog["capabilities"][number]["id"], enabled: true, healthy: id !== "browser" || paths.some((path) => path.pathId === "agent-browser/chrome" && path.visual) })),
         browserPaths: paths,
       };
       return ok(catalog);
@@ -136,9 +121,6 @@ export class WebxAuthority {
     if (request.method === "POST" && url.pathname === "/v1/read") return ok(await this.read(actor, body<ReadRequest>(request), request.signal));
     if (request.method === "POST" && url.pathname === "/v1/read-range") return ok(await this.readRange(actor, body<RangeReadRequest>(request), request.signal));
     if (request.method === "POST" && url.pathname === "/v1/research") return ok(await this.research(actor, body<ResearchRequest>(request), request.signal));
-    if (request.method === "GET" && segments[1] === "artifacts" && segments[3] === "excerpt") {
-      return ok(this.artifact(actor, segments[2] ?? "", numberQuery(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER), numberQuery(url, "max_bytes", 16_384, 1, MAX_ARTIFACT_BYTES)));
-    }
     if (request.method === "GET" && segments[1] === "artifacts" && segments[3] === "bytes") {
       return ok(this.artifactBytes(actor, segments[2] ?? "", numberQuery(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER), numberQuery(url, "max_bytes", MAX_ARTIFACT_BINARY_BYTES, 1, MAX_ARTIFACT_BINARY_BYTES)));
     }
@@ -230,7 +212,7 @@ export class WebxAuthority {
   private async uncachedRead(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<BoundedContent> {
     requireScope(actor, "retrieval.read");
     if (typeof request.url !== "string" || request.url.length === 0) throw problem(400, "invalid-request", "url is required", false);
-    const allSources = [...this.options.sources, ...this.#liveSources.values()];
+    const allSources = this.options.sources;
     const input = request as ReadRequest & { query?: string; view?: string; fields?: readonly string[]; itemOffset?: number; itemLimit?: number };
     const transformed = input.query !== undefined || input.fields !== undefined || input.itemOffset !== undefined || input.itemLimit !== undefined || (input.view !== undefined && input.view !== "main");
     let source = !transformed ? allSources.find((item) => item.url === request.url) : undefined;
@@ -246,18 +228,17 @@ export class WebxAuthority {
       const page = await response.json() as { url?: unknown; title?: unknown; content?: unknown; mediaType?: unknown; source?: unknown; truncated?: unknown; metadata?: unknown };
       if (typeof page.content !== "string") throw new Error("reader returned no text content");
       const digest = createHash("sha256").update(`${request.url}\0${page.content}`).digest("hex");
-      source = { hitId: `hit-${digest.slice(0, 20)}`, ownerPrincipalId: actor.principalId, title: typeof page.title === "string" ? page.title : request.url, url: typeof page.url === "string" ? page.url : request.url, content: page.content, visibility: "public", pageId: `page-${digest}`, artifactId: `artifact-${digest}` };
-      this.#liveSources.set(source.pageId, source);
+      source = { hitId: `hit-${digest.slice(0, 20)}`, ownerPrincipalId: actor.principalId, title: typeof page.title === "string" ? page.title : request.url, url: typeof page.url === "string" ? page.url : request.url, content: page.content, visibility: "public" };
       const readerMetadata = typeof page.metadata === "object" && page.metadata !== null ? page.metadata as Record<string, unknown> : {};
-      this.#liveReadMetadata.set(source.pageId, { requestedUrl: request.url, finalUrl: source.url, source: page.source, substituted: source.url !== request.url, saved: true, immediatelyRecallable: true, pageId: source.pageId, artifactId: source.artifactId, reader: { ...readerMetadata, truncated: page.truncated === true } });
-      this.#liveArtifacts.set(source.artifactId, { artifactId: source.artifactId, ownerPrincipalId: actor.principalId, mediaType: typeof page.mediaType === "string" ? page.mediaType : "text/markdown", sha256: createHash("sha256").update(page.content).digest("hex"), content: page.content, visibility: "public" });
+      const metadata = { requestedUrl: request.url, finalUrl: source.url, source: page.source, substituted: source.url !== request.url, reader: { ...readerMetadata, truncated: page.truncated === true } };
+      const maxChars = integer(request.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, 1_000_000);
+      const bounded = boundText(source.content, maxChars);
+      return { title: source.title, url: source.url, untrustedContent: bounded.text, truncated: bounded.truncated || page.truncated === true, visibility: source.visibility, metadata } as BoundedContent;
     }
     if (source === undefined || !canRead(actor, source.ownerPrincipalId, source.visibility)) throw problem(404, "not-found", "page was not found", false);
     const maxChars = integer(request.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, 1_000_000);
     const bounded = boundText(source.content, maxChars);
-    const metadata = this.#liveReadMetadata.get(source.pageId);
-    const readerTruncated = metadata?.reader !== null && typeof metadata?.reader === "object" && (metadata.reader as { truncated?: unknown }).truncated === true;
-    return { title: source.title, url: source.url, untrustedContent: bounded.text, truncated: bounded.truncated || readerTruncated, visibility: source.visibility, metadata } as BoundedContent;
+    return { title: source.title, url: source.url, untrustedContent: bounded.text, truncated: bounded.truncated, visibility: source.visibility } as BoundedContent;
   }
 
   private async readRange(actor: AuthorityActor, request: RangeReadRequest, signal?: AbortSignal): Promise<RangeReadResponse> {
@@ -359,16 +340,6 @@ export class WebxAuthority {
       : `Insufficient relevant evidence. Found ${readableSources} readable source${readableSources === 1 ? "" : "s"}; at least ${minimumReadable} are required.\n\n${sections.join("\n\n")}`;
     const outputLimit = Math.min(MAX_CONTENT_CHARS, input.maxBytes ?? 24_000);
     return { question: request.question, summary: boundText(summary, outputLimit).text, sources, truncated: searchTruncated || summary.length > outputLimit };
-  }
-
-  private artifact(actor: AuthorityActor, artifactId: string, offset: number, maxBytes: number): ArtifactExcerpt {
-    requireScope(actor, "artifacts.read");
-    const artifact = this.options.artifacts.find((item) => item.artifactId === artifactId) ?? this.#liveArtifacts.get(artifactId);
-    if (artifact === undefined || !canRead(actor, artifact.ownerPrincipalId, artifact.visibility)) throw problem(404, "not-found", "artifact was not found", false);
-    const bytes = new TextEncoder().encode(artifact.content);
-    const end = Math.min(bytes.byteLength, offset + maxBytes);
-    const excerpt = new TextDecoder().decode(bytes.slice(offset, end));
-    return { artifactId, mediaType: artifact.mediaType, sha256: artifact.sha256, sizeBytes: bytes.byteLength, excerpt, offset, ...(end < bytes.byteLength ? { nextOffset: end } : {}), visibility: artifact.visibility, integrityVerified: true };
   }
 
   private pruneBinaryArtifacts(): void {

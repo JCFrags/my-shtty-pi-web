@@ -30,7 +30,7 @@ Browser operations use only `BrowserDaemonPort`. Semantic actions use the frozen
 
 ## Short-lived cache
 
-Search results use a 15-minute cache. Extracted page reads use a six-hour cache. The cache keeps up to 512 recent entries in RAM and up to 2 GiB on SSD. Files default to `$XDG_CACHE_HOME/pi-web/responses` with user-only permissions. `WEBX_CACHE_DIR` can select another directory. Cache failures never block a live request.
+Search results use a 15-minute cache. Extracted page reads use a six-hour cache. The cache keeps up to 512 recent entries in RAM and up to 10 GiB on SSD. Files default to `$XDG_CACHE_HOME/pi-web/responses` with user-only permissions. `WEBX_CACHE_DIR` can select another directory. Cache failures never block a live request.
 
 This cache reduces repeated search-provider and website traffic. It is not a durable research archive and has no Pi-facing recall operations.
 

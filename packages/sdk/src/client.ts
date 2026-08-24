@@ -3,7 +3,6 @@ import type { UnixSocketTransport } from "./transport.js";
 import {
   WEBX_API_MAJOR,
   type ArtifactByteExcerpt,
-  type ArtifactExcerpt,
   type BoundedContent,
   type BrowserAction,
   type BrowserControlResult,
@@ -87,11 +86,6 @@ export class WebxClient {
 
   research(request: ResearchRequest, options: RequestOptions): Promise<ResearchResponse> {
     return this.call("POST", "/v1/research", request, requireIdempotency(options));
-  }
-
-  getArtifactExcerpt(artifactId: string, offset = 0, maxBytes = 16_384, options: RequestOptions = {}): Promise<ArtifactExcerpt> {
-    const query = new URLSearchParams({ offset: String(offset), max_bytes: String(maxBytes) });
-    return this.call("GET", `/v1/artifacts/${encodeURIComponent(artifactId)}/excerpt?${query}`, undefined, options);
   }
 
   getArtifactBytes(artifactId: string, offset = 0, maxBytes = 49_152, options: RequestOptions = {}): Promise<ArtifactByteExcerpt> {

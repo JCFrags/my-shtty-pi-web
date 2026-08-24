@@ -37,7 +37,7 @@ export default tseslint.config(
     languageOptions: { globals: runtimeGlobals },
   },
   {
-    files: ["apps/pi-webx/qualification/**/*.{mjs,js}", "components/browser/**/*.{mjs,js,ts,tsx}"],
+    files: ["components/browser/**/*.{mjs,js,ts,tsx}"],
     rules: {
       "@typescript-eslint/no-unused-expressions": "off",
       "@typescript-eslint/no-unused-vars": "off",

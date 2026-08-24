@@ -28,8 +28,6 @@ export interface IndexedSource {
   readonly url: string;
   readonly content: string;
   readonly visibility: Visibility;
-  readonly pageId: string;
-  readonly artifactId: string;
 }
 
 export class BrowserPortError extends Error {

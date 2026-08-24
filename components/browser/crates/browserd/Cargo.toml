@@ -16,7 +16,6 @@ pi-web-artifact-store = { path = "../artifact-store" }
 pi-web-backend-agent-browser = { path = "../backend-agent-browser" }
 pi-web-backend-core = { path = "../backend-core" }
 pi-web-backend-pinchtab = { path = "../backend-pinchtab" }
-pi-web-backend-rustwright = { path = "../backend-rustwright" }
 pi-web-protocol = { path = "../protocol" }
 pi-web-reader-client = { path = "../reader-client" }
 serde.workspace = true

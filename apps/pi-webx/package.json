@@ -8,8 +8,7 @@
   },
   "files": [
     "src",
-    "skills",
-    "vendor"
+    "skills"
   ],
   "pi": {
     "extensions": [

@@ -128,7 +128,7 @@ export class PinchTabRunner {
         if (attempt === 199) throw new Error("PinchTab instance did not become ready");
         await sleep(50);
       }
-      const session = await this.run(["session", "create", "--agent-id", this.agentId, "--label", "pi-web qualification", "--json"], { redactResult: false });
+      const session = await this.run(["session", "create", "--agent-id", this.agentId, "--label", "pi-web conformance", "--json"], { redactResult: false });
       if (session.agentId !== this.agentId) throw new Error("PinchTab session owner mismatch");
       this.sessionId = requiredString(session, "id", "session");
       return { pathId: PINCHTAB_PATH_ID, provider: PINCHTAB_PROVIDER, version: PINCHTAB_VERSION, instanceId: this.instanceId, sessionId: this.sessionId };

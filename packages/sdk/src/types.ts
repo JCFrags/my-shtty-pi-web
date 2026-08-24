@@ -75,8 +75,6 @@ export interface SearchHit {
   readonly snippet: string;
   readonly rank: number;
   readonly visibility: Visibility;
-  readonly pageId?: string;
-  readonly artifactId?: string;
 }
 
 export interface SearchResponse {
@@ -125,8 +123,6 @@ export interface BoundedContent {
   readonly url: string;
   readonly untrustedContent: string;
   readonly truncated: boolean;
-  readonly artifactId?: string;
-  readonly pageId?: string;
   readonly visibility: Visibility;
 }
 
@@ -147,19 +143,6 @@ export interface ResearchResponse {
   readonly summary: string;
   readonly sources: readonly SearchHit[];
   readonly truncated: boolean;
-  readonly artifactId?: string;
-}
-
-export interface ArtifactExcerpt {
-  readonly artifactId: string;
-  readonly mediaType: string;
-  readonly sha256: string;
-  readonly sizeBytes: number;
-  readonly excerpt: string;
-  readonly offset: number;
-  readonly nextOffset?: number;
-  readonly visibility: Visibility;
-  readonly integrityVerified: true;
 }
 
 export interface ArtifactByteExcerpt {

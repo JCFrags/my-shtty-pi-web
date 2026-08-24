@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
 
@@ -25,7 +25,7 @@ export class WebCache {
   constructor(options: WebCacheOptions = {}) {
     this.#directory = options.directory;
     this.#maxMemoryEntries = options.maxMemoryEntries ?? 512;
-    this.#maxDiskBytes = options.maxDiskBytes ?? 2 * 1024 * 1024 * 1024;
+    this.#maxDiskBytes = options.maxDiskBytes ?? 10 * 1024 * 1024 * 1024;
   }
 
   async get<T>(namespace: string, input: unknown): Promise<T | undefined> {
@@ -49,7 +49,9 @@ export class WebCache {
       this.#remember(key, envelope);
       return envelope.value;
     } catch (error) {
-      if ((error as { code?: string }).code === "ENOENT") return undefined;
+      if ((error as { code?: string }).code !== "ENOENT") {
+        await unlink(join(this.#directory, `${key}.json`)).catch(() => undefined);
+      }
       return undefined;
     }
   }
@@ -60,10 +62,15 @@ export class WebCache {
     this.#remember(key, envelope);
     if (this.#directory === undefined) return;
     await mkdir(this.#directory, { recursive: true, mode: 0o700 });
+    await chmod(this.#directory, 0o700);
     const target = join(this.#directory, `${key}.json`);
     const temporary = `${target}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
-    await writeFile(temporary, JSON.stringify(envelope), { mode: 0o600 });
-    await rename(temporary, target);
+    try {
+      await writeFile(temporary, JSON.stringify(envelope), { mode: 0o600 });
+      await rename(temporary, target);
+    } finally {
+      await unlink(temporary).catch(() => undefined);
+    }
     this.#writes += 1;
     if (this.#writes % 100 === 0) await this.#pruneDisk();
   }
@@ -80,9 +87,10 @@ export class WebCache {
 
   async #pruneDisk(): Promise<void> {
     if (this.#directory === undefined) return;
-    const entries = await readdir(this.#directory).catch(() => [] as string[]);
+    const directory = this.#directory;
+    const entries = await readdir(directory).catch(() => [] as string[]);
     const files = await Promise.all(entries.filter((name) => name.endsWith(".json")).map(async (name) => {
-      const path = join(this.#directory!, name);
+      const path = join(directory, name);
       const info = await stat(path).catch(() => undefined);
       return info === undefined ? undefined : { path, size: info.size, modified: info.mtimeMs };
     }));

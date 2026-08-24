@@ -6,7 +6,7 @@ import type { TransportRequest, TransportResponse } from "../../../packages/sdk/
 import { WebxAuthority } from "./authority.js";
 import { BrowserDaemonRpcPort, type BrowserRpcConnection, type BrowserRpcConnectionFactory } from "./browser-daemon-port.js";
 import type { BrowserDestinationAuthority } from "./destination-authority.js";
-import { PUBLIC_ARTIFACTS, PUBLIC_SOURCES } from "./fixtures.js";
+import { PUBLIC_SOURCES } from "./fixtures.js";
 import type { AuthorityActor, IndexedSource } from "./ports.js";
 
 const MAX_REQUEST_BYTES = 1_048_576;
@@ -29,14 +29,6 @@ export interface WebxdRuntimeOptions {
   readonly browserSocketPath: string;
   readonly cwd?: string;
   readonly sources?: readonly IndexedSource[];
-  readonly artifacts?: readonly {
-    readonly artifactId: string;
-    readonly ownerPrincipalId: string;
-    readonly mediaType: string;
-    readonly sha256: string;
-    readonly content: string;
-    readonly visibility: "public" | "internal" | "private" | "secret";
-  }[];
   readonly browserConnectionFactory?: BrowserRpcConnectionFactory;
   readonly browserDestinationAuthority?: BrowserDestinationAuthority;
   readonly searxUrl?: string;
@@ -62,7 +54,6 @@ export class WebxdRuntime {
     this.#authority = new WebxAuthority({
       browser: this.#browser,
       sources: options.sources ?? PUBLIC_SOURCES,
-      artifacts: options.artifacts ?? PUBLIC_ARTIFACTS,
       clock: { now: () => new Date().toISOString() },
       ids: { next: (prefix) => `${prefix}-${Date.now().toString(36)}` },
       searxUrl: options.searxUrl,

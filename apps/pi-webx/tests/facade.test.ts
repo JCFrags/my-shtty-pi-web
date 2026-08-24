@@ -173,7 +173,6 @@ test("API mismatch, daemon outage, wrong paths, and untrusted projects fail clos
     { ...readyCapabilities, daemon: "unavailable" as const },
     { ...readyCapabilities, browserPathIds: ["agent-browser", "pinchtab/chrome"] as [string, string] },
     { ...readyCapabilities, browserPathIds: ["rustwright", "pinchtab/chrome"] as [string, string] },
-    { ...readyCapabilities, browserPathIds: ["agent-browser/chrome", "other"] as [string, string] },
   ]) {
     const sdk = new MockSdk();
     sdk.capabilitiesValue = capabilitiesValue;
@@ -204,7 +203,7 @@ test("startup and shutdown are clean across reload-style extension replacement",
   assert.deepEqual([firstSdk.starts, firstSdk.stops, secondSdk.starts, secondSdk.stops], [1, 1, 1, 1]);
 });
 
-test("output compaction and artifact recovery have deterministic bounds", () => {
+test("output compaction and visual transfer have deterministic bounds", () => {
   let value: unknown = "leaf";
   for (let index = 0; index < 20; index += 1) value = { value };
   const result = presentResult({ summary: "ok", data: value });
@@ -213,11 +212,11 @@ test("output compaction and artifact recovery have deterministic bounds", () => 
 
   const continued = presentResult({ summary: "read", data: {
     title: "Bounded page", url: "https://example.test/page", untrustedContent: "partial",
-    truncated: true, pageId: "page-1", artifactId: "artifact-1",
-    metadata: { saved: true, immediatelyRecallable: true, source: "trafilatura" },
+    truncated: true,
+    metadata: { source: "trafilatura" },
   } });
-  assert.match(JSON.stringify(continued.content), /Continuation: artifactId=artifact-1; pageId=page-1/);
-  assert.match(JSON.stringify(continued.content), /saved=true; recallable=true/);
+  assert.match(JSON.stringify(continued.content), /truncated=true/);
+  assert.doesNotMatch(JSON.stringify(continued.content), /artifactId|pageId|saved=|recallable=/);
 
   const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(100)]);
   const image = presentResult({

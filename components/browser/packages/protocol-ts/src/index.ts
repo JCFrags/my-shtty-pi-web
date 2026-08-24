@@ -327,7 +327,7 @@ export function isMajorCompatible(version: string): boolean {
 // Temporary source-compatibility aliases for candidate code that still uses the
 // protocol 1 coordinator model. They are not part of the protocol 2 schema.
 export type PiMode = "tui" | "rpc" | "json" | "print";
-export type BrowserBackend = "agent-browser" | "rustwright" | "pinchtab";
+export type BrowserBackend = "agent-browser" | "pinchtab";
 export type BrowserEngine = "lightpanda" | "chromium";
 export type BrowserControl = "agent" | "human" | "shared";
 export interface AgentRegistration { agentId: string; clientId: string; piSessionId?: string; piSessionFile?: string; piSessionName?: string; cwd: string; pid: number; mode: PiMode; startedAt: string; lastHeartbeatAt: string }

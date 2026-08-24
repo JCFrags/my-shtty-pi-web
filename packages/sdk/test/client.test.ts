@@ -44,7 +44,6 @@ describe("WebxClient", () => {
     const wire = transport();
     const client = new WebxClient(wire);
     await client.readRange({ url: "https://data.example/warc", offset: 0, length: 10 }, { idempotencyKey: "range-read-001" });
-    await client.getArtifactExcerpt("artifact-1");
     await client.getArtifactBytes("artifact-1", 0, 10);
     await client.listBrowserSessions();
     await client.manageBrowserWorkspace({ action: "list" }, { idempotencyKey: "workspace-list-1" });
@@ -58,7 +57,7 @@ describe("WebxClient", () => {
     await client.cancelBrowserOperation("operation-1", { idempotencyKey: "browser-cancel-01" });
     await client.closeBrowserSession("session-1", { idempotencyKey: "browser-close-01" });
     expect(wire.request.mock.calls.map(([request]) => `${request.method} ${request.path}`)).toEqual(expect.arrayContaining([
-      "POST /v1/read-range", "GET /v1/artifacts/artifact-1/excerpt?offset=0&max_bytes=16384", "GET /v1/artifacts/artifact-1/bytes?offset=0&max_bytes=10",
+      "POST /v1/read-range", "GET /v1/artifacts/artifact-1/bytes?offset=0&max_bytes=10",
       "GET /v1/browser/sessions", "POST /v1/browser/workspace", "DELETE /v1/browser/sessions/session-1/tabs/tab-1", "GET /v1/browser/sessions/session-1", "POST /v1/browser/sessions/session-1/observe", "POST /v1/browser/sessions/session-1/frame",
       "POST /v1/browser/sessions/session-1/actions", "POST /v1/browser/sessions/session-1/debug", "POST /v1/browser/sessions/session-1/control",
       "POST /v1/browser/operations/operation-1/cancel", "DELETE /v1/browser/sessions/session-1",

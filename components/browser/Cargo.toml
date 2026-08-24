@@ -4,7 +4,6 @@ members = [
   "crates/protocol",
   "crates/backend-core",
   "crates/backend-agent-browser",
-  "crates/backend-rustwright",
   "crates/backend-pinchtab",
   "crates/artifact-store",
   "crates/reader-client",

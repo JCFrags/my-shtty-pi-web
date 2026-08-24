@@ -13,11 +13,8 @@ Pi terminals ── newline JSON-RPC / Unix socket ── pi-browserd
                                                        ├── Docling worker
                                                        ├── artifact store
                                                        └── BrowserController
-                                                            ├── agent-browser (default)
-                                                            │    ├── Lightpanda
-                                                            │    └── Chromium
-                                                            ├── Rustwright boundary
-                                                            └── PinchTab boundary
+                                                            ├── agent-browser + Chromium (required visual path)
+                                                            └── PinchTab + Chromium (optional non-visual path)
                                                                   │
                                                                   ▼
                                                         Pi Browser Workspace
@@ -30,21 +27,21 @@ The daemon owns stable agent, client, profile, host, browser-session, tab, and a
 
 - `crates/browserd`: native coordinator, Unix/HTTP/WebSocket transports, recovery, queues, browser routing, human takeover, artifacts.
 - `crates/backend-agent-browser`: external agent-browser adapter with version validation, namespaces, named sessions, atomic tab focus/action/observation, viewport discovery, and structured errors.
-- `packages/pi-extension`: Pi tools, `/web` modes, `/browser` commands, heartbeats, compact result formatting.
+- `../../apps/pi-webx`: Pi tools, `/web` modes, lifecycle handling, and compact result formatting.
 - `apps/workspace`: one Tauri/React desktop window containing the agent tree, tabs, live JPEG viewport, activity, artifacts, and debug panels.
 - `services/reader`: Markdown negotiation, `.md`, `llms.txt`, Trafilatura, and explicit render escalation.
 - `services/docling`: local PDF and office conversion to Markdown and structured metadata.
 - `packages/browserd-reference`: zero-dependency executable reference coordinator used for deterministic concurrency tests and environments without Rust.
-- `deploy`: Fedora installer, user services, Quadlet, SearXNG configuration, desktop entry, and defaults.
+- `deploy`: service configuration templates and local defaults used by the root installer.
 - `fixtures` and `tests`: browser, reader, multi-agent, protocol, observation, extension, and workspace fixtures.
 
 ## Install on Fedora
 
 ```bash
-./deploy/install-fedora.sh
+../../install-fedora.sh
 ```
 
-The installer validates or installs the Fedora/Tauri toolchain, Rust, Node/pnpm, uv, Chromium, a pinned CloakBrowser build for visible workspace hosts, Podman, a pinned Lightpanda build, and the supported agent-browser release. It builds the monorepo, installs user services, deploys loopback-only SearXNG, and links the extension at `~/.pi/agent/extensions/pi-web`.
+The root installer validates the Fedora/Tauri toolchain, Node/pnpm, uv, Chromium, Podman, and Agent Browser. It builds the repository, installs user services, deploys loopback-only SearXNG, and links the extension at `~/.pi/agent/extensions/pi-web`.
 
 Then start Pi normally. New sessions default to browser mode, so no `/web` command is required. Use `/browser` only when you want to open the visual workspace.
 
@@ -65,7 +62,6 @@ systemctl --user status pi-browserd pi-web-reader pi-web-docling pi-web-searxng
 journalctl --user -u pi-browserd -f
 ```
 
-See [Fedora installation](docs/fedora-install.md) for profiles, extensions, password managers, service details, and rollback.
 
 ## Pi tool surface
 
