@@ -115,7 +115,7 @@ export class WebxAuthority {
       const paths = await this.options.browser.capabilities(request.signal);
       const catalog: CapabilityCatalog = {
         apiVersion: WEBX_API_VERSION,
-        capabilities: ["search", "read", "research", "crawl", "browser"].map((id) => ({ id: id as CapabilityCatalog["capabilities"][number]["id"], enabled: id !== "crawl" || this.options.crawlUrl !== undefined, healthy: id !== "browser" || paths.some((path) => path.pathId === "agent-browser/chrome" && path.visual) })),
+        capabilities: ["search", "read", "research", "browser"].map((id) => ({ id: id as CapabilityCatalog["capabilities"][number]["id"], enabled: true, healthy: id !== "browser" || paths.some((path) => path.pathId === "agent-browser/chrome" && path.visual) })),
         browserPaths: paths,
       };
       return ok(catalog);
@@ -194,12 +194,29 @@ export class WebxAuthority {
     eligible = [...eligible, ...staticAuthoritativeHits(parsedQuery.query, domains).filter(isEligible)];
     const unique = [...new Map(eligible.map((item) => [String(item.url), item])).values()]
       .sort((left, right) => searchResultScore(right, parsedQuery, domains) - searchResultScore(left, parsedQuery, domains));
-    const hits: SearchHit[] = unique.slice(0, limit).map((item, index) => ({
+    let hits: SearchHit[] = unique.slice(0, limit).map((item, index) => ({
       hitId: `search-${createHash("sha256").update(String(item.url)).digest("hex").slice(0, 20)}`,
       title: String(item.title), url: String(item.url), snippet: boundText(typeof item.content === "string" ? item.content : "", 500).text,
       rank: index + 1, visibility: "public",
       metadata: { score: item.score, publishedDate: item.publishedDate, engines: item.engines },
     } as SearchHit));
+    const crawlPages = integer(request.crawlPages ?? 0, "crawlPages", 0, 5);
+    const crawlDepth = integer(request.crawlDepth ?? 0, "crawlDepth", 0, 1);
+    if (crawlPages > 0) {
+      const enriched: SearchHit[] = [];
+      for (const hit of hits) {
+        if (enriched.length < crawlPages) {
+          try {
+            const crawled = await this.crawl({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, { url: hit.url, maxPages: 1, maxDepth: crawlDepth, maxChars: 2_000 }, signal);
+            const content = crawled.pages.find((page) => page.ok && page.content)?.content;
+            enriched.push(content ? { ...hit, snippet: boundText(content, 1_000).text } : hit);
+            continue;
+          } catch { /* Keep the search result when optional enrichment fails. */ }
+        }
+        enriched.push(hit);
+      }
+      hits = enriched;
+    }
     return { query: request.query, hits, truncated: unique.length > hits.length };
   }
 
@@ -216,6 +233,14 @@ export class WebxAuthority {
   private async uncachedRead(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<BoundedContent> {
     requireScope(actor, "retrieval.read");
     if (typeof request.url !== "string" || request.url.length === 0) throw problem(400, "invalid-request", "url is required", false);
+    const crawlPages = integer(request.maxPages ?? 1, "maxPages", 1, 20);
+    const crawlDepth = integer(request.maxDepth ?? 0, "maxDepth", 0, 3);
+    if (crawlPages > 1 || crawlDepth > 0) {
+      const maxChars = integer(request.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, 200_000);
+      const crawled = await this.crawl(actor, { url: request.url, maxPages: crawlPages, maxDepth: crawlDepth, maxChars, sameDomain: request.sameDomain }, signal);
+      const content = crawled.pages.map((page) => page.ok ? `## ${page.url}\n\n${page.content ?? ""}` : `## ${page.url}\n\nCrawl failed: ${page.error ?? "unknown error"}`).join("\n\n");
+      return { title: `Crawl from ${request.url}`, url: request.url, untrustedContent: content, truncated: crawled.truncated, visibility: "public", metadata: { engine: "crawl4ai", pageCount: crawled.pageCount } } as BoundedContent;
+    }
     const allSources = this.options.sources;
     const input = request as ReadRequest & { query?: string; view?: string; fields?: readonly string[]; itemOffset?: number; itemLimit?: number };
     const transformed = input.query !== undefined || input.fields !== undefined || input.itemOffset !== undefined || input.itemLimit !== undefined || (input.view !== undefined && input.view !== "main");
@@ -324,9 +349,10 @@ export class WebxAuthority {
   private async research(actor: AuthorityActor, request: ResearchRequest, signal?: AbortSignal): Promise<{ question: string; summary: string; sources: SearchHit[]; truncated: boolean }> {
     requireScope(actor, "research.write");
     if (typeof request.question !== "string" || request.question.trim().length === 0) throw problem(400, "invalid-request", "question is required", false);
-    const input = request as ResearchRequest & { maxPages?: number; maxBytes?: number; maxQueries?: number; mode?: string };
+    const input = request as ResearchRequest & { maxPages?: number; maxBytes?: number; maxQueries?: number; mode?: string; crawlDepth?: number };
     const pageLimit = integer(input.maxPages ?? (input.mode === "deep" ? 12 : input.mode === "research" ? 8 : 4), "maxPages", 0, 40);
     const queryLimit = integer(input.maxQueries ?? (input.mode === "deep" ? 8 : input.mode === "research" ? 5 : 3), "maxQueries", 1, 24);
+    const crawlDepth = integer(input.crawlDepth ?? 0, "crawlDepth", 0, 2);
     const plans = researchSearchPlans(request.question).slice(0, queryLimit);
     const collected: SearchHit[] = [];
     let searchTruncated = false;
@@ -343,7 +369,7 @@ export class WebxAuthority {
     for (const hit of sources.slice(0, pageLimit)) {
       try {
         const perPageChars = Math.min(6_000, Math.floor((input.maxBytes ?? 24_000) / Math.max(1, pageLimit)));
-        const readRequest: ReadRequest & { query?: string; fields?: string[]; itemLimit?: number } = { url: hit.url, maxChars: perPageChars, query: request.question };
+        const readRequest: ReadRequest & { query?: string; fields?: string[]; itemLimit?: number } = { url: hit.url, maxChars: perPageChars, query: request.question, ...(crawlDepth > 0 ? { maxPages: 3, maxDepth: crawlDepth, sameDomain: true } : {}) };
         if (hit.url === "https://nodejs.org/dist/index.json") Object.assign(readRequest, { query: undefined, fields: ["version", "date", "lts"], itemLimit: 50 });
         if (hit.url.startsWith("https://go.dev/dl/?mode=json")) Object.assign(readRequest, { query: undefined, fields: ["version", "stable"], itemLimit: 10 });
         const page = await this.read({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, readRequest, signal);

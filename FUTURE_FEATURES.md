@@ -32,7 +32,7 @@ The core web tools can use a short-lived RAM and SSD cache to reduce repeated tr
 
 ## Crawling and monitoring
 
-The core product now includes `web_crawl`. It uses Crawl4AI with explicit page, depth, text, domain, robots, and runtime bounds. Future work can add:
+The core `web_search`, `web_read`, and `web_research` tools now include optional Crawl4AI behavior with explicit page, depth, text, domain, robots, and runtime bounds. Crawl4AI is not a separate Pi tool. Future work can add:
 
 - Pause, resume, cancel, and inspect a long crawl.
 - Watch selected pages or feeds and report changes.

@@ -57,10 +57,9 @@ Review `~/.config/pi-web`, `~/.local/share/pi-web`, and `~/.cache/pi-web` before
 
 ## Pi tools
 
-- `web_search`
-- `web_read`
-- `web_crawl` — bounded Crawl4AI rendering and linked-page extraction
-- `web_research`
+- `web_search` — includes optional bounded Crawl4AI result enrichment
+- `web_read` — includes optional bounded Crawl4AI rendering and linked-page extraction
+- `web_research` — includes optional bounded Crawl4AI evidence collection
 - `browser_open`
 - `browser_tabs`
 - `browser_observe`

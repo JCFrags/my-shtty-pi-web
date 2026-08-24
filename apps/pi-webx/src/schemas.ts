@@ -27,6 +27,8 @@ export const WebSearchSchema = Type.Object({
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
   domains: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 253 }), { maxItems: 32 })),
   freshness: Type.Optional(StringEnum(["day", "week", "month", "year"] as const)),
+  crawlPages: Type.Optional(Type.Integer({ minimum: 0, maximum: 5 })),
+  crawlDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 1 })),
 }, strict);
 
 export const WebResearchSchema = Type.Object({
@@ -35,15 +37,8 @@ export const WebResearchSchema = Type.Object({
   maxQueries: Type.Optional(Type.Integer({ minimum: 1, maximum: 24 })),
   maxPages: Type.Optional(Type.Integer({ minimum: 0, maximum: 40 })),
   maxBytes: Type.Optional(Type.Integer({ minimum: 0, maximum: 16_777_216 })),
+  crawlDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 2 })),
   resume: Type.Optional(Type.Record(Type.String({ maxLength: 128 }), Type.Unknown(), { maxProperties: 64 })),
-}, strict);
-
-export const WebCrawlSchema = Type.Object({
-  url: Type.String({ minLength: 1, maxLength: 8192 }),
-  maxPages: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
-  maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 3 })),
-  maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 200_000 })),
-  sameDomain: Type.Optional(Type.Boolean()),
 }, strict);
 
 export const WebReadSchema = Type.Object({
@@ -54,6 +49,9 @@ export const WebReadSchema = Type.Object({
   itemOffset: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000 })),
   itemLimit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
   maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000 })),
+  maxPages: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+  maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 3 })),
+  sameDomain: Type.Optional(Type.Boolean()),
 }, strict);
 
 export const BrowserOpenSchema = Type.Object({

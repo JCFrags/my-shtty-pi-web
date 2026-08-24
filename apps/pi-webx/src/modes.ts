@@ -6,7 +6,6 @@ export const TOOL_NAMES = [
   "web_search",
   "web_research",
   "web_read",
-  "web_crawl",
   "browser_open",
   "browser_tabs",
   "browser_observe",
@@ -19,7 +18,7 @@ const rank: Record<WebMode, number> = { off: 0, read: 1, browser: 2, debug: 3 };
 export function availableTools(mode: WebMode, capabilities: WebxCapabilities | undefined): string[] {
   if (!capabilities || capabilities.daemon !== "ready" || mode === "off") return [];
   const tools: string[] = [];
-  if (capabilities.groups.web) tools.push("web_search", "web_research", "web_read", "web_crawl");
+  if (capabilities.groups.web) tools.push("web_search", "web_research", "web_read");
   if (rank[mode] >= rank.browser && capabilities.groups.browser) {
     tools.push("browser_open", "browser_tabs", "browser_observe", "browser_act");
   }
