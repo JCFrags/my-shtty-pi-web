@@ -17,6 +17,8 @@ import {
   type BrowserWorkspaceRequest,
   type BrowserWorkspaceResult,
   type CapabilityCatalog,
+  type CrawlRequest,
+  type CrawlResponse,
   type RangeReadRequest,
   type RangeReadResponse,
   type ReadRequest,
@@ -78,6 +80,10 @@ export class WebxClient {
 
   read(request: ReadRequest, options: RequestOptions): Promise<BoundedContent> {
     return this.call("POST", "/v1/read", request, requireIdempotency(options));
+  }
+
+  crawl(request: CrawlRequest, options: RequestOptions): Promise<CrawlResponse> {
+    return this.call("POST", "/v1/crawl", request, requireIdempotency(options));
   }
 
   readRange(request: RangeReadRequest, options: RequestOptions): Promise<RangeReadResponse> {

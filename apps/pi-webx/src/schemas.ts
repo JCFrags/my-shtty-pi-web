@@ -38,6 +38,14 @@ export const WebResearchSchema = Type.Object({
   resume: Type.Optional(Type.Record(Type.String({ maxLength: 128 }), Type.Unknown(), { maxProperties: 64 })),
 }, strict);
 
+export const WebCrawlSchema = Type.Object({
+  url: Type.String({ minLength: 1, maxLength: 8192 }),
+  maxPages: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+  maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 3 })),
+  maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 200_000 })),
+  sameDomain: Type.Optional(Type.Boolean()),
+}, strict);
+
 export const WebReadSchema = Type.Object({
   url: Type.String({ minLength: 1, maxLength: 8192 }),
   query: Type.Optional(Type.String({ maxLength: 8192 })),

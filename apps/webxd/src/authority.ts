@@ -7,6 +7,8 @@ import type {
   BrowserSessionRequest,
   BrowserWorkspaceRequest,
   CapabilityCatalog,
+  CrawlRequest,
+  CrawlResponse,
   RangeReadRequest,
   RangeReadResponse,
   ReadRequest,
@@ -57,6 +59,7 @@ export interface WebxAuthorityOptions {
   readonly ids: AuthorityIdSource;
   readonly searxUrl?: string;
   readonly readerUrl?: string;
+  readonly crawlUrl?: string;
   readonly cacheDirectory?: string;
 }
 
@@ -112,7 +115,7 @@ export class WebxAuthority {
       const paths = await this.options.browser.capabilities(request.signal);
       const catalog: CapabilityCatalog = {
         apiVersion: WEBX_API_VERSION,
-        capabilities: ["search", "read", "research", "browser"].map((id) => ({ id: id as CapabilityCatalog["capabilities"][number]["id"], enabled: true, healthy: id !== "browser" || paths.some((path) => path.pathId === "agent-browser/chrome" && path.visual) })),
+        capabilities: ["search", "read", "research", "crawl", "browser"].map((id) => ({ id: id as CapabilityCatalog["capabilities"][number]["id"], enabled: id !== "crawl" || this.options.crawlUrl !== undefined, healthy: id !== "browser" || paths.some((path) => path.pathId === "agent-browser/chrome" && path.visual) })),
         browserPaths: paths,
       };
       return ok(catalog);
@@ -120,6 +123,7 @@ export class WebxAuthority {
     if (request.method === "POST" && url.pathname === "/v1/search") return ok(await this.search(actor, body<SearchRequest>(request), "search.write", request.signal));
     if (request.method === "POST" && url.pathname === "/v1/read") return ok(await this.read(actor, body<ReadRequest>(request), request.signal));
     if (request.method === "POST" && url.pathname === "/v1/read-range") return ok(await this.readRange(actor, body<RangeReadRequest>(request), request.signal));
+    if (request.method === "POST" && url.pathname === "/v1/crawl") return ok(await this.crawl(actor, body<CrawlRequest>(request), request.signal));
     if (request.method === "POST" && url.pathname === "/v1/research") return ok(await this.research(actor, body<ResearchRequest>(request), request.signal));
     if (request.method === "GET" && segments[1] === "artifacts" && segments[3] === "bytes") {
       return ok(this.artifactBytes(actor, segments[2] ?? "", numberQuery(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER), numberQuery(url, "max_bytes", MAX_ARTIFACT_BINARY_BYTES, 1, MAX_ARTIFACT_BINARY_BYTES)));
@@ -239,6 +243,27 @@ export class WebxAuthority {
     const maxChars = integer(request.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, 1_000_000);
     const bounded = boundText(source.content, maxChars);
     return { title: source.title, url: source.url, untrustedContent: bounded.text, truncated: bounded.truncated, visibility: source.visibility } as BoundedContent;
+  }
+
+  private async crawl(actor: AuthorityActor, request: CrawlRequest, signal?: AbortSignal): Promise<CrawlResponse> {
+    requireScope(actor, "retrieval.read");
+    if (this.options.crawlUrl === undefined) throw problem(503, "crawl-unavailable", "Crawl4AI service is unavailable", true);
+    assertPublicUrlSyntax(request.url);
+    const response = await fetch(new URL("/v1/crawl", this.options.crawlUrl), {
+      method: "POST", signal, headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({
+        url: request.url,
+        maxPages: integer(request.maxPages ?? 5, "maxPages", 1, 20),
+        maxDepth: integer(request.maxDepth ?? 1, "maxDepth", 0, 3),
+        maxChars: integer(request.maxChars ?? 50_000, "maxChars", 1, 200_000),
+        sameDomain: request.sameDomain ?? true,
+      }),
+    });
+    if (!response.ok) {
+      const failure = parseReaderFailure(response.status, await response.text());
+      throw problem(failure.toolStatus, "crawl-failed", failure.message, failure.retryable);
+    }
+    return await response.json() as CrawlResponse;
   }
 
   private async readRange(actor: AuthorityActor, request: RangeReadRequest, signal?: AbortSignal): Promise<RangeReadResponse> {

@@ -5,7 +5,7 @@ export const BROWSER_PATH_IDS = ["agent-browser/chrome", "pinchtab/chrome"] as c
 
 export type BrowserPathId = (typeof BROWSER_PATH_IDS)[number];
 export type Visibility = "public" | "internal" | "private" | "secret";
-export type CapabilityId = "search" | "read" | "research" | "artifacts" | "browser";
+export type CapabilityId = "search" | "read" | "research" | "crawl" | "artifacts" | "browser";
 
 export interface RequestOptions {
   readonly signal?: AbortSignal;
@@ -124,6 +124,30 @@ export interface BoundedContent {
   readonly untrustedContent: string;
   readonly truncated: boolean;
   readonly visibility: Visibility;
+}
+
+export interface CrawlRequest {
+  readonly url: string;
+  readonly maxPages?: number;
+  readonly maxDepth?: number;
+  readonly maxChars?: number;
+  readonly sameDomain?: boolean;
+}
+
+export interface CrawlPage {
+  readonly url: string;
+  readonly depth: number;
+  readonly ok: boolean;
+  readonly content?: string;
+  readonly error?: string;
+  readonly truncated?: boolean;
+}
+
+export interface CrawlResponse {
+  readonly startUrl: string;
+  readonly pages: readonly CrawlPage[];
+  readonly pageCount: number;
+  readonly truncated: boolean;
 }
 
 export interface ResearchRequest {

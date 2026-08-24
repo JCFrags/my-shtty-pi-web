@@ -80,7 +80,7 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   const sdk = new MockSdk();
   const fx = harness(sdk);
   assert.deepEqual(fx.tools.map((tool) => tool.name), [
-    "web_search", "web_research", "web_read",
+    "web_search", "web_research", "web_read", "web_crawl",
     "browser_open", "browser_tabs", "browser_observe", "browser_act", "browser_debug",
   ]);
   assert.deepEqual([...fx.commands.keys()], ["web", "browser"]);

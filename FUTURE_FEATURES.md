@@ -32,9 +32,9 @@ The core web tools can use a short-lived RAM and SSD cache to reduce repeated tr
 
 ## Crawling and monitoring
 
-- Crawl a small, explicitly bounded set of pages.
-- Pause, resume, cancel, and inspect a crawl.
-- Respect robots rules, redirect limits, network boundaries, and resource budgets.
+The core product now includes `web_crawl`. It uses Crawl4AI with explicit page, depth, text, domain, robots, and runtime bounds. Future work can add:
+
+- Pause, resume, cancel, and inspect a long crawl.
 - Watch selected pages or feeds and report changes.
 - Schedule optional refreshes without turning the core tools into a large crawler platform.
 

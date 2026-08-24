@@ -33,6 +33,7 @@ export interface WebxdRuntimeOptions {
   readonly browserDestinationAuthority?: BrowserDestinationAuthority;
   readonly searxUrl?: string;
   readonly readerUrl?: string;
+  readonly crawlUrl?: string;
   readonly cacheDirectory?: string;
   readonly authenticateActor?: WebxActorAuthenticator["authenticate"];
 }
@@ -58,6 +59,7 @@ export class WebxdRuntime {
       ids: { next: (prefix) => `${prefix}-${Date.now().toString(36)}` },
       searxUrl: options.searxUrl,
       readerUrl: options.readerUrl,
+      crawlUrl: options.crawlUrl,
       cacheDirectory: options.cacheDirectory,
     });
   }

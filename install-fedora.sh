@@ -60,6 +60,7 @@ cd "$INSTALL_ROOT"
 log "Installing locked dependencies and building the product"
 pnpm install --frozen-lockfile
 (cd "$BROWSER_ROOT" && uv sync --all-packages --frozen)
+PLAYWRIGHT_BROWSERS_PATH="$DATA_HOME/pi-web/crawl4ai-browsers" "$DATA_HOME/pi-web/python-env/bin/python" -m playwright install chromium
 pnpm -r --if-present build
 (cd "$BROWSER_ROOT" && cargo build --release -p pi-browserd -p pi-browser-workspace)
 install -m 0755 "$CARGO_TARGET_DIR/release/pi-browserd" "$BIN_DIR/pi-browserd"
@@ -118,6 +119,22 @@ Restart=on-failure
 [Install]
 WantedBy=default.target
 EOF
+cat > "$UNIT_DIR/pi-web-crawl.service" <<EOF
+[Unit]
+Description=Pi Web bounded Crawl4AI service
+After=network-online.target pi-web-egress-proxy.service
+Requires=pi-web-egress-proxy.service
+[Service]
+WorkingDirectory=$BROWSER_ROOT
+ExecStart=$DATA_HOME/pi-web/python-env/bin/pi-web-crawl
+Environment=PI_WEB_CRAWL_HOST=127.0.0.1
+Environment=PI_WEB_CRAWL_PORT=8793
+Environment=PI_WEB_CRAWL_PROXY=http://127.0.0.1:8877
+Environment=PLAYWRIGHT_BROWSERS_PATH=$DATA_HOME/pi-web/crawl4ai-browsers
+Restart=on-failure
+[Install]
+WantedBy=default.target
+EOF
 cat > "$UNIT_DIR/pi-web-reader.service" <<EOF
 [Unit]
 Description=Pi Web direct reader
@@ -135,14 +152,15 @@ EOF
 cat > "$UNIT_DIR/webxd.service" <<EOF
 [Unit]
 Description=Pi Web authority
-After=pi-browserd.service pi-web-reader.service pi-web-egress-proxy.service pi-web-searxng.service
-Requires=pi-browserd.service pi-web-reader.service pi-web-egress-proxy.service
+After=pi-browserd.service pi-web-reader.service pi-web-crawl.service pi-web-egress-proxy.service pi-web-searxng.service
+Requires=pi-browserd.service pi-web-reader.service pi-web-crawl.service pi-web-egress-proxy.service
 [Service]
 WorkingDirectory=$INSTALL_ROOT
 ExecStart=/usr/bin/node $INSTALL_ROOT/apps/webxd/dist/apps/webxd/src/main.js
 Environment=PATH=$BIN_DIR:/usr/local/bin:/usr/bin
 Environment=WEBX_EGRESS_PROXY=http://127.0.0.1:8877/
 Environment=WEBX_CACHE_DIR=$CACHE_HOME/pi-web/responses
+Environment=WEBX_CRAWL_URL=http://127.0.0.1:8793/
 Restart=on-failure
 [Install]
 WantedBy=default.target
@@ -154,7 +172,7 @@ set -euo pipefail
 case "\${1:-}" in
   doctor) shift; exec "$BIN_DIR/pi-browserd" doctor "\$@" ;;
   workspace) shift; exec "$BIN_DIR/pi-browser-workspace" "\$@" ;;
-  status) exec systemctl --user status webxd pi-browserd pi-web-reader pi-web-docling pi-web-searxng ;;
+  status) exec systemctl --user status webxd pi-browserd pi-web-reader pi-web-crawl pi-web-docling pi-web-searxng ;;
   *) echo 'usage: pi-web {doctor|workspace|status}' >&2; exit 2 ;;
 esac
 EOF
@@ -173,10 +191,10 @@ EOF
 
 log "Starting services"
 systemctl --user daemon-reload
-systemctl --user enable pi-web-egress-proxy.service pi-web-docling.service pi-web-reader.service pi-browserd.service webxd.service
-systemctl --user restart pi-web-egress-proxy.service pi-web-docling.service pi-web-reader.service pi-browserd.service webxd.service pi-web-searxng.service
+systemctl --user enable pi-web-egress-proxy.service pi-web-docling.service pi-web-reader.service pi-web-crawl.service pi-browserd.service webxd.service
+systemctl --user restart pi-web-egress-proxy.service pi-web-docling.service pi-web-reader.service pi-web-crawl.service pi-browserd.service webxd.service pi-web-searxng.service
 
 log "Verifying the installation"
-systemctl --user --quiet is-active pi-web-egress-proxy pi-web-docling pi-web-reader pi-browserd pi-web-searxng webxd
+systemctl --user --quiet is-active pi-web-egress-proxy pi-web-docling pi-web-reader pi-web-crawl pi-browserd pi-web-searxng webxd
 "$BIN_DIR/pi-browserd" doctor --json || true
 printf '\nPi Web Tools installed at %s. Run `pi-web status` for service status.\n' "$INSTALL_ROOT"

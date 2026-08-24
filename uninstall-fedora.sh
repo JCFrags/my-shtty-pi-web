@@ -4,9 +4,9 @@ set -Eeuo pipefail
 PREFIX="${PI_WEB_PREFIX:-$HOME/.local}"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
-UNITS=(webxd.service pi-browserd.service pi-web-reader.service pi-web-docling.service pi-web-egress-proxy.service pi-web-searxng.service)
+UNITS=(webxd.service pi-browserd.service pi-web-reader.service pi-web-crawl.service pi-web-docling.service pi-web-egress-proxy.service pi-web-searxng.service)
 systemctl --user disable --now "${UNITS[@]}" 2>/dev/null || true
-rm -f "$CONFIG_HOME/systemd/user/webxd.service" "$CONFIG_HOME/systemd/user/pi-browserd.service" "$CONFIG_HOME/systemd/user/pi-web-reader.service" "$CONFIG_HOME/systemd/user/pi-web-docling.service" "$CONFIG_HOME/systemd/user/pi-web-egress-proxy.service"
+rm -f "$CONFIG_HOME/systemd/user/webxd.service" "$CONFIG_HOME/systemd/user/pi-browserd.service" "$CONFIG_HOME/systemd/user/pi-web-reader.service" "$CONFIG_HOME/systemd/user/pi-web-crawl.service" "$CONFIG_HOME/systemd/user/pi-web-docling.service" "$CONFIG_HOME/systemd/user/pi-web-egress-proxy.service"
 rm -f "$CONFIG_HOME/containers/systemd/pi-web-searxng.container"
 rm -f "$PREFIX/bin/pi-browserd" "$PREFIX/bin/pi-browser-workspace" "$PREFIX/bin/pi-web"
 rm -f "$DATA_HOME/applications/pi-browser-workspace.desktop" "$DATA_HOME/icons/hicolor/scalable/apps/pi-browser-workspace.svg"

@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["services/reader", "services/docling"]
+members = ["services/reader", "services/docling", "services/crawl"]
 
 [dependency-groups]
 dev = ["pytest==9.0.2", "pytest-asyncio==1.4.0"]
@@ -10,4 +10,4 @@ target-version = "py313"
 
 [tool.pytest.ini_options]
 addopts = "-q"
-testpaths = ["tests/reader", "tests/docling"]
+testpaths = ["tests/reader", "tests/docling", "tests/crawl"]

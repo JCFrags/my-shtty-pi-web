@@ -59,6 +59,7 @@ Review `~/.config/pi-web`, `~/.local/share/pi-web`, and `~/.cache/pi-web` before
 
 - `web_search`
 - `web_read`
+- `web_crawl` — bounded Crawl4AI rendering and linked-page extraction
 - `web_research`
 - `browser_open`
 - `browser_tabs`
@@ -76,7 +77,7 @@ pnpm lint
 pnpm typecheck
 pnpm test
 cd components/browser
-uv run pytest tests/reader tests/docling
+uv run pytest
 cargo test --workspace
 ```
 
