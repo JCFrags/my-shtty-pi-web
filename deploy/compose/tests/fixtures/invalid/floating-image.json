@@ -1,1 +1,0 @@
-{"path":["services","webxd","image"],"value":"example.invalid/webxd:latest","expected":"image differs from images.lock.json"}

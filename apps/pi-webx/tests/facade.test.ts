@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { Value } from "typebox/value";
-import { createPiWebxExtension } from "../src/index-web-v6.js";
+import { createPiWebxExtension } from "../src/index.js";
 import { MAX_MODEL_CHARS, presentResult } from "../src/output.js";
 import {
   ArtifactReadSchema,

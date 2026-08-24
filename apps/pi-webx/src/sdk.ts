@@ -1,5 +1,4 @@
-// Change this versioned file name when the vendored facade changes so /reload imports new bytes.
-import { WebxFacadeClient } from "../vendor/sdk/facade-live-search-reader-v1.js";
+import { WebxFacadeClient } from "../vendor/sdk/facade.js";
 
 export const SUPPORTED_API_MAJOR = 1;
 
