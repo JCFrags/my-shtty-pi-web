@@ -48,6 +48,16 @@ function renderData(value: unknown): string | undefined {
     const freshnessNotice = metadata.freshnessReranked === true ? "\n[Quality reranking used available publication dates as a soft freshness signal. Missing or unreliable dates did not exclude results.]" : "";
     return hits.length ? `${execution}${freshnessNotice}\n\n${hits.join("\n")}` : `${execution}${freshnessNotice}\n\nNo results.`;
   }
+  if (data.saved === true && typeof data.path === "string") {
+    const source = typeof data.source === "object" && data.source !== null ? data.source as Record<string, unknown> : {};
+    return [
+      `Saved Markdown: ${data.path}`,
+      `Size: ${String(data.bytes ?? "unknown")} bytes; ${String(data.characters ?? "unknown")} characters`,
+      `SHA-256: ${String(data.sha256 ?? "unknown")}`,
+      `Complete: ${data.complete === true ? "yes" : "no"}`,
+      `Source: ${String(source.finalUrl ?? source.requestedUrl ?? "unknown")}`,
+    ].join("\n");
+  }
   if (typeof data.untrustedContent === "string") {
     const metadata = typeof data.metadata === "object" && data.metadata !== null ? data.metadata as Record<string, unknown> : undefined;
     const reader = metadata && typeof metadata.reader === "object" && metadata.reader !== null ? metadata.reader as Record<string, unknown> : metadata;

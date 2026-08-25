@@ -9,5 +9,8 @@
     "start": "pnpm run build && node dist/apps/webxd/src/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4"
   }
 }

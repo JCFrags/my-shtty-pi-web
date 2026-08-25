@@ -38,6 +38,10 @@ export const WebReadSchema = Type.Object({
   maxPages: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Maximum linked pages to read. Default: 1. Set above 1 only when linked sources are explicitly needed." })),
   maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 3, description: "Maximum link-following depth. Default: 0. Any positive value enables linked crawling." })),
   sameDomain: Type.Optional(Type.Boolean({ description: "Keep linked crawling on the starting domain. Default: true. Set false only when cited external primary sources are required." })),
+  save: Type.Optional(Type.Object({
+    path: Type.String({ minLength: 3, maxLength: 4096, pattern: "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\).+\\.[mM][dD]$", description: "Relative .md path below the private WebX export directory. WebX returns the absolute saved path." }),
+    overwrite: Type.Optional(Type.Boolean({ description: "Replace an existing file atomically. Default: false. Set true only when replacement is intended." })),
+  }, { ...strict, description: "Save one extracted page as UTF-8 Markdown and return compact file metadata instead of the body. Not compatible with structured JSON projection or linked crawling." })),
 }, strict);
 
 export const BrowserOpenSchema = Type.Object({

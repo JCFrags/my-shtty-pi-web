@@ -1,7 +1,8 @@
 import { WebxClient } from "./client.js";
 import { nodeNdjsonConnectionFactory } from "./node-unix.js";
 import { UnixSocketTransport } from "./transport.js";
-import type { BrowserAction, BrowserPathId, BrowserVisualFrame, RequestOptions, VisualGuard } from "./types.js";
+import { defaultExportRoot, saveReadMarkdown, validateRelativeMarkdownPath } from "./save-markdown.js";
+import type { BrowserAction, BrowserPathId, BrowserVisualFrame, ReadRequest, ReadSaveOptions, RequestOptions, VisualGuard } from "./types.js";
 
 export const FACADE_OPERATION_INVENTORY = {
   "web.search": "search",
@@ -32,7 +33,7 @@ export class WebxFacadeClient {
   readonly #observations = new Map<string, ObservationBinding>();
   #observationSequence = 0;
 
-  constructor(private readonly socketPath: string) {}
+  constructor(private readonly socketPath: string, private readonly exportRoot = defaultExportRoot()) {}
 
   async start(options: { signal: AbortSignal; ownerId: string; cwd: string }): Promise<void> {
     if (options.signal.aborted) throw new DOMException("startup was cancelled", "AbortError");
@@ -64,7 +65,7 @@ export class WebxFacadeClient {
       rejectPresent(value, ["limit", "crawlPages", "crawlDepth"], operation);
       return external("Search results", await client.search({ query: requiredString(value.query, "query"), operation: searchOperation(value.operation), effort: searchEffort(value.effort), domains: optionalStringArray(value.domains, "domains"), freshness: optionalFreshness(value.freshness) }, requestOptions));
     }
-    if (operation === "web.read") { rejectPresent(value, ["browserSessionId", "tabId"], operation); return external("Read result", await client.read({ url: requiredString(value.url, "url"), query: optionalString(value.query), view: optionalReadView(value.view), fields: optionalStringArray(value.fields, "fields"), itemOffset: optionalNumber(value.itemOffset), itemLimit: optionalNumber(value.itemLimit), maxChars: optionalNumber(value.maxChars), contentOffset: optionalNumber(value.contentOffset), maxPages: optionalNumber(value.maxPages), maxDepth: optionalNumber(value.maxDepth), sameDomain: optionalBoolean(value.sameDomain) }, requestOptions)); }
+    if (operation === "web.read") return this.read(client, value, requestOptions);
     if (operation === "browser.open") { rejectPresent(value, ["newTab"], operation); return local("Browser session opened", await client.createBrowserSession({ pathId: browserPath(value.pathId), url: optionalString(value.url), visible: optionalBoolean(value.visible), label: optionalString(value.label) }, requestOptions)); }
     if (operation === "browser.tabs") return this.browserTabs(client, value, requestOptions);
     if (operation === "browser.observe") return this.observe(client, value, options, requestOptions);
@@ -82,6 +83,29 @@ export class WebxFacadeClient {
   importObservationBindingForTest(observationId: string, ownerId: string, sessionId: string, frame: BrowserVisualFrame): void { this.#observations.set(observationId, { ownerId, sessionId, frame }); }
 
   private client(ownerId: string): WebxClient { if (this.#client === undefined || this.#ownerId !== ownerId) throw new Error("WebX facade client is not started for this owner"); return this.#client; }
+
+  private async read(client: WebxClient, value: Record<string, unknown>, options: RequestOptions): Promise<FacadeResult> {
+    rejectPresent(value, ["browserSessionId", "tabId"], "web.read");
+    const requestedUrl = requiredString(value.url, "url");
+    const save = readSaveOptions(value.save);
+    if (save !== undefined) rejectPresent(value, ["fields", "itemOffset", "itemLimit", "maxPages", "maxDepth", "sameDomain"], "web.read save");
+    const request: ReadRequest = {
+      url: requestedUrl,
+      query: optionalString(value.query),
+      view: optionalReadView(value.view),
+      fields: optionalStringArray(value.fields, "fields"),
+      itemOffset: optionalNumber(value.itemOffset),
+      itemLimit: optionalNumber(value.itemLimit),
+      maxChars: optionalNumber(value.maxChars),
+      contentOffset: optionalNumber(value.contentOffset),
+      maxPages: optionalNumber(value.maxPages),
+      maxDepth: optionalNumber(value.maxDepth),
+      sameDomain: optionalBoolean(value.sameDomain),
+    };
+    const content = await client.read(request, options);
+    if (save === undefined) return external("Read result", content);
+    return local("Web content saved as Markdown", await saveReadMarkdown(content, requestedUrl, save, this.exportRoot));
+  }
 
   private async browserTabs(client: WebxClient, input: Record<string, unknown>, options: RequestOptions): Promise<FacadeResult> {
     const action = requiredString(input.action, "action");
@@ -154,6 +178,15 @@ function local(summary: string, data: unknown): FacadeResult { return { summary,
 function unavailable(operation: string, reason: string): Error { const error = new Error(`${operation} is unavailable: ${reason}`); error.name = "WebxUnavailableError"; return error; }
 function object(value: unknown): Record<string, unknown> { if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError("operation input must be an object"); return value as Record<string, unknown>; }
 function optionalObject(value: unknown): Readonly<Record<string, unknown>> | undefined { return value === undefined ? undefined : object(value); }
+function readSaveOptions(value: unknown): ReadSaveOptions | undefined {
+  if (value === undefined) return undefined;
+  const save = object(value);
+  for (const key of Object.keys(save)) if (key !== "path" && key !== "overwrite") throw new TypeError(`save.${key} is not supported`);
+  const path = validateRelativeMarkdownPath(requiredString(save.path, "save.path"));
+  const overwrite = optionalBoolean(save.overwrite);
+  if (save.overwrite !== undefined && overwrite === undefined) throw new TypeError("save.overwrite must be a boolean");
+  return { path, overwrite };
+}
 function requiredString(value: unknown, name: string): string { if (typeof value !== "string" || value.length === 0) throw new TypeError(`${name} is required`); return value; }
 function optionalString(value: unknown): string | undefined { return typeof value === "string" ? value : undefined; }
 function requiredNumber(value: unknown, name: string): number { if (typeof value !== "number" || !Number.isFinite(value)) throw new TypeError(`${name} is required`); return value; }

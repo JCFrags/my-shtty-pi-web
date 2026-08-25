@@ -150,7 +150,8 @@ describe("actual WebX Unix runtime", () => {
     expect(browser.registrations).toBe(2);
     expect(browser.methods.filter((method) => method === "agent.register")).toHaveLength(2);
 
-    const facade = new WebxFacadeClient(webxPath);
+    const exportRoot = join(directory, "exports");
+    const facade = new WebxFacadeClient(webxPath, exportRoot);
     const facadeSignal = new AbortController();
     await facade.start({ signal: facadeSignal.signal, ownerId: "facade-owner", cwd: "/deterministic/project" });
     const facadeOptions = { signal: facadeSignal.signal, idempotencyKey: "facade-search-1", ownerId: "facade-owner", cwd: "/deterministic/project" };
@@ -158,6 +159,11 @@ describe("actual WebX Unix runtime", () => {
     for (const legacy of [{ limit: 5 }, { crawlPages: 1 }, { crawlDepth: 1 }]) {
       await expect(facade.request("web.search", { query: "WebX", operation: "links", effort: "fast", ...legacy }, facadeOptions)).rejects.toThrow("is not supported");
     }
+    const saved = await facade.request("web.read", { url: "https://fixture.invalid/webx", save: { path: "fixtures/webx.md" } }, { ...facadeOptions, idempotencyKey: "facade-save-001" });
+    expect(saved).toMatchObject({ summary: "Web content saved as Markdown", trust: "local", data: { saved: true, relativePath: "fixtures/webx.md", complete: true } });
+    expect(await readFile(join(exportRoot, "fixtures", "webx.md"), "utf8")).toContain("WebX routes search, read");
+    await expect(facade.request("web.read", { url: "https://fixture.invalid/webx", save: { path: "fixtures/webx.md" } }, { ...facadeOptions, idempotencyKey: "facade-save-002" })).rejects.toThrow("already exists");
+    await expect(facade.request("web.read", { url: "https://fixture.invalid/webx", maxPages: 2, save: { path: "fixtures/crawl.md" } }, { ...facadeOptions, idempotencyKey: "facade-save-003" })).rejects.toThrow("maxPages is not supported");
     await expect(facade.request("browser.workspace", { action: "show" }, { signal: facadeSignal.signal, idempotencyKey: "facade-workspace-1", ownerId: "facade-owner", cwd: "/deterministic/project" })).resolves.toMatchObject({ summary: "Browser workspace show" });
     await expect(facade.request("browser.tabs", { action: "discard-tab", browserSessionId: "session-runtime", tabId: "tab-runtime" }, { signal: facadeSignal.signal, idempotencyKey: "facade-tabs-0001", ownerId: "facade-owner", cwd: "/deterministic/project" })).rejects.toThrow("no safe Pi 0.84.1 equivalent");
     await expect(facade.request("browser.act", { browserSessionId: "session-runtime", action: { kind: "hover", ref: "e1" } }, { signal: facadeSignal.signal, idempotencyKey: "facade-action-001", ownerId: "facade-owner", cwd: "/deterministic/project" })).rejects.toBeInstanceOf(WebxError);

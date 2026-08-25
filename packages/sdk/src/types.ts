@@ -92,6 +92,11 @@ export interface SearchResponse {
   };
 }
 
+export interface ReadSaveOptions {
+  readonly path: string;
+  readonly overwrite?: boolean;
+}
+
 export interface ReadRequest {
   readonly url: string;
   readonly query?: string;
@@ -137,6 +142,22 @@ export interface BoundedContent {
   readonly untrustedContent: string;
   readonly truncated: boolean;
   readonly visibility: Visibility;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export interface SavedReadResponse {
+  readonly saved: true;
+  readonly path: string;
+  readonly relativePath: string;
+  readonly bytes: number;
+  readonly characters: number;
+  readonly sha256: string;
+  readonly complete: boolean;
+  readonly source: {
+    readonly requestedUrl: string;
+    readonly finalUrl: string;
+    readonly title: string;
+  };
 }
 
 export interface CrawlRequest {

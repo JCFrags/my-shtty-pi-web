@@ -132,6 +132,11 @@ test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
   assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation: "links", effort: "fast", crawlPages: 1 }), false);
   assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation: "links", effort: "fast", domains: ["https://example.com/path"] }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "not-a-url" }), false);
+  assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "notes/page.md" } }), true);
+  assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "../page.md" } }), false);
+  assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "/tmp/page.md" } }), false);
+  assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "page.txt" } }), false);
+  assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "page.md", overwrite: "yes" } }), false);
   assert.equal(Value.Check(BrowserOpenSchema, { pathId: "agent-browser/chrome" }), true);
   assert.equal(Value.Check(BrowserOpenSchema, { newTab: true }), false);
   assert.equal(Value.Check(BrowserTabsSchema, { action: "discard-tab" }), false);
@@ -198,6 +203,13 @@ test("real search and read calls send structured and agent-visible evidence to t
   assert.equal(record.input.query, "evidence");
   assert.equal(record.result.summary, "search");
   assert.ok(Array.isArray(record.presentation.content));
+
+  sdk.result = { summary: "saved", data: { saved: true, path: "/home/user/.local/share/pi-web/exports/page.md", relativePath: "page.md", bytes: 100, characters: 98, sha256: "b".repeat(64), complete: true, source: { requestedUrl: "https://example.test", finalUrl: "https://example.test", title: "Page" } }, trust: "local" };
+  await fx.execute("web_read", { url: "https://example.test", save: { path: "page.md" } });
+  const saveRecord = records[1] as { operation: string; result: { data: unknown }; presentation: { content: unknown[] } };
+  assert.equal(saveRecord.operation, "web.read");
+  assert.match(JSON.stringify(saveRecord.result.data), /page\.md/);
+  assert.doesNotMatch(JSON.stringify(saveRecord), /complete public content|untrustedContent/);
   await fx.events.get("session_shutdown")?.();
 });
 
@@ -275,6 +287,11 @@ test("output compaction and visual transfer have deterministic bounds", () => {
   } });
   assert.match(JSON.stringify(paged.content), /Returned 5 of 10 items; continue with itemOffset=5/);
   assert.match(JSON.stringify(paged.content), /Returned 2 characters; extracted total 2; complete/);
+
+  const saved = presentResult({ summary: "saved", trust: "local", data: { saved: true, path: "/home/user/.local/share/pi-web/exports/notes/page.md", relativePath: "notes/page.md", bytes: 123, characters: 120, sha256: "a".repeat(64), complete: true, source: { requestedUrl: "https://example.test", finalUrl: "https://example.test/final", title: "Page" } } });
+  assert.match(JSON.stringify(saved.content), /Saved Markdown/);
+  assert.match(JSON.stringify(saved.content), /Complete: yes/);
+  assert.doesNotMatch(JSON.stringify(saved.content), /untrustedContent/);
 
   const extracts = presentResult({ summary: "search", data: { query: "feature", operation: "extracts", effort: "quality", hits: [{ title: "Source", url: "https://example.test/source", snippet: "Focused supporting passage." }], metadata: { searches: 3, pagesRead: 1, linkedDepth: 0, freshnessReranked: true } } });
   assert.match(JSON.stringify(extracts.content), /quality extracts; 3 search\(es\); 1 page read\(s\); linked depth 0/);

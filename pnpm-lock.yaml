@@ -48,7 +48,11 @@ importers:
         specifier: 6.0.3
         version: 6.0.3
 
-  apps/webxd: {}
+  apps/webxd:
+    devDependencies:
+      '@types/node':
+        specifier: 24.12.4
+        version: 24.12.4
 
   components/browser/apps/workspace:
     dependencies:
@@ -100,7 +104,11 @@ importers:
 
   packages/policy: {}
 
-  packages/sdk: {}
+  packages/sdk:
+    devDependencies:
+      '@types/node':
+        specifier: 24.12.4
+        version: 24.12.4
 
   packages/test-fixtures: {}
 
