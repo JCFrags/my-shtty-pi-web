@@ -33,7 +33,7 @@ describe("WebxClient", () => {
 
   it("maps the complete facade inventory to SDK methods or explicit unavailable results", async () => {
     expect(Object.keys(FACADE_OPERATION_INVENTORY)).toEqual([
-      "web.search", "web.read", "web.research",
+      "web.search", "web.read",
       "browser.open", "browser.tabs", "browser.observe", "browser.act", "browser.cancel", "browser.debug", "browser.workspace",
     ]);
     expect(FACADE_OPERATION_INVENTORY["browser.workspace"]).toBe("manageBrowserWorkspace");

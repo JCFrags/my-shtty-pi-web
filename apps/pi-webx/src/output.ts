@@ -37,7 +37,7 @@ function renderData(value: unknown): string | undefined {
   const data = value as Record<string, unknown>;
   if (Array.isArray(data.hits)) {
     const operation = data.operation === "extracts" ? "extracts" : "links";
-    const effort = data.effort === "quality" ? "quality" : "fast";
+    const effort = data.effort === "deep" ? "deep" : data.effort === "quality" ? "quality" : "fast";
     const hits = data.hits.slice(0, 20).map((item, index) => {
       const hit = item as Record<string, unknown>;
       const snippet = typeof hit.snippet === "string" && hit.snippet.trim() ? `\n   ${operation === "extracts" ? "Extract: " : ""}${clip(hit.snippet.trim(), operation === "extracts" ? 1_200 : 360)}` : "";

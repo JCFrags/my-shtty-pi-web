@@ -6,7 +6,6 @@ import type { BrowserAction, BrowserPathId, BrowserVisualFrame, RequestOptions, 
 export const FACADE_OPERATION_INVENTORY = {
   "web.search": "search",
   "web.read": "read",
-  "web.research": "research",
   "browser.open": "createBrowserSession",
   "browser.tabs": "list/closeBrowserTab/closeBrowserSession; discard and restore unavailable",
   "browser.observe": "observeBrowser plus getBrowserVisualFrame for visual binding",
@@ -66,7 +65,6 @@ export class WebxFacadeClient {
       return external("Search results", await client.search({ query: requiredString(value.query, "query"), operation: searchOperation(value.operation), effort: searchEffort(value.effort), domains: optionalStringArray(value.domains, "domains"), freshness: optionalFreshness(value.freshness) }, requestOptions));
     }
     if (operation === "web.read") { rejectPresent(value, ["browserSessionId", "tabId"], operation); return external("Read result", await client.read({ url: requiredString(value.url, "url"), query: optionalString(value.query), view: optionalReadView(value.view), fields: optionalStringArray(value.fields, "fields"), itemOffset: optionalNumber(value.itemOffset), itemLimit: optionalNumber(value.itemLimit), maxChars: optionalNumber(value.maxChars), contentOffset: optionalNumber(value.contentOffset), maxPages: optionalNumber(value.maxPages), maxDepth: optionalNumber(value.maxDepth), sameDomain: optionalBoolean(value.sameDomain) }, requestOptions)); }
-    if (operation === "web.research") return external("Research result", await client.research({ question: requiredString(value.question, "question"), mode: optionalResearchMode(value.mode), maxQueries: optionalNumber(value.maxQueries), maxPages: optionalNumber(value.maxPages), maxBytes: optionalNumber(value.maxBytes), crawlDepth: optionalNumber(value.crawlDepth), resume: optionalObject(value.resume) }, requestOptions));
     if (operation === "browser.open") { rejectPresent(value, ["newTab"], operation); return local("Browser session opened", await client.createBrowserSession({ pathId: browserPath(value.pathId), url: optionalString(value.url), visible: optionalBoolean(value.visible), label: optionalString(value.label) }, requestOptions)); }
     if (operation === "browser.tabs") return this.browserTabs(client, value, requestOptions);
     if (operation === "browser.observe") return this.observe(client, value, options, requestOptions);
@@ -163,10 +161,9 @@ function optionalNumber(value: unknown): number | undefined { return typeof valu
 function optionalBoolean(value: unknown): boolean | undefined { return typeof value === "boolean" ? value : undefined; }
 function optionalStringArray(value: unknown, name: string): readonly string[] | undefined { return value === undefined ? undefined : stringArray(value, name); }
 function searchOperation(value: unknown): "links" | "extracts" { if (value === "links" || value === "extracts") return value; throw new TypeError("operation must be links or extracts"); }
-function searchEffort(value: unknown): "fast" | "quality" { if (value === "fast" || value === "quality") return value; throw new TypeError("effort must be fast or quality"); }
+function searchEffort(value: unknown): "fast" | "quality" | "deep" { if (value === "fast" || value === "quality" || value === "deep") return value; throw new TypeError("effort must be fast, quality, or deep"); }
 function optionalFreshness(value: unknown): "day" | "week" | "month" | "year" | undefined { if (value === undefined) return undefined; if (value === "day" || value === "week" || value === "month" || value === "year") return value; throw new TypeError("freshness is invalid"); }
 function optionalReadView(value: unknown): "main" | "outline" | "raw" | undefined { if (value === undefined) return undefined; if (value === "main" || value === "outline" || value === "raw") return value; throw new TypeError("view is invalid"); }
-function optionalResearchMode(value: unknown): "quick" | "research" | "deep" | undefined { if (value === undefined) return undefined; if (value === "quick" || value === "research" || value === "deep") return value; throw new TypeError("mode is invalid"); }
 function validateId(value: string, name: string): void { if (!/^[A-Za-z0-9._:-]{1,256}$/u.test(value)) throw new TypeError(`${name} is invalid`); }
 function browserPath(value: unknown): BrowserPathId { if (value === undefined || value === "agent-browser/chrome") return "agent-browser/chrome"; if (value === "pinchtab/chrome") return value; throw new TypeError("pathId is unsupported"); }
 function observationView(value: unknown): "main" | "interactive" | "visual" | "full" | "diff" { if (value === undefined || value === "main") return "main"; if (value === "interactive" || value === "visual" || value === "full" || value === "diff") return value; throw unavailable("browser.observe", `${String(value)} view has no daemon route`); }

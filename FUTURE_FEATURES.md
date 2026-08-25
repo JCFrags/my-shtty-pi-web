@@ -32,7 +32,7 @@ The core web tools can use a short-lived RAM and SSD cache to reduce repeated tr
 
 ## Crawling and monitoring
 
-Crawl4AI remains an internal capability rather than a separate Pi tool. `web_search` uses fixed recipes and never follows links. `web_read` and `web_research` expose bounded linked traversal only when their task needs it. Future work can add:
+Crawl4AI remains an internal capability rather than a separate Pi tool. `web_search` uses fixed recipes and never follows links. `web_read` exposes bounded linked traversal only when its task needs it. Future work can add:
 
 - Pause, resume, cancel, and inspect a long crawl.
 - Watch selected pages or feeds and report changes.

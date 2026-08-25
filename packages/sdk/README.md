@@ -7,7 +7,7 @@ It includes:
 - API-major negotiation;
 - bounded responses and cancellation;
 - required mutation idempotency;
-- search, read, and research;
+- search and read;
 - internal artifact transfer support for bounded component results;
 - browser create, list, get, observe, frame, act, safe debug, workspace, control, cancel, close-tab, and close-session;
 - exactly `agent-browser/chrome` and `pinchtab/chrome`;

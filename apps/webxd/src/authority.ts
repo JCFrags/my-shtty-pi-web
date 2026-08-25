@@ -12,7 +12,6 @@ import type {
   RangeReadRequest,
   RangeReadResponse,
   ReadRequest,
-  ResearchRequest,
   SearchHit,
   SearchRequest,
   SearchResponse,
@@ -116,7 +115,7 @@ export class WebxAuthority {
       const paths = await this.options.browser.capabilities(request.signal);
       const catalog: CapabilityCatalog = {
         apiVersion: WEBX_API_VERSION,
-        capabilities: ["search", "read", "research", "browser"].map((id) => ({ id: id as CapabilityCatalog["capabilities"][number]["id"], enabled: true, healthy: id !== "browser" || paths.some((path) => path.pathId === "agent-browser/chrome" && path.visual) })),
+        capabilities: ["search", "read", "browser"].map((id) => ({ id: id as CapabilityCatalog["capabilities"][number]["id"], enabled: true, healthy: id !== "browser" || paths.some((path) => path.pathId === "agent-browser/chrome" && path.visual) })),
         browserPaths: paths,
       };
       return ok(catalog);
@@ -125,7 +124,6 @@ export class WebxAuthority {
     if (request.method === "POST" && url.pathname === "/v1/read") return ok(await this.read(actor, body<ReadRequest>(request), request.signal));
     if (request.method === "POST" && url.pathname === "/v1/read-range") return ok(await this.readRange(actor, body<RangeReadRequest>(request), request.signal));
     if (request.method === "POST" && url.pathname === "/v1/crawl") return ok(await this.crawl(actor, body<CrawlRequest>(request), request.signal));
-    if (request.method === "POST" && url.pathname === "/v1/research") return ok(await this.research(actor, body<ResearchRequest>(request), request.signal));
     if (request.method === "GET" && segments[1] === "artifacts" && segments[3] === "bytes") {
       return ok(this.artifactBytes(actor, segments[2] ?? "", numberQuery(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER), numberQuery(url, "max_bytes", MAX_ARTIFACT_BINARY_BYTES, 1, MAX_ARTIFACT_BINARY_BYTES)));
     }
@@ -135,7 +133,7 @@ export class WebxAuthority {
 
   private async search(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<SearchResponse> {
     requireScope(actor, scope);
-    const key = { formatVersion: 16, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
+    const key = { formatVersion: 17, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
     const cached = await this.#cache.get<SearchResponse>("search", key);
     if (cached !== undefined) return cached;
     const result = await this.uncachedSearch(actor, request, scope, signal);
@@ -147,8 +145,8 @@ export class WebxAuthority {
     requireScope(actor, scope);
     if (typeof request.query !== "string" || request.query.trim().length === 0 || request.query.length > 8_192) throw problem(400, "invalid-request", "query must contain 1 to 8192 characters", false);
     if (request.operation !== "links" && request.operation !== "extracts") throw problem(400, "invalid-request", "operation must be links or extracts", false);
-    if (request.effort !== "fast" && request.effort !== "quality") throw problem(400, "invalid-request", "effort must be fast or quality", false);
-    const queries = request.effort === "quality" ? qualitySearchQueries(request.query) : [request.query];
+    if (request.effort !== "fast" && request.effort !== "quality" && request.effort !== "deep") throw problem(400, "invalid-request", "effort must be fast, quality, or deep", false);
+    const queries = request.effort === "fast" ? [request.query] : request.effort === "quality" ? qualitySearchQueries(request.query) : deepSearchQueries(request.query);
     const batches: SearchBatch[] = [];
     const failures: string[] = [];
     for (const query of queries) {
@@ -157,9 +155,10 @@ export class WebxAuthority {
     }
     if (batches.every((batch) => batch.hits.length === 0) && failures.length > 0) throw new Error(`search providers returned no results: ${[...new Set(failures)].join("; ")}`);
     const merged = [...new Map(batches.flatMap((batch) => batch.hits).filter((item) => typeof item.url === "string" && typeof item.title === "string").map((item) => [String(item.url).replace(/#.*$/u, ""), item])).values()];
-    const candidates = merged.map((item, index) => ({ item, index, score: request.effort === "quality" ? searchCandidateScore(item, request.query) + freshnessScore(item.publishedDate, request.freshness, this.options.clock.now()) : 0 }));
-    if (request.effort === "quality") candidates.sort((left, right) => right.score - left.score || left.index - right.index);
-    const selected = candidates.slice(0, request.operation === "links" ? 10 : request.effort === "quality" ? 5 : 3);
+    const candidates = merged.map((item, index) => ({ item, index, score: request.effort !== "fast" ? searchCandidateScore(item, request.query) + freshnessScore(item.publishedDate, request.freshness, this.options.clock.now()) : 0 }));
+    if (request.effort !== "fast") candidates.sort((left, right) => right.score - left.score || left.index - right.index);
+    const resultLimit = request.operation === "links" ? (request.effort === "deep" ? 20 : 10) : request.effort === "deep" ? 10 : request.effort === "quality" ? 5 : 3;
+    const selected = candidates.slice(0, resultLimit);
     let pagesRead = 0;
     const hits: SearchHit[] = [];
     const readerActor = { ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) };
@@ -187,7 +186,7 @@ export class WebxAuthority {
         metadata: { score: item.score, publishedDate: item.publishedDate, engines: item.engines },
       } as SearchHit);
     }
-    return { query: request.query, operation: request.operation, effort: request.effort, hits, truncated: merged.length > hits.length, metadata: { searches: batches.reduce((total, batch) => total + batch.searches, 0), pagesRead, linkedDepth: 0, freshnessReranked: request.effort === "quality" && request.freshness !== undefined } };
+    return { query: request.query, operation: request.operation, effort: request.effort, hits, truncated: merged.length > hits.length, metadata: { searches: batches.reduce((total, batch) => total + batch.searches, 0), pagesRead, linkedDepth: 0, freshnessReranked: request.effort !== "fast" && request.freshness !== undefined } };
   }
 
   private async searchOne(query: string, requestedDomains: readonly string[], signal?: AbortSignal): Promise<SearchBatch> {
@@ -354,64 +353,6 @@ export class WebxAuthority {
       rangeStart, rangeEnd, totalBytes, bodyBytes, sha256: digest, artifactId,
       redirectChain, visibility: "internal", integrityVerified: true,
     };
-  }
-
-  private async research(actor: AuthorityActor, request: ResearchRequest, signal?: AbortSignal): Promise<{ question: string; summary: string; sources: SearchHit[]; truncated: boolean }> {
-    requireScope(actor, "research.write");
-    if (typeof request.question !== "string" || request.question.trim().length === 0) throw problem(400, "invalid-request", "question is required", false);
-    const input = request as ResearchRequest & { maxPages?: number; maxBytes?: number; maxQueries?: number; mode?: string; crawlDepth?: number };
-    const pageLimit = integer(input.maxPages ?? (input.mode === "deep" ? 12 : input.mode === "research" ? 8 : 4), "maxPages", 0, 40);
-    const queryLimit = integer(input.maxQueries ?? (input.mode === "deep" ? 8 : input.mode === "research" ? 5 : 3), "maxQueries", 1, 24);
-    const crawlDepth = integer(input.crawlDepth ?? 0, "crawlDepth", 0, 2);
-    const plans = researchSearchPlans(request.question).slice(0, queryLimit);
-    const collected: SearchHit[] = researchSeedHits(request.question);
-    let searchTruncated = false;
-    const perPlanLimit = plans.length > 1 ? 1 : Math.max(2, Math.ceil(Math.max(6, pageLimit) / Math.max(1, plans.length)));
-    for (const plan of plans) {
-      const result = await this.search(actor, { query: plan.query, operation: "links", effort: "fast", ...(plan.domains.length > 0 ? { domains: plan.domains } : {}) }, "research.write", signal);
-      searchTruncated ||= result.truncated;
-      for (const hit of result.hits.slice(0, perPlanLimit)) if (!collected.some((existing) => existing.url === hit.url)) collected.push(hit);
-    }
-    const sources = collected.slice(0, Math.max(6, pageLimit)).map((hit, index) => ({ ...hit, rank: index + 1 }));
-    const evidence: Array<{ source: SearchHit; excerpt: string; directFinding?: string }> = [];
-    const releaseAnswer = /\b(?:version|release|lts|stable|support)\b/iu.test(request.question)
-      && /\b(?:node(?:\.js|js)?|python|rust|golang|go programming)\b/iu.test(request.question);
-    const failures: string[] = [];
-    const readableUrls: string[] = [];
-    for (const hit of sources.slice(0, pageLimit)) {
-      try {
-        const perPageChars = Math.min(6_000, Math.floor((input.maxBytes ?? 24_000) / Math.max(1, pageLimit)));
-        let readRequest: ReadRequest & { query?: string; fields?: string[]; itemLimit?: number } = { url: hit.url, maxChars: perPageChars, query: request.question, ...(crawlDepth > 0 ? { maxPages: 3, maxDepth: crawlDepth, sameDomain: true } : {}) };
-        if (hit.url === "https://nodejs.org/dist/index.json") readRequest = { url: hit.url, maxChars: 30_000, fields: ["version", "date", "lts"], itemLimit: 200 };
-        if (hit.url.startsWith("https://go.dev/dl/?mode=json")) readRequest = { url: hit.url, maxChars: 30_000, itemLimit: 10 };
-        if (hit.url === "https://static.rust-lang.org/dist/channel-rust-stable.toml" || hit.url === "https://go.dev/doc/devel/release") readRequest = { url: hit.url, maxChars: 30_000 };
-        const page = await this.read({ ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) }, readRequest, signal);
-        if (!page.untrustedContent.trim()) continue;
-        readableUrls.push(page.url);
-        const finding = releaseFinding(page.url, page.untrustedContent);
-        if (releaseAnswer && !finding) continue;
-        const excerpt = finding ?? evidenceExcerpt(page.untrustedContent, request.question, Math.min(1_200, perPageChars));
-        if (excerpt) evidence.push({ source: hit, excerpt, ...(finding ? { directFinding: finding } : {}) });
-      } catch (error) {
-        failures.push(`${hit.title}: ${safeMessage(error)}`);
-      }
-    }
-    const hasPrimaryProcedure = readableUrls.some((url) => {
-      try { return new URL(url).hostname === "docs.fedoraproject.org" && /upgrad/iu.test(request.question); } catch { return false; }
-    });
-    const minimumReadable = hasPrimaryProcedure || evidence.some((item) => item.directFinding) ? 1 : 2;
-    const directFindings = [...new Set(evidence.map((item) => item.directFinding).filter((item): item is string => Boolean(item)))];
-    const evidenceLines = evidence.map((item, index) => `### [${index + 1}] ${item.source.title}\n${item.excerpt}`);
-    const status = evidence.length >= minimumReadable
-      ? `Collected ${evidence.length} readable sources.`
-      : `Insufficient relevant evidence. Found ${evidence.length} readable source${evidence.length === 1 ? "" : "s"}; at least ${minimumReadable} are required.`;
-    const summary = [
-      directFindings.length ? `## Direct findings\n${directFindings.map((item) => `- ${item}`).join("\n")}` : "",
-      `## Evidence\n${evidenceLines.join("\n\n") || "No relevant readable evidence was found."}`,
-      `## Evidence quality\n${status}${failures.length ? ` ${failures.length} source read${failures.length === 1 ? "" : "s"} failed.` : ""}`,
-    ].filter(Boolean).join("\n\n");
-    const outputLimit = Math.min(MAX_CONTENT_CHARS, input.maxBytes ?? 24_000);
-    return { question: request.question, summary: boundText(summary, outputLimit).text, sources: evidence.map((item, index) => ({ ...item.source, rank: index + 1 })), truncated: searchTruncated || summary.length > outputLimit };
   }
 
   private pruneBinaryArtifacts(): void {
@@ -596,8 +537,27 @@ function evidenceExcerpt(value: string, query: string, maxChars: number): string
 }
 
 function qualitySearchQueries(query: string): string[] {
+  return searchQueryVariants(query).slice(0, 3);
+}
+
+function deepSearchQueries(query: string): string[] {
+  return searchQueryVariants(query).slice(0, 5);
+}
+
+function searchQueryVariants(query: string): string[] {
   const base = query.trim();
-  return [...new Set([base, `${base} official`, `${base} guide`])];
+  if (/\bpi\b/iu.test(base)) {
+    const rest = base.replace(/\bpi\b/iu, " ").replace(/\s+/gu, " ").trim();
+    const suffix = rest ? ` ${rest}` : "";
+    return [...new Set([
+      base,
+      `"Pi coding agent"${suffix}`,
+      `Pi package${suffix} site:pi.dev`,
+      `Pi extension${suffix} site:github.com`,
+      `Pi coding agent${suffix} documentation`,
+    ])];
+  }
+  return [...new Set([base, `${base} official`, `${base} guide`, `${base} documentation`, `${base} GitHub`])];
 }
 
 function searxUnavailableEngines(value: unknown): string[] {
@@ -643,97 +603,6 @@ function problem(status: number, code: string, message: string, retryable: boole
 function isAuthorityFailure(value: unknown): value is AuthorityFailure { return typeof value === "object" && value !== null && (value as { authorityFailure?: unknown }).authorityFailure === true; }
 function searchDomains(query: string): string[] {
   return [...query.matchAll(/(?:^|\s)site:([A-Za-z0-9.-]+)/giu)].map((match) => match[1] ?? "").filter(Boolean);
-}
-function researchSeedHits(question: string): SearchHit[] {
-  const normalized = question.toLocaleLowerCase();
-  const seeds: Array<{ title: string; url: string }> = [];
-  if (/\bnode(?:\.js|js)?\b/u.test(normalized)) seeds.push(
-    { title: "Official Node.js Release Index", url: "https://nodejs.org/dist/index.json" },
-    { title: "Official Node.js Release Support Policy", url: "https://nodejs.org/en/about/previous-releases" },
-  );
-  if (/\bpython\b/u.test(normalized)) seeds.push({ title: "Official Python Releases", url: "https://www.python.org/downloads/" });
-  if (/\brust\b/u.test(normalized)) seeds.push({ title: "Official Rust Stable Channel", url: "https://static.rust-lang.org/dist/channel-rust-stable.toml" });
-  if (/\b(?:golang|go)\b/u.test(normalized)) seeds.push({ title: "Official Go Release History", url: "https://go.dev/doc/devel/release" });
-  return seeds.map((seed, index) => ({ hitId: `research-seed-${index + 1}`, title: seed.title, url: seed.url, snippet: "Official machine-readable release source.", rank: index + 1, visibility: "public" }));
-}
-
-function researchSearchPlans(question: string): Array<{ query: string; domains: string[] }> {
-  const normalized = question.toLocaleLowerCase();
-  if (/qwen3[\s-]+embedding/iu.test(question)) return [
-    { query: "Qwen3 Embedding", domains: ["qwenlm.github.io"] },
-    { query: "Qwen3-Embedding-8B", domains: ["huggingface.co"] },
-    { query: "Qwen3 Embedding", domains: ["github.com"] },
-  ];
-  const technologies: Array<{ pattern: RegExp; query: string; domains: string[] }> = [
-    { pattern: /\bnode(?:\.js|js)?\b/u, query: "Node.js releases", domains: ["nodejs.org"] },
-    { pattern: /\brust\b/u, query: "Rust releases", domains: ["rust-lang.org"] },
-    { pattern: /\bpython\b/u, query: "Python releases", domains: ["python.org"] },
-    { pattern: /\b(?:golang|go(?: programming)?)(?=\s+(?:stable|release|version)|\b)/u, query: "Go releases", domains: ["go.dev"] },
-  ];
-  const selected = technologies.filter((item) => item.pattern.test(normalized)).map(({ query, domains }) => ({ query, domains }));
-  if (selected.length > 1) return selected;
-  return [{ query: researchSearchQuery(question), domains: researchDomains(question) }];
-}
-function researchDomains(question: string): string[] {
-  const normalized = question.toLocaleLowerCase();
-  if (normalized.includes("fedora")) return ["fedoraproject.org", "fedoramagazine.org"];
-  if (normalized.includes("pi coding agent") || normalized.includes("pi agent")) return ["pi.dev", "github.com"];
-  if (normalized.includes("weather") || normalized.includes("forecast")) return ["weather.gov"];
-  if (normalized.includes("ecb") || normalized.includes("european central bank")) return ["ecb.europa.eu"];
-  return [];
-}
-function researchSearchQuery(question: string): string {
-  const noise = new Set(["a", "an", "and", "are", "be", "before", "can", "do", "find", "for", "from", "how", "identify", "in", "is", "of", "official", "or", "should", "source", "sources", "the", "to", "two", "use", "user", "using", "what", "when", "with"]);
-  const terms = question.replace(/[^\p{L}\p{N}._+-]+/gu, " ").trim().split(/\s+/u).filter((term) => term.length > 1 && !noise.has(term.toLocaleLowerCase()));
-  return terms.length > 0 ? terms.slice(0, 12).join(" ") : question;
-}
-function releaseFinding(url: string, content: string): string | undefined {
-  try {
-    const value = JSON.parse(content) as unknown;
-    if (url.includes("nodejs.org/dist/index.json")) {
-      const rows = Array.isArray(value)
-        ? value.filter((item): item is { version: string; date: string; lts?: unknown } => typeof item === "object" && item !== null && typeof (item as { version?: unknown }).version === "string" && typeof (item as { date?: unknown }).date === "string")
-        : projectedRows(value, ["version", "date", "lts"]) as Array<{ version: string; date: string; lts?: unknown }>;
-      const latest = rows[0];
-      const lts = rows.find((item) => typeof item.lts === "string" && item.lts.length > 0);
-      if (latest && lts) return `Node.js Current is ${latest.version} (${latest.date}); the newest LTS line is ${lts.version} (${lts.date}, codename ${String(lts.lts)}).`;
-    }
-    if (url.startsWith("https://go.dev/dl/")) {
-      const rows = Array.isArray(value) ? value : projectedRows(value, ["version", "stable", "files"]);
-      const stable = rows.find((item): item is { version: string; stable: true; files?: Array<{ time?: unknown }> } => typeof item === "object" && item !== null && (item as { stable?: unknown }).stable === true && typeof (item as { version?: unknown }).version === "string");
-      if (stable) {
-        const date = stable.files?.map((file) => typeof file.time === "string" ? file.time.slice(0, 10) : "").find(Boolean);
-        return `Go latest stable is ${stable.version}${date ? ` (${date})` : ""}.`;
-      }
-    }
-  } catch { /* HTML findings use bounded pattern extraction below. */ }
-  if (/^https:\/\/(?:www\.)?nodejs\.org\/en\/about\/previous-releases\/?(?:[?#]|$)/u.test(url) && /production applications should only use/iu.test(content)) {
-    return "Production applications should use Active LTS or Maintenance LTS Node.js releases.";
-  }
-  if (/^https:\/\/(?:www\.)?python\.org\/downloads\/?(?:[?#]|$)/u.test(url)) {
-    const match = content.match(/Python\s+(3\.\d+\.\d+)[^\n]{0,120}(?:(\d{4}-\d{2}-\d{2})|([A-Z][a-z]+\.?\s+\d{1,2},\s+\d{4}))/u);
-    if (match) return `Python latest stable is ${match[1]} (${match[2] ?? match[3]}).`;
-  }
-  if (/^https:\/\/static\.rust-lang\.org\/dist\/channel-rust-stable\.toml/u.test(url)) {
-    const match = content.match(/version\s*=\s*"(1\.\d+\.\d+)\s+\([^\n"]*?(\d{4}-\d{2}-\d{2})\)"/u)
-      ?? content.match(/(1\.\d+\.\d+)[^\n]{0,100}(\d{4}-\d{2}-\d{2})/u);
-    if (match) return `Rust latest stable is ${match[1]} (${match[2]}).`;
-    const date = content.match(/^date\s*=\s*"(\d{4}-\d{2}-\d{2})"/mu)?.[1];
-    const cargoForRust = content.match(/cargo-(1\.\d+\.\d+)-/u)?.[1];
-    if (date && cargoForRust) return `Rust latest stable is ${cargoForRust} (${date}).`;
-  }
-  if (/^https:\/\/go\.dev\/doc\/devel\/release/u.test(url)) {
-    const match = content.match(/go(1\.\d+(?:\.\d+)?)\s+\(released\s+(\d{4}-\d{2}-\d{2})\)/iu)
-      ?? content.match(/go(1\.\d+(?:\.\d+)?)[^\n]{0,100}(\d{4}-\d{2}-\d{2})/iu);
-    if (match) return `Go latest stable is go${match[1]} (${match[2]}).`;
-  }
-  return undefined;
-}
-function projectedRows(value: unknown, keys: readonly string[]): Array<Record<string, unknown>> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return [];
-  const record = value as Record<string, unknown>;
-  const length = Math.max(0, ...keys.map((key) => Array.isArray(record[key]) ? record[key].length : 0));
-  return Array.from({ length }, (_, index) => Object.fromEntries(keys.map((key) => [key, Array.isArray(record[key]) ? record[key][index] : undefined])));
 }
 function parseReaderFailure(status: number, raw: string): { toolStatus: number; message: string; retryable: boolean } {
   let detail = "reader failed";

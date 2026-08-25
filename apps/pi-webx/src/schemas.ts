@@ -21,18 +21,9 @@ const point = {
 export const WebSearchSchema = Type.Object({
   query: Type.String({ minLength: 1, maxLength: 8192, description: "Natural-language search query. Keep the named entity and intent complete." }),
   operation: StringEnum(["links", "extracts"] as const, { description: "Required product. links discovers URLs without returning page passages. extracts returns separate query-focused passages from selected sources without cross-source synthesis." }),
-  effort: StringEnum(["fast", "quality"] as const, { description: "Required effort. fast uses one search. quality sends three regular queries, then merges, deduplicates, and reranks their results." }),
+  effort: StringEnum(["fast", "quality", "deep"] as const, { description: "Required effort. fast sends one verbatim query. quality sends up to three regular queries. deep sends up to five. Quality and deep merge, deduplicate, and rerank only returned results; extracts read 3, 5, or 10 selected pages respectively." }),
   domains: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 253, pattern: "^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$", description: "Host name only, such as docs.python.org. Do not pass a URL, path, or site: prefix." }), { maxItems: 32, description: "Optional strict source-host requirements. Every search recipe retains these domains." })),
   freshness: Type.Optional(StringEnum(["day", "week", "month", "year"] as const, { description: "Optional recency preference. Use with quality when source age matters. Search remains broad and applies a soft local reranking signal when a publication date is available. Missing or unreliable dates never exclude a result." })),
-}, strict);
-
-export const WebResearchSchema = Type.Object({
-  question: Type.String({ minLength: 1, maxLength: 8192, description: "One complete factual question that needs multi-source synthesis or validation." }),
-  mode: Type.Optional(StringEnum(["quick", "research", "deep"] as const, { description: "Effort preset. quick uses fewer sources; research is the normal default; deep uses wider bounded evidence collection." })),
-  maxQueries: Type.Optional(Type.Integer({ minimum: 1, maximum: 24, description: "Hard search-query budget. Usually omit and use the mode default." })),
-  maxPages: Type.Optional(Type.Integer({ minimum: 1, maximum: 40, description: "Hard readable-source budget. Usually omit and use the mode default." })),
-  maxBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 16_777_216, description: "Hard synthesized-output budget in characters. This does not return complete crawled pages." })),
-  crawlDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 2, description: "Depth for following citations or linked evidence from selected sources. Default: 0." })),
 }, strict);
 
 export const WebReadSchema = Type.Object({

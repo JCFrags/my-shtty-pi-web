@@ -12,7 +12,7 @@ const paths = [
 ] as const;
 
 function actor(principalId = "principal-a", agentId = "agent-a"): AuthorityActor {
-  return { principalId, agentId, scopes: new Set(["system.read", "search.write", "retrieval.read", "research.write", "artifacts.read", "browser.read", "browser.write", "browser.control", "browser.debug"]) };
+  return { principalId, agentId, scopes: new Set(["system.read", "search.write", "retrieval.read", "artifacts.read", "browser.read", "browser.write", "browser.control", "browser.debug"]) };
 }
 
 function browser(): BrowserDaemonPort {
@@ -54,7 +54,6 @@ describe("WebxAuthority", () => {
     expect(read.body).toMatchObject({ untrustedContent: "WebX", truncated: true });
     const incompatibleContinuation = await call(instance, actor(), "POST", "/v1/read", { url: "https://fixture.invalid/webx", contentOffset: 10, maxPages: 2 }, "read-key-002");
     expect(incompatibleContinuation).toMatchObject({ status: 400, body: { code: "invalid-request" } });
-    expect((await call(instance, actor(), "POST", "/v1/research", { question: "browser paths", maxSources: 2 }, "research-key-001")).status).toBe(200);
   });
 
   it("returns clean SearXNG order without lexical intent filtering or rescoring", async () => {
@@ -125,6 +124,23 @@ describe("WebxAuthority", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("uses Pi coding-agent routing for any query that contains Pi", async () => {
+    const queries: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
+      queries.push(new URL(String(input)).searchParams.get("q") ?? "");
+      return new Response(JSON.stringify({ results: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
+    await call(instance, actor(), "POST", "/v1/search", { query: "Pi persistent wiki", operation: "links", effort: "deep" }, "pi-routing");
+    expect(queries).toEqual([
+      "Pi persistent wiki",
+      `"Pi coding agent" persistent wiki`,
+      "Pi package persistent wiki site:pi.dev",
+      "Pi extension persistent wiki site:github.com",
+      "Pi coding agent persistent wiki documentation",
+    ]);
+  });
+
   it("reports unavailable providers instead of a false successful empty search", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ results: [], unresponsive_engines: [["bing news", "too many requests"], ["brave.news", "CAPTCHA"]] }), { status: 200, headers: { "content-type": "application/json" } })));
     const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
@@ -133,7 +149,7 @@ describe("WebxAuthority", () => {
     expect((result.body as { message: string }).message).toMatch(/bing news.*too many requests.*brave\.news.*CAPTCHA/iu);
   });
 
-  it("executes the four fixed search recipes without linked traversal or synthesis", async () => {
+  it("executes the six fixed search recipes without linked traversal or synthesis", async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     vi.stubGlobal("fetch", vi.fn(async (input: unknown, init?: RequestInit) => {
       const url = String(input);
@@ -151,21 +167,21 @@ describe("WebxAuthority", () => {
       return new Response(JSON.stringify({ url: body.url, title: `Verified ${body.url.split("-").at(-1)}`, content: "Product feature support is documented in this independent source passage with useful detail.", truncated: false }), { status: 200, headers: { "content-type": "application/json" } });
     }));
     const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888", readerUrl: "http://127.0.0.1:8787" });
-    const run = async (operation: "links" | "extracts", effort: "fast" | "quality", key: string) => {
+    const run = async (operation: "links" | "extracts", effort: "fast" | "quality" | "deep", key: string) => {
       requests.length = 0;
       const result = await call(instance, actor(), "POST", "/v1/search", { query: "Product feature support", operation, effort, domains: ["docs.example.org"], freshness: "month" }, key);
       expect(result.status).toBe(200);
       const body = result.body as { hits: Array<{ snippet: string }>; metadata: { searches: number; pagesRead: number; linkedDepth: number } };
       const searches = requests.filter((item) => item.url.includes("/search"));
       const reads = requests.filter((item) => item.url.includes(":8787/"));
-      expect(searches).toHaveLength(effort === "quality" ? 3 : 1);
-      expect(searches.map((item) => new URL(item.url).searchParams.get("q"))).toEqual(effort === "quality"
-        ? ["Product feature support", "Product feature support official", "Product feature support guide"]
-        : ["Product feature support"]);
+      expect(searches).toHaveLength(effort === "deep" ? 5 : effort === "quality" ? 3 : 1);
+      expect(searches.map((item) => new URL(item.url).searchParams.get("q"))).toEqual(effort === "deep"
+        ? ["Product feature support", "Product feature support official", "Product feature support guide", "Product feature support documentation", "Product feature support GitHub"]
+        : effort === "quality" ? ["Product feature support", "Product feature support official", "Product feature support guide"] : ["Product feature support"]);
       expect(searches.every((item) => new URL(item.url).searchParams.get("time_range") === null)).toBe(true);
-      expect(reads).toHaveLength(operation === "links" ? 0 : effort === "quality" ? 5 : 3);
-      expect(body.metadata).toEqual({ searches: searches.length, pagesRead: reads.length, linkedDepth: 0, freshnessReranked: effort === "quality" });
-      expect(body.hits).toHaveLength(operation === "links" ? 10 : effort === "quality" ? 5 : 3);
+      expect(reads).toHaveLength(operation === "links" ? 0 : effort === "deep" ? 10 : effort === "quality" ? 5 : 3);
+      expect(body.metadata).toEqual({ searches: searches.length, pagesRead: reads.length, linkedDepth: 0, freshnessReranked: effort !== "fast" });
+      expect(body.hits).toHaveLength(operation === "links" ? 10 : effort === "deep" ? 10 : effort === "quality" ? 5 : 3);
       if (operation === "extracts") expect(body.hits.every((hit) => hit.snippet.includes("independent source passage"))).toBe(true);
       return result;
     };
@@ -173,6 +189,8 @@ describe("WebxAuthority", () => {
     await run("links", "quality", "recipe-quality-links");
     await run("extracts", "fast", "recipe-fast-extracts");
     await run("extracts", "quality", "recipe-quality-extracts");
+    await run("links", "deep", "recipe-deep-links");
+    await run("extracts", "deep", "recipe-deep-extracts");
   });
 
   it("reads a bounded byte range into an integrity-checked owner artifact", async () => {

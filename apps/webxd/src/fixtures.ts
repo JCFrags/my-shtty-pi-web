@@ -6,7 +6,7 @@ export const PUBLIC_SOURCES: readonly IndexedSource[] = [
     ownerPrincipalId: "fixture-owner",
     title: "WebX deterministic public fixture",
     url: "https://fixture.invalid/webx",
-    content: "WebX routes search, read, research, short-lived caching, and browser work through one local authority.",
+    content: "WebX routes search, read, short-lived caching, and browser work through one local authority.",
     visibility: "public",
   },
   {

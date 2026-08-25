@@ -23,8 +23,6 @@ import {
   type RangeReadResponse,
   type ReadRequest,
   type RequestOptions,
-  type ResearchRequest,
-  type ResearchResponse,
   type SearchRequest,
   type SearchResponse,
   type TransportResponse,
@@ -88,10 +86,6 @@ export class WebxClient {
 
   readRange(request: RangeReadRequest, options: RequestOptions): Promise<RangeReadResponse> {
     return this.call("POST", "/v1/read-range", request, requireIdempotency(options));
-  }
-
-  research(request: ResearchRequest, options: RequestOptions): Promise<ResearchResponse> {
-    return this.call("POST", "/v1/research", request, requireIdempotency(options));
   }
 
   getArtifactBytes(artifactId: string, offset = 0, maxBytes = 49_152, options: RequestOptions = {}): Promise<ArtifactByteExcerpt> {

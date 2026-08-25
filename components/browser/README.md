@@ -65,7 +65,7 @@ journalctl --user -u pi-browserd -f
 
 ## Pi tool surface
 
-`web_search`, `web_read`, `web_research`, `browser_open`, `browser_tabs`, `browser_observe`, `browser_act`, and `browser_debug` form the Pi-facing surface. Every daemon browser operation resolves through an explicit agent, session, and tab address. Tool defaults only reuse the invoking agent’s own last tab.
+`web_search`, `web_read`, `browser_open`, `browser_tabs`, `browser_observe`, `browser_act`, and `browser_debug` form the Pi-facing surface. Every daemon browser operation resolves through an explicit agent, session, and tab address. Tool defaults only reuse the invoking agent’s own last tab.
 
 Only the user changes capability modes. `browser_tabs` lets the model review its owned sessions and tabs, reuse relevant ones, and close transient tabs or sessions when they are no longer needed. Internal artifacts and short-lived caches are implementation details rather than separate Pi tools.
 

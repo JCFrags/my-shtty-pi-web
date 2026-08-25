@@ -5,8 +5,7 @@ This Pi extension presents the repository's internet capabilities as one small, 
 ## Tool selection
 
 - `web_read`: read a known public URL, API, feed, PDF, or document. It supports full main content, section selection, structured JSON rows, item pagination, reported continuations, and explicit linked crawling.
-- `web_search`: choose URL discovery (`links`) or separate sourced passages (`extracts`), with a fixed `fast` or `quality` recipe.
-- `web_research`: synthesize and validate bounded evidence from multiple sources.
+- `web_search`: choose URL discovery (`links`) or separate sourced passages (`extracts`), with a fixed `fast`, `quality`, or `deep` recipe.
 - `browser_open`: open an owned browser only when direct reading cannot provide required dynamic state, interaction, DOM evidence, or pixels.
 - `browser_tabs`: list or close owned browser tabs and sessions.
 - `browser_observe`: inspect current browser text, semantic controls, DOM state, changes, or screenshot-bound pixels.
@@ -19,7 +18,7 @@ The tool descriptions, field descriptions, active-tool prompt guidelines, and We
 
 A normal `web_read` returns complete extracted main content up to the source limit. Omit `maxChars` for a full read. Structured API projections return one object per collection row. Use continuation values only when the prior result reports them. `contentOffset` applies to direct single-page reading and cannot be combined with linked crawling.
 
-Search has four fixed recipes from its required `operation` and `effort` axes. Fast sends the query verbatim once. Quality sends the original query and two plain variants, then merges, deduplicates, and reranks only the returned results. Search never follows links. Extracts remain separate by source and do not synthesize a conclusion. Read crawling follows linked pages. Research crawling follows linked evidence.
+Search has six fixed recipes from its required `operation` and `effort` axes. Fast sends the query verbatim once. Quality sends up to three deterministic variants and can read five selected pages. Deep sends up to five variants and can read ten selected pages. Quality and deep merge, deduplicate, and rerank only returned results. Queries containing `Pi` receive Pi coding-agent variants. Search never follows links. Extracts remain separate by source and do not synthesize a conclusion. Read crawling follows linked pages.
 
 Browser work follows open, observe, act, observe, and close. Semantic refs are preferred. Coordinate actions bind to the latest visual observation. The exposed browser schema does not support upload or download.
 

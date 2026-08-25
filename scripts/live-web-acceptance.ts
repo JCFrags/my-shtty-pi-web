@@ -52,17 +52,14 @@ try {
   assert.equal(structured.data.metadata.reader.returnedItems, 3);
   assert(structured.data.metadata.reader.nextItemOffset > 0);
 
-  const research = await client.request("web.research", {
-    question: "What are the latest stable releases of Node.js, Rust, Python, and the Go programming language?",
-    mode: "research",
-    maxQueries: 6,
-    maxPages: 8,
-    maxBytes: 32_000,
+  const deepExtracts = await client.request("web.search", {
+    query: "latest stable releases Node.js Rust Python Go programming language",
+    operation: "extracts",
+    effort: "deep",
   }, options());
-  const researchHosts = new Set(research.data.sources.map((source) => hostname(source.url)));
-  for (const domain of ["nodejs.org", "rust-lang.org", "python.org", "go.dev"]) {
-    assert([...researchHosts].some((host) => host === domain || host.endsWith(`.${domain}`)), `research omitted ${domain}`);
-  }
+  assert.equal(deepExtracts.data.metadata.searches, 5);
+  assert(deepExtracts.data.metadata.pagesRead > 0);
+  assert(deepExtracts.data.hits.length > 0);
 
   const opened = await client.request("browser.open", {
     pathId: "agent-browser/chrome",

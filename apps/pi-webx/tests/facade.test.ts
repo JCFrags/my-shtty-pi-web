@@ -11,7 +11,6 @@ import {
   BrowserOpenSchema,
   BrowserTabsSchema,
   WebReadSchema,
-  WebResearchSchema,
   WebSearchSchema,
 } from "../src/schemas.js";
 import type { WebxCapabilities, WebxRequestOptions, WebxResult, WebxSdk } from "../src/sdk.js";
@@ -85,7 +84,7 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   const sdk = new MockSdk();
   const fx = harness(sdk);
   assert.deepEqual(fx.tools.map((tool) => tool.name), [
-    "web_search", "web_research", "web_read",
+    "web_search", "web_read",
     "browser_open", "browser_tabs", "browser_observe", "browser_act", "browser_debug",
   ]);
   assert.deepEqual([...fx.commands.keys()], ["web", "browser"]);
@@ -107,7 +106,7 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   const prompt = await (fx.events.get("before_agent_start") as Function)({ systemPrompt: "base" }, fx.ctx);
   assert.match(prompt.systemPrompt, /WebX is Pi's primary internet interface/);
   assert.match(prompt.systemPrompt, /Do not replace WebX with curl/);
-  assert.match(prompt.systemPrompt, /Do not run all three by default/);
+  assert.match(prompt.systemPrompt, /Do not call both by default/);
   assert.match(prompt.systemPrompt, /Do not invent a continuation offset/);
   assert.match(prompt.systemPrompt, /does not expose uploads or downloads/);
 
@@ -124,7 +123,7 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
 });
 
 test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
-  for (const operation of ["links", "extracts"]) for (const effort of ["fast", "quality"]) {
+  for (const operation of ["links", "extracts"]) for (const effort of ["fast", "quality", "deep"]) {
     assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation, effort }), true);
   }
   assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation: "links" }), false);
@@ -133,7 +132,6 @@ test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
   assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation: "links", effort: "fast", crawlPages: 1 }), false);
   assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation: "links", effort: "fast", domains: ["https://example.com/path"] }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "not-a-url" }), false);
-  assert.equal(Value.Check(WebResearchSchema, { question: "compare sources", resume: {} }), false);
   assert.equal(Value.Check(BrowserOpenSchema, { pathId: "agent-browser/chrome" }), true);
   assert.equal(Value.Check(BrowserOpenSchema, { newTab: true }), false);
   assert.equal(Value.Check(BrowserTabsSchema, { action: "discard-tab" }), false);
@@ -194,7 +192,6 @@ test("real search and read calls send structured and agent-visible evidence to t
   const fx = harness(sdk, true, { record: async (input) => { records.push(input); } });
   await fx.events.get("session_start")?.({}, fx.ctx);
   await fx.execute("web_search", { query: "evidence", operation: "links", effort: "fast" });
-  await fx.execute("web_research", { question: "evidence" });
   assert.equal(records.length, 1);
   const record = records[0] as { operation: string; input: { query: string }; result: { summary: string }; presentation: { content: unknown[] } };
   assert.equal(record.operation, "web.search");

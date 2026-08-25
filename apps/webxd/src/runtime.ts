@@ -12,7 +12,7 @@ import type { AuthorityActor, IndexedSource } from "./ports.js";
 const MAX_REQUEST_BYTES = 1_048_576;
 const MAX_RESPONSE_BYTES = 4_194_304;
 const ACTOR_ID = /^[A-Za-z0-9._:-]{1,256}$/u;
-const AUTHORITY_SCOPES = new Set(["system.read", "search.write", "retrieval.read", "research.write", "artifacts.read", "browser.read", "browser.write", "browser.control", "browser.debug"]);
+const AUTHORITY_SCOPES = new Set(["system.read", "search.write", "retrieval.read", "artifacts.read", "browser.read", "browser.write", "browser.control", "browser.debug"]);
 
 export interface WebxActorAuthenticator {
   authenticate(identity: { readonly principalId: string; readonly agentId: string }): AuthorityActor;
