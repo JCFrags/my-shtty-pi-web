@@ -30,7 +30,7 @@ import { setupCommand } from "./editors";
 import { commandHelp, helpTopics, rootHelp } from "./help";
 import { browsers, describe, recordKey } from "./instances";
 import type { Browser } from "./instances";
-import { findHosts, openAppInHost, openUrlInHost } from "./interop";
+import { findHosts, openInHost } from "./interop";
 import { lsCommand } from "./ls";
 import { instances } from "./registry";
 import { apparmorSetup, deniedRefusal, linuxSandboxError, sandboxRefusal } from "./sandbox";
@@ -552,7 +552,7 @@ async function tryAdopt(args: string[]): Promise<boolean> {
   if (!args.includes("--app-mode")) {
     for (const host of hosts) {
       try {
-        const opened = await openUrlInHost(host.socket, resolved);
+        const opened = await openInHost(host.socket, { url: resolved });
         print({ adopted: instanceKey(host), socket: host.socket, tab: opened.tab });
         return true;
       } catch {}
@@ -572,26 +572,11 @@ async function tryAdopt(args: string[]): Promise<boolean> {
   if (mainScript) app.mainScript = path.resolve(mainScript);
   const spec: OpenSpec = { url: resolved, app };
   for (const host of hosts) {
-    let attachment;
     try {
-      attachment = await openAppInHost(host.socket, spec);
-    } catch {
-      continue;
-    }
-    print({
-      adopted: instanceKey(host),
-      socket: host.socket,
-      tab: attachment.result.tab,
-    });
-    const finish = () => {
-      attachment.close();
-      process.exit(0);
-    };
-    process.on("SIGINT", finish);
-    process.on("SIGTERM", finish);
-    process.on("SIGHUP", finish);
-    await attachment.closed;
-    process.exit(0);
+      const opened = await openInHost(host.socket, spec);
+      print({ adopted: instanceKey(host), socket: host.socket, tab: opened.tab });
+      return true;
+    } catch {}
   }
   return false;
 }

@@ -38,7 +38,6 @@ export interface ControlHost {
   openTab(url?: string, cwd?: string): number;
   activateTab(id: number): boolean;
   closeTab(id: number): boolean;
-  hasTab(id: number): boolean;
   tabs(): unknown;
   targets(): Promise<unknown>;
   viewport(): { width: number; height: number } | null;
@@ -60,7 +59,6 @@ export class Registry {
   private cdpPort: number | null = null;
   private server: net.Server | null = null;
   private disposed = false;
-  private readonly watchers = new Map<net.Socket, { tab: number; id: string }>();
 
   constructor(host: ControlHost) {
     this.host = host;
@@ -82,7 +80,6 @@ export class Registry {
 
   update() {
     this.write();
-    this.sweepWatchers("closed");
   }
 
   record(): InstanceRow {
@@ -104,14 +101,6 @@ export class Registry {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
-    for (const [connection, watched] of [...this.watchers]) {
-      this.watchers.delete(connection);
-      try {
-        connection.end(
-          `${JSON.stringify({ id: watched.id, event: "app-closed", tab: watched.tab, reason: "shutdown" })}\n`,
-        );
-      } catch {}
-    }
     this.server?.close();
     this.server = null;
     void removeInstance(this.host.key).catch(() => {});
@@ -134,28 +123,10 @@ export class Registry {
     });
   }
 
-  private sweepWatchers(reason: string) {
-    for (const [connection, watched] of [...this.watchers]) {
-      if (this.host.hasTab(watched.tab)) continue;
-      this.watchers.delete(connection);
-      try {
-        connection.end(
-          `${JSON.stringify({ id: watched.id, event: "app-closed", tab: watched.tab, reason })}\n`,
-        );
-      } catch {}
-    }
-  }
-
   private serve(connection: net.Socket) {
     let buffer = "";
     connection.setEncoding("utf8");
     connection.on("error", () => {});
-    connection.on("close", () => {
-      const watched = this.watchers.get(connection);
-      if (watched === undefined) return;
-      this.watchers.delete(connection);
-      if (this.host.hasTab(watched.tab)) this.host.closeTab(watched.tab);
-    });
     connection.on("data", (chunk: string) => {
       buffer += chunk;
       let newline = buffer.indexOf("\n");
@@ -178,14 +149,10 @@ export class Registry {
         const parsed = openSpecSchema.safeParse(request);
         if (!parsed.success) throw new Error("malformed open request");
         const spec = parsed.data;
-        if (!spec.app) {
-          const tab = this.host.openTab(spec.url);
-          connection.end(`${JSON.stringify({ id, ok: true, data: { tab } })}\n`);
-          return;
-        }
-        const result = this.host.openAppTab(spec, spec.app);
-        connection.write(`${JSON.stringify({ id, ok: true, data: result })}\n`);
-        this.watchers.set(connection, { tab: result.tab, id });
+        const tab = spec.app
+          ? this.host.openAppTab(spec, spec.app).tab
+          : this.host.openTab(spec.url);
+        connection.end(`${JSON.stringify({ id, ok: true, data: { tab } })}\n`);
         return;
       }
       const data = await this.handle(request);

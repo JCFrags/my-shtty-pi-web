@@ -433,7 +433,6 @@ class Session {
         mode: this.appIdentity ? ("app" as const) : ("browser" as const),
       }),
       openAppTab: (spec, app) => this.openAppTab(spec, app),
-      hasTab: (id) => this.tabs.has(id),
       openTab: (url, cwd) => this.tabs.create(url ? normalizeUrl(url, cwd) : DEFAULT_URL).id,
       activateTab: (id) => {
         if (!this.tabs.has(id) || this.activeRecord()?.reviewing) return false;
