@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiVersionError, FACADE_OPERATION_INVENTORY, HttpTransport, ResponseLimitError, UnixSocketTransport, WebxClient } from "../src/index.js";
 import type { BrowserAction } from "../src/types.js";
 
-function transport(version = "1.0.0") {
+function transport(version = "2.0.0") {
   const request = vi.fn(async (input) => {
     if (input.path === "/v1/version") return { status: 200, headers: {}, body: { apiVersion: version, webxVersion: "0.1.0", browserProtocolVersion: "2.0.0" } };
     return { status: 200, headers: {}, body: { query: "q", hits: [], truncated: false } };
@@ -14,15 +14,15 @@ describe("WebxClient", () => {
   it("negotiates once and preserves an idempotency key", async () => {
     const wire = transport();
     const client = new WebxClient(wire);
-    await client.search({ query: "q", operation: "links", effort: "fast" }, { idempotencyKey: "search-key-1" });
-    await client.search({ query: "q", operation: "links", effort: "fast" }, { idempotencyKey: "search-key-1" });
+    await client.search({ query: "q" }, { idempotencyKey: "search-key-1" });
+    await client.search({ query: "q" }, { idempotencyKey: "search-key-1" });
     expect(wire.request.mock.calls.filter(([request]) => request.path === "/v1/version")).toHaveLength(1);
     expect(wire.request.mock.calls.at(-1)?.[0].headers).toEqual({ "idempotency-key": "search-key-1" });
   });
 
   it("rejects API-major mismatch with exact versions", async () => {
-    const client = new WebxClient(transport("2.0.0"));
-    await expect(client.capabilities()).rejects.toEqual(expect.objectContaining<ApiVersionError>({ expectedMajor: 1, actualVersion: "2.0.0" }));
+    const client = new WebxClient(transport("1.0.0"));
+    await expect(client.capabilities()).rejects.toEqual(expect.objectContaining<ApiVersionError>({ expectedMajor: 2, actualVersion: "1.0.0" }));
   });
 
   it("requires idempotency for browser mutations", () => {
@@ -104,7 +104,7 @@ describe("WebxClient", () => {
     const wire = transport();
     const client = new WebxClient(wire);
     const controller = new AbortController();
-    await client.search({ query: "q", operation: "links", effort: "fast" }, { signal: controller.signal, idempotencyKey: "search-key-2" });
+    await client.search({ query: "q" }, { signal: controller.signal, idempotencyKey: "search-key-2" });
     expect(wire.request.mock.calls.at(-1)?.[0].signal).toBe(controller.signal);
   });
 });

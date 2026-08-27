@@ -59,7 +59,7 @@ Review `~/.config/pi-web`, `~/.local/share/pi-web`, `~/.cache/pi-web`, and `~/.l
 
 ## Pi tools
 
-- `web_search` — fixed fast, quality, and deep recipes for URL links or separate sourced extracts
+- `web_search` — one complete query for ranked links or a few short sourced extracts
 - `web_read` — includes optional bounded Crawl4AI rendering, linked-page extraction, and one-page Markdown export
 - `browser_open`
 - `browser_tabs`
@@ -67,9 +67,9 @@ Review `~/.config/pi-web`, `~/.local/share/pi-web`, `~/.cache/pi-web`, and `~/.l
 - `browser_act`
 - `browser_debug`
 
-Only the user changes capability modes with `/web off|read|browser|debug`.
+Only the user changes capability modes. Run `/web` with no options to open one settings menu for capability modes and browser workspace controls. Direct forms use `/web mode ...` and `/web workspace ...`; there is no separate browser slash command.
 
-Search and read are capability groups rather than thin provider wrappers. Search uses required `operation` (`links` or `extracts`) and `effort` (`fast`, `quality`, or `deep`) axes. Its six fixed recipes hide provider counts and page-reading budgets. Search never follows links, and extracts do not synthesize across sources. WebX uses SearXNG JSON for all search discovery. It can then select direct fetch, structured JSON, main-content extraction, Crawl4AI rendering, document conversion, source ranking, and evidence extraction behind these two stable Pi tools. Full reads return complete main content up to the explicit 1,000,000-character source bound. WebX does not add a smaller facade limit. An explicit saved read writes one normal or focused extraction below `${XDG_DATA_HOME:-~/.local/share}/pi-web/exports` and returns compact metadata instead of sending the body through the transcript. Existing files are protected unless overwrite is explicit. Structured API projections return complete row objects. If a source applies a bound, `contentOffset`, item pagination, or a section query provides a precise continuation. Source and crawl-link details remain structured metadata. Deep extracts return bounded passages from up to ten selected sources instead of complete pages. Browser capabilities advertise only actions that the installed path can execute.
+Search and read are capability groups rather than thin provider wrappers. `web_search` needs one complete query. It returns up to ten ranked links by default. Optional `output: "extracts"` reads selected pages and returns up to four short, separate source passages. Optional `domains` are strict host requirements. WebX sends the query to SearXNG without invented variants. It retries once without a `site:` operator only when the constrained query returns no eligible result. Search normalizes tracking URLs, removes duplicates, applies small relevance adjustments, and never follows page links or synthesizes across sources. Extract mode reads pages concurrently and never labels a search-engine snippet as a page extract. WebX can also select direct fetch, structured JSON, main-content extraction, Crawl4AI rendering, and document conversion behind `web_read`. Full reads return complete main content up to the explicit 1,000,000-character source bound. WebX does not add a smaller facade limit. An explicit saved read writes one normal or focused extraction below `${XDG_DATA_HOME:-~/.local/share}/pi-web/exports` and returns compact metadata instead of sending the body through the transcript. Existing files are protected unless overwrite is explicit. Structured API projections return complete row objects. If a source applies a bound, `contentOffset`, item pagination, or a section query provides a precise continuation. Source and crawl-link details remain structured metadata. Browser capabilities advertise only actions that the installed path can execute.
 
 ## Real-usage audit history
 

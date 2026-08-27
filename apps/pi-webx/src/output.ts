@@ -36,17 +36,24 @@ function renderData(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const data = value as Record<string, unknown>;
   if (Array.isArray(data.hits)) {
-    const operation = data.operation === "extracts" ? "extracts" : "links";
-    const effort = data.effort === "deep" ? "deep" : data.effort === "quality" ? "quality" : "fast";
-    const hits = data.hits.slice(0, 20).map((item, index) => {
+    const output = data.output === "extracts" ? "extracts" : "links";
+    const hits = data.hits.slice(0, 10).map((item, index) => {
       const hit = item as Record<string, unknown>;
-      const snippet = typeof hit.snippet === "string" && hit.snippet.trim() ? `\n   ${operation === "extracts" ? "Extract: " : ""}${clip(hit.snippet.trim(), operation === "extracts" ? 1_200 : 360)}` : "";
+      const snippet = typeof hit.snippet === "string" && hit.snippet.trim() ? `\n   ${output === "extracts" ? "Extract: " : ""}${clip(hit.snippet.trim(), output === "extracts" ? 800 : 360)}` : "";
       return `${index + 1}. **${String(hit.title ?? "Untitled")}**\n   ${String(hit.url ?? "")}${snippet}`;
     });
     const metadata = typeof data.metadata === "object" && data.metadata !== null ? data.metadata as Record<string, unknown> : {};
-    const execution = `[${effort} ${operation}; ${String(metadata.searches ?? 1)} search(es); ${String(metadata.pagesRead ?? 0)} page read(s); linked depth 0]`;
-    const freshnessNotice = metadata.freshnessReranked === true ? "\n[Quality reranking used available publication dates as a soft freshness signal. Missing or unreliable dates did not exclude results.]" : "";
-    return hits.length ? `${execution}${freshnessNotice}\n\n${hits.join("\n")}` : `${execution}${freshnessNotice}\n\nNo results.`;
+    const searches = String(metadata.searches ?? 1);
+    const execution = output === "extracts"
+      ? `[extracts; ${searches} search(es); ${String(metadata.pagesRead ?? 0)} successful page read(s) from ${String(metadata.readAttempts ?? 0)} attempt(s)]`
+      : `[links; ${searches} search(es)]`;
+    const notices = [
+      metadata.fallbackUsed === true ? "[A site-query recovery search was required.]" : undefined,
+      metadata.partial === true ? "[Partial result: one or more search providers or page reads failed.]" : undefined,
+    ].filter((item): item is string => item !== undefined).join("\n");
+    const header = `${execution}${notices ? `\n${notices}` : ""}`;
+    const empty = output === "extracts" && Number(metadata.readAttempts ?? 0) > 0 ? "No page extracts were available." : "No results.";
+    return hits.length ? `${header}\n\n${hits.join("\n")}` : `${header}\n\n${empty}`;
   }
   if (data.saved === true && typeof data.path === "string") {
     const source = typeof data.source === "object" && data.source !== null ? data.source as Record<string, unknown> : {};

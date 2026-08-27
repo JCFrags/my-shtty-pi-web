@@ -16,7 +16,7 @@ import {
 import type { WebxCapabilities, WebxRequestOptions, WebxResult, WebxSdk } from "../src/sdk.js";
 
 const readyCapabilities: WebxCapabilities = {
-  apiVersion: "1.0.0",
+  apiVersion: "2.0.0",
   daemon: "ready",
   groups: { web: true, browser: true, browserDebug: true },
   browserPathIds: ["agent-browser/chrome", "pinchtab/chrome"],
@@ -51,6 +51,10 @@ function harness(sdk: MockSdk, trusted = true, audit: { record(input: unknown): 
   let active = ["read", "bash", "other_extension_tool"];
   const status: unknown[][] = [];
   const notifications: unknown[][] = [];
+  const selectionPrompts: unknown[][] = [];
+  const inputPrompts: unknown[][] = [];
+  const selections: string[] = [];
+  const inputs: Array<string | undefined> = [];
   const pi = {
     registerTool(tool: Record<string, unknown>) { tools.push(tool); },
     registerCommand(name: string, command: { handler: (args: string, ctx: unknown) => Promise<void> }) { commands.set(name, command); },
@@ -69,7 +73,14 @@ function harness(sdk: MockSdk, trusted = true, audit: { record(input: unknown): 
     ui: {
       setStatus: (...args: unknown[]) => status.push(args),
       notify: (...args: unknown[]) => notifications.push(args),
-      select: async () => "Allow once",
+      select: async (...args: unknown[]) => {
+        selectionPrompts.push(args);
+        return selections.shift() ?? "Allow once";
+      },
+      input: async (...args: unknown[]) => {
+        inputPrompts.push(args);
+        return inputs.shift();
+      },
     },
   };
   const execute = async (name: string, input: unknown, signal: AbortSignal = controller.signal) => {
@@ -77,7 +88,11 @@ function harness(sdk: MockSdk, trusted = true, audit: { record(input: unknown): 
     assert.ok(tool);
     return (tool.execute as Function)(`call-${name}`, input, signal, undefined, ctx);
   };
-  return { tools, commands, shortcuts, events, ctx, execute, get active() { return active; }, status, notifications };
+  return {
+    tools, commands, shortcuts, events, ctx, execute,
+    get active() { return active; },
+    status, notifications, selectionPrompts, inputPrompts, selections, inputs,
+  };
 }
 
 test("registers one stable inventory and preserves unrelated active tools", async () => {
@@ -87,7 +102,7 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
     "web_search", "web_read",
     "browser_open", "browser_tabs", "browser_observe", "browser_act", "browser_debug",
   ]);
-  assert.deepEqual([...fx.commands.keys()], ["web", "browser"]);
+  assert.deepEqual([...fx.commands.keys()], ["web"]);
   assert.deepEqual([...fx.shortcuts.keys()], ["ctrl+alt+g"]);
   await fx.events.get("session_start")?.({}, fx.ctx);
   assert.equal(sdk.starts, 1);
@@ -95,8 +110,16 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   assert.ok(fx.active.includes("web_search"));
   assert.ok(fx.active.includes("browser_open"));
   const searchTool = fx.tools.find((tool) => tool.name === "web_search");
-  assert.match(String(searchTool?.promptSnippet), /Discover URLs or retrieve separate source passages/);
+  assert.match(String(searchTool?.promptSnippet), /Discover ranked URLs or retrieve short separate source extracts/);
   assert.ok(Array.isArray(searchTool?.promptGuidelines));
+  const searchCall = (searchTool?.renderCall as Function)(
+    { query: "NIST password guidance 2026", output: "extracts", domains: ["nist.gov", "csrc.nist.gov"] },
+    { fg: (_color: string, text: string) => text, bold: (text: string) => text },
+    { lastComponent: undefined },
+  ) as { render(width: number): string[] };
+  const visibleSearchCall = searchCall.render(200).join("\n");
+  assert.match(visibleSearchCall, /web_search "NIST password guidance 2026"/);
+  assert.match(visibleSearchCall, /\[extracts; domains: nist\.gov, csrc\.nist\.gov\]/);
   for (const tool of fx.tools) {
     assert.ok(String(tool.description ?? "").length >= 80, `${String(tool.name)} needs a useful model-facing description`);
     if (tool.promptGuidelines !== undefined) {
@@ -106,7 +129,7 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   const prompt = await (fx.events.get("before_agent_start") as Function)({ systemPrompt: "base" }, fx.ctx);
   assert.match(prompt.systemPrompt, /WebX is Pi's primary internet interface/);
   assert.match(prompt.systemPrompt, /Do not replace WebX with curl/);
-  assert.match(prompt.systemPrompt, /Do not call both by default/);
+  assert.match(prompt.systemPrompt, /web_search needs only a complete query/);
   assert.match(prompt.systemPrompt, /Do not invent a continuation offset/);
   assert.match(prompt.systemPrompt, /does not expose uploads or downloads/);
 
@@ -122,15 +145,48 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   assert.equal(sdk.stops, 1);
 });
 
+test("one /web settings command routes modes and browser workspace actions", async () => {
+  const sdk = new MockSdk();
+  const fx = harness(sdk);
+  await fx.events.get("session_start")?.({}, fx.ctx);
+
+  fx.selections.push("Set capability mode", "read");
+  await fx.commands.get("web")?.handler("", fx.ctx);
+  assert.equal(fx.selectionPrompts.length, 2);
+  assert.ok(fx.active.includes("web_search"));
+  assert.ok(!fx.active.includes("browser_open"));
+
+  await fx.commands.get("web")?.handler("workspace attach session-1 tab-1", fx.ctx);
+  assert.deepEqual(sdk.calls.at(-1)?.input, { action: "attach", browserSessionId: "session-1", tabId: "tab-1" });
+
+  fx.selections.push("Take over browser session");
+  fx.inputs.push("session-2");
+  await fx.commands.get("web")?.handler("settings", fx.ctx);
+  assert.deepEqual(sdk.calls.at(-1)?.input, { action: "takeover", browserSessionId: "session-2" });
+  assert.equal(fx.inputPrompts.length, 1);
+
+  const callCount = sdk.calls.length;
+  await fx.commands.get("web")?.handler("workspace profile personal", fx.ctx);
+  assert.equal(sdk.calls.length, callCount);
+  assert.match(String(fx.notifications.at(-1)?.[0]), /Usage: \/web workspace/);
+
+  await fx.shortcuts.get("ctrl+alt+g")?.handler(fx.ctx);
+  assert.deepEqual(sdk.calls.at(-1)?.input, { action: "show" });
+  await fx.events.get("session_shutdown")?.();
+});
+
 test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
-  for (const operation of ["links", "extracts"]) for (const effort of ["fast", "quality", "deep"]) {
-    assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation, effort }), true);
-  }
+  assert.equal(Value.Check(WebSearchSchema, { query: "ok" }), true);
+  assert.equal(Value.Check(WebSearchSchema, { query: "ok", output: "links" }), true);
+  assert.equal(Value.Check(WebSearchSchema, { query: "ok", output: "extracts" }), true);
+  assert.equal(Value.Check(WebSearchSchema, { query: "ok", output: "deep" }), false);
   assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation: "links" }), false);
-  assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation: "links", effort: "fast", unexpected: true }), false);
-  assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation: "links", effort: "fast", limit: 20 }), false);
-  assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation: "links", effort: "fast", crawlPages: 1 }), false);
-  assert.equal(Value.Check(WebSearchSchema, { query: "ok", operation: "links", effort: "fast", domains: ["https://example.com/path"] }), false);
+  assert.equal(Value.Check(WebSearchSchema, { query: "ok", effort: "fast" }), false);
+  assert.equal(Value.Check(WebSearchSchema, { query: "ok", freshness: "day" }), false);
+  assert.equal(Value.Check(WebSearchSchema, { query: "ok", unexpected: true }), false);
+  assert.equal(Value.Check(WebSearchSchema, { query: "ok", limit: 20 }), false);
+  assert.equal(Value.Check(WebSearchSchema, { query: "ok", crawlPages: 1 }), false);
+  assert.equal(Value.Check(WebSearchSchema, { query: "ok", domains: ["https://example.com/path"] }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "not-a-url" }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "notes/page.md" } }), true);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "../page.md" } }), false);
@@ -177,7 +233,7 @@ test("tool calls use only the SDK seam with owner, idempotency, cancellation, an
   const fx = harness(sdk);
   await fx.events.get("session_start")?.({}, fx.ctx);
   const caller = new AbortController();
-  const result = await fx.execute("web_search", { query: "evidence", operation: "links", effort: "fast" }, caller.signal);
+  const result = await fx.execute("web_search", { query: "evidence" }, caller.signal);
   assert.equal(sdk.calls.length, 1);
   assert.equal(sdk.calls[0]?.operation, "web.search");
   assert.equal(sdk.calls[0]?.options.ownerId, "owner-session");
@@ -192,11 +248,11 @@ test("tool calls use only the SDK seam with owner, idempotency, cancellation, an
 
 test("real search and read calls send structured and agent-visible evidence to the audit boundary", async () => {
   const sdk = new MockSdk();
-  sdk.result = { summary: "search", data: { operation: "links", effort: "fast", hits: [], metadata: { searches: 1, pagesRead: 0, linkedDepth: 0 } }, trust: "untrusted-external" };
+  sdk.result = { summary: "search", data: { output: "links", hits: [], metadata: { searches: 1, fallbackUsed: false, partial: false, pagesRead: 0, readAttempts: 0 } }, trust: "untrusted-external" };
   const records: unknown[] = [];
   const fx = harness(sdk, true, { record: async (input) => { records.push(input); } });
   await fx.events.get("session_start")?.({}, fx.ctx);
-  await fx.execute("web_search", { query: "evidence", operation: "links", effort: "fast" });
+  await fx.execute("web_search", { query: "evidence" });
   assert.equal(records.length, 1);
   const record = records[0] as { operation: string; input: { query: string }; result: { summary: string }; presentation: { content: unknown[] } };
   assert.equal(record.operation, "web.search");
@@ -232,7 +288,7 @@ test("approval UI offers only allow-once or deny and returns the SDK decision", 
 
 test("API mismatch, daemon outage, wrong paths, and untrusted projects fail closed", async () => {
   for (const capabilitiesValue of [
-    { ...readyCapabilities, apiVersion: "2.0.0" },
+    { ...readyCapabilities, apiVersion: "1.0.0" },
     { ...readyCapabilities, daemon: "unavailable" as const },
     { ...readyCapabilities, browserPathIds: ["agent-browser", "pinchtab/chrome"] as [string, string] },
     { ...readyCapabilities, browserPathIds: ["rustwright", "pinchtab/chrome"] as [string, string] },
@@ -293,9 +349,9 @@ test("output compaction and visual transfer have deterministic bounds", () => {
   assert.match(JSON.stringify(saved.content), /Complete: yes/);
   assert.doesNotMatch(JSON.stringify(saved.content), /untrustedContent/);
 
-  const extracts = presentResult({ summary: "search", data: { query: "feature", operation: "extracts", effort: "quality", hits: [{ title: "Source", url: "https://example.test/source", snippet: "Focused supporting passage." }], metadata: { searches: 3, pagesRead: 1, linkedDepth: 0, freshnessReranked: true } } });
-  assert.match(JSON.stringify(extracts.content), /quality extracts; 3 search\(es\); 1 page read\(s\); linked depth 0/);
-  assert.match(JSON.stringify(extracts.content), /soft freshness signal/);
+  const extracts = presentResult({ summary: "search", data: { query: "feature", output: "extracts", hits: [{ title: "Source", url: "https://example.test/source", snippet: "Focused supporting passage." }], metadata: { searches: 1, fallbackUsed: false, partial: true, pagesRead: 1, readAttempts: 2 } } });
+  assert.match(JSON.stringify(extracts.content), /extracts; 1 search\(es\); 1 successful page read\(s\) from 2 attempt\(s\)/);
+  assert.match(JSON.stringify(extracts.content), /Partial result/);
   assert.match(JSON.stringify(extracts.content), /Extract: Focused supporting passage/);
 
   const completePage = "main-content-".repeat(5_000);

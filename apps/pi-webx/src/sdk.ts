@@ -1,6 +1,6 @@
 import { WebxFacadeClient } from "../../../packages/sdk/src/facade.js";
 
-export const SUPPORTED_API_MAJOR = 1;
+export const SUPPORTED_API_MAJOR = 2;
 
 export interface WebxCapabilities {
   apiVersion: string;

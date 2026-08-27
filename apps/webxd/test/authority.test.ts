@@ -47,150 +47,128 @@ async function call(instance: WebxAuthority, owner: AuthorityActor, method: "GET
 }
 
 describe("WebxAuthority", () => {
-  it("serves bounded deterministic search, read, and research operations", async () => {
+  it("serves the streamlined search contract and rejects removed fields", async () => {
     const instance = authority();
-    expect((await call(instance, actor(), "POST", "/v1/search", { query: "WebX routes", operation: "links", effort: "fast" }, "search-key-001")).status).toBe(200);
+    const search = await call(instance, actor(), "POST", "/v1/search", { query: "WebX routes" }, "search-key-001");
+    expect(search).toMatchObject({ status: 200, body: { output: "links", metadata: { searches: 1, fallbackUsed: false, partial: false, pagesRead: 0, readAttempts: 0 } } });
+    expect(await call(instance, actor(), "POST", "/v1/search", { query: "WebX routes", effort: "fast" }, "search-key-002")).toMatchObject({ status: 400, body: { code: "invalid-request" } });
     const read = await call(instance, actor(), "POST", "/v1/read", { url: "https://fixture.invalid/webx", maxChars: 4 }, "read-key-001");
     expect(read.body).toMatchObject({ untrustedContent: "WebX", truncated: true });
     const incompatibleContinuation = await call(instance, actor(), "POST", "/v1/read", { url: "https://fixture.invalid/webx", contentOffset: 10, maxPages: 2 }, "read-key-002");
     expect(incompatibleContinuation).toMatchObject({ status: 400, body: { code: "invalid-request" } });
   });
 
-  it("returns clean SearXNG order without lexical intent filtering or rescoring", async () => {
+  it("keeps one query, applies small relevance ranking, and removes canonical duplicates", async () => {
+    const query = "major changes in Fedora Linux 44 for desktop users";
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = new URL(String(input));
       expect(url.pathname).toBe("/search");
-      expect(url.searchParams.get("q")).toBe("major changes in Fedora Linux 44 for desktop users");
-      expect(url.searchParams.get("format")).toBe("json");
-      return new Response(JSON.stringify({ results: [
-        { title: "Major definition", url: "https://dictionary.example/major", content: "A dictionary definition." },
-        { title: "Fedora Linux 44 Changes", url: "https://fedoraproject.org/wiki/Releases/44/ChangeSet", content: "Major approved changes for Fedora Linux 44." },
-        { title: "Fedora 44 desktop overview", url: "https://fedoramagazine.org/fedora-44-desktop/", content: "Desktop changes." },
-      ] }), { status: 200, headers: { "content-type": "application/json" } });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const instance = new WebxAuthority({
-      browser: browser(), sources: PUBLIC_SOURCES,
-      clock: { now: () => "2026-08-12T00:00:00Z" },
-      ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888",
-    });
-    const result = await call(instance, actor(), "POST", "/v1/search", { query: "major changes in Fedora Linux 44 for desktop users", operation: "links", effort: "fast" }, "search-fedora");
-    expect(result).toMatchObject({ status: 200, body: { hits: [
-      { title: "Major definition", rank: 1 },
-      { title: "Fedora Linux 44 Changes", rank: 2 },
-      { title: "Fedora 44 desktop overview", rank: 3 },
-    ] } });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("sends fast queries to SearXNG verbatim", async () => {
-    const query = `site:github.com "pi" "llm-wiki"`;
-    const fetchMock = vi.fn(async (input: unknown) => {
-      const url = new URL(String(input));
       expect(url.searchParams.get("q")).toBe(query);
       expect(url.searchParams.get("format")).toBe("json");
       expect(url.searchParams.get("time_range")).toBeNull();
       return new Response(JSON.stringify({ results: [
-        { title: "pi-llm-wiki", url: "https://github.com/zosmaai/pi-llm-wiki", content: "A Pi coding-agent wiki package." },
+        { title: "Major definition", url: "https://dictionary.example/major", content: "A dictionary definition." },
+        { title: "Fedora Linux 44 Changes", url: "https://fedoraproject.org/wiki/Releases/44/ChangeSet?utm_source=test", content: "Major approved desktop changes for Fedora Linux 44, including the complete official change set for workstation users." },
+        { title: "Fedora Linux 44 Changes", url: "https://fedoraproject.org/wiki/Releases/44/ChangeSet?utm_medium=duplicate", content: "Major approved desktop changes for Fedora Linux 44, including the complete official change set for workstation users." },
+        { title: "Official Fedora desktop changes", url: "https://fedoraproject.org/wiki/Releases/44/ChangeSet/wiki/Releases/44/ChangeSet", content: "Major approved desktop changes for Fedora Linux 44, including the complete official change set for workstation users." },
       ] }), { status: 200, headers: { "content-type": "application/json" } });
     });
     vi.stubGlobal("fetch", fetchMock);
-    const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
-    const result = await call(instance, actor(), "POST", "/v1/search", { query, operation: "links", effort: "fast" }, "verbatim-search");
-    expect(result).toMatchObject({ status: 200, body: { hits: [{ title: "pi-llm-wiki", rank: 1 }], metadata: { searches: 1 } } });
+    const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
+    const result = await call(instance, actor(), "POST", "/v1/search", { query }, "search-fedora");
+    const body = result.body as { hits: Array<{ title: string; url: string }> };
+    expect(result.status).toBe(200);
+    expect(body.hits).toHaveLength(2);
+    expect(body.hits[0]).toMatchObject({ title: "Fedora Linux 44 Changes", url: "https://fedoraproject.org/wiki/Releases/44/ChangeSet" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps SearXNG discovery broad and uses publication dates only for soft quality reranking", async () => {
+  it("sends the query once and enforces explicit domains without leaks", async () => {
+    const query = "Pi coding agent extensions documentation official";
     const fetchMock = vi.fn(async (input: unknown) => {
-      const url = new URL(String(input));
-      expect(url.searchParams.get("categories")).toBeNull();
-      expect(url.searchParams.get("time_range")).toBeNull();
-      return new Response(JSON.stringify({ results: [
-        { title: "Stock market latest news archive", url: "https://finance.example/markets/archive", content: "U.S. stock market today latest news.", publishedDate: "2025-01-01" },
-        { title: "Stock market latest news update", url: "https://finance.example/markets/today", content: "U.S. stock market today latest news.", publishedDate: "2026-08-24" },
-        { title: "Stock market latest news overview", url: "https://finance.example/markets/overview", content: "U.S. stock market today latest news." },
-      ] }), { status: 200, headers: { "content-type": "application/json" } });
+      expect(new URL(String(input)).searchParams.get("q")).toBe(query);
+      return new Response(JSON.stringify({
+        results: [
+          { title: "Pi Coding Agent", url: "https://pi.dev/", content: "Pi home." },
+          { title: "Extensions", url: "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md", content: "Pi extension documentation." },
+        ],
+        unresponsive_engines: [["bing", "timeout"]],
+      }), { status: 200, headers: { "content-type": "application/json" } });
     });
     vi.stubGlobal("fetch", fetchMock);
     const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
-    const result = await call(instance, actor(), "POST", "/v1/search", { query: "U.S. stock market today latest news", operation: "links", effort: "quality", freshness: "day" }, "stock-news");
-    expect(result).toMatchObject({ status: 200, body: { metadata: { searches: 3, pagesRead: 0, linkedDepth: 0, freshnessReranked: true } } });
-    expect((result.body as { hits: Array<{ title: string }> }).hits.map((hit) => hit.title)).toEqual([
-      "Stock market latest news update",
-      "Stock market latest news overview",
-      "Stock market latest news archive",
-    ]);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const result = await call(instance, actor(), "POST", "/v1/search", { query, domains: ["github.com"] }, "strict-domain");
+    expect(result).toMatchObject({ status: 200, body: { hits: [{ title: "Extensions" }], metadata: { searches: 1, partial: true } } });
+    const hits = (result.body as { hits: Array<{ url: string }> }).hits;
+    expect(hits.every((hit) => new URL(hit.url).hostname === "github.com")).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("uses Pi coding-agent routing for any query that contains Pi", async () => {
+  it("uses one narrow site-query recovery and rejects conflicting domain constraints", async () => {
     const queries: string[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
-      queries.push(new URL(String(input)).searchParams.get("q") ?? "");
-      return new Response(JSON.stringify({ results: [] }), { status: 200, headers: { "content-type": "application/json" } });
-    }));
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const query = new URL(String(input)).searchParams.get("q") ?? "";
+      queries.push(query);
+      const results = query.startsWith("site:") ? [] : [
+        { title: "Data API docs", url: "https://artificialanalysis.ai/data-api/docs", content: "Language model endpoint documentation." },
+      ];
+      return new Response(JSON.stringify({ results }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
     const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
-    await call(instance, actor(), "POST", "/v1/search", { query: "Pi persistent wiki", operation: "links", effort: "deep" }, "pi-routing");
-    expect(queries).toEqual([
-      "Pi persistent wiki",
-      `"Pi coding agent" persistent wiki`,
-      "Pi package persistent wiki site:pi.dev",
-      "Pi extension persistent wiki site:github.com",
-      "Pi coding agent persistent wiki documentation",
-    ]);
+    const query = "site:artificialanalysis.ai/data-api/docs language models endpoint";
+    const recovered = await call(instance, actor(), "POST", "/v1/search", { query }, "site-recovery");
+    expect(recovered).toMatchObject({ status: 200, body: { hits: [{ url: "https://artificialanalysis.ai/data-api/docs" }], metadata: { searches: 2, fallbackUsed: true } } });
+    expect(queries).toEqual([query, "artificialanalysis.ai/data-api/docs language models endpoint"]);
+    const conflict = await call(instance, actor(), "POST", "/v1/search", { query: "site:pi.dev extensions", domains: ["github.com"] }, "site-conflict");
+    expect(conflict).toMatchObject({ status: 400, body: { code: "invalid-request" } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("reports unavailable providers instead of a false successful empty search", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ results: [], unresponsive_engines: [["bing news", "too many requests"], ["brave.news", "CAPTCHA"]] }), { status: 200, headers: { "content-type": "application/json" } })));
     const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
-    const result = await call(instance, actor(), "POST", "/v1/search", { query: "market news", operation: "links", effort: "fast" }, "failed-news");
+    const result = await call(instance, actor(), "POST", "/v1/search", { query: "market news" }, "failed-news");
     expect(result).toMatchObject({ status: 502, body: { code: "backend-failure", retryable: true } });
     expect((result.body as { message: string }).message).toMatch(/bing news.*too many requests.*brave\.news.*CAPTCHA/iu);
   });
 
-  it("executes the six fixed search recipes without linked traversal or synthesis", async () => {
+  it("reads a bounded extract set concurrently and never substitutes search snippets", async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
+    let activeReaders = 0;
+    let maximumReaders = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: unknown, init?: RequestInit) => {
       const url = String(input);
       requests.push({ url, init });
       if (url.startsWith("http://127.0.0.1:8888/search")) {
-        return new Response(JSON.stringify({ results: Array.from({ length: 10 }, (_, index) => ({
-          title: `Product guide ${index + 1}`, url: `https://docs.example.org/page-${index + 1}`,
-          content: `Short search description ${index + 1}.`,
+        return new Response(JSON.stringify({ results: Array.from({ length: 6 }, (_, index) => ({
+          title: `Product result ${index + 1}`, url: `https://docs.example.org/page-${index + 1}`, content: `Unverified search snippet ${index + 1}.`,
         })) }), { status: 200, headers: { "content-type": "application/json" } });
       }
-      const body = JSON.parse(String(init?.body)) as { url: string; query: string; maxPages?: number; maxDepth?: number };
-      expect(body.query).toBe("Product feature support");
-      expect(body).not.toHaveProperty("maxPages");
-      expect(body).not.toHaveProperty("maxDepth");
-      return new Response(JSON.stringify({ url: body.url, title: `Verified ${body.url.split("-").at(-1)}`, content: "Product feature support is documented in this independent source passage with useful detail.", truncated: false }), { status: 200, headers: { "content-type": "application/json" } });
+      const body = JSON.parse(String(init?.body)) as { url: string; query?: string; maxChars: number };
+      expect(body.query).toBeUndefined();
+      expect(body.maxChars).toBe(30_000);
+      activeReaders += 1;
+      maximumReaders = Math.max(maximumReaders, activeReaders);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      activeReaders -= 1;
+      if (body.url.endsWith("page-2")) return new Response("failed", { status: 500 });
+      return new Response(JSON.stringify({
+        url: body.url, title: `Verified ${body.url.split("-").at(-1)}`,
+        content: `Introduction for ${body.url}. Product feature support is documented in this verified page passage with enough useful detail to be returned. Additional unrelated page text follows.`,
+        truncated: false,
+      }), { status: 200, headers: { "content-type": "application/json" } });
     }));
     const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888", readerUrl: "http://127.0.0.1:8787" });
-    const run = async (operation: "links" | "extracts", effort: "fast" | "quality" | "deep", key: string) => {
-      requests.length = 0;
-      const result = await call(instance, actor(), "POST", "/v1/search", { query: "Product feature support", operation, effort, domains: ["docs.example.org"], freshness: "month" }, key);
-      expect(result.status).toBe(200);
-      const body = result.body as { hits: Array<{ snippet: string }>; metadata: { searches: number; pagesRead: number; linkedDepth: number } };
-      const searches = requests.filter((item) => item.url.includes("/search"));
-      const reads = requests.filter((item) => item.url.includes(":8787/"));
-      expect(searches).toHaveLength(effort === "deep" ? 5 : effort === "quality" ? 3 : 1);
-      expect(searches.map((item) => new URL(item.url).searchParams.get("q"))).toEqual(effort === "deep"
-        ? ["Product feature support", "Product feature support official", "Product feature support guide", "Product feature support documentation", "Product feature support GitHub"]
-        : effort === "quality" ? ["Product feature support", "Product feature support official", "Product feature support guide"] : ["Product feature support"]);
-      expect(searches.every((item) => new URL(item.url).searchParams.get("time_range") === null)).toBe(true);
-      expect(reads).toHaveLength(operation === "links" ? 0 : effort === "deep" ? 10 : effort === "quality" ? 5 : 3);
-      expect(body.metadata).toEqual({ searches: searches.length, pagesRead: reads.length, linkedDepth: 0, freshnessReranked: effort !== "fast" });
-      expect(body.hits).toHaveLength(operation === "links" ? 10 : effort === "deep" ? 10 : effort === "quality" ? 5 : 3);
-      if (operation === "extracts") expect(body.hits.every((hit) => hit.snippet.includes("independent source passage"))).toBe(true);
-      return result;
-    };
-    await run("links", "fast", "recipe-fast-links");
-    await run("links", "quality", "recipe-quality-links");
-    await run("extracts", "fast", "recipe-fast-extracts");
-    await run("extracts", "quality", "recipe-quality-extracts");
-    await run("links", "deep", "recipe-deep-links");
-    await run("extracts", "deep", "recipe-deep-extracts");
+    const result = await call(instance, actor(), "POST", "/v1/search", { query: "Product feature support", output: "extracts", domains: ["docs.example.org"] }, "extract-search");
+    const body = result.body as { hits: Array<{ snippet: string }>; metadata: { searches: number; pagesRead: number; readAttempts: number; partial: boolean } };
+    expect(result.status).toBe(200);
+    expect(body.metadata).toEqual({ searches: 1, fallbackUsed: false, partial: true, pagesRead: 5, readAttempts: 6 });
+    expect(body.hits).toHaveLength(4);
+    expect(body.hits.every((hit) => hit.snippet.includes("verified page passage") && !hit.snippet.includes("Unverified search snippet") && hit.snippet.length <= 700)).toBe(true);
+    expect(requests.filter((item) => item.url.includes("/search"))).toHaveLength(1);
+    expect(requests.filter((item) => item.url.includes(":8787/"))).toHaveLength(6);
+    expect(maximumReaders).toBe(4);
   });
 
   it("reads a bounded byte range into an integrity-checked owner artifact", async () => {

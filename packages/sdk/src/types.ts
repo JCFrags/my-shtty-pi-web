@@ -1,5 +1,5 @@
-export const WEBX_API_VERSION = "1.0.0" as const;
-export const WEBX_API_MAJOR = 1 as const;
+export const WEBX_API_VERSION = "2.0.0" as const;
+export const WEBX_API_MAJOR = 2 as const;
 export const BROWSER_PROTOCOL_VERSION = "2.0.0" as const;
 export const BROWSER_PATH_IDS = ["agent-browser/chrome", "pinchtab/chrome"] as const;
 
@@ -62,11 +62,9 @@ export interface BrowserPathCapability {
 
 export interface SearchRequest {
   readonly query: string;
-  readonly operation: "links" | "extracts";
-  readonly effort: "fast" | "quality" | "deep";
+  readonly output?: "links" | "extracts";
   readonly visibility?: Visibility;
   readonly domains?: readonly string[];
-  readonly freshness?: "day" | "week" | "month" | "year";
 }
 
 export interface SearchHit {
@@ -80,15 +78,15 @@ export interface SearchHit {
 
 export interface SearchResponse {
   readonly query: string;
-  readonly operation: "links" | "extracts";
-  readonly effort: "fast" | "quality" | "deep";
+  readonly output: "links" | "extracts";
   readonly hits: readonly SearchHit[];
   readonly truncated: boolean;
   readonly metadata: {
     readonly searches: number;
+    readonly fallbackUsed: boolean;
+    readonly partial: boolean;
     readonly pagesRead: number;
-    readonly linkedDepth: 0;
-    readonly freshnessReranked: boolean;
+    readonly readAttempts: number;
   };
 }
 

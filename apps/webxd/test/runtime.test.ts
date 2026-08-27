@@ -142,7 +142,7 @@ describe("actual WebX Unix runtime", () => {
     };
     const forged = new WebxClient(new UnixSocketTransport(webxPath, forgedFactory));
     await expect(forged.version()).rejects.toMatchObject<WebxError>({ status: 400 });
-    expect((await client.search({ query: "WebX", operation: "links", effort: "fast" }, { idempotencyKey: "runtime-search-001" })).hits).toHaveLength(1);
+    expect((await client.search({ query: "WebX" }, { idempotencyKey: "runtime-search-001" })).hits).toHaveLength(1);
     const publicPaths = (await client.capabilities()).browserPaths;
     expect(publicPaths.map((item) => item.pathId)).toEqual(["agent-browser/chrome", "pinchtab/chrome"]);
     expect(publicPaths.every((item) => item.uploads === false && !item.actions.includes("upload"))).toBe(true);
@@ -155,9 +155,9 @@ describe("actual WebX Unix runtime", () => {
     const facadeSignal = new AbortController();
     await facade.start({ signal: facadeSignal.signal, ownerId: "facade-owner", cwd: "/deterministic/project" });
     const facadeOptions = { signal: facadeSignal.signal, idempotencyKey: "facade-search-1", ownerId: "facade-owner", cwd: "/deterministic/project" };
-    await expect(facade.request("web.search", { query: "WebX", operation: "links", effort: "fast" }, facadeOptions)).resolves.toMatchObject({ data: { operation: "links", effort: "fast" } });
-    for (const legacy of [{ limit: 5 }, { crawlPages: 1 }, { crawlDepth: 1 }]) {
-      await expect(facade.request("web.search", { query: "WebX", operation: "links", effort: "fast", ...legacy }, facadeOptions)).rejects.toThrow("is not supported");
+    await expect(facade.request("web.search", { query: "WebX" }, facadeOptions)).resolves.toMatchObject({ data: { output: "links" } });
+    for (const legacy of [{ operation: "links" }, { effort: "fast" }, { freshness: "day" }, { limit: 5 }, { crawlPages: 1 }, { crawlDepth: 1 }]) {
+      await expect(facade.request("web.search", { query: "WebX", ...legacy }, facadeOptions)).rejects.toThrow("is not supported");
     }
     const saved = await facade.request("web.read", { url: "https://fixture.invalid/webx", save: { path: "fixtures/webx.md" } }, { ...facadeOptions, idempotencyKey: "facade-save-001" });
     expect(saved).toMatchObject({ summary: "Web content saved as Markdown", trust: "local", data: { saved: true, relativePath: "fixtures/webx.md", complete: true } });

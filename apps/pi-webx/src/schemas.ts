@@ -19,11 +19,9 @@ const point = {
 };
 
 export const WebSearchSchema = Type.Object({
-  query: Type.String({ minLength: 1, maxLength: 8192, description: "Natural-language search query. Keep the named entity and intent complete." }),
-  operation: StringEnum(["links", "extracts"] as const, { description: "Required product. links discovers URLs without returning page passages. extracts returns separate query-focused passages from selected sources without cross-source synthesis." }),
-  effort: StringEnum(["fast", "quality", "deep"] as const, { description: "Required effort. fast sends one verbatim query. quality sends up to three regular queries. deep sends up to five. Quality and deep merge, deduplicate, and rerank only returned results; extracts read 3, 5, or 10 selected pages respectively." }),
-  domains: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 253, pattern: "^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$", description: "Host name only, such as docs.python.org. Do not pass a URL, path, or site: prefix." }), { maxItems: 32, description: "Optional strict source-host requirements. Every search recipe retains these domains." })),
-  freshness: Type.Optional(StringEnum(["day", "week", "month", "year"] as const, { description: "Optional recency preference. Use with quality when source age matters. Search remains broad and applies a soft local reranking signal when a publication date is available. Missing or unreliable dates never exclude a result." })),
+  query: Type.String({ minLength: 1, maxLength: 8192, description: "Complete search query. Include time terms such as latest, today, or a year when recency matters." }),
+  output: Type.Optional(StringEnum(["links", "extracts"] as const, { description: "Result form. Omit for ranked links with search snippets. Use extracts for short query-focused passages read from selected pages." })),
+  domains: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 253, pattern: "^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$", description: "Strict allowed host name, such as docs.python.org. Do not pass a URL, path, or site: prefix." }), { maxItems: 32, description: "Optional strict allowed hosts. Every returned URL must match one of these hosts or its subdomains." })),
 }, strict);
 
 export const WebReadSchema = Type.Object({

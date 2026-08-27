@@ -27,7 +27,7 @@ The daemon owns stable agent, client, profile, host, browser-session, tab, and a
 
 - `crates/browserd`: native coordinator, Unix/HTTP/WebSocket transports, recovery, queues, browser routing, human takeover, artifacts.
 - `crates/backend-agent-browser`: external agent-browser adapter with version validation, namespaces, named sessions, atomic tab focus/action/observation, viewport discovery, and structured errors.
-- `../../apps/pi-webx`: Pi tools, `/web` modes, lifecycle handling, and compact result formatting.
+- `../../apps/pi-webx`: Pi tools, unified `/web` settings, lifecycle handling, and compact result formatting.
 - `apps/workspace`: one Tauri/React desktop window containing the agent tree, tabs, live JPEG viewport, activity, artifacts, and debug panels.
 - `services/reader`: Markdown negotiation, `.md`, `llms.txt`, Trafilatura, and explicit render escalation.
 - `services/docling`: local PDF and office conversion to Markdown and structured metadata.
@@ -43,16 +43,19 @@ The daemon owns stable agent, client, profile, host, browser-session, tab, and a
 
 The root installer validates the Fedora/Tauri toolchain, Node/pnpm, uv, Chromium, Podman, and Agent Browser. It builds the repository, installs user services, deploys loopback-only SearXNG, and links the extension at `~/.pi/agent/extensions/pi-web`.
 
-Then start Pi normally. New sessions default to browser mode, so no `/web` command is required. Use `/browser` only when you want to open the visual workspace.
+Then start Pi normally. New sessions default to browser mode, so no command is required. Run `/web` with no options to open one settings menu. The menu controls capability modes and browser workspace actions.
 
-Useful commands:
+All direct forms use the same slash command:
 
 ```text
-/web off|read|browser|debug
-/browser show|hide|sessions
-/browser profile <name>
-/browser attach <session>
+/web
+/web status
+/web mode off|read|browser|debug
+/web workspace show|hide|list
+/web workspace attach|takeover|return <sessionId>
 ```
+
+There is no separate browser slash command.
 
 Diagnostics:
 

@@ -34,9 +34,16 @@ const MAX_BINARY_ARTIFACT_COUNT = 64;
 const MAX_BINARY_ARTIFACT_BYTES = 33_554_432;
 const SEARCH_CACHE_TTL_MS = 15 * 60 * 1_000;
 const READ_CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
+const SEARCH_RESULT_LIMIT = 10;
+const EXTRACT_RESULT_LIMIT = 4;
+const EXTRACT_ATTEMPT_LIMIT = 8;
+const EXTRACT_READ_CONCURRENCY = 4;
+const EXTRACT_PASSAGE_CHARS = 700;
 
 interface RawSearchHit { readonly url?: unknown; readonly title?: unknown; readonly content?: unknown; readonly score?: unknown; readonly publishedDate?: unknown; readonly engines?: unknown }
-interface SearchBatch { readonly hits: RawSearchHit[]; readonly searches: number }
+interface SearchBatch { readonly hits: RawSearchHit[]; readonly unavailable: string[] }
+interface SearchCandidate { readonly item: RawSearchHit; readonly url: string; readonly score: number; readonly firstIndex: number }
+interface ExtractResult { readonly hits: SearchHit[]; readonly pagesRead: number; readonly readAttempts: number; readonly failures: number }
 
 interface StoredBinaryArtifact {
   readonly artifactId: string;
@@ -133,7 +140,7 @@ export class WebxAuthority {
 
   private async search(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<SearchResponse> {
     requireScope(actor, scope);
-    const key = { formatVersion: 17, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
+    const key = { formatVersion: 20, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
     const cached = await this.#cache.get<SearchResponse>("search", key);
     if (cached !== undefined) return cached;
     const result = await this.uncachedSearch(actor, request, scope, signal);
@@ -143,81 +150,128 @@ export class WebxAuthority {
 
   private async uncachedSearch(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<SearchResponse> {
     requireScope(actor, scope);
+    assertSearchRequestKeys(request);
     if (typeof request.query !== "string" || request.query.trim().length === 0 || request.query.length > 8_192) throw problem(400, "invalid-request", "query must contain 1 to 8192 characters", false);
-    if (request.operation !== "links" && request.operation !== "extracts") throw problem(400, "invalid-request", "operation must be links or extracts", false);
-    if (request.effort !== "fast" && request.effort !== "quality" && request.effort !== "deep") throw problem(400, "invalid-request", "effort must be fast, quality, or deep", false);
-    const queries = request.effort === "fast" ? [request.query] : request.effort === "quality" ? qualitySearchQueries(request.query) : deepSearchQueries(request.query);
+    const output = request.output ?? "links";
+    if (output !== "links" && output !== "extracts") throw problem(400, "invalid-request", "output must be links or extracts", false);
+    const queryDomains = searchDomains(request.query);
+    const domains = resolveSearchDomains(request.domains ?? [], queryDomains);
     const batches: SearchBatch[] = [];
     const failures: string[] = [];
-    for (const query of queries) {
-      try { batches.push(await this.searchOne(query, request.domains ?? [], signal)); }
-      catch (error) { failures.push(safeMessage(error)); }
-    }
-    if (batches.every((batch) => batch.hits.length === 0) && failures.length > 0) throw new Error(`search providers returned no results: ${[...new Set(failures)].join("; ")}`);
-    const merged = [...new Map(batches.flatMap((batch) => batch.hits).filter((item) => typeof item.url === "string" && typeof item.title === "string").map((item) => [String(item.url).replace(/#.*$/u, ""), item])).values()];
-    const candidates = merged.map((item, index) => ({ item, index, score: request.effort !== "fast" ? searchCandidateScore(item, request.query) + freshnessScore(item.publishedDate, request.freshness, this.options.clock.now()) : 0 }));
-    if (request.effort !== "fast") candidates.sort((left, right) => right.score - left.score || left.index - right.index);
-    const resultLimit = request.operation === "links" ? (request.effort === "deep" ? 20 : 10) : request.effort === "deep" ? 10 : request.effort === "quality" ? 5 : 3;
-    const selected = candidates.slice(0, resultLimit);
-    let pagesRead = 0;
-    const hits: SearchHit[] = [];
-    const readerActor = { ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) };
-    for (const candidate of selected) {
-      const item = candidate.item;
-      let title = String(item.title);
-      let url = String(item.url);
-      let snippet = request.operation === "links"
-        ? boundText(typeof item.content === "string" ? item.content : "", 320).text
-        : evidenceExcerpt(typeof item.content === "string" ? item.content : "", request.query, 1_200);
-      if (request.operation === "extracts") {
-        try {
-          const page = await this.uncachedRead(readerActor, { url, query: request.query, maxChars: 8_000, maxPages: 1, maxDepth: 0 }, signal);
-          pagesRead += 1;
-          title = page.title || title;
-          url = page.url || url;
-          const extracted = evidenceExcerpt(page.untrustedContent, request.query, 1_200);
-          if (extracted.length >= 60) snippet = extracted;
-        } catch { /* Keep usable discovery results when bounded verification fails. */ }
+    let searches = 0;
+    const runSearch = async (query: string): Promise<SearchBatch | undefined> => {
+      searches += 1;
+      try {
+        const batch = await this.searchOne(query, domains, signal);
+        batches.push(batch);
+        return batch;
+      } catch (error) {
+        failures.push(safeMessage(error));
+        return undefined;
       }
-      if (request.operation === "extracts" && snippet.length < 60) continue;
-      hits.push({
-        hitId: `search-${createHash("sha256").update(url).digest("hex").slice(0, 20)}`,
-        title, url, snippet, rank: hits.length + 1, visibility: "public",
-        metadata: { score: item.score, publishedDate: item.publishedDate, engines: item.engines },
-      } as SearchHit);
+    };
+
+    const primary = await runSearch(request.query.trim());
+    const fallbackQuery = stripSiteOperators(request.query);
+    const fallbackUsed = (primary?.hits.length ?? 0) === 0 && queryDomains.length > 0 && fallbackQuery.length > 0 && fallbackQuery !== request.query.trim();
+    if (fallbackUsed) await runSearch(fallbackQuery);
+
+    const candidates = rankSearchCandidates(batches, request.query);
+    if (candidates.length === 0 && failures.length > 0) throw new Error(`search providers returned no results: ${[...new Set(failures)].join("; ")}`);
+    const providerWarnings = [...new Set(batches.flatMap((batch) => batch.unavailable))];
+    let hits: SearchHit[];
+    let pagesRead = 0;
+    let readAttempts = 0;
+    let extractionFailures = 0;
+    if (output === "extracts") {
+      const extracted = await this.extractSearchHits(actor, candidates, domains, request.query, signal);
+      hits = extracted.hits;
+      pagesRead = extracted.pagesRead;
+      readAttempts = extracted.readAttempts;
+      extractionFailures = extracted.failures;
+    } else {
+      hits = candidates.slice(0, SEARCH_RESULT_LIMIT).map((candidate, index) => ({
+        hitId: searchHitId(candidate.url),
+        title: String(candidate.item.title),
+        url: candidate.url,
+        snippet: boundText(typeof candidate.item.content === "string" ? candidate.item.content : "", 360).text.trim(),
+        rank: index + 1,
+        visibility: "public",
+      }));
     }
-    return { query: request.query, operation: request.operation, effort: request.effort, hits, truncated: merged.length > hits.length, metadata: { searches: batches.reduce((total, batch) => total + batch.searches, 0), pagesRead, linkedDepth: 0, freshnessReranked: request.effort !== "fast" && request.freshness !== undefined } };
+    return {
+      query: request.query, output, hits, truncated: candidates.length > hits.length,
+      metadata: {
+        searches, fallbackUsed,
+        partial: failures.length > 0 || providerWarnings.length > 0 || extractionFailures > 0,
+        pagesRead, readAttempts,
+      },
+    };
   }
 
-  private async searchOne(query: string, requestedDomains: readonly string[], signal?: AbortSignal): Promise<SearchBatch> {
-    if (this.options.searxUrl === undefined) {
-      const terms = query.toLocaleLowerCase().split(/\s+/u).filter(Boolean);
-      const hits = this.options.sources.filter((source) => terms.every((term) => `${source.title} ${source.content}`.toLocaleLowerCase().includes(term))).map((source) => ({ url: source.url, title: source.title, content: source.content }));
-      return { hits, searches: 1 };
+  private async extractSearchHits(actor: AuthorityActor, candidates: readonly SearchCandidate[], domains: readonly string[], query: string, signal?: AbortSignal): Promise<ExtractResult> {
+    const readerActor = { ...actor, scopes: new Set([...actor.scopes, "retrieval.read"]) };
+    const selected: SearchHit[] = [];
+    const seen = new Set<string>();
+    let pagesRead = 0;
+    let readAttempts = 0;
+    let failures = 0;
+    const attempted = candidates.slice(0, EXTRACT_ATTEMPT_LIMIT);
+    for (let offset = 0; offset < attempted.length && selected.length < EXTRACT_RESULT_LIMIT; offset += EXTRACT_READ_CONCURRENCY) {
+      const chunk = attempted.slice(offset, offset + EXTRACT_READ_CONCURRENCY);
+      readAttempts += chunk.length;
+      const outcomes = await Promise.all(chunk.map(async (candidate): Promise<{ pageRead: boolean; hit?: SearchHit }> => {
+        try {
+          const page = await this.uncachedRead(readerActor, { url: candidate.url, maxChars: 30_000 }, signal);
+          const url = normalizeSearchUrl(page.url || candidate.url);
+          if (url === undefined || !urlMatchesDomains(url, domains)) return { pageRead: true };
+          const snippet = contiguousEvidenceExcerpt(page.untrustedContent, query, EXTRACT_PASSAGE_CHARS);
+          if (snippet.length < 60) return { pageRead: true };
+          return {
+            pageRead: true,
+            hit: { hitId: searchHitId(url), title: page.title || String(candidate.item.title), url, snippet, rank: 0, visibility: "public" },
+          };
+        } catch (error) {
+          if (signal?.aborted) throw error;
+          return { pageRead: false };
+        }
+      }));
+      for (const outcome of outcomes) {
+        if (outcome.pageRead) pagesRead += 1;
+        if (outcome.hit === undefined) failures += 1;
+      }
+      for (const outcome of outcomes) {
+        if (outcome.hit === undefined || selected.length >= EXTRACT_RESULT_LIMIT) continue;
+        const key = canonicalSearchUrl(outcome.hit.url);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        selected.push({ ...outcome.hit, rank: selected.length + 1 });
+      }
     }
-    const domains = [...new Set([...requestedDomains.filter(Boolean), ...searchDomains(query)])];
+    return { hits: selected, pagesRead, readAttempts, failures };
+  }
+
+  private async searchOne(query: string, domains: readonly string[], signal?: AbortSignal): Promise<SearchBatch> {
+    if (this.options.searxUrl === undefined) {
+      const terms = searchTerms(stripSiteOperators(query));
+      const hits = this.options.sources
+        .filter((source) => terms.every((term) => `${source.title} ${source.content}`.toLocaleLowerCase().includes(term)))
+        .filter((source) => urlMatchesDomains(source.url, domains))
+        .map((source) => ({ url: source.url, title: source.title, content: source.content }));
+      return { hits, unavailable: [] };
+    }
     const endpoint = new URL("/search", this.options.searxUrl);
     endpoint.searchParams.set("q", query);
     endpoint.searchParams.set("format", "json");
     endpoint.searchParams.set("safesearch", "0");
-    const wantedDomains = domains.map((domain) => domain.toLocaleLowerCase().replace(/^www\./u, ""));
-    const request = async (): Promise<{ eligible: RawSearchHit[]; rawCount: number; unavailable: string[] }> => {
-      const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
-      if (!response.ok) throw new Error(`SearXNG returned HTTP ${response.status}`);
-      const payload = await response.json() as { results?: RawSearchHit[]; unresponsive_engines?: unknown };
-      const raw = Array.isArray(payload.results) ? payload.results : [];
-      const eligible = raw.filter((item) => {
-        if (typeof item.url !== "string" || typeof item.title !== "string") return false;
-        try {
-          const hostname = new URL(item.url).hostname.toLocaleLowerCase().replace(/^www\./u, "");
-          return wantedDomains.length === 0 || wantedDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
-        } catch { return false; }
-      });
-      return { eligible, rawCount: raw.length, unavailable: searxUnavailableEngines(payload.unresponsive_engines) };
-    };
-    const result = await request();
-    if (result.rawCount === 0 && result.unavailable.length > 0) throw new Error(`unavailable engines: ${result.unavailable.join(", ")}`);
-    return { hits: result.eligible, searches: 1 };
+    const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error(`SearXNG returned HTTP ${response.status}`);
+    const payload = await response.json() as { results?: RawSearchHit[]; unresponsive_engines?: unknown };
+    const raw = Array.isArray(payload.results) ? payload.results : [];
+    const eligible = raw.filter((item) => typeof item.url === "string" && typeof item.title === "string" && urlMatchesDomains(item.url, domains));
+    const unavailable = searxUnavailableEngines(payload.unresponsive_engines);
+    if (raw.length === 0 && unavailable.length > 0) throw new Error(`unavailable engines: ${unavailable.join(", ")}`);
+    return { hits: eligible, unavailable };
   }
 
   private async read(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<BoundedContent> {
@@ -536,55 +590,176 @@ function evidenceExcerpt(value: string, query: string, maxChars: number): string
   return boundText(selected.join("\n\n") || clean, maxChars).text.trim();
 }
 
-function qualitySearchQueries(query: string): string[] {
-  return searchQueryVariants(query).slice(0, 3);
-}
-
-function deepSearchQueries(query: string): string[] {
-  return searchQueryVariants(query).slice(0, 5);
-}
-
-function searchQueryVariants(query: string): string[] {
-  const base = query.trim();
-  if (/\bpi\b/iu.test(base)) {
-    const rest = base.replace(/\bpi\b/iu, " ").replace(/\s+/gu, " ").trim();
-    const suffix = rest ? ` ${rest}` : "";
-    return [...new Set([
-      base,
-      `"Pi coding agent"${suffix}`,
-      `Pi package${suffix} site:pi.dev`,
-      `Pi extension${suffix} site:github.com`,
-      `Pi coding agent${suffix} documentation`,
-    ])];
+function contiguousEvidenceExcerpt(value: string, query: string, maxChars: number): string {
+  const clean = cleanMainContent(value);
+  if (clean.length <= maxChars) return clean;
+  const terms = searchTerms(stripSiteOperators(query));
+  const blocks = clean.split(/\n+|(?<=[.!?])\s+(?=[A-Z0-9])/u).map((text) => text.trim()).filter((text) => text.length >= 20);
+  let best = blocks[0] ?? clean;
+  let bestScore = -1;
+  for (const block of blocks) {
+    const lower = block.toLocaleLowerCase();
+    const score = terms.filter((term) => lower.includes(term)).length;
+    if (score > bestScore) { best = block; bestScore = score; }
   }
-  return [...new Set([base, `${base} official`, `${base} guide`, `${base} documentation`, `${base} GitHub`])];
+  const position = Math.max(0, clean.indexOf(best));
+  let start = Math.max(0, position - Math.floor(maxChars * 0.2));
+  if (start > 0) {
+    const boundary = Math.max(clean.lastIndexOf("\n", start), clean.lastIndexOf(" ", start));
+    if (boundary >= 0) start = boundary + 1;
+  }
+  let end = Math.min(clean.length, start + maxChars);
+  if (end < clean.length) {
+    const boundary = Math.max(clean.lastIndexOf("\n", end), clean.lastIndexOf(". ", end));
+    if (boundary > start + Math.floor(maxChars * 0.6)) end = boundary + 1;
+  }
+  return clean.slice(start, end).trim();
+}
+
+function assertSearchRequestKeys(request: SearchRequest): void {
+  const allowed = new Set(["query", "output", "domains", "visibility"]);
+  const unknown = Object.keys(request as unknown as Record<string, unknown>).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) throw problem(400, "invalid-request", `unsupported search field: ${unknown[0]}`, false);
+}
+
+function normalizeSearchDomain(value: string): string {
+  const domain = value.trim().toLocaleLowerCase().replace(/\.$/u, "");
+  if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(domain)) {
+    throw problem(400, "invalid-request", `invalid search domain: ${value}`, false);
+  }
+  return domain;
+}
+
+function isSameOrSubdomain(hostname: string, domain: string): boolean {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
+function resolveSearchDomains(requested: readonly string[], fromQuery: readonly string[]): string[] {
+  const explicit = [...new Set(requested.filter(Boolean).map(normalizeSearchDomain))];
+  const query = [...new Set(fromQuery.filter(Boolean).map(normalizeSearchDomain))];
+  if (explicit.length === 0) return query;
+  if (query.length === 0) return explicit;
+  const intersection = new Set<string>();
+  for (const requestedDomain of explicit) {
+    for (const queryDomain of query) {
+      if (isSameOrSubdomain(requestedDomain, queryDomain)) intersection.add(requestedDomain);
+      else if (isSameOrSubdomain(queryDomain, requestedDomain)) intersection.add(queryDomain);
+    }
+  }
+  if (intersection.size === 0) throw problem(400, "invalid-request", "domains conflict with the query site: constraint", false);
+  return [...intersection];
+}
+
+function searchDomains(query: string): string[] {
+  return [...query.matchAll(/(?:^|\s)site:([A-Za-z0-9.-]+)(?:\/[^\s]*)?/giu)].map((match) => match[1] ?? "").filter(Boolean);
+}
+
+function stripSiteOperators(query: string): string {
+  return query.replace(/(^|\s)site:([A-Za-z0-9.-]+(?:\/[^\s]*)?)/giu, "$1$2").replace(/\s+/gu, " ").trim();
+}
+
+function urlMatchesDomains(value: string, domains: readonly string[]): boolean {
+  if (domains.length === 0) return true;
+  try {
+    const hostname = new URL(value).hostname.toLocaleLowerCase().replace(/\.$/u, "");
+    return domains.some((domain) => isSameOrSubdomain(hostname, domain));
+  } catch { return false; }
+}
+
+function normalizeSearchUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username !== "" || url.password !== "") return undefined;
+    url.hostname = url.hostname.toLocaleLowerCase().replace(/\.$/u, "");
+    if ((url.protocol === "http:" && url.port === "80") || (url.protocol === "https:" && url.port === "443")) url.port = "";
+    url.hash = "";
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^utm_/iu.test(key) || /^(?:fbclid|gclid|dclid|msclkid|msockid|mc_cid|mc_eid|ref_src)$/iu.test(key)) url.searchParams.delete(key);
+    }
+    url.searchParams.sort();
+    if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/u, "");
+    return url.toString();
+  } catch { return undefined; }
+}
+
+function canonicalSearchUrl(value: string): string {
+  const normalized = normalizeSearchUrl(value) ?? value;
+  try {
+    const url = new URL(normalized);
+    url.hostname = url.hostname.replace(/^www\./u, "");
+    return url.toString();
+  } catch { return normalized; }
+}
+
+function searchHitId(url: string): string {
+  return `search-${createHash("sha256").update(url).digest("hex").slice(0, 20)}`;
+}
+
+function searchTerms(query: string): string[] {
+  const stop = new Set(["and", "are", "for", "from", "into", "official", "the", "this", "with"]);
+  return [...new Set(query.toLocaleLowerCase().match(/[a-z0-9][a-z0-9.+-]{1,}/gu) ?? [])].filter((term) => !stop.has(term));
+}
+
+function textCoverage(value: string, terms: readonly string[]): number {
+  if (terms.length === 0) return 0;
+  const lower = value.toLocaleLowerCase();
+  return terms.filter((term) => lower.includes(term)).length / terms.length;
+}
+
+function searchRelevanceScore(item: RawSearchHit, url: string, query: string): number {
+  const cleanQuery = stripSiteOperators(query).toLocaleLowerCase();
+  const terms = searchTerms(cleanQuery);
+  const title = typeof item.title === "string" ? item.title : "";
+  const content = typeof item.content === "string" ? item.content : "";
+  const exact = cleanQuery.length <= 160 && title.toLocaleLowerCase().includes(cleanQuery) ? 2 : 0;
+  return exact + textCoverage(title, terms) * 6 + textCoverage(url, terms) * 3 + textCoverage(content, terms);
+}
+
+function rankSearchCandidates(batches: readonly SearchBatch[], query: string): SearchCandidate[] {
+  const merged = new Map<string, { item: RawSearchHit; url: string; score: number; firstIndex: number }>();
+  let sequence = 0;
+  for (const batch of batches) {
+    const seenInBatch = new Set<string>();
+    for (const [index, item] of batch.hits.entries()) {
+      if (typeof item.url !== "string" || typeof item.title !== "string") continue;
+      const url = normalizeSearchUrl(item.url);
+      if (url === undefined) continue;
+      const key = canonicalSearchUrl(url);
+      if (seenInBatch.has(key)) continue;
+      seenInBatch.add(key);
+      const existing = merged.get(key);
+      const contribution = 1 / (60 + index + 1);
+      if (existing === undefined) {
+        merged.set(key, { item, url, score: contribution, firstIndex: sequence++ });
+      } else {
+        existing.score += contribution;
+        const currentContent = typeof existing.item.content === "string" ? existing.item.content.length : 0;
+        const nextContent = typeof item.content === "string" ? item.content.length : 0;
+        if (nextContent > currentContent) existing.item = item;
+      }
+    }
+  }
+  const ranked = [...merged.values()].map((candidate) => ({
+    ...candidate, score: candidate.score + searchRelevanceScore(candidate.item, candidate.url, query) / 4_000,
+  })).sort((left, right) => right.score - left.score || left.firstIndex - right.firstIndex);
+  const seenTitles = new Set<string>();
+  const seenContent = new Set<string>();
+  return ranked.filter((candidate) => {
+    const hostname = new URL(candidate.url).hostname.replace(/^www\./u, "");
+    const title = String(candidate.item.title).toLocaleLowerCase().replace(/[^a-z0-9]+/gu, " ").trim();
+    const titleKey = `${hostname}\0${title}`;
+    const content = typeof candidate.item.content === "string" ? candidate.item.content.toLocaleLowerCase().replace(/\s+/gu, " ").trim() : "";
+    const contentKey = content.length >= 80 ? `${hostname}\0${content}` : undefined;
+    if (seenTitles.has(titleKey) || (contentKey !== undefined && seenContent.has(contentKey))) return false;
+    seenTitles.add(titleKey);
+    if (contentKey !== undefined) seenContent.add(contentKey);
+    return true;
+  });
 }
 
 function searxUnavailableEngines(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => Array.isArray(item) && typeof item[0] === "string" ? [`${item[0]}${typeof item[1] === "string" ? ` (${item[1]})` : ""}`] : []);
-}
-
-function freshnessScore(value: unknown, freshness: SearchRequest["freshness"], now: string): number {
-  if (freshness === undefined || typeof value !== "string") return 0;
-  const timestamp = Date.parse(value);
-  const currentTimestamp = Date.parse(now);
-  if (!Number.isFinite(timestamp) || !Number.isFinite(currentTimestamp)) return 0;
-  const ageDays = (currentTimestamp - timestamp) / (24 * 60 * 60 * 1_000);
-  if (ageDays < -2) return 0;
-  const windowDays = { day: 1, week: 7, month: 31, year: 366 }[freshness];
-  if (ageDays <= windowDays) return 6;
-  if (ageDays <= windowDays * 2) return 2;
-  return -2;
-}
-
-function searchCandidateScore(item: RawSearchHit, query: string): number {
-  const terms = [...new Set(query.toLocaleLowerCase().match(/[a-z0-9][a-z0-9.+-]{1,}/gu) ?? [])];
-  const title = typeof item.title === "string" ? item.title.toLocaleLowerCase() : "";
-  const content = typeof item.content === "string" ? item.content.toLocaleLowerCase() : "";
-  const titleMatches = terms.filter((term) => title.includes(term)).length;
-  const contentMatches = terms.filter((term) => content.includes(term)).length;
-  return titleMatches * 3 + contentMatches + (title.includes(query.toLocaleLowerCase()) ? 8 : 0);
 }
 
 function header(request: TransportRequest, name: string): string | undefined { const entry = Object.entries(request.headers ?? {}).find(([key]) => key.toLocaleLowerCase() === name); return entry?.[1]; }
@@ -601,9 +776,6 @@ function boundedFailure(status: number, bodyValue: WebxProblem, maxBytes: number
 interface AuthorityFailure { readonly authorityFailure: true; readonly status: number; readonly body: WebxProblem }
 function problem(status: number, code: string, message: string, retryable: boolean): AuthorityFailure { return { authorityFailure: true, status, body: { code, message, retryable } }; }
 function isAuthorityFailure(value: unknown): value is AuthorityFailure { return typeof value === "object" && value !== null && (value as { authorityFailure?: unknown }).authorityFailure === true; }
-function searchDomains(query: string): string[] {
-  return [...query.matchAll(/(?:^|\s)site:([A-Za-z0-9.-]+)/giu)].map((match) => match[1] ?? "").filter(Boolean);
-}
 function parseReaderFailure(status: number, raw: string): { toolStatus: number; message: string; retryable: boolean } {
   let detail = "reader failed";
   try {

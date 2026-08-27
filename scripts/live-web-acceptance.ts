@@ -19,8 +19,8 @@ function hostname(url) {
   return new URL(url).hostname.replace(/^www\./u, "");
 }
 
-async function search(query, expectedDomain, requiredPattern, operation = "links", effort = "fast") {
-  const result = await client.request("web.search", { query, operation, effort, domains: [expectedDomain] }, options());
+async function search(query, expectedDomain, requiredPattern, output = "links") {
+  const result = await client.request("web.search", { query, ...(output === "extracts" ? { output } : {}), domains: [expectedDomain] }, options());
   assert(result.data.hits.length > 0, `${query}: no eligible results`);
   for (const hit of result.data.hits) {
     const host = hostname(hit.url);
@@ -35,10 +35,10 @@ async function search(query, expectedDomain, requiredPattern, operation = "links
 let browserSession;
 try {
   await client.start({ ownerId, cwd: process.cwd(), signal });
-  await search("San Francisco weather forecast", "weather.gov", /san francisco|forecast/iu, "links", "fast");
-  await search("ECB interest rates 2026", "ecb.europa.eu", /(?:interest|rate).*(?:2026)|(?:2026).*(?:interest|rate)/iu, "links", "quality");
-  await search("Fedora Linux 44 desktop changes", "fedoraproject.org", /fedora.*44|desktop/iu, "extracts", "fast");
-  await search("Python 3.14 release support status", "python.org", /python.*3\.14|support/iu, "extracts", "quality");
+  await search("San Francisco weather forecast", "weather.gov", /san francisco|forecast/iu);
+  await search("ECB interest rates 2026", "ecb.europa.eu", /(?:interest|rate).*(?:2026)|(?:2026).*(?:interest|rate)/iu);
+  await search("Fedora Linux 44 desktop changes", "fedoraproject.org", /fedora.*44|desktop/iu, "extracts");
+  await search("Python 3.14 release support status", "python.org", /python.*3\.14|support/iu, "extracts");
 
   const structured = await client.request("web.read", {
     url: "https://api.github.com/repos/nodejs/node/releases",
@@ -52,14 +52,13 @@ try {
   assert.equal(structured.data.metadata.reader.returnedItems, 3);
   assert(structured.data.metadata.reader.nextItemOffset > 0);
 
-  const deepExtracts = await client.request("web.search", {
+  const extracts = await client.request("web.search", {
     query: "latest stable releases Node.js Rust Python Go programming language",
-    operation: "extracts",
-    effort: "deep",
+    output: "extracts",
   }, options());
-  assert.equal(deepExtracts.data.metadata.searches, 5);
-  assert(deepExtracts.data.metadata.pagesRead > 0);
-  assert(deepExtracts.data.hits.length > 0);
+  assert(extracts.data.metadata.searches >= 1 && extracts.data.metadata.searches <= 2);
+  assert(extracts.data.metadata.pagesRead > 0);
+  assert(extracts.data.hits.length > 0 && extracts.data.hits.length <= 4);
 
   const opened = await client.request("browser.open", {
     pathId: "agent-browser/chrome",

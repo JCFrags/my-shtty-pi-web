@@ -53,7 +53,7 @@ export class WebxFacadeClient {
       return { apiVersion: catalog.apiVersion, daemon: "ready", groups: { web: true, browser: true, browserDebug: true }, browserPathIds: paths };
     } catch (error) {
       if (options.signal.aborted) throw error;
-      return { apiVersion: "1.0.0", daemon: "unavailable", groups: { web: false, browser: false, browserDebug: false }, browserPathIds: [] };
+      return { apiVersion: "2.0.0", daemon: "unavailable", groups: { web: false, browser: false, browserDebug: false }, browserPathIds: [] };
     }
   }
 
@@ -62,8 +62,8 @@ export class WebxFacadeClient {
     const value = object(input);
     const requestOptions: RequestOptions = { signal: options.signal, idempotencyKey: options.idempotencyKey };
     if (operation === "web.search") {
-      rejectPresent(value, ["limit", "crawlPages", "crawlDepth"], operation);
-      return external("Search results", await client.search({ query: requiredString(value.query, "query"), operation: searchOperation(value.operation), effort: searchEffort(value.effort), domains: optionalStringArray(value.domains, "domains"), freshness: optionalFreshness(value.freshness) }, requestOptions));
+      rejectPresent(value, ["operation", "effort", "freshness", "limit", "crawlPages", "crawlDepth"], operation);
+      return external("Search results", await client.search({ query: requiredString(value.query, "query"), output: optionalSearchOutput(value.output), domains: optionalStringArray(value.domains, "domains") }, requestOptions));
     }
     if (operation === "web.read") return this.read(client, value, requestOptions);
     if (operation === "browser.open") { rejectPresent(value, ["newTab"], operation); return local("Browser session opened", await client.createBrowserSession({ pathId: browserPath(value.pathId), url: optionalString(value.url), visible: optionalBoolean(value.visible), label: optionalString(value.label) }, requestOptions)); }
@@ -193,9 +193,7 @@ function requiredNumber(value: unknown, name: string): number { if (typeof value
 function optionalNumber(value: unknown): number | undefined { return typeof value === "number" ? value : undefined; }
 function optionalBoolean(value: unknown): boolean | undefined { return typeof value === "boolean" ? value : undefined; }
 function optionalStringArray(value: unknown, name: string): readonly string[] | undefined { return value === undefined ? undefined : stringArray(value, name); }
-function searchOperation(value: unknown): "links" | "extracts" { if (value === "links" || value === "extracts") return value; throw new TypeError("operation must be links or extracts"); }
-function searchEffort(value: unknown): "fast" | "quality" | "deep" { if (value === "fast" || value === "quality" || value === "deep") return value; throw new TypeError("effort must be fast, quality, or deep"); }
-function optionalFreshness(value: unknown): "day" | "week" | "month" | "year" | undefined { if (value === undefined) return undefined; if (value === "day" || value === "week" || value === "month" || value === "year") return value; throw new TypeError("freshness is invalid"); }
+function optionalSearchOutput(value: unknown): "links" | "extracts" | undefined { if (value === undefined) return undefined; if (value === "links" || value === "extracts") return value; throw new TypeError("output must be links or extracts"); }
 function optionalReadView(value: unknown): "main" | "outline" | "raw" | undefined { if (value === undefined) return undefined; if (value === "main" || value === "outline" || value === "raw") return value; throw new TypeError("view is invalid"); }
 function validateId(value: string, name: string): void { if (!/^[A-Za-z0-9._:-]{1,256}$/u.test(value)) throw new TypeError(`${name} is invalid`); }
 function browserPath(value: unknown): BrowserPathId { if (value === undefined || value === "agent-browser/chrome") return "agent-browser/chrome"; if (value === "pinchtab/chrome") return value; throw new TypeError("pathId is unsupported"); }
