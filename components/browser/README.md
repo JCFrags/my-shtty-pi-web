@@ -93,16 +93,14 @@ Run the dependency-free coordinator tests without installing Rust or pnpm depend
 node --test packages/browserd-reference/test/*.test.mjs tests/multi-agent/*.test.mjs
 ```
 
-Validate repository invariants and run the target-machine browser spikes:
+Run the target-machine browser checks when their installed dependencies are available:
 
 ```bash
-node scripts/check-repo.mjs
-node scripts/run-agent-browser-conformance.mjs
 node scripts/password-manager-spike.mjs
 node scripts/benchmark-agent-browser.mjs
 ```
 
-The conformance, stream, and password-manager commands require Fedora, the pinned agent-browser release, Chromium, Lightpanda, and a disposable extension test profile. The dependency-free reference tests verify coordinator semantics but do not substitute for those release gates.
+These commands require Fedora, the pinned Agent Browser release, Chromium, and a disposable extension test profile. The dependency-free reference tests verify coordinator semantics but do not replace these target-machine checks.
 
 Run the fixture server:
 

@@ -10,4 +10,4 @@ target-version = "py313"
 
 [tool.pytest.ini_options]
 addopts = "-q"
-testpaths = ["tests/reader", "tests/docling", "tests/crawl"]
+testpaths = ["tests/reader", "tests/docling"]

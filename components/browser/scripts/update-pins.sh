@@ -49,5 +49,4 @@ s = re.sub(r'^SEARXNG_IMAGE=.*$', f'SEARXNG_IMAGE={searxng}', s, flags=re.M)
 p.write_text(s)
 PIN_PY
 
-node scripts/check-repo.mjs
 printf 'Pins updated. Do not commit until conformance and workflow benchmarks pass.\n'

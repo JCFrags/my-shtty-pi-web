@@ -203,4 +203,6 @@ podman unshare chmod 0700 "$CONFIG_HOME/pi-web/searxng"
 log "Verifying the installation"
 systemctl --user --quiet is-active pi-web-egress-proxy pi-web-docling pi-web-reader pi-web-crawl pi-browserd pi-web-searxng webxd
 "$BIN_DIR/pi-browserd" doctor --json || true
+rm -rf "$CARGO_TARGET_DIR"
+if [[ "$SOURCE_ROOT" != "$INSTALL_ROOT" ]]; then rm -rf "$INSTALL_ROOT.old"; fi
 printf '\nPi Web Tools installed at %s. Run `pi-web status` for service status.\n' "$INSTALL_ROOT"
