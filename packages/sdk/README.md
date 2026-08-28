@@ -7,7 +7,7 @@ It includes:
 - API-major negotiation;
 - bounded responses and cancellation;
 - required mutation idempotency;
-- search, bounded read, ordered batch read for 1 to 5 URLs, exact or focused stored-content retrieval, and guarded one-page Markdown export;
+- search, bounded read, ordered batch read for 1 to 5 direct-read items, exact or focused stored-content retrieval, and guarded one-page Markdown export;
 - internal artifact transfer support for bounded component results;
 - browser create, list, get, observe, frame, act, safe debug, workspace, control, cancel, close-tab, and close-session;
 - exactly `agent-browser/chrome` and `pinchtab/chrome`;

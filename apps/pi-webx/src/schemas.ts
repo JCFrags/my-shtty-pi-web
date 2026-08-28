@@ -24,7 +24,7 @@ export const WebSearchSchema = Type.Object({
   domains: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 253, pattern: "^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$", description: "Strict allowed host name, such as docs.python.org. Do not pass a URL, path, or site: prefix." }), { maxItems: 32, description: "Optional strict allowed hosts. Every returned URL must match one of these hosts or its subdomains." })),
 }, strict);
 
-export const WebReadSchema = Type.Object({
+const directReadProperties = {
   url: Type.String({ minLength: 1, maxLength: 8192, pattern: "^https?://", description: "Exact public HTTP(S) URL to read. Use web_search first when the URL is unknown." }),
   query: Type.Optional(Type.String({ maxLength: 8192, description: "Optional topic or section selector. Omit for the complete extracted main content." })),
   view: Type.Optional(StringEnum(["main", "outline", "raw"] as const, { description: "Extraction view. main is the readable default; outline returns structure; raw preserves source-oriented text." })),
@@ -33,9 +33,13 @@ export const WebReadSchema = Type.Object({
   itemLimit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500, description: "Maximum structured JSON collection items. Use with itemOffset for item pagination." })),
   maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000, description: "Explicit content bound. Omit for a full read. If it binds the result, use the reported nextContentOffset." })),
   contentOffset: Type.Optional(Type.Integer({ minimum: 0, maximum: 100_000_000, description: "Continuation offset reported by a prior direct read. Keep the same URL and options. Do not invent this value or combine it with linked crawling." })),
-  maxPages: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Maximum linked pages to read. Default: 1. Set above 1 only when linked sources are explicitly needed." })),
-  maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 3, description: "Maximum link-following depth. Default: 0. Any positive value enables linked crawling." })),
-  sameDomain: Type.Optional(Type.Boolean({ description: "Keep linked crawling on the starting domain. Default: true. Set false only when cited external primary sources are required." })),
+};
+
+export const WebReadSchema = Type.Object({
+  ...directReadProperties,
+  maxPages: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Advanced legacy-compatible linked crawl page limit. Default: 1. Set above 1 only for an explicit crawl." })),
+  maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 3, description: "Advanced legacy-compatible linked crawl depth. Default: 0. Any positive value enables crawling." })),
+  sameDomain: Type.Optional(Type.Boolean({ description: "Advanced linked crawl control. Keep links on the starting domain by default." })),
   save: Type.Optional(Type.Object({
     path: Type.String({ minLength: 3, maxLength: 4096, pattern: "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\).+\\.[mM][dD]$", description: "Relative .md path below the private WebX export directory. WebX returns the absolute saved path." }),
     overwrite: Type.Optional(Type.Boolean({ description: "Replace an existing file atomically. Default: false. Set true only when replacement is intended." })),
@@ -43,17 +47,7 @@ export const WebReadSchema = Type.Object({
 }, strict);
 
 export const WebReadBatchSchema = Type.Object({
-  urls: Type.Array(Type.String({ minLength: 1, maxLength: 8192, pattern: "^https?://", description: "Exact public HTTP(S) URL. Results keep this input order." }), { minItems: 1, maxItems: 5, description: "Read 1 to 5 separate sources with fixed maximum concurrency 3." }),
-  query: Type.Optional(Type.String({ maxLength: 8192, description: "Optional topic or section selector applied to each source." })),
-  view: Type.Optional(StringEnum(["main", "outline", "raw"] as const)),
-  fields: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 256 }), { maxItems: 32 })),
-  itemOffset: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000 })),
-  itemLimit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
-  maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000 })),
-  contentOffset: Type.Optional(Type.Integer({ minimum: 0, maximum: 100_000_000 })),
-  maxPages: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
-  maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 3 })),
-  sameDomain: Type.Optional(Type.Boolean()),
+  items: Type.Array(Type.Object(directReadProperties, strict), { minItems: 1, maxItems: 5, description: "Directly read 1 to 5 separate sources in input order with fixed maximum concurrency 3." }),
 }, strict);
 
 const contentBase = {

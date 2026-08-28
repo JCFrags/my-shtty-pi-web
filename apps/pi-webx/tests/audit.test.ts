@@ -53,7 +53,7 @@ test("batch audit keeps source counts, IDs, and cache state but no source bodies
     const audit = new WebAuditLog(root);
     await audit.record({
       operation: "web.readBatch", ownerId: "session", toolCallId: "batch", startedAt: new Date("2026-08-24T12:00:00Z"), durationMs: 12,
-      input: { urls: ["https://one.test", "https://two.test"], body: "input body must not persist", snippet: "input snippet must not persist", payloadBase64: "c2VjcmV0" },
+      input: { items: [{ url: "https://one.test" }, { url: "https://two.test" }], body: "input body must not persist", snippet: "input snippet must not persist", payloadBase64: "c2VjcmV0" },
       result: { summary: "batch", trust: "untrusted-external", data: {
         metadata: { requested: 2, succeeded: 1, failed: 1 },
         results: [

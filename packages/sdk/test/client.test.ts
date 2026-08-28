@@ -43,7 +43,7 @@ describe("WebxClient", () => {
 
     const wire = transport();
     const client = new WebxClient(wire);
-    await client.readBatch({ urls: ["https://one.test", "https://two.test"] }, { idempotencyKey: "read-batch-001" });
+    await client.readBatch({ items: [{ url: "https://one.test" }, { url: "https://two.test" }] }, { idempotencyKey: "read-batch-001" });
     await client.content({ contentId: `cnt_${"x".repeat(32)}`, offset: 0, limit: 10 }, { idempotencyKey: "content-read-001" });
     await client.readRange({ url: "https://data.example/warc", offset: 0, length: 10 }, { idempotencyKey: "range-read-001" });
     await client.getArtifactBytes("artifact-1", 0, 10);

@@ -32,13 +32,15 @@ Use separate `web_search` calls for independent questions. Do not combine unrela
 
 ## Read
 
+For normal multi-source research, use `web_search` and then use `web_read_batch` for the selected sources. Each batch item is one direct read. Results stay in input order and keep separate source labels.
+
 A normal `web_read` returns a bounded passage and an opaque content ID for the stored normalized body. Use `web_content` with the exact reported offset to continue without a network request. Use `findText` or `query` for a focused stored passage. Do not combine a focused mode with `offset`. Use:
 
 - `query` to select relevant sections instead of reading the full source;
 - `view: "outline"` to inspect structure;
 - `fields`, `itemOffset`, and `itemLimit` only for structured JSON collections;
-- `maxPages` and `maxDepth` only to follow linked pages explicitly;
-- `save` only when the user requests a local Markdown copy. Give a relative `.md` path below the WebX export directory. Do not set `overwrite: true` unless replacement is intended.
+- `maxPages` and `maxDepth` only for an explicit advanced linked crawl. These controls remain for legacy compatibility and are not the normal research path;
+- `save` only for an explicit user-directed local Markdown export. Give a relative `.md` path below the WebX export directory. Do not set `overwrite: true` unless replacement is intended.
 
 Field projection preserves each collection row as one object. Do not expect parallel field arrays.
 

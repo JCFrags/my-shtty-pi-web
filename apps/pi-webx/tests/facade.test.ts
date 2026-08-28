@@ -195,10 +195,13 @@ test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "/tmp/page.md" } }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "page.txt" } }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "page.md", overwrite: "yes" } }), false);
-  assert.equal(Value.Check(WebReadBatchSchema, { urls: ["https://one.test", "https://two.test"] }), true);
-  assert.equal(Value.Check(WebReadBatchSchema, { urls: [] }), false);
-  assert.equal(Value.Check(WebReadBatchSchema, { urls: Array.from({ length: 6 }, (_, index) => `https://${index}.test`) }), false);
-  assert.equal(Value.Check(WebReadBatchSchema, { urls: ["https://one.test"], save: { path: "x.md" } }), false);
+  const directItem = { url: "https://one.test", query: "topic", view: "outline", fields: ["id"], itemOffset: 2, itemLimit: 3, maxChars: 4_000, contentOffset: 10 };
+  assert.equal(Value.Check(WebReadBatchSchema, { items: [directItem, { url: "https://two.test" }] }), true);
+  assert.equal(Value.Check(WebReadBatchSchema, { items: [] }), false);
+  assert.equal(Value.Check(WebReadBatchSchema, { items: Array.from({ length: 6 }, (_, index) => ({ url: `https://${index}.test` })) }), false);
+  for (const rejected of [{ maxPages: 2 }, { maxDepth: 1 }, { sameDomain: false }, { save: { path: "x.md" } }, { unexpected: true }]) {
+    assert.equal(Value.Check(WebReadBatchSchema, { items: [{ url: "https://one.test", ...rejected }] }), false);
+  }
   const contentId = `cnt_${"x".repeat(32)}`;
   assert.equal(Value.Check(WebContentSchema, { contentId, offset: 10, limit: 100 }), true);
   assert.equal(Value.Check(WebContentSchema, { contentId, findText: "needle", limit: 100 }), true);
@@ -262,7 +265,7 @@ test("web_read_batch sends web.readBatch to the SDK when read capability is heal
   const sdk = new MockSdk();
   const fx = harness(sdk);
   await fx.events.get("session_start")?.({}, fx.ctx);
-  await fx.execute("web_read_batch", { urls: ["https://one.test", "https://two.test"] });
+  await fx.execute("web_read_batch", { items: [{ url: "https://one.test" }, { url: "https://two.test" }] });
   assert.equal(sdk.calls.length, 1);
   assert.equal(sdk.calls[0]?.operation, "web.readBatch");
   await fx.events.get("session_shutdown")?.();

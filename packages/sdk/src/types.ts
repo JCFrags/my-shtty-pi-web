@@ -111,8 +111,10 @@ export interface ReadRequest {
   readonly visibility?: Visibility;
 }
 
-export interface ReadBatchRequest extends Omit<ReadRequest, "url"> {
-  readonly urls: readonly string[];
+export type DirectReadRequest = Pick<ReadRequest, "url" | "query" | "view" | "fields" | "itemOffset" | "itemLimit" | "maxChars" | "contentOffset">;
+
+export interface ReadBatchRequest {
+  readonly items: readonly DirectReadRequest[];
 }
 
 export type ReadBatchEnvelope =

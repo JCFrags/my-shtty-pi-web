@@ -161,6 +161,10 @@ describe("actual WebX Unix runtime", () => {
     }
     const directRead = await facade.request("web.read", { url: "https://fixture.invalid/webx", maxChars: 8 }, { ...facadeOptions, idempotencyKey: "facade-read-001" });
     const directMetadata = (directRead.data as { metadata: { contentId: string } }).metadata;
+    await expect(facade.request("web.readBatch", { items: [{ url: "https://fixture.invalid/webx" }, { url: "https://fixture.invalid/webx", maxChars: 20 }] }, { ...facadeOptions, idempotencyKey: "facade-batch-001" })).resolves.toMatchObject({ data: { metadata: { requested: 2, succeeded: 2 }, results: [{ index: 0, ok: true }, { index: 1, ok: true }] } });
+    for (const [index, field] of ["maxPages", "maxDepth", "sameDomain", "save", "unknown"].entries()) {
+      await expect(facade.request("web.readBatch", { items: [{ url: "https://fixture.invalid/webx", [field]: field === "save" ? { path: "x.md" } : 1 }] }, { ...facadeOptions, idempotencyKey: `facade-batch-invalid-${index}` })).rejects.toThrow("is not supported");
+    }
     await expect(facade.request("web.content", { contentId: directMetadata.contentId, offset: 8, limit: 20 }, { ...facadeOptions, idempotencyKey: "facade-content-001" })).resolves.toMatchObject({ summary: "Stored content", data: { metadata: { mode: "exact", offset: 8 } } });
     await expect(facade.request("web.content", { contentId: directMetadata.contentId, offset: 0, query: "routes" }, { ...facadeOptions, idempotencyKey: "facade-content-invalid" })).rejects.toThrow("mutually exclusive");
     const saved = await facade.request("web.read", { url: "https://fixture.invalid/webx", save: { path: "fixtures/webx.md" } }, { ...facadeOptions, idempotencyKey: "facade-save-001" });

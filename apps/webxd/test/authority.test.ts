@@ -466,7 +466,7 @@ describe("WebxAuthority", () => {
     }));
     const instance = authority(browser(), "http://127.0.0.1:8787");
     const urls = Array.from({ length: 5 }, (_, index) => `https://batch.test/${index}`);
-    const response = await call(instance, actor(), "POST", "/v1/read-batch", { urls }, "batch-partial");
+    const response = await call(instance, actor(), "POST", "/v1/read-batch", { items: urls.map((url) => ({ url })) }, "batch-partial");
     expect(response.status).toBe(200);
     const body = response.body as { results: Array<{ index: number; url: string; ok: boolean; result?: { metadata: { contentId: string } } }>; metadata: unknown };
     expect(body.results.map((item) => item.url)).toEqual(urls);
@@ -490,7 +490,7 @@ describe("WebxAuthority", () => {
     const instance = authority(browser(), "http://127.0.0.1:8787");
     const direct = call(instance, actor(), "POST", "/v1/read", { url: "https://same.test" }, "same-direct");
     await started.promise;
-    const batch = call(instance, actor(), "POST", "/v1/read-batch", { urls: ["https://same.test"] }, "same-batch");
+    const batch = call(instance, actor(), "POST", "/v1/read-batch", { items: [{ url: "https://same.test" }] }, "same-batch");
     release.resolve(undefined);
     const [directResponse, batchResponse] = await Promise.all([direct, batch]);
     const directBody = directResponse.body as { metadata: { contentId: string } };
@@ -502,8 +502,48 @@ describe("WebxAuthority", () => {
 
   it("returns one failure envelope for every failed batch input", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("failed", { status: 503 })));
-    const response = await call(authority(browser(), "http://127.0.0.1:8787"), actor(), "POST", "/v1/read-batch", { urls: ["https://fail.test/1", "https://fail.test/2"] }, "batch-failed");
+    const response = await call(authority(browser(), "http://127.0.0.1:8787"), actor(), "POST", "/v1/read-batch", { items: [{ url: "https://fail.test/1" }, { url: "https://fail.test/2" }] }, "batch-failed");
     expect(response).toMatchObject({ status: 200, body: { metadata: { requested: 2, succeeded: 0, failed: 2 }, results: [{ ok: false }, { ok: false }] } });
+  });
+
+  it("keeps batch content IDs in the calling owner scope", async () => {
+    const instance = authority();
+    const first = await call(instance, actor("owner-one"), "POST", "/v1/read-batch", { items: [{ url: "https://fixture.invalid/webx" }] }, "batch-owner-one");
+    const second = await call(instance, actor("owner-two"), "POST", "/v1/read-batch", { items: [{ url: "https://fixture.invalid/webx" }] }, "batch-owner-two");
+    const firstId = (first.body as { results: Array<{ result: { metadata: { contentId: string } } }> }).results[0]?.result.metadata.contentId ?? "";
+    const secondId = (second.body as { results: Array<{ result: { metadata: { contentId: string } } }> }).results[0]?.result.metadata.contentId ?? "";
+    expect(firstId).not.toBe(secondId);
+    expect(await call(instance, actor("owner-two"), "POST", "/v1/content", { contentId: firstId }, "batch-owner-cross-read")).toMatchObject({ status: 404, body: { code: "content-not-found" } });
+  });
+
+  it("validates direct batch items at the daemon boundary and keeps exact offsets", async () => {
+    const readerBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      readerBodies.push(body);
+      return new Response(JSON.stringify({ url: body.url, title: "Offset", content: "offset body", truncated: false }), { status: 200 });
+    }));
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const valid = await call(instance, actor(), "POST", "/v1/read-batch", { items: [{ url: "https://offset.test", contentOffset: 37, itemOffset: 4, itemLimit: 2, fields: ["id"] }] }, "batch-offset");
+    expect(valid.status).toBe(200);
+    expect(readerBodies[0]).toMatchObject({ contentOffset: 37, itemOffset: 4, itemLimit: 2, fields: ["id"] });
+    for (const [index, field] of ["maxPages", "maxDepth", "sameDomain", "save", "unknown"].entries()) {
+      const rejected = await call(instance, actor(), "POST", "/v1/read-batch", { items: [{ url: "https://invalid.test", [field]: field === "save" ? { path: "x.md" } : 1 }] }, `batch-invalid-${index}`);
+      expect(rejected).toMatchObject({ status: 400, body: { code: "invalid-request" } });
+    }
+  });
+
+  it("cancels batch fan-out without turning cancellation into a partial result", async () => {
+    const started = Promise.withResolvers<undefined>();
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      started.resolve(undefined);
+      return await new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")), { once: true }));
+    }));
+    const controller = new AbortController();
+    const pending = authority(browser(), "http://127.0.0.1:8787").handle(actor(), { method: "POST", path: "/v1/read-batch", body: { items: [{ url: "https://cancel.test/1" }, { url: "https://cancel.test/2" }] }, maxResponseBytes: 1_048_576, headers: { "idempotency-key": "batch-cancel" }, signal: controller.signal });
+    await started.promise;
+    controller.abort();
+    expect(await pending).toMatchObject({ status: 499, body: { code: "cancelled" } });
   });
 
   it("coalesces identical reads and keeps waiter cancellation independent", async () => {

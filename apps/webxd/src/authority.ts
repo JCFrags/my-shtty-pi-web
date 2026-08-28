@@ -310,7 +310,7 @@ export class WebxAuthority {
     for (let offset = 0; offset < attempted.length && selected.length < EXTRACT_RESULT_LIMIT; offset += EXTRACT_READ_CONCURRENCY) {
       const chunk = attempted.slice(offset, offset + EXTRACT_READ_CONCURRENCY);
       readAttempts += chunk.length;
-      const outcomes = await Promise.all(chunk.map(async (candidate): Promise<{ pageRead: boolean; hit?: SearchHit }> => {
+      const outcomes = await boundedOrderedFanOut(chunk, EXTRACT_READ_CONCURRENCY, async (candidate): Promise<{ pageRead: boolean; hit?: SearchHit }> => {
         try {
           const page = await this.uncachedRead(readerActor, { url: candidate.url, maxChars: 30_000 }, signal, false);
           const url = normalizeSearchUrl(page.url || candidate.url);
@@ -325,7 +325,7 @@ export class WebxAuthority {
           if (signal?.aborted) throw error;
           return { pageRead: false };
         }
-      }));
+      });
       for (const outcome of outcomes) {
         if (outcome.pageRead) pagesRead += 1;
         if (outcome.hit === undefined) failures += 1;
@@ -382,25 +382,15 @@ export class WebxAuthority {
   private async readBatch(actor: AuthorityActor, request: ReadBatchRequest, signal?: AbortSignal): Promise<ReadBatchResponse> {
     requireScope(actor, "retrieval.read");
     assertReadBatchRequest(request);
-    const results: ReadBatchResponse["results"][number][] = new Array(request.urls.length);
-    let next = 0;
-    const worker = async (): Promise<void> => {
-      for (;;) {
-        const index = next++;
-        if (index >= request.urls.length) return;
-        if (signal?.aborted) throw problem(499, "cancelled", "request was cancelled", false);
-        const url = request.urls[index];
-        if (url === undefined) return;
-        const common = definedReadOptions(request);
-        try {
-          results[index] = { index, url, ok: true, result: await this.read(actor, { url, ...common }, signal) };
-        } catch (error) {
-          if (signal?.aborted) throw error;
-          results[index] = { index, url, ok: false, error: publicProblem(error) };
-        }
+    const results = await boundedOrderedFanOut(request.items, READ_BATCH_CONCURRENCY, async (item, index): Promise<ReadBatchResponse["results"][number]> => {
+      if (signal?.aborted) throw problem(499, "cancelled", "request was cancelled", false);
+      try {
+        return { index, url: item.url, ok: true, result: await this.read(actor, item, signal) };
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        return { index, url: item.url, ok: false, error: publicProblem(error) };
       }
-    };
-    await Promise.all(Array.from({ length: Math.min(READ_BATCH_CONCURRENCY, request.urls.length) }, worker));
+    });
     const succeeded = results.filter((item) => item.ok).length;
     return { results, metadata: { requested: results.length, succeeded, failed: results.length - succeeded, maxConcurrency: 3 } };
   }
@@ -775,18 +765,42 @@ function withReadDelivery(value: BoundedContent, cache: "hit" | "miss", coalesce
   const metadata = typeof value.metadata === "object" && value.metadata !== null ? value.metadata : {};
   return { ...value, metadata: { ...metadata, delivery: { cache, coalesced } } };
 }
-function definedReadOptions(request: ReadBatchRequest): Omit<ReadRequest, "url"> {
-  const keys = ["query", "view", "fields", "itemOffset", "itemLimit", "maxChars", "contentOffset", "maxPages", "maxDepth", "sameDomain", "visibility"] as const;
-  return Object.fromEntries(keys.flatMap((key) => request[key] === undefined ? [] : [[key, request[key]]])) as Omit<ReadRequest, "url">;
+async function boundedOrderedFanOut<T, R>(items: readonly T[], concurrency: number, run: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = next++;
+      const item = items[index];
+      if (item === undefined) return;
+      results[index] = await run(item, index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return results;
 }
 function assertReadBatchRequest(request: ReadBatchRequest): void {
-  const allowed = new Set(["urls", "query", "view", "fields", "itemOffset", "itemLimit", "maxChars", "contentOffset", "maxPages", "maxDepth", "sameDomain", "visibility"]);
-  const unknown = Object.keys(request as unknown as Record<string, unknown>).filter((key) => !allowed.has(key));
+  const value = request as unknown as Record<string, unknown>;
+  const unknown = Object.keys(value).filter((key) => key !== "items");
   if (unknown.length > 0) throw problem(400, "invalid-request", `unsupported read batch field: ${unknown[0]}`, false);
-  if (!Array.isArray(request.urls) || request.urls.length < 1 || request.urls.length > 5 || request.urls.some((url) => typeof url !== "string" || url.length < 1 || url.length > 8_192)) {
-    throw problem(400, "invalid-request", "urls must contain 1 to 5 URL strings", false);
-  }
-  for (const url of request.urls) assertPublicUrlSyntax(url);
+  if (!Array.isArray(value.items) || value.items.length < 1 || value.items.length > 5) throw problem(400, "invalid-request", "items must contain 1 to 5 direct read requests", false);
+  for (const item of value.items) assertDirectReadRequest(item);
+}
+function assertDirectReadRequest(input: unknown): void {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) throw problem(400, "invalid-request", "each read batch item must be an object", false);
+  const value = input as Record<string, unknown>;
+  const allowed = new Set(["url", "query", "view", "fields", "itemOffset", "itemLimit", "maxChars", "contentOffset"]);
+  const unknown = Object.keys(value).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) throw problem(400, "invalid-request", `unsupported read batch item field: ${unknown[0]}`, false);
+  if (typeof value.url !== "string" || value.url.length < 1 || value.url.length > 8_192) throw problem(400, "invalid-request", "read batch item url is required", false);
+  assertPublicUrlSyntax(value.url);
+  if (value.query !== undefined && (typeof value.query !== "string" || value.query.length > 8_192)) throw problem(400, "invalid-request", "query must contain at most 8192 characters", false);
+  if (value.view !== undefined && value.view !== "main" && value.view !== "outline" && value.view !== "raw") throw problem(400, "invalid-request", "view must be main, outline, or raw", false);
+  if (value.fields !== undefined && (!Array.isArray(value.fields) || value.fields.length > 32 || value.fields.some((field) => typeof field !== "string" || field.length < 1 || field.length > 256))) throw problem(400, "invalid-request", "fields must contain at most 32 property names", false);
+  if (value.itemOffset !== undefined) integer(value.itemOffset as number, "itemOffset", 0, 1_000_000);
+  if (value.itemLimit !== undefined) integer(value.itemLimit as number, "itemLimit", 1, 500);
+  if (value.maxChars !== undefined) integer(value.maxChars as number, "maxChars", 1, 1_000_000);
+  if (value.contentOffset !== undefined) integer(value.contentOffset as number, "contentOffset", 0, 100_000_000);
 }
 function publicProblem(error: unknown): WebxProblem {
   if (isAuthorityFailure(error)) return error.body;

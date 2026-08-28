@@ -40,7 +40,7 @@ Optional `output: "extracts"` reads top distinct pages in groups of four. It tri
 
 Direct reads store only normalized extracted text. They never store original response bytes or document base64 as the normalized artifact. Content IDs are random and opaque. The store has positive limits for total bytes, entry count, item bytes, and retention. It prunes on insertion and startup. Files default to `$XDG_CACHE_HOME/pi-web/content`; `WEBX_CONTENT_DIR` can select another directory.
 
-The `/v1/read-batch` route accepts 1 to 5 URLs. It runs at most three reads at once. It returns ordered separate success or failure envelopes. Each success uses the same normalized-content storage behavior as `/v1/read`.
+The `/v1/read-batch` route accepts 1 to 5 direct-read items. Batch items do not accept crawl or save controls. It runs at most three reads at once. It returns ordered separate success or failure envelopes. Each success uses the same normalized-content storage behavior as `/v1/read`.
 
 The `/v1/content` route supports exact offset retrieval and focused `findText` or `query` retrieval. These modes are mutually exclusive. The route reads only the store and never fetches a URL.
 

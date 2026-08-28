@@ -2,7 +2,7 @@ import { WebxClient } from "./client.js";
 import { nodeNdjsonConnectionFactory } from "./node-unix.js";
 import { UnixSocketTransport } from "./transport.js";
 import { defaultExportRoot, saveReadMarkdown, validateRelativeMarkdownPath } from "./save-markdown.js";
-import type { BoundedContent, BrowserAction, BrowserPathId, BrowserVisualFrame, ContentRequest, ReadBatchRequest, ReadRequest, ReadSaveOptions, RequestOptions, VisualGuard } from "./types.js";
+import type { BoundedContent, BrowserAction, BrowserPathId, BrowserVisualFrame, ContentRequest, DirectReadRequest, ReadBatchRequest, ReadRequest, ReadSaveOptions, RequestOptions, VisualGuard } from "./types.js";
 
 export const FACADE_OPERATION_INVENTORY = {
   "web.search": "search",
@@ -204,14 +204,25 @@ function unavailable(operation: string, reason: string): Error { const error = n
 function object(value: unknown): Record<string, unknown> { if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError("operation input must be an object"); return value as Record<string, unknown>; }
 function optionalObject(value: unknown): Readonly<Record<string, unknown>> | undefined { return value === undefined ? undefined : object(value); }
 function readBatchRequest(value: Record<string, unknown>): ReadBatchRequest {
-  const allowed = new Set(["urls", "query", "view", "fields", "itemOffset", "itemLimit", "maxChars", "contentOffset", "maxPages", "maxDepth", "sameDomain"]);
-  for (const key of Object.keys(value)) if (!allowed.has(key)) throw new TypeError(`${key} is not supported by web.readBatch`);
-  const urls = stringArray(value.urls, "urls");
-  if (urls.length < 1 || urls.length > 5 || urls.some((url) => !/^https?:\/\//u.test(url) || url.length > 8_192)) throw new TypeError("urls must contain 1 to 5 public HTTP(S) URLs");
+  for (const key of Object.keys(value)) if (key !== "items") throw new TypeError(`${key} is not supported by web.readBatch`);
+  if (!Array.isArray(value.items) || value.items.length < 1 || value.items.length > 5) throw new TypeError("items must contain 1 to 5 direct read requests");
+  return { items: value.items.map((item, index) => directReadRequest(object(item), `items[${index}]`)) };
+}
+function directReadRequest(value: Record<string, unknown>, name: string): DirectReadRequest {
+  const allowed = new Set(["url", "query", "view", "fields", "itemOffset", "itemLimit", "maxChars", "contentOffset"]);
+  for (const key of Object.keys(value)) if (!allowed.has(key)) throw new TypeError(`${name}.${key} is not supported by web.readBatch`);
+  const url = requiredString(value.url, `${name}.url`);
+  if (!/^https?:\/\//u.test(url) || url.length > 8_192) throw new TypeError(`${name}.url must be a public HTTP(S) URL`);
+  const query = optionalString(value.query);
+  if (query !== undefined && query.length > 8_192) throw new TypeError(`${name}.query must contain at most 8192 characters`);
+  const fields = optionalStringArray(value.fields, `${name}.fields`);
+  if (fields !== undefined && (fields.length > 32 || fields.some((field) => field.length < 1 || field.length > 256))) throw new TypeError(`${name}.fields must contain at most 32 property names`);
   return {
-    urls, query: optionalString(value.query), view: optionalReadView(value.view), fields: optionalStringArray(value.fields, "fields"),
-    itemOffset: optionalNumber(value.itemOffset), itemLimit: optionalNumber(value.itemLimit), maxChars: optionalNumber(value.maxChars),
-    contentOffset: optionalNumber(value.contentOffset), maxPages: optionalNumber(value.maxPages), maxDepth: optionalNumber(value.maxDepth), sameDomain: optionalBoolean(value.sameDomain),
+    url, query, view: optionalReadView(value.view), fields,
+    itemOffset: boundedOptionalInteger(value.itemOffset, `${name}.itemOffset`, 0, 1_000_000),
+    itemLimit: boundedOptionalInteger(value.itemLimit, `${name}.itemLimit`, 1, 500),
+    maxChars: boundedOptionalInteger(value.maxChars, `${name}.maxChars`, 1, 1_000_000),
+    contentOffset: boundedOptionalInteger(value.contentOffset, `${name}.contentOffset`, 0, 100_000_000),
   };
 }
 function contentRequest(value: Record<string, unknown>): ContentRequest {
