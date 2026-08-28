@@ -9,7 +9,7 @@
       "httpx": "0.28.1"
     },
     "pdftotext": "pdftotext version 26.01.0",
-    "documentService": "not started; PDF uses the production fallback and Office is skipped"
+    "documentService": "not started; normal PDF uses local pdftotext and Office is skipped"
   },
   "quality": [
     {
@@ -1416,16 +1416,16 @@
     {
       "id": "pdf-text",
       "adapter": "current",
-      "status": "failed",
+      "status": "passed",
       "quality": {
-        "outcome": "fail",
-        "path": "error",
+        "outcome": "pass",
+        "path": "document",
         "requiredMarkerRetention": {
-          "retained": 0,
+          "retained": 2,
           "total": 2,
           "markers": {
-            "Ordinary PDF Guide": false,
-            "Bounded extraction keeps required content": false
+            "Ordinary PDF Guide": true,
+            "Bounded extraction keeps required content": true
           }
         },
         "forbiddenBoilerplateLeakage": {
@@ -1460,10 +1460,12 @@
           "required": 0,
           "pass": true
         },
-        "adapterEvidence": {},
-        "outputCharacters": 0,
-        "outputBytes": 0,
-        "error": "RuntimeError: PDF extraction returned no useful text"
+        "adapterEvidence": {
+          "documentConverter": "pdftotext"
+        },
+        "outputCharacters": 61,
+        "outputBytes": 61,
+        "error": null
       }
     },
     {
@@ -1472,16 +1474,16 @@
       "status": "failed",
       "quality": {
         "outcome": "fail",
-        "path": "error",
+        "path": "document",
         "requiredMarkerRetention": {
-          "retained": 0,
+          "retained": 5,
           "total": 5,
           "markers": {
-            "Regional Metrics": false,
-            "Region": false,
-            "Value": false,
-            "North": false,
-            "42": false
+            "Regional Metrics": true,
+            "Region": true,
+            "Value": true,
+            "North": true,
+            "42": true
           }
         },
         "forbiddenBoilerplateLeakage": {
@@ -1516,10 +1518,12 @@
           "required": 0,
           "pass": true
         },
-        "adapterEvidence": {},
-        "outputCharacters": 0,
-        "outputBytes": 0,
-        "error": "RuntimeError: PDF extraction returned no useful text"
+        "adapterEvidence": {
+          "documentConverter": "pdftotext"
+        },
+        "outputCharacters": 39,
+        "outputBytes": 39,
+        "error": null
       }
     },
     {
@@ -1569,7 +1573,7 @@
         "adapterEvidence": {},
         "outputCharacters": 0,
         "outputBytes": 0,
-        "error": "RuntimeError: PDF extraction returned no useful text"
+        "error": "RuntimeError: document conversion failed"
       }
     },
     {

@@ -491,7 +491,7 @@ def environment() -> dict[str, Any]:
         "platform": sys.platform,
         "packages": packages,
         "pdftotext": tool_version("pdftotext", "-v"),
-        "documentService": "not started; PDF uses the production fallback and Office is skipped",
+        "documentService": "not started; normal PDF uses local pdftotext and Office is skipped",
     }
 
 

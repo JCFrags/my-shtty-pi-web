@@ -14,7 +14,7 @@ pnpm benchmark:extraction
 
 The command uses `uv --offline`. It writes `reports/current-run.json`. It returns zero when deterministic quality matches `current-baseline.json`. A reviewed loss can remain in the baseline. Drift or a missing baseline makes the command fail.
 
-The offline benchmark does not start the Docling service. It does not declare or package the RapidOCR model assets. Office cases are visible environment skips for this reason. PDF cases exercise the exact production behavior when the Docling service is unavailable. Production then tries its local `pdftotext` fallback. The report does not claim cache-dependent Docling or OCR success.
+The offline benchmark does not start the Docling service. It does not declare or package the RapidOCR model assets. Office cases are visible environment skips for this reason. Normal PDF cases use the bounded local `pdftotext` path first. Raw PDF view and a PDF with no local text still require Docling. The report does not claim cache-dependent Docling or OCR success.
 
 ## Acquisition contracts
 
