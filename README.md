@@ -23,7 +23,7 @@ Search and direct reading do not require the visual browser. Search health depen
 - `packages/policy`: destination and ownership policy.
 - `packages/test-fixtures`: deterministic local test inputs.
 
-The separate research archive concept is recorded in [`FUTURE_FEATURES.md`](FUTURE_FEATURES.md). Core web traffic uses only a short-lived cache. The cache holds 512 recent RAM entries and targets at most 10 GiB on SSD.
+The separate research archive concept is recorded in [`FUTURE_FEATURES.md`](FUTURE_FEATURES.md). Core web traffic uses only a short-lived cache. The cache keeps up to 256 entries and 32 MiB in memory. It keeps up to 2,048 entries and 512 MiB on disk.
 
 ## Browser support
 
