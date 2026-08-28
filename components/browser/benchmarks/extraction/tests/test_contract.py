@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import importlib.util
 import json
@@ -64,6 +65,38 @@ def test_acquisition_contracts_do_not_use_expected_metadata_as_results() -> None
         assert quality["contract"] == "acquisition"
         assert quality["observed"] is not case["acquisitionExpected"]
         assert "extractionMetrics" in quality
+
+
+@pytest.mark.parametrize(
+    ("case_id", "reader_check"),
+    (
+        ("bad-charset", "readerDecodedRequiredMarkers"),
+        ("compressed-content", "readerDecompressedRequiredMarkers"),
+    ),
+)
+def test_acquisition_contracts_fail_when_reader_loses_decoded_content(
+    monkeypatch: pytest.MonkeyPatch,
+    case_id: str,
+    reader_check: str,
+) -> None:
+    case = next(case for case in manifest()["cases"] if case["id"] == case_id)
+    content = (ROOT / "fixtures" / case["file"]).read_bytes()
+    real_read = runner.pipeline.ReaderPipeline.read
+
+    async def read_without_content(self, request):
+        result = await real_read(self, request)
+        result.content = ""
+        return result
+
+    monkeypatch.setattr(runner.pipeline.ReaderPipeline, "read", read_without_content)
+    extracted, observed = asyncio.run(runner.production_read(case, content))
+    extraction = runner.extraction_quality(case, extracted, None)
+    quality = runner.acquisition_quality(case, observed, extraction)
+
+    assert all(observed.get(key) == value for key, value in case["acquisitionExpected"].items())
+    assert extraction["requiredMarkerRetention"]["retained"] == 0
+    assert not quality["checks"][reader_check]
+    assert quality["outcome"] == "fail"
 
 
 def test_expected_annotations_do_not_select_production_behavior() -> None:

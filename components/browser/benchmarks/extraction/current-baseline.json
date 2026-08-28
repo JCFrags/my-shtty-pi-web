@@ -1152,11 +1152,24 @@
           "rawBytes": 182,
           "decodedBytes": 182
         },
+        "readerObserved": {
+          "outputBytes": 143,
+          "requiredMarkerRetention": {
+            "retained": 3,
+            "total": 3,
+            "markers": {
+              "Café Encoding Note": true,
+              "naïve": true,
+              "extraction review": true
+            }
+          }
+        },
         "checks": {
           "finalUrl": true,
           "contentEncoding": true,
           "rawBytes": true,
-          "decodedBytes": true
+          "decodedBytes": true,
+          "readerDecodedRequiredMarkers": true
         },
         "extractionMetrics": {
           "outcome": "fail",
@@ -1238,6 +1251,18 @@
           "rawBytes": 198,
           "decodedBytes": 198
         },
+        "readerObserved": {
+          "outputBytes": 136,
+          "requiredMarkerRetention": {
+            "retained": 3,
+            "total": 3,
+            "markers": {
+              "Redirect Target": true,
+              "three-hop redirect chain": true,
+              "Final resource": true
+            }
+          }
+        },
         "checks": {
           "redirectChain": true,
           "finalUrl": true
@@ -1316,11 +1341,24 @@
           "rawBytes": 145,
           "decodedBytes": 188
         },
+        "readerObserved": {
+          "outputBytes": 146,
+          "requiredMarkerRetention": {
+            "retained": 3,
+            "total": 3,
+            "markers": {
+              "Compressed Response": true,
+              "gzip decompression": true,
+              "raw and decoded byte limits": true
+            }
+          }
+        },
         "checks": {
           "finalUrl": true,
           "contentEncoding": true,
           "rawBytes": true,
-          "decodedBytes": true
+          "decodedBytes": true,
+          "readerDecompressedRequiredMarkers": true
         },
         "extractionMetrics": {
           "outcome": "fail",

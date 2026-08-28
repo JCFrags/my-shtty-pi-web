@@ -95,8 +95,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 387.11,
-        "peakRssBytes": 90861568,
+        "wallMilliseconds": 392.262,
+        "peakRssBytes": 90935296,
         "temporaryDiskHighWaterBytes": 1913,
         "descendantProcessHighWater": 1
       }
@@ -163,8 +163,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 315.784,
-        "peakRssBytes": 60555264,
+        "wallMilliseconds": 309.476,
+        "peakRssBytes": 60481536,
         "temporaryDiskHighWaterBytes": 1993,
         "descendantProcessHighWater": 1
       }
@@ -231,8 +231,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 308.639,
-        "peakRssBytes": 60514304,
+        "wallMilliseconds": 308.973,
+        "peakRssBytes": 60407808,
         "temporaryDiskHighWaterBytes": 1981,
         "descendantProcessHighWater": 1
       }
@@ -300,8 +300,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 313.95,
-        "peakRssBytes": 60432384,
+        "wallMilliseconds": 308.797,
+        "peakRssBytes": 60583936,
         "temporaryDiskHighWaterBytes": 1933,
         "descendantProcessHighWater": 1
       }
@@ -369,8 +369,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 308.657,
-        "peakRssBytes": 60665856,
+        "wallMilliseconds": 314.046,
+        "peakRssBytes": 60456960,
         "temporaryDiskHighWaterBytes": 2055,
         "descendantProcessHighWater": 1
       }
@@ -438,8 +438,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 308.565,
-        "peakRssBytes": 60473344,
+        "wallMilliseconds": 324.978,
+        "peakRssBytes": 60551168,
         "temporaryDiskHighWaterBytes": 1989,
         "descendantProcessHighWater": 1
       }
@@ -507,8 +507,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 308.627,
-        "peakRssBytes": 60407808,
+        "wallMilliseconds": 321.802,
+        "peakRssBytes": 60534784,
         "temporaryDiskHighWaterBytes": 2061,
         "descendantProcessHighWater": 1
       }
@@ -575,8 +575,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 309.062,
-        "peakRssBytes": 60485632,
+        "wallMilliseconds": 308.452,
+        "peakRssBytes": 60489728,
         "temporaryDiskHighWaterBytes": 1951,
         "descendantProcessHighWater": 1
       }
@@ -643,8 +643,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 314.858,
-        "peakRssBytes": 60461056,
+        "wallMilliseconds": 314.269,
+        "peakRssBytes": 60592128,
         "temporaryDiskHighWaterBytes": 2007,
         "descendantProcessHighWater": 1
       }
@@ -712,8 +712,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 308.95,
-        "peakRssBytes": 60542976,
+        "wallMilliseconds": 314.31,
+        "peakRssBytes": 60551168,
         "temporaryDiskHighWaterBytes": 1958,
         "descendantProcessHighWater": 1
       }
@@ -775,8 +775,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 309.924,
-        "peakRssBytes": 60137472,
+        "wallMilliseconds": 309.14,
+        "peakRssBytes": 60407808,
         "temporaryDiskHighWaterBytes": 1998,
         "descendantProcessHighWater": 1
       }
@@ -838,8 +838,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 391.77,
-        "peakRssBytes": 90853376,
+        "wallMilliseconds": 386.235,
+        "peakRssBytes": 90869760,
         "temporaryDiskHighWaterBytes": 1927,
         "descendantProcessHighWater": 1
       }
@@ -901,8 +901,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 386.356,
-        "peakRssBytes": 90779648,
+        "wallMilliseconds": 386.067,
+        "peakRssBytes": 90894336,
         "temporaryDiskHighWaterBytes": 1934,
         "descendantProcessHighWater": 1
       }
@@ -966,8 +966,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 309.362,
-        "peakRssBytes": 60252160,
+        "wallMilliseconds": 308.593,
+        "peakRssBytes": 60219392,
         "temporaryDiskHighWaterBytes": 1909,
         "descendantProcessHighWater": 1
       }
@@ -1031,8 +1031,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 308.533,
-        "peakRssBytes": 60399616,
+        "wallMilliseconds": 313.224,
+        "peakRssBytes": 60592128,
         "temporaryDiskHighWaterBytes": 1916,
         "descendantProcessHighWater": 1
       }
@@ -1096,8 +1096,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 380.616,
-        "peakRssBytes": 90853376,
+        "wallMilliseconds": 385.938,
+        "peakRssBytes": 90959872,
         "temporaryDiskHighWaterBytes": 1903,
         "descendantProcessHighWater": 1
       }
@@ -1157,8 +1157,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 308.492,
-        "peakRssBytes": 60198912,
+        "wallMilliseconds": 310.245,
+        "peakRssBytes": 60149760,
         "temporaryDiskHighWaterBytes": 1691,
         "descendantProcessHighWater": 1
       }
@@ -1219,8 +1219,8 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 314.534,
-        "peakRssBytes": 60256256,
+        "wallMilliseconds": 316.057,
+        "peakRssBytes": 60534784,
         "temporaryDiskHighWaterBytes": 1850,
         "descendantProcessHighWater": 1
       }
@@ -1306,11 +1306,24 @@
           "rawBytes": 182,
           "decodedBytes": 182
         },
+        "readerObserved": {
+          "outputBytes": 143,
+          "requiredMarkerRetention": {
+            "retained": 3,
+            "total": 3,
+            "markers": {
+              "Café Encoding Note": true,
+              "naïve": true,
+              "extraction review": true
+            }
+          }
+        },
         "checks": {
           "finalUrl": true,
           "contentEncoding": true,
           "rawBytes": true,
-          "decodedBytes": true
+          "decodedBytes": true,
+          "readerDecodedRequiredMarkers": true
         },
         "extractionMetrics": {
           "outcome": "fail",
@@ -1365,8 +1378,8 @@
         }
       },
       "runtime": {
-        "wallMilliseconds": 308.878,
-        "peakRssBytes": 60596224,
+        "wallMilliseconds": 316.269,
+        "peakRssBytes": 60559360,
         "temporaryDiskHighWaterBytes": 2094,
         "descendantProcessHighWater": 1
       }
@@ -1398,6 +1411,18 @@
           "contentEncoding": "identity",
           "rawBytes": 198,
           "decodedBytes": 198
+        },
+        "readerObserved": {
+          "outputBytes": 136,
+          "requiredMarkerRetention": {
+            "retained": 3,
+            "total": 3,
+            "markers": {
+              "Redirect Target": true,
+              "three-hop redirect chain": true,
+              "Final resource": true
+            }
+          }
         },
         "checks": {
           "redirectChain": true,
@@ -1456,8 +1481,8 @@
         }
       },
       "runtime": {
-        "wallMilliseconds": 310.085,
-        "peakRssBytes": 60542976,
+        "wallMilliseconds": 309.951,
+        "peakRssBytes": 60559360,
         "temporaryDiskHighWaterBytes": 2306,
         "descendantProcessHighWater": 1
       }
@@ -1484,11 +1509,24 @@
           "rawBytes": 145,
           "decodedBytes": 188
         },
+        "readerObserved": {
+          "outputBytes": 146,
+          "requiredMarkerRetention": {
+            "retained": 3,
+            "total": 3,
+            "markers": {
+              "Compressed Response": true,
+              "gzip decompression": true,
+              "raw and decoded byte limits": true
+            }
+          }
+        },
         "checks": {
           "finalUrl": true,
           "contentEncoding": true,
           "rawBytes": true,
-          "decodedBytes": true
+          "decodedBytes": true,
+          "readerDecompressedRequiredMarkers": true
         },
         "extractionMetrics": {
           "outcome": "fail",
@@ -1543,8 +1581,8 @@
         }
       },
       "runtime": {
-        "wallMilliseconds": 309.262,
-        "peakRssBytes": 60538880,
+        "wallMilliseconds": 309.34,
+        "peakRssBytes": 60481536,
         "temporaryDiskHighWaterBytes": 2082,
         "descendantProcessHighWater": 1
       }
@@ -1603,8 +1641,8 @@
         "error": "RuntimeError: PDF extraction returned no useful text"
       },
       "runtime": {
-        "wallMilliseconds": 324.407,
-        "peakRssBytes": 60436480,
+        "wallMilliseconds": 337.585,
+        "peakRssBytes": 60600320,
         "temporaryDiskHighWaterBytes": 801,
         "descendantProcessHighWater": 1
       }
@@ -1666,8 +1704,8 @@
         "error": "RuntimeError: PDF extraction returned no useful text"
       },
       "runtime": {
-        "wallMilliseconds": 314.104,
-        "peakRssBytes": 60567552,
+        "wallMilliseconds": 319.266,
+        "peakRssBytes": 60444672,
         "temporaryDiskHighWaterBytes": 787,
         "descendantProcessHighWater": 1
       }
@@ -1723,8 +1761,8 @@
         "error": "RuntimeError: PDF extraction returned no useful text"
       },
       "runtime": {
-        "wallMilliseconds": 314.264,
-        "peakRssBytes": 60633088,
+        "wallMilliseconds": 315.305,
+        "peakRssBytes": 60542976,
         "temporaryDiskHighWaterBytes": 819,
         "descendantProcessHighWater": 1
       }

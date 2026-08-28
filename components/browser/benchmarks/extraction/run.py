@@ -453,10 +453,27 @@ def extraction_quality(case: dict[str, Any], extracted: Extracted | None, error:
 def acquisition_quality(case: dict[str, Any], observed: dict[str, Any], extraction: dict[str, Any]) -> dict[str, Any]:
     expected = case["acquisitionExpected"]
     checks = {key: observed.get(key) == value for key, value in expected.items()}
+    marker_retention = extraction["requiredMarkerRetention"]
+    reader_observed = {
+        "outputBytes": extraction["outputBytes"],
+        "requiredMarkerRetention": marker_retention,
+    }
+    acquisition = case.get("acquisition", {})
+    if acquisition.get("charset"):
+        checks["readerDecodedRequiredMarkers"] = (
+            marker_retention["total"] > 0
+            and marker_retention["retained"] == marker_retention["total"]
+        )
+    if acquisition.get("compression") == "gzip":
+        checks["readerDecompressedRequiredMarkers"] = (
+            marker_retention["total"] > 0
+            and marker_retention["retained"] == marker_retention["total"]
+        )
     return {
         "outcome": "pass" if all(checks.values()) else "fail",
         "contract": "acquisition",
         "observed": observed,
+        "readerObserved": reader_observed,
         "checks": checks,
         "extractionMetrics": extraction,
     }

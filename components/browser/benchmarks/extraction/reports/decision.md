@@ -6,7 +6,7 @@ The clean offline run has 28 current cases. It records 8 extraction passes, 14 e
 
 The adapter calls `ReaderPipeline.read` with deterministic injected acquisition. Expected annotations do not select reader behavior. All static HTML cases use the production `trafilatura` source. Feed XML also uses the production `trafilatura` source. JavaScript shell fallback uses the production Markdown candidate flow. Challenge results use the production `raw` source and `renderRequired` metadata.
 
-The reviewed fixture semantics require source headings, code blocks, tables, and links. Current HTML extraction keeps most required text but flattens all reviewed HTML heading, code, table, and link structure. Technical documentation also loses one required table value. Cookie and challenge shells lose one required heading marker. These are visible baseline failures.
+The reviewed fixture semantics require source headings, code blocks, tables, and links. The technical documentation result retains two headings and one link. The other direct `trafilatura` HTML results retain no measured heading or link structure. All required code-block and table structure in direct HTML results is lost. The technical documentation result also loses one required table value. Cookie and challenge shells each lose one required heading marker. The JavaScript shell uses the Markdown fallback and retains two headings and one code block. These measured losses and retained structures are visible in the baseline.
 
 JSON keeps both structured rows. Negotiated Markdown keeps its headings, code block, and link. Plain text keeps all required text. RSS and Atom keep their required text and declared structure.
 
