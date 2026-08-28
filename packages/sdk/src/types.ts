@@ -153,6 +153,8 @@ export interface ContentProvenance extends Readonly<Record<string, unknown>> {
 export interface ReadFreshness {
   readonly fetchedAt: string;
   readonly validatedAt: string;
+  readonly cacheAgeMs: number;
+  readonly cache: "hit" | "miss" | "revalidated";
   readonly validation: "fetched" | "not-modified";
   readonly etag?: string;
   readonly lastModified?: string;

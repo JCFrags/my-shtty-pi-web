@@ -368,13 +368,13 @@ export class WebxAuthority {
     const key = { formatVersion: 12, principalId: actor.principalId, request: canonicalRequest, readerUrl: this.options.readerUrl };
     const entry = await this.#cache.getEntry<ReadContent>("read", key, true);
     const prior = entry === undefined ? undefined : await this.usableCachedRead(actor, entry.value);
-    if (request.refresh !== true && entry?.fresh === true && prior !== undefined) return withReadDelivery(prior, "hit", false, "cached");
+    if (request.refresh !== true && entry?.fresh === true && prior !== undefined) return withReadDelivery(prior, "hit", false, "cached", this.options.clock.now());
     const mode = request.refresh === true ? "refresh" : prior === undefined ? "miss" : "stale";
     const flightKey = `read\0${mode}\0${createHash("sha256").update(stableStringify(key)).digest("hex")}`;
     const shared = await this.#inFlight.run(flightKey, signal, (sharedSignal) => this.uncachedRead(actor, canonicalRequest, sharedSignal, true, prior) as Promise<ReadContent>);
     await this.#cache.set("read", key, shared.value, READ_CACHE_TTL_MS).catch(() => undefined);
     const freshness = readValidation(shared.value) === "not-modified" ? "revalidated" : "fetched";
-    return withReadDelivery(shared.value, "miss", shared.coalesced, freshness);
+    return withReadDelivery(shared.value, "miss", shared.coalesced, freshness, this.options.clock.now());
   }
 
   private async usableCachedRead(actor: AuthorityActor, cached: ReadContent): Promise<ReadContent | undefined> {
@@ -555,6 +555,8 @@ export class WebxAuthority {
     const freshness = {
       fetchedAt: timestamp,
       validatedAt: timestamp,
+      cacheAgeMs: 0,
+      cache: "miss" as const,
       validation: "fetched" as const,
       ...boundedValidators(reader),
     };
@@ -868,9 +870,15 @@ function outlineContent(content: string): string {
 function withSearchDelivery(value: SearchResponse, cache: "hit" | "miss", coalesced: boolean): SearchResponse {
   return { ...value, metadata: { ...value.metadata, delivery: { cache, coalesced } } };
 }
-function withReadDelivery<T extends BoundedContent>(value: T, cache: "hit" | "miss", coalesced: boolean, freshness: "cached" | "fetched" | "revalidated"): T {
+function withReadDelivery<T extends BoundedContent>(value: T, cache: "hit" | "miss", coalesced: boolean, freshness: "cached" | "fetched" | "revalidated", deliveredAt: string): T {
   const metadata = typeof value.metadata === "object" && value.metadata !== null ? value.metadata : {};
-  return { ...value, metadata: { ...metadata, delivery: { cache, coalesced, freshness } } } as T;
+  const priorFreshness = typeof metadata.freshness === "object" && metadata.freshness !== null ? metadata.freshness as ReadFreshness : undefined;
+  const visibleFreshness = priorFreshness === undefined ? undefined : {
+    ...priorFreshness,
+    cacheAgeMs: cacheAgeMilliseconds(priorFreshness.fetchedAt, deliveredAt),
+    cache: freshness === "cached" ? "hit" as const : freshness === "revalidated" ? "revalidated" as const : "miss" as const,
+  };
+  return { ...value, metadata: { ...metadata, ...(visibleFreshness === undefined ? {} : { freshness: visibleFreshness }), delivery: { cache, coalesced, freshness } } } as T;
 }
 function readFreshness(value: ReadContent | undefined): ReadFreshness | undefined {
   const freshness = value?.metadata.freshness;
@@ -892,11 +900,18 @@ function revalidatedRead(prior: ReadContent, readerMetadata: Readonly<Record<str
   const freshness: ReadFreshness = {
     fetchedAt: previous.fetchedAt,
     validatedAt,
+    cacheAgeMs: cacheAgeMilliseconds(previous.fetchedAt, validatedAt),
+    cache: "revalidated",
     validation: "not-modified",
     etag: responseValidators.etag ?? previous.etag,
     lastModified: responseValidators.lastModified ?? previous.lastModified,
   };
   return { ...prior, metadata: { ...prior.metadata, freshness } };
+}
+function cacheAgeMilliseconds(fetchedAt: string, observedAt: string): number {
+  const fetched = Date.parse(fetchedAt);
+  const observed = Date.parse(observedAt);
+  return Number.isFinite(fetched) && Number.isFinite(observed) ? Math.max(0, observed - fetched) : 0;
 }
 function withoutRefresh(request: ReadRequest): ReadRequest {
   const { refresh: _refresh, ...canonical } = request;

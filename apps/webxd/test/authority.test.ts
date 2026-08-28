@@ -527,7 +527,7 @@ describe("WebxAuthority", () => {
       const stale = await call(instance, actor(), "POST", "/v1/read", { url: "https://stale.example/page" }, "stale-second");
       expect(requests).toHaveLength(2);
       expect(requests[1]).toMatchObject({ etag: '"six-hour"', validatorUrl: "https://stale.example/page" });
-      expect(stale).toMatchObject({ body: { metadata: { contentId: (first.body as { metadata: { contentId: string } }).metadata.contentId, freshness: { validatedAt: "2026-08-28T06:00:00.001Z", validation: "not-modified" }, delivery: { freshness: "revalidated" } } } });
+      expect(stale).toMatchObject({ body: { metadata: { contentId: (first.body as { metadata: { contentId: string } }).metadata.contentId, freshness: { validatedAt: "2026-08-28T06:00:00.001Z", cacheAgeMs: 21_600_001, cache: "revalidated", validation: "not-modified" }, delivery: { freshness: "revalidated" } } } });
     } finally {
       vi.useRealTimers();
     }
