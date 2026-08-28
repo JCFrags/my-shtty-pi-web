@@ -141,15 +141,41 @@ def run_systemctl(command: str, args: list[str], *, check: bool = True) -> subpr
     return result
 
 
-def service_state(command: str) -> dict[str, dict[str, bool]]:
-    return {unit: {"active": run_systemctl(command, ["is-active", "--quiet", unit], check=False).returncode == 0, "enabled": run_systemctl(command, ["is-enabled", "--quiet", unit], check=False).returncode == 0} for unit in UNITS}
+def service_state(command: str) -> dict[str, dict[str, bool | str]]:
+    state: dict[str, dict[str, bool | str]] = {}
+    for unit in UNITS:
+        active = run_systemctl(command, ["is-active", "--quiet", unit], check=False).returncode == 0
+        enabled = run_systemctl(command, ["is-enabled", unit], check=False).stdout.strip()
+        state[unit] = {"active": active, "enabled": enabled}
+    return state
 
 
-def restore_services(command: str, state: dict[str, dict[str, bool]]) -> None:
+def restore_services(command: str, state: dict[str, dict[str, Any]]) -> None:
+    errors: list[str] = []
+    enable_actions = {
+        "enabled": ["enable"],
+        "enabled-runtime": ["enable", "--runtime"],
+        "disabled": ["disable"],
+    }
     for unit in UNITS:
-        run_systemctl(command, ["enable" if state[unit]["enabled"] else "disable", unit])
+        enabled = state[unit]["enabled"]
+        # Accept journals from before enable state names were recorded.
+        if isinstance(enabled, bool):
+            enabled = "enabled" if enabled else "disabled"
+        action = enable_actions.get(enabled)
+        if action is None:
+            continue
+        try:
+            run_systemctl(command, [*action, unit])
+        except (OSError, RuntimeError) as error:
+            errors.append(str(error))
     for unit in UNITS:
-        run_systemctl(command, ["start" if state[unit]["active"] else "stop", unit])
+        try:
+            run_systemctl(command, ["start" if state[unit]["active"] else "stop", unit])
+        except (OSError, RuntimeError) as error:
+            errors.append(str(error))
+    if errors:
+        fail(f"service restoration failed after all attempts: {'; '.join(errors)}")
 
 
 def generated(prefix: Path, config: Path, candidate: Path) -> dict[Path, dict[str, Any]]:

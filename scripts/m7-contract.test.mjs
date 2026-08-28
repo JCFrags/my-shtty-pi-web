@@ -129,6 +129,73 @@ test("cutover plan, apply, and rollback stay inside isolated HOME and restore by
   assert.match(await readFile(log, "utf8"), /daemon-reload/);
 });
 
+test("generated and static units skip enable changes while mutable states restore exactly", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "webx-m7-generated-unit-"));
+  const home = join(temporary, "home"); const prefix = join(home, ".local"); const state = join(home, ".state");
+  await mkdir(home);
+  const staged = JSON.parse(run(stageScript, ["--source", root, "--release-root", join(temporary, "releases"), "--test-no-build"], { HOME: home }));
+  const evidence = join(temporary, "evidence.json"); await writeFile(evidence, JSON.stringify({ ok: true, mode: "deterministic" }));
+  const fake = join(temporary, "systemctl"); const log = join(temporary, "systemctl.log");
+  await writeFile(fake, `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${log}"
+case "$*" in
+  '--user is-active --quiet '*) exit 0 ;;
+  '--user is-enabled webxd.service') echo enabled-runtime; exit 0 ;;
+  '--user is-enabled pi-web-reader.service') echo disabled; exit 1 ;;
+  '--user is-enabled pi-web-searxng.service') echo generated; exit 0 ;;
+  '--user is-enabled pi-browserd.service') echo enabled; exit 0 ;;
+  '--user is-enabled '*) echo static; exit 0 ;;
+  '--user enable pi-web-searxng.service'|'--user disable pi-web-searxng.service'|'--user mask pi-web-searxng.service') echo 'invalid generated-unit action' >&2; exit 40 ;;
+esac
+exit 0
+`);
+  await chmod(fake, 0o755);
+  const env = { HOME: home, PI_WEB_PREFIX: prefix, XDG_CONFIG_HOME: join(home, ".config"), XDG_STATE_HOME: state };
+  run(cutoverScript, ["--apply", "--candidate", staged.candidate, "--evidence", evidence, "--test-mode", "--run-id", "generated-unit", "--systemctl", fake], env);
+  const calls = await readFile(log, "utf8");
+  assert.match(calls, /--user enable --runtime webxd\.service/);
+  assert.match(calls, /--user disable pi-web-reader\.service/);
+  assert.match(calls, /--user enable pi-browserd\.service/);
+  assert.doesNotMatch(calls, /--user (?:enable|disable).*pi-web-searxng\.service/);
+  assert.doesNotMatch(calls, /--user (?:enable|disable).*pi-web-(?:crawl|docling|egress-proxy)\.service/);
+  assert.match(calls, /--user start pi-web-searxng\.service/);
+  const journal = JSON.parse(await readFile(join(state, "pi-web/cutovers/generated-unit/journal.json"), "utf8"));
+  assert.equal(journal.servicesBefore["pi-web-searxng.service"].enabled, "generated");
+});
+
+test("service restore reports aggregate errors only after every active-state attempt", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "webx-m7-restore-failure-"));
+  const home = join(temporary, "home"); const prefix = join(home, ".local"); const state = join(home, ".state");
+  await mkdir(home);
+  const staged = JSON.parse(run(stageScript, ["--source", root, "--release-root", join(temporary, "releases"), "--test-no-build"], { HOME: home }));
+  const evidence = join(temporary, "evidence.json"); await writeFile(evidence, JSON.stringify({ ok: true, mode: "deterministic" }));
+  const fake = join(temporary, "systemctl"); const log = join(temporary, "systemctl.log");
+  await writeFile(fake, `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${log}"
+case "$*" in
+  '--user is-active --quiet '*) exit 0 ;;
+  '--user is-enabled '*) echo enabled; exit 0 ;;
+  '--user enable webxd.service') echo 'enable webxd failed' >&2; exit 3 ;;
+  '--user start pi-web-reader.service') echo 'start reader failed' >&2; exit 4 ;;
+esac
+exit 0
+`);
+  await chmod(fake, 0o755);
+  const env = { HOME: home, PI_WEB_PREFIX: prefix, XDG_CONFIG_HOME: join(home, ".config"), XDG_STATE_HOME: state };
+  const result = runResult(cutoverScript, ["--apply", "--candidate", staged.candidate, "--evidence", evidence, "--test-mode", "--run-id", "restore-failure", "--systemctl", fake], env);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /service restoration failed after all attempts/);
+  assert.match(result.stderr, /enable webxd failed/);
+  assert.match(result.stderr, /start reader failed/);
+  const calls = await readFile(log, "utf8");
+  for (const unit of ["webxd.service", "pi-web-reader.service", "pi-web-searxng.service", "pi-browserd.service", "pi-web-crawl.service", "pi-web-docling.service", "pi-web-egress-proxy.service"]) {
+    assert.match(calls, new RegExp(`--user start ${unit.replaceAll(".", "\\.")}`));
+  }
+  assert.match(calls, /--user enable pi-web-egress-proxy\.service/);
+  const journal = JSON.parse(await readFile(join(state, "pi-web/cutovers/restore-failure/journal.json"), "utf8"));
+  assert.equal(journal.status, "apply-failed");
+});
+
 test("failed aggregate stop changes no path and restores service state", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "webx-m7-stop-failure-"));
   const home = join(temporary, "home"); const prefix = join(home, ".local"); const state = join(home, ".state");
