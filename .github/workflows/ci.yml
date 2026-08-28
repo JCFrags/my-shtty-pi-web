@@ -65,7 +65,10 @@ jobs:
           gcc gcc-c++ make pkgconf-pkg-config curl git openssl-devel
           webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel
           libxdo-devel gtk3-devel glib2-devel cairo-devel pango-devel
-          gdk-pixbuf2-devel nodejs npm
+          gdk-pixbuf2-devel
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Build the browser workspace shell
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.88.0
