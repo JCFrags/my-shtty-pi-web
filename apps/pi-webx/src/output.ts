@@ -56,6 +56,23 @@ function renderData(value: unknown): string | undefined {
     const empty = output === "extracts" && Number(metadata.readAttempts ?? 0) > 0 ? "No page extracts were available." : "No results.";
     return hits.length ? `${header}\n\n${hits.join("\n")}` : `${header}\n\n${empty}`;
   }
+  if (Array.isArray(data.results)) {
+    const batch = data.results.slice(0, 5);
+    const sourceLimit = Math.max(2_000, Math.floor(35_000 / Math.max(1, batch.length)));
+    const sources = batch.map((item, position) => {
+      const envelope = item as Record<string, unknown>;
+      const index = typeof envelope.index === "number" ? envelope.index : position;
+      const url = typeof envelope.url === "string" ? clip(envelope.url, MAX_PRESENTATION_HEADING_CHARS) : "unknown URL";
+      if (envelope.ok !== true) {
+        const error = typeof envelope.error === "object" && envelope.error !== null ? envelope.error as Record<string, unknown> : {};
+        return `--- Source ${index + 1}: ${url} ---\n[Source failed: ${String(error.code ?? "read-failed")}]`;
+      }
+      const rendered = renderData(envelope.result);
+      return `--- Source ${index + 1}: ${url} ---\n[UNTRUSTED EXTERNAL SOURCE ${index + 1}]\n${clip(rendered ?? "No content returned.", sourceLimit)}`;
+    });
+    const metadata = typeof data.metadata === "object" && data.metadata !== null ? data.metadata as Record<string, unknown> : {};
+    return `[Separate ordered sources; ${String(metadata.succeeded ?? 0)} succeeded; ${String(metadata.failed ?? 0)} failed; maximum concurrency 3]\n\n${sources.join("\n\n")}`;
+  }
   if (data.saved === true && typeof data.path === "string") {
     const source = typeof data.source === "object" && data.source !== null ? data.source as Record<string, unknown> : {};
     return [

@@ -5,6 +5,7 @@ export type WebMode = "off" | "read" | "browser" | "debug";
 export const TOOL_NAMES = [
   "web_search",
   "web_read",
+  "web_read_batch",
   "web_content",
   "browser_open",
   "browser_tabs",
@@ -19,7 +20,7 @@ export function availableTools(mode: WebMode, capabilities: WebxCapabilities | u
   if (!capabilities || capabilities.daemon !== "ready" || mode === "off") return [];
   const tools: string[] = [];
   if (capabilities.groups.search) tools.push("web_search");
-  if (capabilities.groups.read) tools.push("web_read", "web_content");
+  if (capabilities.groups.read) tools.push("web_read", "web_read_batch", "web_content");
   if (rank[mode] >= rank.browser && capabilities.groups.browser) {
     tools.push("browser_open", "browser_tabs", "browser_observe", "browser_act");
   }

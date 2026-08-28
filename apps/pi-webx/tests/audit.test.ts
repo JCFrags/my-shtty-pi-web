@@ -19,7 +19,7 @@ async function records(root: string): Promise<string[]> {
   return output.filter((path) => path.endsWith(".json"));
 }
 
-test("audit stores exact search and read evidence with secret redaction and user-only files", async () => {
+test("audit stores bounded metadata only with secret redaction and user-only files", async () => {
   const root = await mkdtemp(join(tmpdir(), "webx-audit-"));
   try {
     const audit = new WebAuditLog(root);
@@ -35,23 +35,57 @@ test("audit stores exact search and read evidence with secret redaction and user
     assert(file);
     const value = JSON.parse(await readFile(file, "utf8"));
     assert.equal(value.operation, "web.read");
-    assert.equal(value.status, "succeeded");
+    assert.equal(value.version, 2);
+    assert.equal(value.outcome, "succeeded");
+    assert.equal(value.status, "ok");
     assert.equal(value.durationMs, 42);
     assert.equal(value.input.apiKey, "[redacted]");
     assert.match(value.input.url, /token=\[redacted\]/);
-    assert.equal(value.structuredResult.data.untrustedContent, "complete public content");
-    assert.equal(value.agentVisibleOutput.content[0].text, "agent-visible output");
+    assert.equal(value.result.trust, "untrusted-external");
+    assert.doesNotMatch(JSON.stringify(value), /complete public content|agent-visible output|structuredResult|agentVisibleOutput/);
     assert.equal((await stat(file)).mode & 0o777, 0o600);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("audit records failures and removes records older than 90 days", async () => {
+test("batch audit keeps source counts, IDs, and cache state but no source bodies", async () => {
+  const root = await mkdtemp(join(tmpdir(), "webx-audit-"));
+  try {
+    const audit = new WebAuditLog(root);
+    await audit.record({
+      operation: "web.readBatch", ownerId: "session", toolCallId: "batch", startedAt: new Date("2026-08-24T12:00:00Z"), durationMs: 12,
+      input: { urls: ["https://one.test", "https://two.test"], body: "input body must not persist", snippet: "input snippet must not persist", payloadBase64: "c2VjcmV0" },
+      result: { summary: "batch", trust: "untrusted-external", data: {
+        metadata: { requested: 2, succeeded: 1, failed: 1 },
+        results: [
+          { index: 0, url: "https://one.test", ok: true, result: { untrustedContent: "source body must not persist", metadata: { contentId: `cnt_${"a".repeat(32)}`, delivery: { cache: "miss", coalesced: true }, reader: { returnedCharacters: 28, storedBytes: 28 } } } },
+          { index: 1, url: "https://two.test", ok: false, error: { code: "read-failed", message: "body-like failure detail" } },
+        ],
+      } },
+      presentation: { content: [{ type: "text", text: "final visible body" }], details: {} },
+    });
+    const [path] = await records(root);
+    assert(path);
+    const value = JSON.parse(await readFile(path, "utf8"));
+    assert.equal(value.result.sources[0].contentId, `cnt_${"a".repeat(32)}`);
+    assert.equal(value.result.sources[0].coalesced, true);
+    assert.equal(value.result.sources[1].status, "read-failed");
+    assert.doesNotMatch(JSON.stringify(value), /source body must not persist|body-like failure detail|final visible body|input body must not persist|input snippet must not persist|c2VjcmV0/);
+    assert.equal(value.input.body, "[omitted content]");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("audit records failure metadata and removes records older than 30 days", async () => {
   const root = await mkdtemp(join(tmpdir(), "webx-audit-"));
   try {
     const audit = new WebAuditLog(root);
     await audit.record({ operation: "web.search", ownerId: "session", toolCallId: "call", startedAt: new Date("2026-08-24T12:00:00Z"), durationMs: 3, input: { query: "x" }, error: new Error("search failed") });
     const [path] = await records(root);
     assert(path);
+    const failure = JSON.parse(await readFile(path, "utf8"));
+    assert.equal(failure.outcome, "failed");
+    assert.equal(failure.errorClass, "Error");
+    assert.equal(typeof failure.error.messageDigest, "string");
+    assert.doesNotMatch(JSON.stringify(failure), /search failed/);
     const old = new Date("2026-01-01T00:00:00Z");
     await utimes(path, old, old);
     await audit.prune(new Date("2026-08-24T12:00:00Z").getTime());

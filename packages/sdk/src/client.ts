@@ -24,6 +24,8 @@ import {
   type RangeReadRequest,
   type RangeReadResponse,
   type ReadRequest,
+  type ReadBatchRequest,
+  type ReadBatchResponse,
   type RequestOptions,
   type SearchRequest,
   type SearchResponse,
@@ -80,6 +82,10 @@ export class WebxClient {
 
   read(request: ReadRequest, options: RequestOptions): Promise<BoundedContent> {
     return this.call("POST", "/v1/read", request, requireIdempotency(options));
+  }
+
+  readBatch(request: ReadBatchRequest, options: RequestOptions): Promise<ReadBatchResponse> {
+    return this.call("POST", "/v1/read-batch", request, requireIdempotency(options));
   }
 
   content(request: ContentRequest, options: RequestOptions): Promise<StoredContent> {

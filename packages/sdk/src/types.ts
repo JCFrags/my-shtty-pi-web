@@ -87,6 +87,7 @@ export interface SearchResponse {
     readonly partial: boolean;
     readonly pagesRead: number;
     readonly readAttempts: number;
+    readonly delivery?: { readonly cache: "hit" | "miss"; readonly coalesced: boolean };
   };
 }
 
@@ -108,6 +109,19 @@ export interface ReadRequest {
   readonly maxDepth?: number;
   readonly sameDomain?: boolean;
   readonly visibility?: Visibility;
+}
+
+export interface ReadBatchRequest extends Omit<ReadRequest, "url"> {
+  readonly urls: readonly string[];
+}
+
+export type ReadBatchEnvelope =
+  | { readonly index: number; readonly url: string; readonly ok: true; readonly result: BoundedContent }
+  | { readonly index: number; readonly url: string; readonly ok: false; readonly error: WebxProblem };
+
+export interface ReadBatchResponse {
+  readonly results: readonly ReadBatchEnvelope[];
+  readonly metadata: { readonly requested: number; readonly succeeded: number; readonly failed: number; readonly maxConcurrency: 3 };
 }
 
 export interface ContentRequest {

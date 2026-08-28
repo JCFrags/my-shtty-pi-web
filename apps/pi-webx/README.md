@@ -5,6 +5,7 @@ This Pi extension presents the repository's internet capabilities as one small, 
 ## Tool selection
 
 - `web_read`: read a known public URL, API, feed, PDF, or document. It returns a bounded passage, an opaque content ID, and exact continuation metadata.
+- `web_read_batch`: read 1 to 5 known URLs with maximum concurrency 3 and separate ordered result envelopes.
 - `web_content`: retrieve an exact continuation or a focused passage from stored normalized content without a network request.
 - `web_search`: send one complete query for ranked links, or set `output: "extracts"` for a few short passages read from selected pages.
 - `browser_open`: open an owned browser only when direct reading cannot provide required dynamic state, interaction, DOM evidence, or pixels.
@@ -27,6 +28,6 @@ Only the user changes modes. Run `/web` with no options to open one settings men
 
 Repeated searches and reads use a short-lived RAM and SSD traffic cache. It is not a durable research library or a recall tool.
 
-The extension also writes a separate user-only audit record for each real `web_search` and `web_read` call. A record contains sanitized input, the structured result, final agent-visible output, duration, and failure state. Records remain for at most 90 days and 10 GiB. Inspect them with `pi-web audit list` and `pi-web audit show RECORD_ID`. Audit history is not a Pi tool and is not automatic model recall.
+The extension also writes a separate user-only audit record for each real `web_search`, `web_read`, and `web_read_batch` call. New records contain sanitized bounded inputs and result metadata only. They include actor scope, timestamps, duration, outcome, error class, cache and coalescing state, content IDs, digests, counts, and sizes when available. They do not contain fetched bodies, source bytes, snippets, passages, or final agent-visible output. Existing files are not migrated. New audit history uses a 30-day and 100 MiB policy with a bounded prune scan. Inspect them with `pi-web audit list` and `pi-web audit show RECORD_ID`. Audit history is not a Pi tool and is not automatic model recall.
 
 The extension calls the local WebX SDK over a same-user Unix socket. It does not call websites, browser providers, or subprocesses directly. It fails closed when the local daemon is unavailable.

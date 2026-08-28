@@ -2,11 +2,12 @@ import { WebxClient } from "./client.js";
 import { nodeNdjsonConnectionFactory } from "./node-unix.js";
 import { UnixSocketTransport } from "./transport.js";
 import { defaultExportRoot, saveReadMarkdown, validateRelativeMarkdownPath } from "./save-markdown.js";
-import type { BoundedContent, BrowserAction, BrowserPathId, BrowserVisualFrame, ContentRequest, ReadRequest, ReadSaveOptions, RequestOptions, VisualGuard } from "./types.js";
+import type { BoundedContent, BrowserAction, BrowserPathId, BrowserVisualFrame, ContentRequest, ReadBatchRequest, ReadRequest, ReadSaveOptions, RequestOptions, VisualGuard } from "./types.js";
 
 export const FACADE_OPERATION_INVENTORY = {
   "web.search": "search",
   "web.read": "read",
+  "web.readBatch": "readBatch; 1 to 5 ordered sources with concurrency 3",
   "web.content": "content; stored normalized content only",
   "browser.open": "createBrowserSession",
   "browser.tabs": "list/closeBrowserTab/closeBrowserSession; discard and restore unavailable",
@@ -68,6 +69,7 @@ export class WebxFacadeClient {
       return external("Search results", await client.search({ query: requiredString(value.query, "query"), output: optionalSearchOutput(value.output), domains: optionalStringArray(value.domains, "domains") }, requestOptions));
     }
     if (operation === "web.read") return this.read(client, value, requestOptions);
+    if (operation === "web.readBatch") return external("Batch read results", await client.readBatch(readBatchRequest(value), requestOptions));
     if (operation === "web.content") return external("Stored content", await client.content(contentRequest(value), requestOptions));
     if (operation === "browser.open") { rejectPresent(value, ["newTab"], operation); return local("Browser session opened", await client.createBrowserSession({ pathId: browserPath(value.pathId), url: optionalString(value.url), visible: optionalBoolean(value.visible), label: optionalString(value.label) }, requestOptions)); }
     if (operation === "browser.tabs") return this.browserTabs(client, value, requestOptions);
@@ -201,6 +203,17 @@ function local(summary: string, data: unknown): FacadeResult { return { summary,
 function unavailable(operation: string, reason: string): Error { const error = new Error(`${operation} is unavailable: ${reason}`); error.name = "WebxUnavailableError"; return error; }
 function object(value: unknown): Record<string, unknown> { if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError("operation input must be an object"); return value as Record<string, unknown>; }
 function optionalObject(value: unknown): Readonly<Record<string, unknown>> | undefined { return value === undefined ? undefined : object(value); }
+function readBatchRequest(value: Record<string, unknown>): ReadBatchRequest {
+  const allowed = new Set(["urls", "query", "view", "fields", "itemOffset", "itemLimit", "maxChars", "contentOffset", "maxPages", "maxDepth", "sameDomain"]);
+  for (const key of Object.keys(value)) if (!allowed.has(key)) throw new TypeError(`${key} is not supported by web.readBatch`);
+  const urls = stringArray(value.urls, "urls");
+  if (urls.length < 1 || urls.length > 5 || urls.some((url) => !/^https?:\/\//u.test(url) || url.length > 8_192)) throw new TypeError("urls must contain 1 to 5 public HTTP(S) URLs");
+  return {
+    urls, query: optionalString(value.query), view: optionalReadView(value.view), fields: optionalStringArray(value.fields, "fields"),
+    itemOffset: optionalNumber(value.itemOffset), itemLimit: optionalNumber(value.itemLimit), maxChars: optionalNumber(value.maxChars),
+    contentOffset: optionalNumber(value.contentOffset), maxPages: optionalNumber(value.maxPages), maxDepth: optionalNumber(value.maxDepth), sameDomain: optionalBoolean(value.sameDomain),
+  };
+}
 function contentRequest(value: Record<string, unknown>): ContentRequest {
   for (const key of Object.keys(value)) if (!["contentId", "offset", "limit", "findText", "query"].includes(key)) throw new TypeError(`${key} is not supported by web.content`);
   const offset = boundedOptionalInteger(value.offset, "offset", 0, 100_000_000);

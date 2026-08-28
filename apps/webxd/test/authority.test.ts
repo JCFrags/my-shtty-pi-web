@@ -165,7 +165,7 @@ describe("WebxAuthority", () => {
     const result = await call(instance, actor(), "POST", "/v1/search", { query: "Product feature support", output: "extracts", domains: ["docs.example.org"] }, "extract-search");
     const body = result.body as { hits: Array<{ snippet: string }>; metadata: { searches: number; pagesRead: number; readAttempts: number; partial: boolean } };
     expect(result.status).toBe(200);
-    expect(body.metadata).toEqual({ searches: 1, fallbackUsed: false, partial: true, pagesRead: 5, readAttempts: 6 });
+    expect(body.metadata).toMatchObject({ searches: 1, fallbackUsed: false, partial: true, pagesRead: 5, readAttempts: 6 });
     expect(body.hits).toHaveLength(4);
     expect(body.hits.every((hit) => hit.snippet.includes("verified page passage") && !hit.snippet.includes("Unverified search snippet") && hit.snippet.length <= 700)).toBe(true);
     expect(requests.filter((item) => item.url.includes("/search"))).toHaveLength(1);
@@ -411,6 +411,132 @@ describe("WebxAuthority", () => {
     expect(await call(instance, actor(), "POST", "/v1/content", { contentId, limit: 30_001 }, "content-invalid-limit")).toMatchObject({ status: 400, body: { code: "invalid-request" } });
     expect(await call(instance, actor("other"), "POST", "/v1/content", { contentId }, "content-other-owner")).toMatchObject({ status: 404, body: { code: "content-not-found" } });
     expect(await call(instance, actor(), "POST", "/v1/content", { contentId: `cnt_${"x".repeat(32)}` }, "content-missing")).toMatchObject({ status: 404, body: { code: "content-not-found" } });
+  });
+
+  it("returns ordered separate batch envelopes with concurrency at most three and partial success", async () => {
+    let active = 0;
+    let maximum = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { url: string };
+      active += 1;
+      maximum = Math.max(maximum, active);
+      await new Promise((resolve) => setTimeout(resolve, request.url.endsWith("/1") ? 15 : 5));
+      active -= 1;
+      if (request.url.endsWith("/2")) return new Response("failed", { status: 500 });
+      return new Response(JSON.stringify({ url: request.url, title: request.url, content: `body for ${request.url}`, truncated: false }), { status: 200 });
+    }));
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const urls = Array.from({ length: 5 }, (_, index) => `https://batch.test/${index}`);
+    const response = await call(instance, actor(), "POST", "/v1/read-batch", { urls }, "batch-partial");
+    expect(response.status).toBe(200);
+    const body = response.body as { results: Array<{ index: number; url: string; ok: boolean; result?: { metadata: { contentId: string } } }>; metadata: unknown };
+    expect(body.results.map((item) => item.url)).toEqual(urls);
+    expect(body.results.map((item) => item.index)).toEqual([0, 1, 2, 3, 4]);
+    expect(body.results.map((item) => item.ok)).toEqual([true, true, false, true, true]);
+    expect(maximum).toBeLessThanOrEqual(3);
+    expect(body.metadata).toEqual({ requested: 5, succeeded: 4, failed: 1, maxConcurrency: 3 });
+    for (const item of body.results.filter((value) => value.ok)) expect(item.result?.metadata.contentId).toMatch(/^cnt_/u);
+  });
+
+  it("coalesces equivalent singular and batch reads and returns the same stored content ID", async () => {
+    const started = Promise.withResolvers<undefined>();
+    const release = Promise.withResolvers<undefined>();
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      started.resolve(undefined);
+      await release.promise;
+      const request = JSON.parse(String(init?.body)) as { url: string };
+      return new Response(JSON.stringify({ url: request.url, title: "Shared", content: "one shared stored body", truncated: false }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const direct = call(instance, actor(), "POST", "/v1/read", { url: "https://same.test" }, "same-direct");
+    await started.promise;
+    const batch = call(instance, actor(), "POST", "/v1/read-batch", { urls: ["https://same.test"] }, "same-batch");
+    release.resolve(undefined);
+    const [directResponse, batchResponse] = await Promise.all([direct, batch]);
+    const directBody = directResponse.body as { metadata: { contentId: string } };
+    const batchBody = batchResponse.body as { results: Array<{ ok: true; result: { metadata: { contentId: string; delivery: { coalesced: boolean } } } }> };
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(batchBody.results[0]?.result.metadata.contentId).toBe(directBody.metadata.contentId);
+    expect(batchBody.results[0]?.result.metadata.delivery.coalesced).toBe(true);
+  });
+
+  it("returns one failure envelope for every failed batch input", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("failed", { status: 503 })));
+    const response = await call(authority(browser(), "http://127.0.0.1:8787"), actor(), "POST", "/v1/read-batch", { urls: ["https://fail.test/1", "https://fail.test/2"] }, "batch-failed");
+    expect(response).toMatchObject({ status: 200, body: { metadata: { requested: 2, succeeded: 0, failed: 2 }, results: [{ ok: false }, { ok: false }] } });
+  });
+
+  it("coalesces identical reads and keeps waiter cancellation independent", async () => {
+    const started = Promise.withResolvers<undefined>();
+    const release = Promise.withResolvers<undefined>();
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      started.resolve(undefined);
+      await release.promise;
+      const request = JSON.parse(String(init?.body)) as { url: string };
+      return new Response(JSON.stringify({ url: request.url, title: "Shared", content: "shared body", truncated: false }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const cancelled = new AbortController();
+    const first = instance.handle(actor(), { method: "POST", path: "/v1/read", body: { url: "https://shared.test" }, maxResponseBytes: 1_048_576, headers: { "idempotency-key": "shared-first" }, signal: cancelled.signal });
+    await started.promise;
+    const second = instance.handle(actor(), { method: "POST", path: "/v1/read", body: { url: "https://shared.test" }, maxResponseBytes: 1_048_576, headers: { "idempotency-key": "shared-second" } });
+    cancelled.abort();
+    release.resolve(undefined);
+    expect(await first).toMatchObject({ status: 499 });
+    expect(await second).toMatchObject({ status: 200, body: { metadata: { delivery: { cache: "miss", coalesced: true } } } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears coalescing state when every waiter cancels", async () => {
+    const started = Promise.withResolvers<undefined>();
+    let attempts = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      attempts += 1;
+      if (attempts === 1) {
+        started.resolve(undefined);
+        await new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")), { once: true }));
+      }
+      return new Response(JSON.stringify({ url: "https://cancel-all.test", title: "Retry", content: "retry body", truncated: false }), { status: 200 });
+    }));
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const controller = new AbortController();
+    const first = instance.handle(actor(), { method: "POST", path: "/v1/read", body: { url: "https://cancel-all.test" }, maxResponseBytes: 1_048_576, headers: { "idempotency-key": "cancel-all-one" }, signal: controller.signal });
+    await started.promise;
+    controller.abort();
+    expect(await first).toMatchObject({ status: 499 });
+    expect((await call(instance, actor(), "POST", "/v1/read", { url: "https://cancel-all.test" }, "cancel-all-two")).status).toBe(200);
+    expect(attempts).toBe(2);
+  });
+
+  it("clears failed coalescing state", async () => {
+    const fetchMock = vi.fn(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); return new Response("failed", { status: 500 }); });
+    vi.stubGlobal("fetch", fetchMock);
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const pair = await Promise.all([
+      call(instance, actor(), "POST", "/v1/read", { url: "https://shared-fail.test" }, "failure-one"),
+      call(instance, actor(), "POST", "/v1/read", { url: "https://shared-fail.test" }, "failure-two"),
+    ]);
+    expect(pair.map((item) => item.status)).toEqual([500, 500]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((await call(instance, actor(), "POST", "/v1/read", { url: "https://shared-fail.test" }, "failure-three")).status).toBe(500);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds idempotency records by entries and bytes", async () => {
+    const port = browser();
+    const entryBound = new WebxAuthority({ browser: port, sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, idempotencyMaxEntries: 2 });
+    for (const key of ["idempotency-one", "idempotency-two", "idempotency-three", "idempotency-one"]) {
+      expect((await call(entryBound, actor(), "POST", "/v1/browser/workspace", { action: "list" }, key)).status).toBe(200);
+    }
+    expect(port.workspace).toHaveBeenCalledTimes(4);
+
+    const bytePort = browser();
+    const byteBound = new WebxAuthority({ browser: bytePort, sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, idempotencyMaxBytes: 1 });
+    await call(byteBound, actor(), "POST", "/v1/browser/workspace", { action: "list" }, "idempotency-byte");
+    await call(byteBound, actor(), "POST", "/v1/browser/workspace", { action: "list" }, "idempotency-byte");
+    expect(bytePort.workspace).toHaveBeenCalledTimes(2);
   });
 
   it("reports response limits and cancellation without fallback", async () => {

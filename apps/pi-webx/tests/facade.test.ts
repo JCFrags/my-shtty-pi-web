@@ -11,6 +11,7 @@ import {
   BrowserOpenSchema,
   BrowserTabsSchema,
   WebContentSchema,
+  WebReadBatchSchema,
   WebReadSchema,
   WebSearchSchema,
 } from "../src/schemas.js";
@@ -100,7 +101,7 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   const sdk = new MockSdk();
   const fx = harness(sdk);
   assert.deepEqual(fx.tools.map((tool) => tool.name), [
-    "web_search", "web_read", "web_content",
+    "web_search", "web_read", "web_read_batch", "web_content",
     "browser_open", "browser_tabs", "browser_observe", "browser_act", "browser_debug",
   ]);
   assert.deepEqual([...fx.commands.keys()], ["web"]);
@@ -194,6 +195,10 @@ test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "/tmp/page.md" } }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "page.txt" } }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "page.md", overwrite: "yes" } }), false);
+  assert.equal(Value.Check(WebReadBatchSchema, { urls: ["https://one.test", "https://two.test"] }), true);
+  assert.equal(Value.Check(WebReadBatchSchema, { urls: [] }), false);
+  assert.equal(Value.Check(WebReadBatchSchema, { urls: Array.from({ length: 6 }, (_, index) => `https://${index}.test`) }), false);
+  assert.equal(Value.Check(WebReadBatchSchema, { urls: ["https://one.test"], save: { path: "x.md" } }), false);
   const contentId = `cnt_${"x".repeat(32)}`;
   assert.equal(Value.Check(WebContentSchema, { contentId, offset: 10, limit: 100 }), true);
   assert.equal(Value.Check(WebContentSchema, { contentId, findText: "needle", limit: 100 }), true);

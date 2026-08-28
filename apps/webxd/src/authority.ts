@@ -14,6 +14,8 @@ import type {
   RangeReadRequest,
   RangeReadResponse,
   ReadRequest,
+  ReadBatchRequest,
+  ReadBatchResponse,
   SearchHit,
   SearchRequest,
   SearchResponse,
@@ -24,7 +26,7 @@ import type {
 } from "../../../packages/sdk/src/index.js";
 import { BROWSER_PROTOCOL_VERSION, WEBX_API_VERSION } from "../../../packages/sdk/src/index.js";
 import type { AuthorityActor, AuthorityClock, AuthorityIdSource, BrowserDaemonPort, IndexedSource } from "./ports.js";
-import { WebCache } from "./cache.js";
+import { WebCache, type WebCacheOptions } from "./cache.js";
 import { ContentEntryTooLargeError, NormalizedContentStore, type NormalizedContentRecord } from "./content-store.js";
 import { BrowserPortError, isBrowserPathId } from "./ports.js";
 
@@ -45,6 +47,11 @@ const EXTRACT_PASSAGE_CHARS = 700;
 const HEALTH_PROBE_TIMEOUT_MS = 2_000;
 const MAX_AGENT_READ_CONTENT_CHARS = 30_000;
 const MAX_STORED_CONTENT_RETRIEVAL_CHARS = 30_000;
+const IDEMPOTENCY_MAX_ENTRIES = 1_024;
+const IDEMPOTENCY_MAX_BYTES = 16 * 1024 * 1024;
+const IDEMPOTENCY_TTL_MS = 15 * 60 * 1_000;
+const IN_FLIGHT_MAX_KEYS = 256;
+const READ_BATCH_CONCURRENCY = 3;
 
 interface RawSearchHit { readonly url?: unknown; readonly title?: unknown; readonly content?: unknown; readonly score?: unknown; readonly publishedDate?: unknown; readonly engines?: unknown }
 interface SearchBatch { readonly hits: RawSearchHit[]; readonly unavailable: string[] }
@@ -63,6 +70,8 @@ interface StoredBinaryArtifact {
 interface CachedResult {
   readonly fingerprint: string;
   readonly response: TransportResponse;
+  readonly expiresAt: number;
+  readonly bytes: number;
 }
 
 export interface WebxAuthorityOptions {
@@ -76,18 +85,30 @@ export interface WebxAuthorityOptions {
   readonly cacheDirectory?: string;
   readonly contentDirectory?: string;
   readonly contentStore?: NormalizedContentStore;
+  readonly cacheOptions?: Omit<WebCacheOptions, "directory">;
+  readonly idempotencyMaxEntries?: number;
+  readonly idempotencyMaxBytes?: number;
+  readonly idempotencyTtlMs?: number;
 }
 
 export class WebxAuthority {
   readonly #idempotency = new Map<string, CachedResult>();
+  readonly #inFlight = new InFlightCoalescer(IN_FLIGHT_MAX_KEYS);
   readonly #browserOwners = new Map<string, { principalId: string; agentId: string }>();
   readonly #liveBinaryArtifacts = new Map<string, StoredBinaryArtifact>();
   readonly #cache: WebCache;
   readonly #content: NormalizedContentStore;
+  readonly #idempotencyMaxEntries: number;
+  readonly #idempotencyMaxBytes: number;
+  readonly #idempotencyTtlMs: number;
+  #idempotencyBytes = 0;
 
   constructor(private readonly options: WebxAuthorityOptions) {
-    this.#cache = new WebCache({ directory: options.cacheDirectory });
+    this.#cache = new WebCache({ directory: options.cacheDirectory, ...options.cacheOptions });
     this.#content = options.contentStore ?? new NormalizedContentStore({ directory: options.contentDirectory });
+    this.#idempotencyMaxEntries = positiveOption(options.idempotencyMaxEntries ?? IDEMPOTENCY_MAX_ENTRIES, "idempotencyMaxEntries");
+    this.#idempotencyMaxBytes = positiveOption(options.idempotencyMaxBytes ?? IDEMPOTENCY_MAX_BYTES, "idempotencyMaxBytes");
+    this.#idempotencyTtlMs = positiveOption(options.idempotencyTtlMs ?? IDEMPOTENCY_TTL_MS, "idempotencyTtlMs");
   }
 
   async handle(actor: AuthorityActor, request: TransportRequest): Promise<TransportResponse> {
@@ -103,15 +124,18 @@ export class WebxAuthority {
       if (cacheKey !== undefined) {
         const cached = this.#idempotency.get(cacheKey);
         if (cached !== undefined) {
-          if (cached.fingerprint !== fingerprint) throw problem(409, "idempotency-conflict", "idempotency key was used for a different request", false);
-          return cached.response;
+          if (cached.expiresAt <= Date.now()) this.removeIdempotency(cacheKey, cached);
+          else {
+            if (cached.fingerprint !== fingerprint) throw problem(409, "idempotency-conflict", "idempotency key was used for a different request", false);
+            this.#idempotency.delete(cacheKey);
+            this.#idempotency.set(cacheKey, cached);
+            return cached.response;
+          }
         }
       }
       const response = await this.route(actor, request);
       const bounded = enforceSerializedBound(response, request.maxResponseBytes);
-      if (cacheKey !== undefined && mutation && bounded.status >= 200 && bounded.status < 300) {
-        this.#idempotency.set(cacheKey, { fingerprint, response: bounded });
-      }
+      if (cacheKey !== undefined && mutation && bounded.status >= 200 && bounded.status < 300) this.rememberIdempotency(cacheKey, fingerprint, bounded);
       return bounded;
     } catch (error) {
       if (isAuthorityFailure(error)) return boundedFailure(error.status, error.body, request.maxResponseBytes);
@@ -147,6 +171,7 @@ export class WebxAuthority {
     }
     if (request.method === "POST" && url.pathname === "/v1/search") return ok(await this.search(actor, body<SearchRequest>(request), "search.write", request.signal));
     if (request.method === "POST" && url.pathname === "/v1/read") return ok(await this.read(actor, body<ReadRequest>(request), request.signal));
+    if (request.method === "POST" && url.pathname === "/v1/read-batch") return ok(await this.readBatch(actor, body<ReadBatchRequest>(request), request.signal));
     if (request.method === "POST" && url.pathname === "/v1/content") return ok(await this.content(actor, body<ContentRequest>(request)));
     if (request.method === "POST" && url.pathname === "/v1/read-range") return ok(await this.readRange(actor, body<RangeReadRequest>(request), request.signal));
     if (request.method === "POST" && url.pathname === "/v1/crawl") return ok(await this.crawl(actor, body<CrawlRequest>(request), request.signal));
@@ -204,12 +229,13 @@ export class WebxAuthority {
 
   private async search(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<SearchResponse> {
     requireScope(actor, scope);
-    const key = { formatVersion: 20, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
+    const key = { formatVersion: 21, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
     const cached = await this.#cache.get<SearchResponse>("search", key);
-    if (cached !== undefined) return cached;
-    const result = await this.uncachedSearch(actor, request, scope, signal);
-    await this.#cache.set("search", key, result, SEARCH_CACHE_TTL_MS).catch(() => undefined);
-    return result;
+    if (cached !== undefined) return withSearchDelivery(cached, "hit", false);
+    const flightKey = `search\0${createHash("sha256").update(stableStringify(key)).digest("hex")}`;
+    const shared = await this.#inFlight.run(flightKey, signal, (sharedSignal) => this.uncachedSearch(actor, request, scope, sharedSignal));
+    await this.#cache.set("search", key, shared.value, SEARCH_CACHE_TTL_MS).catch(() => undefined);
+    return withSearchDelivery(shared.value, "miss", shared.coalesced);
   }
 
   private async uncachedSearch(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<SearchResponse> {
@@ -340,16 +366,43 @@ export class WebxAuthority {
 
   private async read(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<BoundedContent> {
     requireScope(actor, "retrieval.read");
-    const key = { formatVersion: 9, principalId: actor.principalId, request, readerUrl: this.options.readerUrl };
+    const key = { formatVersion: 10, principalId: actor.principalId, request, readerUrl: this.options.readerUrl };
     const cached = await this.#cache.get<BoundedContent>("read", key);
     if (cached !== undefined) {
       const metadata = typeof cached.metadata === "object" && cached.metadata !== null ? cached.metadata as Record<string, unknown> : {};
       const contentId = typeof metadata.contentId === "string" ? metadata.contentId : undefined;
-      if (contentId !== undefined && await this.#content.get(contentId, actor.principalId) !== undefined) return cached;
+      if (contentId !== undefined && await this.#content.get(contentId, actor.principalId) !== undefined) return withReadDelivery(cached, "hit", false);
     }
-    const result = await this.uncachedRead(actor, request, signal);
-    await this.#cache.set("read", key, result, READ_CACHE_TTL_MS).catch(() => undefined);
-    return result;
+    const flightKey = `read\0${createHash("sha256").update(stableStringify(key)).digest("hex")}`;
+    const shared = await this.#inFlight.run(flightKey, signal, (sharedSignal) => this.uncachedRead(actor, request, sharedSignal));
+    await this.#cache.set("read", key, shared.value, READ_CACHE_TTL_MS).catch(() => undefined);
+    return withReadDelivery(shared.value, "miss", shared.coalesced);
+  }
+
+  private async readBatch(actor: AuthorityActor, request: ReadBatchRequest, signal?: AbortSignal): Promise<ReadBatchResponse> {
+    requireScope(actor, "retrieval.read");
+    assertReadBatchRequest(request);
+    const results: ReadBatchResponse["results"][number][] = new Array(request.urls.length);
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const index = next++;
+        if (index >= request.urls.length) return;
+        if (signal?.aborted) throw problem(499, "cancelled", "request was cancelled", false);
+        const url = request.urls[index];
+        if (url === undefined) return;
+        const common = definedReadOptions(request);
+        try {
+          results[index] = { index, url, ok: true, result: await this.read(actor, { url, ...common }, signal) };
+        } catch (error) {
+          if (signal?.aborted) throw error;
+          results[index] = { index, url, ok: false, error: publicProblem(error) };
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(READ_BATCH_CONCURRENCY, request.urls.length) }, worker));
+    const succeeded = results.filter((item) => item.ok).length;
+    return { results, metadata: { requested: results.length, succeeded, failed: results.length - succeeded, maxConcurrency: 3 } };
   }
 
   private async uncachedRead(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal, retainContent = true): Promise<BoundedContent> {
@@ -649,10 +702,96 @@ export class WebxAuthority {
     throw problem(404, "not-found", "browser operation was not found", false);
   }
 
+  private rememberIdempotency(key: string, fingerprint: string, response: TransportResponse): void {
+    const bytes = new TextEncoder().encode(JSON.stringify({ fingerprint, response })).byteLength;
+    if (bytes > this.#idempotencyMaxBytes) return;
+    const prior = this.#idempotency.get(key);
+    if (prior !== undefined) this.removeIdempotency(key, prior);
+    this.#idempotency.set(key, { fingerprint, response, expiresAt: Date.now() + this.#idempotencyTtlMs, bytes });
+    this.#idempotencyBytes += bytes;
+    for (const [entryKey, entry] of this.#idempotency) {
+      if (entry.expiresAt <= Date.now()) this.removeIdempotency(entryKey, entry);
+    }
+    while (this.#idempotency.size > this.#idempotencyMaxEntries || this.#idempotencyBytes > this.#idempotencyMaxBytes) {
+      const oldest = this.#idempotency.entries().next().value as [string, CachedResult] | undefined;
+      if (oldest === undefined) break;
+      this.removeIdempotency(oldest[0], oldest[1]);
+    }
+  }
+
+  private removeIdempotency(key: string, entry: CachedResult): void {
+    if (!this.#idempotency.delete(key)) return;
+    this.#idempotencyBytes -= entry.bytes;
+  }
+
   private assertBrowserOwner(actor: AuthorityActor, sessionId: string): void {
     const owner = this.#browserOwners.get(sessionId);
     if (owner !== undefined && (owner.principalId !== actor.principalId || owner.agentId !== actor.agentId)) throw problem(403, "wrong-owner", "browser session has a different owner", false);
   }
+}
+
+interface Flight<T> { readonly controller: AbortController; readonly promise: Promise<T>; waiters: number }
+class InFlightCoalescer {
+  readonly #flights = new Map<string, Flight<unknown>>();
+  constructor(private readonly maxKeys: number) {}
+
+  async run<T>(key: string, signal: AbortSignal | undefined, operation: (signal: AbortSignal) => Promise<T>): Promise<{ value: T; coalesced: boolean }> {
+    let flight = this.#flights.get(key) as Flight<T> | undefined;
+    const coalesced = flight !== undefined;
+    if (flight === undefined) {
+      if (this.#flights.size >= this.maxKeys) return { value: await operation(signal ?? new AbortController().signal), coalesced: false };
+      const controller = new AbortController();
+      const created: Flight<T> = { controller, waiters: 0, promise: Promise.resolve().then(() => operation(controller.signal)) };
+      flight = created;
+      this.#flights.set(key, created as Flight<unknown>);
+      void created.promise.finally(() => { if (this.#flights.get(key) === created) this.#flights.delete(key); }).catch(() => undefined);
+    }
+    flight.waiters += 1;
+    try { return { value: await waitForFlight(flight.promise, signal), coalesced }; }
+    finally {
+      flight.waiters -= 1;
+      if (flight.waiters === 0 && this.#flights.get(key) === flight) {
+        this.#flights.delete(key);
+        flight.controller.abort();
+      }
+    }
+  }
+}
+
+function waitForFlight<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (signal === undefined) return promise;
+  if (signal.aborted) return Promise.reject(new DOMException("request was cancelled", "AbortError"));
+  return new Promise<T>((resolve, reject) => {
+    const cancelled = () => reject(new DOMException("request was cancelled", "AbortError"));
+    signal.addEventListener("abort", cancelled, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", cancelled)).catch(() => undefined);
+  });
+}
+
+function withSearchDelivery(value: SearchResponse, cache: "hit" | "miss", coalesced: boolean): SearchResponse {
+  return { ...value, metadata: { ...value.metadata, delivery: { cache, coalesced } } };
+}
+function withReadDelivery(value: BoundedContent, cache: "hit" | "miss", coalesced: boolean): BoundedContent {
+  const metadata = typeof value.metadata === "object" && value.metadata !== null ? value.metadata : {};
+  return { ...value, metadata: { ...metadata, delivery: { cache, coalesced } } };
+}
+function definedReadOptions(request: ReadBatchRequest): Omit<ReadRequest, "url"> {
+  const keys = ["query", "view", "fields", "itemOffset", "itemLimit", "maxChars", "contentOffset", "maxPages", "maxDepth", "sameDomain", "visibility"] as const;
+  return Object.fromEntries(keys.flatMap((key) => request[key] === undefined ? [] : [[key, request[key]]])) as Omit<ReadRequest, "url">;
+}
+function assertReadBatchRequest(request: ReadBatchRequest): void {
+  const allowed = new Set(["urls", "query", "view", "fields", "itemOffset", "itemLimit", "maxChars", "contentOffset", "maxPages", "maxDepth", "sameDomain", "visibility"]);
+  const unknown = Object.keys(request as unknown as Record<string, unknown>).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) throw problem(400, "invalid-request", `unsupported read batch field: ${unknown[0]}`, false);
+  if (!Array.isArray(request.urls) || request.urls.length < 1 || request.urls.length > 5 || request.urls.some((url) => typeof url !== "string" || url.length < 1 || url.length > 8_192)) {
+    throw problem(400, "invalid-request", "urls must contain 1 to 5 URL strings", false);
+  }
+  for (const url of request.urls) assertPublicUrlSyntax(url);
+}
+function publicProblem(error: unknown): WebxProblem {
+  if (isAuthorityFailure(error)) return error.body;
+  if (error instanceof BrowserPortError) return { code: error.code, message: error.message.slice(0, 300), retryable: error.retryable };
+  return { code: "backend-failure", message: safeMessage(error), retryable: true };
 }
 
 function healthProbeSignal(signal?: AbortSignal): AbortSignal {
@@ -670,6 +809,7 @@ function body<T>(request: TransportRequest): T {
 }
 function requireScope(actor: AuthorityActor, scope: string): void { if (!actor.scopes.has(scope)) throw problem(403, "forbidden", `missing scope: ${scope}`, false); }
 function canRead(actor: AuthorityActor, ownerPrincipalId: string, visibilityValue: Visibility): boolean { return visibilityValue === "public" || actor.principalId === ownerPrincipalId; }
+function positiveOption(value: number, name: string): number { if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError(`${name} must be a positive finite integer`); return value; }
 function integer(value: number, name: string, minimum: number, maximum: number): number { if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw problem(400, "invalid-request", `${name} must be an integer from ${minimum} to ${maximum}`, false); return value; }
 function integerValue(value: unknown, name: string, minimum: number, maximum: number): number { if (typeof value !== "number" || !Number.isSafeInteger(value) || value < minimum || value > maximum) throw new Error(`range reader ${name} is invalid`); return value; }
 function requiredString(value: unknown, name: string): string { if (typeof value !== "string" || value.length === 0) throw new Error(`range reader ${name} is invalid`); return value; }

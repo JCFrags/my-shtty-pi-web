@@ -42,6 +42,20 @@ export const WebReadSchema = Type.Object({
   }, { ...strict, description: "Save one extracted page as UTF-8 Markdown and return compact file metadata instead of the body. Not compatible with structured JSON projection or linked crawling." })),
 }, strict);
 
+export const WebReadBatchSchema = Type.Object({
+  urls: Type.Array(Type.String({ minLength: 1, maxLength: 8192, pattern: "^https?://", description: "Exact public HTTP(S) URL. Results keep this input order." }), { minItems: 1, maxItems: 5, description: "Read 1 to 5 separate sources with fixed maximum concurrency 3." }),
+  query: Type.Optional(Type.String({ maxLength: 8192, description: "Optional topic or section selector applied to each source." })),
+  view: Type.Optional(StringEnum(["main", "outline", "raw"] as const)),
+  fields: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 256 }), { maxItems: 32 })),
+  itemOffset: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000 })),
+  itemLimit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
+  maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000 })),
+  contentOffset: Type.Optional(Type.Integer({ minimum: 0, maximum: 100_000_000 })),
+  maxPages: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+  maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 3 })),
+  sameDomain: Type.Optional(Type.Boolean()),
+}, strict);
+
 const contentBase = {
   contentId: Type.String({ minLength: 36, maxLength: 36, pattern: "^cnt_[A-Za-z0-9_-]{32}$", description: "Opaque content ID returned by web_read or web_content." }),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 30_000, description: "Maximum normalized-content characters to return. Default: 30000." })),
