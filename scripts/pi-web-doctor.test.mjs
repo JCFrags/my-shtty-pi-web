@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { doctorReport, probeWebx, profileDoctorChecks, runDoctor } from "./pi-web-doctor.mjs";
+import { doctorReport, documentAssetReadiness, probeWebx, profileDoctorChecks, runDoctor } from "./pi-web-doctor.mjs";
 
 async function fixture(catalog) {
   const directory = await mkdtemp(join(tmpdir(), "pi-web-doctor-"));
@@ -133,6 +133,27 @@ test("doctor checks the installed profile and reviewed core limits", () => {
   }, profile);
   assert.equal(report.checks.find((item) => item.name === "browser")?.required, true);
   assert.equal(report.ok, false);
+});
+
+test("doctor reports bounded documents and refuses unvalidated model claims", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pi-web-assets-"));
+  try {
+    const bytes = Buffer.from("reviewed model bytes");
+    await writeFile(join(directory, "model.bin"), bytes);
+    await writeFile(join(directory, "model-assets.json"), JSON.stringify({ schemaVersion: 1, capabilities: ["office"], files: [{ path: "model.bin", sha256: "0".repeat(64) }] }));
+    assert.equal(documentAssetReadiness(directory).office, false);
+    await writeFile(join(directory, "model-assets.json"), JSON.stringify({ schemaVersion: 1, assetSetId: "unvalidated-local-set", capabilities: ["office"], files: [{ path: "model.bin", sha256: "1".repeat(64) }] }));
+    assert.deepEqual(documentAssetReadiness(directory), { manifestValidated: false, office: false, scannedPdf: false, detail: "model asset set has no validated acceptance record in this release" });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+  const checks = profileDoctorChecks({ schemaVersion: 1, resolvedProfiles: ["web-core", "documents"], resourceLimits: {
+    "pi-web-reader.service": { MemoryMax: "2G", TasksMax: 512 },
+    "pi-web-searxng.service": { MemoryMax: "2G", TasksMax: 512 },
+    "pi-web-docling.service": { MemoryMax: "4G", TasksMax: 128, Concurrency: 1, QueueSize: 2, TimeoutSeconds: 120, MaxInputBytes: 268435456, MaxTempBytes: 536870912, MaxOutputBytes: 16777216 },
+  } });
+  assert.equal(checks.find((item) => item.name === "document-resource-limits")?.ok, true);
+  assert.equal(checks.find((item) => item.name === "office-model-assets")?.required, false);
 });
 
 test("doctor reports an unavailable authority as fatal", async () => {

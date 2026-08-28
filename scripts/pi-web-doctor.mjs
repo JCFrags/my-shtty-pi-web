@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import process from "node:process";
@@ -95,6 +95,37 @@ export function doctorReport(catalog, profile = undefined) {
   return { ok: checks.filter((item) => item.required).every((item) => item.ok), apiVersion: catalog.apiVersion, policy: storagePolicyReport(), checks };
 }
 
+function commandAvailable(command, pathValue = process.env.PATH ?? "") {
+  return pathValue.split(":").some((directory) => directory && existsSync(`${directory}/${command}`));
+}
+
+const VALIDATED_MODEL_ASSET_SETS = new Map(); // Populate only after an acceptance run validates the exact asset set.
+
+export function documentAssetReadiness(directory = process.env.DOCLING_ARTIFACTS_PATH ?? `${process.env.XDG_CACHE_HOME ?? `${process.env.HOME}/.cache`}/pi-web/document-models`) {
+  const unavailable = (detail) => ({ manifestValidated: false, office: false, scannedPdf: false, detail });
+  try {
+    const manifestPath = `${directory}/model-assets.json`;
+    const manifestInfo = lstatSync(manifestPath);
+    if (!manifestInfo.isFile() || manifestInfo.isSymbolicLink() || manifestInfo.size > 65_536) return unavailable("model asset manifest is absent or unsafe");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.files) || manifest.files.length < 1 || manifest.files.length > 256) return unavailable("model asset manifest is invalid");
+    const capabilities = manifest.capabilities;
+    if (!Array.isArray(capabilities) || capabilities.some((item) => item !== "office" && item !== "scanned-pdf")) return unavailable("model asset capabilities are invalid");
+    const approved = VALIDATED_MODEL_ASSET_SETS.get(manifest.assetSetId);
+    if (!approved || JSON.stringify(approved.capabilities) !== JSON.stringify(capabilities) || JSON.stringify(approved.files) !== JSON.stringify(manifest.files)) return unavailable("model asset set has no validated acceptance record in this release");
+    for (const item of manifest.files) {
+      if (typeof item?.path !== "string" || !item.path || item.path.startsWith("/") || item.path.split("/").includes("..") || !/^[0-9a-f]{64}$/u.test(item.sha256)) return unavailable("model asset declaration is invalid");
+      const path = `${directory}/${item.path}`;
+      const info = lstatSync(path);
+      if (!info.isFile() || info.isSymbolicLink()) return unavailable("model asset is missing or unsafe");
+      if (approved.digests[item.path] !== item.sha256) return unavailable("model asset digest mismatch");
+    }
+    return { manifestValidated: true, office: capabilities.includes("office"), scannedPdf: capabilities.includes("scanned-pdf"), detail: `validated ${manifest.files.length} declared model asset file(s)` };
+  } catch (error) {
+    return unavailable(error?.code === "ENOENT" ? "model asset manifest is absent" : error instanceof Error ? error.message : String(error));
+  }
+}
+
 export function profileDoctorChecks(profile, root = process.env.PI_WEB_INSTALL_ROOT) {
   const resolved = Array.isArray(profile?.resolvedProfiles) ? profile.resolvedProfiles : [];
   const limits = profile?.resourceLimits;
@@ -104,6 +135,18 @@ export function profileDoctorChecks(profile, root = process.env.PI_WEB_INSTALL_R
   const search = limits?.["pi-web-searxng.service"];
   const limitsOk = reader?.MemoryMax === "2G" && reader?.TasksMax === 512 && search?.MemoryMax === "2G" && search?.TasksMax === 512;
   checks.push({ name: "core-resource-limits", required: true, ok: limitsOk, detail: limitsOk ? "reader and SearXNG: MemoryMax=2G, TasksMax=512" : "reviewed core limits are missing" });
+  if (resolved.includes("documents")) {
+    const documentLimits = limits?.["pi-web-docling.service"];
+    const bounded = documentLimits?.MemoryMax === "4G" && documentLimits?.TasksMax === 128
+      && documentLimits?.Concurrency === 1 && documentLimits?.QueueSize === 2
+      && documentLimits?.TimeoutSeconds === 120 && documentLimits?.MaxInputBytes === 268_435_456
+      && documentLimits?.MaxTempBytes === 536_870_912 && documentLimits?.MaxOutputBytes === 16_777_216;
+    checks.push({ name: "pdftotext", required: true, ok: commandAvailable("pdftotext"), detail: commandAvailable("pdftotext") ? "available for text PDF extraction" : "pdftotext is missing" });
+    checks.push({ name: "document-resource-limits", required: true, ok: bounded, detail: bounded ? "concurrency=1, queue=2, timeout=120s, memory=4G, tasks=128, temp=512MiB, input=256MiB, output=16MiB" : "reviewed document limits are missing" });
+    const assets = documentAssetReadiness();
+    checks.push({ name: "office-model-assets", required: false, ok: assets.office, detail: assets.office ? assets.detail : `Office unavailable: ${assets.detail}` });
+    checks.push({ name: "scanned-pdf-model-assets", required: false, ok: assets.scannedPdf, detail: assets.scannedPdf ? assets.detail : `scanned PDF unavailable: ${assets.detail}` });
+  }
   if (root) {
     const requiredPaths = ["apps/webxd/dist/apps/webxd/src/main.js", ".venv/bin/pi-web-reader"];
     if (resolved.includes("documents")) requiredPaths.push(".venv/bin/pi-web-docling");

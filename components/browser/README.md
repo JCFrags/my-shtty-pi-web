@@ -30,7 +30,7 @@ The daemon owns stable agent, client, profile, host, browser-session, tab, and a
 - `../../apps/pi-webx`: Pi tools, unified `/web` settings, lifecycle handling, and compact result formatting.
 - `apps/workspace`: one Tauri/React desktop window containing the agent tree, tabs, live JPEG viewport, activity, artifacts, and debug panels.
 - `services/reader`: Markdown negotiation, `.md`, `llms.txt`, Trafilatura, and explicit render escalation.
-- `services/docling`: local PDF and office conversion to Markdown and structured metadata.
+- `services/docling`: optional bounded document conversion. Text PDFs use `pdftotext`. Office and scanned PDFs require an acceptance-tested asset set from the release allowlist. This release has no validated set and does not claim those capabilities.
 - `packages/browserd-reference`: zero-dependency executable reference coordinator used for deterministic concurrency tests and environments without Rust.
 - `deploy`: service configuration templates and local defaults used by the root installer.
 - `fixtures` and `tests`: browser, reader, multi-agent, protocol, observation, extension, and workspace fixtures.

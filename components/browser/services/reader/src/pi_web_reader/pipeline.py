@@ -224,6 +224,7 @@ class ReaderPipeline:
         worker_concurrency: int | None = None,
         worker_timeout_seconds: float | None = None,
         docling_url: str | None = None,
+        documents_enabled: bool | None = None,
         user_agent: str = "Pi-Web-Reader/0.1 (+local self-hosted reader)",
         resolver: Resolver | None = None,
         transport_factory: Callable[[dict[str, str]], Any] | None = None,
@@ -283,6 +284,8 @@ class ReaderPipeline:
             name="worker timeout",
         )
         self._worker_slots = asyncio.Semaphore(worker_count)
+        configured_documents = os.getenv("PI_WEB_DOCUMENTS_ENABLED")
+        self.documents_enabled = documents_enabled if documents_enabled is not None else configured_documents == "1"
         self.docling_url = docling_url or os.getenv("PI_WEB_DOCLING_URL", "http://127.0.0.1:8792/")
         self.user_agent = user_agent
         self.resolver = resolver or resolve_public_addresses
@@ -480,6 +483,8 @@ class ReaderPipeline:
         return result
 
     async def _read_document(self, fetched: FetchResult, request: ReadRequest) -> ReadResult:
+        if not self.documents_enabled:
+            raise RuntimeError("document reading requires the explicit documents profile")
         converted: dict[str, Any] = {}
         converter = "docling"
         if fetched.media_type == "application/pdf" and request.view != "raw":
