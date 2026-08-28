@@ -35,6 +35,7 @@ export interface WebxdRuntimeOptions {
   readonly readerUrl?: string;
   readonly crawlUrl?: string;
   readonly cacheDirectory?: string;
+  readonly contentDirectory?: string;
   readonly authenticateActor?: WebxActorAuthenticator["authenticate"];
 }
 
@@ -61,6 +62,7 @@ export class WebxdRuntime {
       readerUrl: options.readerUrl,
       crawlUrl: options.crawlUrl,
       cacheDirectory: options.cacheDirectory,
+      contentDirectory: options.contentDirectory,
     });
   }
 

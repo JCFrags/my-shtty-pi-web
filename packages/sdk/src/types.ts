@@ -87,6 +87,7 @@ export interface SearchResponse {
     readonly partial: boolean;
     readonly pagesRead: number;
     readonly readAttempts: number;
+    readonly delivery?: { readonly cache: "hit" | "miss"; readonly coalesced: boolean };
   };
 }
 
@@ -108,6 +109,42 @@ export interface ReadRequest {
   readonly maxDepth?: number;
   readonly sameDomain?: boolean;
   readonly visibility?: Visibility;
+}
+
+export type DirectReadRequest = Pick<ReadRequest, "url" | "query" | "view" | "fields" | "itemOffset" | "itemLimit" | "maxChars" | "contentOffset">;
+
+export interface ReadBatchRequest {
+  readonly items: readonly DirectReadRequest[];
+}
+
+export type ReadBatchEnvelope =
+  | { readonly index: number; readonly url: string; readonly ok: true; readonly result: BoundedContent }
+  | { readonly index: number; readonly url: string; readonly ok: false; readonly error: WebxProblem };
+
+export interface ReadBatchResponse {
+  readonly results: readonly ReadBatchEnvelope[];
+  readonly metadata: { readonly requested: number; readonly succeeded: number; readonly failed: number; readonly maxConcurrency: 3 };
+}
+
+export interface ContentRequest {
+  readonly contentId: string;
+  readonly offset?: number;
+  readonly limit?: number;
+  readonly findText?: string;
+  readonly query?: string;
+}
+
+export interface StoredContent extends BoundedContent {
+  readonly metadata: {
+    readonly contentId: string;
+    readonly mode: "exact" | "findText" | "query";
+    readonly totalCharacters: number;
+    readonly returnedCharacters: number;
+    readonly offset?: number;
+    readonly nextOffset?: number | null;
+    readonly matchOffset?: number;
+    readonly expiresAt: string;
+  };
 }
 
 export interface RangeReadRequest {

@@ -11,7 +11,7 @@ It contains:
 - the Pi extension that presents one clear tool set;
 - one Fedora installer and uninstaller.
 
-Search and direct reading do not require the visual browser. Browser automation starts only when a dynamic page, interaction, or visual check needs it.
+Search and direct reading do not require the visual browser. Search health depends only on SearXNG. Static read health depends only on the reader. Browser, crawl, and document-converter outages do not remove healthy search or static read tools. Browser automation starts only when a dynamic page, interaction, or visual check needs it.
 
 ## Main directories
 
@@ -31,13 +31,24 @@ The separate research archive concept is recorded in [`FUTURE_FEATURES.md`](FUTU
 
 ## Install on Fedora
 
-Pi must already be installed. Then run:
+Pi must already be installed. The original compatible install command remains available:
 
 ```bash
 ./install-fedora.sh
 ```
 
-The installer stages the source at `~/.local/lib/pi-web-tools`, installs locked dependencies, builds the services and Tauri app, links the Pi extension, and starts user services.
+For a reviewed update, use the staged procedure instead:
+
+```bash
+./install-fedora.sh --stage
+# Run the deterministic candidate smoke test.
+./install-fedora.sh --cutover-plan CANDIDATE EVIDENCE
+./install-fedora.sh --cutover-apply CANDIDATE EVIDENCE
+```
+
+See [`docs/operations-fedora.md`](docs/operations-fedora.md) for exact smoke, resource, verification, and `--rollback RUN_ID` commands. Do not apply cutover until the deterministic gate passes.
+
+The compatible installer stages the source at `~/.local/lib/pi-web-tools`, installs locked dependencies, builds the services and Tauri app, links the Pi extension, and starts user services. The install fails if the authority, search backend, or static reader is unhealthy. Optional browser, crawl, and document-converter failures remain visible in status output but do not fail the core install. `pi-web doctor` checks the WebX authority capability catalog rather than only the browser daemon.
 
 Useful commands:
 
@@ -60,7 +71,9 @@ Review `~/.config/pi-web`, `~/.local/share/pi-web`, `~/.cache/pi-web`, and `~/.l
 ## Pi tools
 
 - `web_search` — one complete query for ranked links or a few short sourced extracts
-- `web_read` — includes optional bounded Crawl4AI rendering, linked-page extraction, and one-page Markdown export
+- `web_read` — direct reading with normalized-content storage, advanced legacy-compatible linked crawl controls, and explicit user-directed Markdown export
+- `web_read_batch` — reads up to five selected direct sources as ordered separate results
+- `web_content` — retrieves exact or focused bounded passages from stored normalized content without refetching
 - `browser_open`
 - `browser_tabs`
 - `browser_observe`
@@ -69,7 +82,7 @@ Review `~/.config/pi-web`, `~/.local/share/pi-web`, `~/.cache/pi-web`, and `~/.l
 
 Only the user changes capability modes. Run `/web` with no options to open one settings menu for capability modes and browser workspace controls. Direct forms use `/web mode ...` and `/web workspace ...`; there is no separate browser slash command.
 
-Search and read are capability groups rather than thin provider wrappers. `web_search` needs one complete query. It returns up to ten ranked links by default. Optional `output: "extracts"` reads selected pages and returns up to four short, separate source passages. Optional `domains` are strict host requirements. WebX sends the query to SearXNG without invented variants. It retries once without a `site:` operator only when the constrained query returns no eligible result. Search normalizes tracking URLs, removes duplicates, applies small relevance adjustments, and never follows page links or synthesizes across sources. Extract mode reads pages concurrently and never labels a search-engine snippet as a page extract. WebX can also select direct fetch, structured JSON, main-content extraction, Crawl4AI rendering, and document conversion behind `web_read`. Full reads return complete main content up to the explicit 1,000,000-character source bound. WebX does not add a smaller facade limit. An explicit saved read writes one normal or focused extraction below `${XDG_DATA_HOME:-~/.local/share}/pi-web/exports` and returns compact metadata instead of sending the body through the transcript. Existing files are protected unless overwrite is explicit. Structured API projections return complete row objects. If a source applies a bound, `contentOffset`, item pagination, or a section query provides a precise continuation. Source and crawl-link details remain structured metadata. Browser capabilities advertise only actions that the installed path can execute.
+Search and read are capability groups rather than thin provider wrappers. Normal multi-source research uses `web_search` and then `web_read_batch` for selected sources. Linked crawl is explicit advanced legacy-compatible behavior, not the normal research path. `web_search` needs one complete query. It returns up to ten ranked links by default. Optional `output: "extracts"` reads selected pages and returns up to four short, separate source passages. Optional `domains` are strict host requirements. WebX sends the query to SearXNG without invented variants. It retries once without a `site:` operator only when the constrained query returns no eligible result. Search normalizes tracking URLs, removes duplicates, applies small relevance adjustments, and never follows page links or synthesizes across sources. Extract mode reads pages concurrently and never labels a search-engine snippet as a page extract. WebX can also select direct fetch, structured JSON, main-content extraction, Crawl4AI rendering, and document conversion behind `web_read`. Direct reads extract up to the explicit 1,000,000-character source bound. Agent-visible output has a 40,000-character hard ceiling. A read passage uses at most 30,000 characters and reports an opaque content ID plus exact stored-content continuation metadata. An explicit saved read writes one normal or focused extraction below `${XDG_DATA_HOME:-~/.local/share}/pi-web/exports` and returns compact metadata instead of sending the body through the transcript. Existing files are protected unless overwrite is explicit. Structured API projections return complete row objects. If a source applies a bound, `contentOffset`, item pagination, or a section query provides a precise continuation. Source and crawl-link details remain structured metadata. Browser capabilities advertise only actions that the installed path can execute.
 
 ## Real-usage audit history
 
@@ -101,3 +114,14 @@ cargo test --workspace
 ```
 
 Generated dependencies and build output are not source and must not be committed.
+
+### Offline extraction benchmark
+
+Run the deterministic extraction corpus and its contract tests from the repository root:
+
+```bash
+pnpm test:extraction
+pnpm benchmark:extraction
+```
+
+The benchmark uses local fixtures only. It compares current quality with the reviewed baseline. See [`components/browser/benchmarks/extraction/README.md`](components/browser/benchmarks/extraction/README.md) for limits, metrics, optional adapter slots, and baseline review steps.

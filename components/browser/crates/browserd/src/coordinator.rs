@@ -3,7 +3,7 @@ use crate::config::{DaemonConfig, XdgPaths};
 use crate::operation::{OperationHandle, OperationRecord, OperationRegistry, cancelled, cancelled_error};
 use crate::transfer::{BackendTransferHandle, TransferKind, parse_transfer, resolve_transfer};
 use crate::upload::UploadRegistry;
-use anyhow::{Context, Result as AnyResult, anyhow};
+use anyhow::{Context, Result as AnyResult};
 use base64::Engine as _;
 use chrono::{DateTime, Duration, Utc};
 use dashmap::{DashMap, DashSet};
@@ -1929,28 +1929,6 @@ impl Coordinator {
         let mut backend_request = params.request.clone();
         backend_request.max_chars = self.config.limits.max_observation_chars;
         let mut result = self.reader.read(backend_request).await.map_err(external_rpc_error)?;
-
-        // Documents carry their original bytes once across the private loopback service
-        // boundary. Move those bytes immediately into the content-addressed artifact store
-        // and never include them in the model-facing response.
-        if let Some(encoded) = result.metadata.remove("originalDataBase64").and_then(|value| value.as_str().map(str::to_owned)) {
-            let bytes = base64::engine::general_purpose::STANDARD
-                .decode(encoded)
-                .map_err(|error| internal_rpc_error(anyhow!("decode original document bytes: {error}")))?;
-            let media_type = result.metadata.get("documentMediaType").and_then(Value::as_str).unwrap_or("application/octet-stream");
-            let artifact = self.artifacts.put_bytes(
-                media_type,
-                &bytes,
-                ArtifactContext {
-                    owner_agent_id: params.agent_id.clone(),
-                    source_url: Some(result.url.clone()),
-                    metadata: BTreeMap::from([("kind".into(), json!("original-document"))]),
-                    ..Default::default()
-                },
-            ).map_err(internal_rpc_error)?;
-            result.metadata.insert("originalArtifactId".into(), json!(artifact.artifact_id));
-            self.emit("artifact.created", &artifact);
-        }
 
         let render_required = result.metadata.get("renderRequired").and_then(Value::as_bool).unwrap_or(false);
         if render_required {

@@ -10,6 +10,8 @@ import {
   BrowserObserveSchema,
   BrowserOpenSchema,
   BrowserTabsSchema,
+  WebContentSchema,
+  WebReadBatchSchema,
   WebReadSchema,
   WebSearchSchema,
 } from "../src/schemas.js";
@@ -18,7 +20,7 @@ import type { WebxCapabilities, WebxRequestOptions, WebxResult, WebxSdk } from "
 const readyCapabilities: WebxCapabilities = {
   apiVersion: "2.0.0",
   daemon: "ready",
-  groups: { web: true, browser: true, browserDebug: true },
+  groups: { search: true, read: true, browser: true, browserDebug: true },
   browserPathIds: ["agent-browser/chrome", "pinchtab/chrome"],
 };
 
@@ -99,7 +101,7 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   const sdk = new MockSdk();
   const fx = harness(sdk);
   assert.deepEqual(fx.tools.map((tool) => tool.name), [
-    "web_search", "web_read",
+    "web_search", "web_read", "web_read_batch", "web_content",
     "browser_open", "browser_tabs", "browser_observe", "browser_act", "browser_debug",
   ]);
   assert.deepEqual([...fx.commands.keys()], ["web"]);
@@ -193,6 +195,19 @@ test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "/tmp/page.md" } }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "page.txt" } }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "page.md", overwrite: "yes" } }), false);
+  const directItem = { url: "https://one.test", query: "topic", view: "outline", fields: ["id"], itemOffset: 2, itemLimit: 3, maxChars: 4_000, contentOffset: 10 };
+  assert.equal(Value.Check(WebReadBatchSchema, { items: [directItem, { url: "https://two.test" }] }), true);
+  assert.equal(Value.Check(WebReadBatchSchema, { items: [] }), false);
+  assert.equal(Value.Check(WebReadBatchSchema, { items: Array.from({ length: 6 }, (_, index) => ({ url: `https://${index}.test` })) }), false);
+  for (const rejected of [{ maxPages: 2 }, { maxDepth: 1 }, { sameDomain: false }, { save: { path: "x.md" } }, { unexpected: true }]) {
+    assert.equal(Value.Check(WebReadBatchSchema, { items: [{ url: "https://one.test", ...rejected }] }), false);
+  }
+  const contentId = `cnt_${"x".repeat(32)}`;
+  assert.equal(Value.Check(WebContentSchema, { contentId, offset: 10, limit: 100 }), true);
+  assert.equal(Value.Check(WebContentSchema, { contentId, findText: "needle", limit: 100 }), true);
+  assert.equal(Value.Check(WebContentSchema, { contentId, query: "topic", limit: 100 }), true);
+  assert.equal(Value.Check(WebContentSchema, { contentId, offset: 10, query: "topic" }), false);
+  assert.equal(Value.Check(WebContentSchema, { contentId, limit: 30_001 }), false);
   assert.equal(Value.Check(BrowserOpenSchema, { pathId: "agent-browser/chrome" }), true);
   assert.equal(Value.Check(BrowserOpenSchema, { newTab: true }), false);
   assert.equal(Value.Check(BrowserTabsSchema, { action: "discard-tab" }), false);
@@ -246,6 +261,16 @@ test("tool calls use only the SDK seam with owner, idempotency, cancellation, an
   await fx.events.get("session_shutdown")?.();
 });
 
+test("web_read_batch sends web.readBatch to the SDK when read capability is healthy", async () => {
+  const sdk = new MockSdk();
+  const fx = harness(sdk);
+  await fx.events.get("session_start")?.({}, fx.ctx);
+  await fx.execute("web_read_batch", { items: [{ url: "https://one.test" }, { url: "https://two.test" }] });
+  assert.equal(sdk.calls.length, 1);
+  assert.equal(sdk.calls[0]?.operation, "web.readBatch");
+  await fx.events.get("session_shutdown")?.();
+});
+
 test("real search and read calls send structured and agent-visible evidence to the audit boundary", async () => {
   const sdk = new MockSdk();
   sdk.result = { summary: "search", data: { output: "links", hits: [], metadata: { searches: 1, fallbackUsed: false, partial: false, pagesRead: 0, readAttempts: 0 } }, trust: "untrusted-external" };
@@ -286,12 +311,10 @@ test("approval UI offers only allow-once or deny and returns the SDK decision", 
   await fx.events.get("session_shutdown")?.();
 });
 
-test("API mismatch, daemon outage, wrong paths, and untrusted projects fail closed", async () => {
+test("API mismatch, daemon outage, and untrusted projects fail closed", async () => {
   for (const capabilitiesValue of [
     { ...readyCapabilities, apiVersion: "1.0.0" },
     { ...readyCapabilities, daemon: "unavailable" as const },
-    { ...readyCapabilities, browserPathIds: ["agent-browser", "pinchtab/chrome"] as [string, string] },
-    { ...readyCapabilities, browserPathIds: ["rustwright", "pinchtab/chrome"] as [string, string] },
   ]) {
     const sdk = new MockSdk();
     sdk.capabilitiesValue = capabilitiesValue;
@@ -308,6 +331,27 @@ test("API mismatch, daemon outage, wrong paths, and untrusted projects fail clos
   await untrusted.events.get("session_start")?.({}, untrusted.ctx);
   assert.equal(sdk.starts, 0);
   await assert.rejects(untrusted.execute("web_search", { query: "x" }), /not trusted/);
+});
+
+test("optional capability failures preserve each healthy search and read tool", async () => {
+  const cases: Array<{ groups: WebxCapabilities["groups"]; present: string[]; absent: string[] }> = [
+    { groups: { search: true, read: true, browser: false, browserDebug: false }, present: ["web_search", "web_read"], absent: ["browser_open"] },
+    { groups: { search: true, read: false, browser: false, browserDebug: false }, present: ["web_search"], absent: ["web_read", "browser_open"] },
+    { groups: { search: false, read: true, browser: false, browserDebug: false }, present: ["web_read"], absent: ["web_search", "browser_open"] },
+  ];
+  for (const item of cases) {
+    const sdk = new MockSdk();
+    sdk.capabilitiesValue = { ...readyCapabilities, groups: item.groups, browserPathIds: [] };
+    const fx = harness(sdk);
+    await fx.events.get("session_start")?.({}, fx.ctx);
+    for (const name of item.present) assert.ok(fx.active.includes(name), `${name} should remain active`);
+    for (const name of item.absent) assert.ok(!fx.active.includes(name), `${name} should be inactive`);
+    if (item.groups.search) await fx.execute("web_search", { query: "healthy search" });
+    else await assert.rejects(fx.execute("web_search", { query: "unhealthy search" }), /backend is unhealthy/);
+    if (item.groups.read) await fx.execute("web_read", { url: "https://example.test" });
+    else await assert.rejects(fx.execute("web_read", { url: "https://example.test" }), /backend is unhealthy/);
+    await fx.events.get("session_shutdown")?.();
+  }
 });
 
 test("startup and shutdown are clean across reload-style extension replacement", async () => {
@@ -337,6 +381,16 @@ test("output compaction and visual transfer have deterministic bounds", () => {
   assert.match(JSON.stringify(continued.content), /Content truncated/);
   assert.doesNotMatch(JSON.stringify(continued.content), /artifactId|pageId|saved=|recallable=/);
 
+  const visibleId = `cnt_${"z".repeat(32)}`;
+  const hostileTitle = "hostile-title-".repeat(10_000);
+  const titled = presentResult({ summary: "read", title: hostileTitle, data: {
+    title: hostileTitle, url: "https://example.test/long", untrustedContent: "body", truncated: true,
+    metadata: { contentId: visibleId, reader: { contentId: visibleId, returnedCharacters: 4, totalCharacters: 40_000, nextStoredOffset: 4 } },
+  } });
+  const titledText = titled.content[0]?.type === "text" ? titled.content[0].text : "";
+  assert.ok(titledText.length <= MAX_MODEL_CHARS);
+  assert.match(titledText, new RegExp(visibleId));
+
   const paged = presentResult({ summary: "read", data: {
     title: "API rows", url: "https://example.test/api", untrustedContent: "[]", truncated: false,
     metadata: { reader: { returnedItems: 5, matchedItems: 10, nextItemOffset: 5, returnedCharacters: 2, totalCharacters: 2, complete: true } },
@@ -356,8 +410,9 @@ test("output compaction and visual transfer have deterministic bounds", () => {
 
   const completePage = "main-content-".repeat(5_000);
   const complete = presentResult({ summary: "read", data: { title: "Full page", url: "https://example.test/full", untrustedContent: completePage, truncated: false } });
-  assert.ok((complete.content[0]?.type === "text" ? complete.content[0].text : "").includes(completePage));
-  assert.doesNotMatch(JSON.stringify(complete.content), /truncated by Pi WebX facade/);
+  const completeText = complete.content[0]?.type === "text" ? complete.content[0].text : "";
+  assert.ok(completeText.length <= MAX_MODEL_CHARS);
+  assert.match(completeText, /truncated by Pi WebX facade/);
 
   const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(100)]);
   const image = presentResult({

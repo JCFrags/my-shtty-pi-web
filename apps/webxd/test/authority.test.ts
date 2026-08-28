@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebxAuthority } from "../src/authority.js";
+import { NormalizedContentStore } from "../src/content-store.js";
 import { PUBLIC_SOURCES } from "../src/fixtures.js";
 import type { AuthorityActor, BrowserDaemonPort } from "../src/ports.js";
 
@@ -159,16 +160,57 @@ describe("WebxAuthority", () => {
         truncated: false,
       }), { status: 200, headers: { "content-type": "application/json" } });
     }));
-    const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888", readerUrl: "http://127.0.0.1:8787" });
+    const contentStore = new NormalizedContentStore();
+    const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888", readerUrl: "http://127.0.0.1:8787", contentStore });
     const result = await call(instance, actor(), "POST", "/v1/search", { query: "Product feature support", output: "extracts", domains: ["docs.example.org"] }, "extract-search");
     const body = result.body as { hits: Array<{ snippet: string }>; metadata: { searches: number; pagesRead: number; readAttempts: number; partial: boolean } };
     expect(result.status).toBe(200);
-    expect(body.metadata).toEqual({ searches: 1, fallbackUsed: false, partial: true, pagesRead: 5, readAttempts: 6 });
+    expect(body.metadata).toMatchObject({ searches: 1, fallbackUsed: false, partial: true, pagesRead: 5, readAttempts: 6 });
     expect(body.hits).toHaveLength(4);
     expect(body.hits.every((hit) => hit.snippet.includes("verified page passage") && !hit.snippet.includes("Unverified search snippet") && hit.snippet.length <= 700)).toBe(true);
     expect(requests.filter((item) => item.url.includes("/search"))).toHaveLength(1);
     expect(requests.filter((item) => item.url.includes(":8787/"))).toHaveLength(6);
     expect(maximumReaders).toBe(4);
+    expect(await contentStore.stats()).toEqual({ entries: 0, bytes: 0 });
+  });
+
+  it("does not coalesce concurrent identical searches from different owners", async () => {
+    const release = Promise.withResolvers<undefined>();
+    const fetchMock = vi.fn(async () => {
+      await release.promise;
+      return new Response(JSON.stringify({ results: [{ title: "Shared", url: "https://shared.test/", content: "shared result" }] }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
+    const first = call(instance, actor("principal-a"), "POST", "/v1/search", { query: "same query" }, "owner-a-search");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const second = call(instance, actor("principal-b"), "POST", "/v1/search", { query: "same query" }, "owner-b-search");
+    try { await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2)); }
+    finally { release.resolve(undefined); }
+    const responses = await Promise.all([first, second]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    expect(responses.map((response) => (response.body as { metadata: { delivery: { coalesced: boolean } } }).metadata.delivery.coalesced)).toEqual([false, false]);
+  });
+
+  it("coalesces concurrent identical searches from the same owner", async () => {
+    const started = Promise.withResolvers<undefined>();
+    const release = Promise.withResolvers<undefined>();
+    const fetchMock = vi.fn(async () => {
+      started.resolve(undefined);
+      await release.promise;
+      return new Response(JSON.stringify({ results: [{ title: "Shared", url: "https://shared.test/", content: "shared result" }] }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
+    const first = call(instance, actor("principal-a"), "POST", "/v1/search", { query: "same query" }, "same-owner-search-one");
+    await started.promise;
+    const second = call(instance, actor("principal-a"), "POST", "/v1/search", { query: "same query" }, "same-owner-search-two");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    release.resolve(undefined);
+    const responses = await Promise.all([first, second]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    expect((responses[1]?.body as { metadata: { delivery: { coalesced: boolean } } }).metadata.delivery.coalesced).toBe(true);
   });
 
   it("reads a bounded byte range into an integrity-checked owner artifact", async () => {
@@ -306,6 +348,274 @@ describe("WebxAuthority", () => {
     const frame = await call(instance, actor(), "POST", "/v1/browser/sessions/session-1/frame", {}, "browser-frame-001");
     expect(frame).toMatchObject({ status: 200, body: { mediaType: "image/png", viewportId: "viewport-1" } });
     expect(port.captureFrame).toHaveBeenCalledTimes(1);
+  });
+
+  it("negotiates search, static read, and optional browser health independently", async () => {
+    const failedBrowser = browser();
+    vi.mocked(failedBrowser.capabilities).mockRejectedValue(new Error("browser offline"));
+    vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
+      const url = new URL(String(input));
+      if (url.port === "8888" && url.pathname === "/search") return new Response(JSON.stringify({ results: [] }), { status: 200 });
+      if (url.port === "8787" && url.pathname === "/health") return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      throw new Error(`unexpected probe: ${url}`);
+    }));
+    const instance = new WebxAuthority({
+      browser: failedBrowser, sources: PUBLIC_SOURCES,
+      clock: { now: () => "2026-08-27T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` },
+      searxUrl: "http://127.0.0.1:8888", readerUrl: "http://127.0.0.1:8787", crawlUrl: "http://127.0.0.1:8793",
+    });
+    const response = await call(instance, actor(), "GET", "/v1/capabilities");
+    expect(response).toMatchObject({ status: 200, body: {
+      capabilities: [
+        { id: "search", enabled: true, healthy: true },
+        { id: "read", enabled: true, healthy: true },
+        { id: "browser", enabled: true, healthy: false },
+      ],
+      browserPaths: [],
+    } });
+    expect(JSON.stringify(response.body)).not.toContain("crawl");
+  });
+
+  it("does not let reader health remove healthy search", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
+      const url = new URL(String(input));
+      if (url.port === "8888") return new Response(JSON.stringify({ results: [] }), { status: 200 });
+      throw new Error("reader offline");
+    }));
+    const instance = new WebxAuthority({
+      browser: browser(), sources: PUBLIC_SOURCES,
+      clock: { now: () => "2026-08-27T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` },
+      searxUrl: "http://127.0.0.1:8888", readerUrl: "http://127.0.0.1:8787",
+    });
+    const response = await call(instance, actor(), "GET", "/v1/capabilities");
+    expect(response).toMatchObject({ status: 200, body: { capabilities: [
+      { id: "search", healthy: true }, { id: "read", healthy: false }, { id: "browser", healthy: true },
+    ] } });
+  });
+
+  it("stores normalized read content and retrieves exact or focused passages without refetching", async () => {
+    const normalized = `${"prefix ".repeat(5_000)}UNIQUE NEEDLE ${"suffix ".repeat(5_000)}`;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ url: "https://docs.example/page", title: "Stored page", content: normalized, truncated: false, metadata: { totalCharacters: normalized.length } }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const read = await call(instance, actor(), "POST", "/v1/read", { url: "https://docs.example/page" }, "stored-read-001");
+    expect(read).toMatchObject({ status: 200, body: { truncated: true, metadata: { contentId: expect.stringMatching(/^cnt_/u), reader: { returnedCharacters: 30_000, nextStoredOffset: 30_000 } } } });
+    const readBody = read.body as { metadata: { contentId: string } };
+    const exact = await call(instance, actor(), "POST", "/v1/content", { contentId: readBody.metadata.contentId, offset: 30_000, limit: 100 }, "stored-exact-001");
+    expect(exact).toMatchObject({ status: 200, body: { metadata: { mode: "exact", offset: 30_000, returnedCharacters: 100 } } });
+    const focused = await call(instance, actor(), "POST", "/v1/content", { contentId: readBody.metadata.contentId, findText: "unique needle", limit: 200 }, "stored-focus-001");
+    expect(focused).toMatchObject({ status: 200, body: { untrustedContent: expect.stringContaining("UNIQUE NEEDLE"), metadata: { mode: "findText", matchOffset: expect.any(Number) } } });
+    const queried = await call(instance, actor(), "POST", "/v1/content", { contentId: readBody.metadata.contentId, query: "unique needle", limit: 200 }, "stored-query-001");
+    expect(queried).toMatchObject({ status: 200, body: { untrustedContent: expect.stringContaining("UNIQUE NEEDLE"), metadata: { mode: "query" } } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces a cached read whose owned stored content was evicted", async () => {
+    let sequence = 0;
+    const contentStore = new NormalizedContentStore({ maxEntries: 1, nextId: () => `cnt_${(++sequence).toString(36).padStart(32, "a")}` });
+    const sources = [
+      { hitId: "one", ownerPrincipalId: "principal-a", title: "One", url: "https://fixture.invalid/one", content: "first body", visibility: "public" as const },
+      { hitId: "two", ownerPrincipalId: "principal-a", title: "Two", url: "https://fixture.invalid/two", content: "second body", visibility: "public" as const },
+    ];
+    const instance = new WebxAuthority({ browser: browser(), sources, clock: { now: () => "2026-08-27T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, contentStore });
+    const first = await call(instance, actor(), "POST", "/v1/read", { url: sources[0].url }, "cache-eviction-1");
+    const oldId = (first.body as { metadata: { contentId: string } }).metadata.contentId;
+    await call(instance, actor(), "POST", "/v1/read", { url: sources[1].url }, "cache-eviction-2");
+    const replacement = await call(instance, actor(), "POST", "/v1/read", { url: sources[0].url }, "cache-eviction-3");
+    const newId = (replacement.body as { metadata: { contentId: string } }).metadata.contentId;
+    expect(newId).not.toBe(oldId);
+    expect(await call(instance, actor(), "POST", "/v1/content", { contentId: newId }, "cache-eviction-content")).toMatchObject({ status: 200, body: { untrustedContent: "first body" } });
+  });
+
+  it("acquires complete structured rows when maxChars is omitted", async () => {
+    const projected = JSON.stringify([{ id: 1, value: `${"x".repeat(40_000)}ROW-END` }]);
+    let readerRequest: { maxChars?: number; fields?: string[]; itemLimit?: number } = {};
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      readerRequest = JSON.parse(String(init?.body)) as typeof readerRequest;
+      return new Response(JSON.stringify({ url: "https://api.example/rows", title: "Rows", content: projected, truncated: false, metadata: { returnedItems: 1, totalItems: 1 } }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const read = await call(instance, actor(), "POST", "/v1/read", { url: "https://api.example/rows", fields: ["id", "value"], itemLimit: 1 }, "structured-complete");
+    expect(readerRequest).toMatchObject({ maxChars: 1_000_000, fields: ["id", "value"], itemLimit: 1 });
+    const contentId = (read.body as { metadata: { contentId: string } }).metadata.contentId;
+    const tail = await call(instance, actor(), "POST", "/v1/content", { contentId, offset: 30_000, limit: 20_000 }, "structured-tail");
+    expect((tail.body as { untrustedContent: string }).untrustedContent).toContain("ROW-END");
+  });
+
+  it("validates stored-content modes and hides missing or other-owner IDs", async () => {
+    const instance = authority();
+    const read = await call(instance, actor(), "POST", "/v1/read", { url: "https://fixture.invalid/webx" }, "content-validation-read");
+    const contentId = (read.body as { metadata: { contentId: string } }).metadata.contentId;
+    expect(await call(instance, actor(), "POST", "/v1/content", { contentId, offset: 0, query: "webx" }, "content-invalid-mode")).toMatchObject({ status: 400, body: { code: "invalid-request" } });
+    expect(await call(instance, actor(), "POST", "/v1/content", { contentId, limit: 30_001 }, "content-invalid-limit")).toMatchObject({ status: 400, body: { code: "invalid-request" } });
+    expect(await call(instance, actor("other"), "POST", "/v1/content", { contentId }, "content-other-owner")).toMatchObject({ status: 404, body: { code: "content-not-found" } });
+    expect(await call(instance, actor(), "POST", "/v1/content", { contentId: `cnt_${"x".repeat(32)}` }, "content-missing")).toMatchObject({ status: 404, body: { code: "content-not-found" } });
+  });
+
+  it("returns ordered separate batch envelopes with concurrency at most three and partial success", async () => {
+    let active = 0;
+    let maximum = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { url: string };
+      active += 1;
+      maximum = Math.max(maximum, active);
+      await new Promise((resolve) => setTimeout(resolve, request.url.endsWith("/1") ? 15 : 5));
+      active -= 1;
+      if (request.url.endsWith("/2")) return new Response("failed", { status: 500 });
+      return new Response(JSON.stringify({ url: request.url, title: request.url, content: `body for ${request.url}`, truncated: false }), { status: 200 });
+    }));
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const urls = Array.from({ length: 5 }, (_, index) => `https://batch.test/${index}`);
+    const response = await call(instance, actor(), "POST", "/v1/read-batch", { items: urls.map((url) => ({ url })) }, "batch-partial");
+    expect(response.status).toBe(200);
+    const body = response.body as { results: Array<{ index: number; url: string; ok: boolean; result?: { metadata: { contentId: string } } }>; metadata: unknown };
+    expect(body.results.map((item) => item.url)).toEqual(urls);
+    expect(body.results.map((item) => item.index)).toEqual([0, 1, 2, 3, 4]);
+    expect(body.results.map((item) => item.ok)).toEqual([true, true, false, true, true]);
+    expect(maximum).toBeLessThanOrEqual(3);
+    expect(body.metadata).toEqual({ requested: 5, succeeded: 4, failed: 1, maxConcurrency: 3 });
+    for (const item of body.results.filter((value) => value.ok)) expect(item.result?.metadata.contentId).toMatch(/^cnt_/u);
+  });
+
+  it("coalesces equivalent singular and batch reads and returns the same stored content ID", async () => {
+    const started = Promise.withResolvers<undefined>();
+    const release = Promise.withResolvers<undefined>();
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      started.resolve(undefined);
+      await release.promise;
+      const request = JSON.parse(String(init?.body)) as { url: string };
+      return new Response(JSON.stringify({ url: request.url, title: "Shared", content: "one shared stored body", truncated: false }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const direct = call(instance, actor(), "POST", "/v1/read", { url: "https://same.test" }, "same-direct");
+    await started.promise;
+    const batch = call(instance, actor(), "POST", "/v1/read-batch", { items: [{ url: "https://same.test" }] }, "same-batch");
+    release.resolve(undefined);
+    const [directResponse, batchResponse] = await Promise.all([direct, batch]);
+    const directBody = directResponse.body as { metadata: { contentId: string } };
+    const batchBody = batchResponse.body as { results: Array<{ ok: true; result: { metadata: { contentId: string; delivery: { coalesced: boolean } } } }> };
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(batchBody.results[0]?.result.metadata.contentId).toBe(directBody.metadata.contentId);
+    expect(batchBody.results[0]?.result.metadata.delivery.coalesced).toBe(true);
+  });
+
+  it("returns one failure envelope for every failed batch input", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("failed", { status: 503 })));
+    const response = await call(authority(browser(), "http://127.0.0.1:8787"), actor(), "POST", "/v1/read-batch", { items: [{ url: "https://fail.test/1" }, { url: "https://fail.test/2" }] }, "batch-failed");
+    expect(response).toMatchObject({ status: 200, body: { metadata: { requested: 2, succeeded: 0, failed: 2 }, results: [{ ok: false }, { ok: false }] } });
+  });
+
+  it("keeps batch content IDs in the calling owner scope", async () => {
+    const instance = authority();
+    const first = await call(instance, actor("owner-one"), "POST", "/v1/read-batch", { items: [{ url: "https://fixture.invalid/webx" }] }, "batch-owner-one");
+    const second = await call(instance, actor("owner-two"), "POST", "/v1/read-batch", { items: [{ url: "https://fixture.invalid/webx" }] }, "batch-owner-two");
+    const firstId = (first.body as { results: Array<{ result: { metadata: { contentId: string } } }> }).results[0]?.result.metadata.contentId ?? "";
+    const secondId = (second.body as { results: Array<{ result: { metadata: { contentId: string } } }> }).results[0]?.result.metadata.contentId ?? "";
+    expect(firstId).not.toBe(secondId);
+    expect(await call(instance, actor("owner-two"), "POST", "/v1/content", { contentId: firstId }, "batch-owner-cross-read")).toMatchObject({ status: 404, body: { code: "content-not-found" } });
+  });
+
+  it("validates direct batch items at the daemon boundary and keeps exact offsets", async () => {
+    const readerBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      readerBodies.push(body);
+      return new Response(JSON.stringify({ url: body.url, title: "Offset", content: "offset body", truncated: false }), { status: 200 });
+    }));
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const valid = await call(instance, actor(), "POST", "/v1/read-batch", { items: [{ url: "https://offset.test", contentOffset: 37, itemOffset: 4, itemLimit: 2, fields: ["id"] }] }, "batch-offset");
+    expect(valid.status).toBe(200);
+    expect(readerBodies[0]).toMatchObject({ contentOffset: 37, itemOffset: 4, itemLimit: 2, fields: ["id"] });
+    for (const [index, field] of ["maxPages", "maxDepth", "sameDomain", "save", "unknown"].entries()) {
+      const rejected = await call(instance, actor(), "POST", "/v1/read-batch", { items: [{ url: "https://invalid.test", [field]: field === "save" ? { path: "x.md" } : 1 }] }, `batch-invalid-${index}`);
+      expect(rejected).toMatchObject({ status: 400, body: { code: "invalid-request" } });
+    }
+  });
+
+  it("cancels batch fan-out without turning cancellation into a partial result", async () => {
+    const started = Promise.withResolvers<undefined>();
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      started.resolve(undefined);
+      return await new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")), { once: true }));
+    }));
+    const controller = new AbortController();
+    const pending = authority(browser(), "http://127.0.0.1:8787").handle(actor(), { method: "POST", path: "/v1/read-batch", body: { items: [{ url: "https://cancel.test/1" }, { url: "https://cancel.test/2" }] }, maxResponseBytes: 1_048_576, headers: { "idempotency-key": "batch-cancel" }, signal: controller.signal });
+    await started.promise;
+    controller.abort();
+    expect(await pending).toMatchObject({ status: 499, body: { code: "cancelled" } });
+  });
+
+  it("coalesces identical reads and keeps waiter cancellation independent", async () => {
+    const started = Promise.withResolvers<undefined>();
+    const release = Promise.withResolvers<undefined>();
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      started.resolve(undefined);
+      await release.promise;
+      const request = JSON.parse(String(init?.body)) as { url: string };
+      return new Response(JSON.stringify({ url: request.url, title: "Shared", content: "shared body", truncated: false }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const cancelled = new AbortController();
+    const first = instance.handle(actor(), { method: "POST", path: "/v1/read", body: { url: "https://shared.test" }, maxResponseBytes: 1_048_576, headers: { "idempotency-key": "shared-first" }, signal: cancelled.signal });
+    await started.promise;
+    const second = instance.handle(actor(), { method: "POST", path: "/v1/read", body: { url: "https://shared.test" }, maxResponseBytes: 1_048_576, headers: { "idempotency-key": "shared-second" } });
+    cancelled.abort();
+    release.resolve(undefined);
+    expect(await first).toMatchObject({ status: 499 });
+    expect(await second).toMatchObject({ status: 200, body: { metadata: { delivery: { cache: "miss", coalesced: true } } } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears coalescing state when every waiter cancels", async () => {
+    const started = Promise.withResolvers<undefined>();
+    let attempts = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      attempts += 1;
+      if (attempts === 1) {
+        started.resolve(undefined);
+        await new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")), { once: true }));
+      }
+      return new Response(JSON.stringify({ url: "https://cancel-all.test", title: "Retry", content: "retry body", truncated: false }), { status: 200 });
+    }));
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const controller = new AbortController();
+    const first = instance.handle(actor(), { method: "POST", path: "/v1/read", body: { url: "https://cancel-all.test" }, maxResponseBytes: 1_048_576, headers: { "idempotency-key": "cancel-all-one" }, signal: controller.signal });
+    await started.promise;
+    controller.abort();
+    expect(await first).toMatchObject({ status: 499 });
+    expect((await call(instance, actor(), "POST", "/v1/read", { url: "https://cancel-all.test" }, "cancel-all-two")).status).toBe(200);
+    expect(attempts).toBe(2);
+  });
+
+  it("clears failed coalescing state", async () => {
+    const fetchMock = vi.fn(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); return new Response("failed", { status: 500 }); });
+    vi.stubGlobal("fetch", fetchMock);
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const pair = await Promise.all([
+      call(instance, actor(), "POST", "/v1/read", { url: "https://shared-fail.test" }, "failure-one"),
+      call(instance, actor(), "POST", "/v1/read", { url: "https://shared-fail.test" }, "failure-two"),
+    ]);
+    expect(pair.map((item) => item.status)).toEqual([500, 500]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((await call(instance, actor(), "POST", "/v1/read", { url: "https://shared-fail.test" }, "failure-three")).status).toBe(500);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds idempotency records by entries and bytes", async () => {
+    const port = browser();
+    const entryBound = new WebxAuthority({ browser: port, sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, idempotencyMaxEntries: 2 });
+    for (const key of ["idempotency-one", "idempotency-two", "idempotency-three", "idempotency-one"]) {
+      expect((await call(entryBound, actor(), "POST", "/v1/browser/workspace", { action: "list" }, key)).status).toBe(200);
+    }
+    expect(port.workspace).toHaveBeenCalledTimes(4);
+
+    const bytePort = browser();
+    const byteBound = new WebxAuthority({ browser: bytePort, sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, idempotencyMaxBytes: 1 });
+    await call(byteBound, actor(), "POST", "/v1/browser/workspace", { action: "list" }, "idempotency-byte");
+    await call(byteBound, actor(), "POST", "/v1/browser/workspace", { action: "list" }, "idempotency-byte");
+    expect(bytePort.workspace).toHaveBeenCalledTimes(2);
   });
 
   it("reports response limits and cancellation without fallback", async () => {

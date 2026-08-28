@@ -159,6 +159,14 @@ describe("actual WebX Unix runtime", () => {
     for (const legacy of [{ operation: "links" }, { effort: "fast" }, { freshness: "day" }, { limit: 5 }, { crawlPages: 1 }, { crawlDepth: 1 }]) {
       await expect(facade.request("web.search", { query: "WebX", ...legacy }, facadeOptions)).rejects.toThrow("is not supported");
     }
+    const directRead = await facade.request("web.read", { url: "https://fixture.invalid/webx", maxChars: 8 }, { ...facadeOptions, idempotencyKey: "facade-read-001" });
+    const directMetadata = (directRead.data as { metadata: { contentId: string } }).metadata;
+    await expect(facade.request("web.readBatch", { items: [{ url: "https://fixture.invalid/webx" }, { url: "https://fixture.invalid/webx", maxChars: 20 }] }, { ...facadeOptions, idempotencyKey: "facade-batch-001" })).resolves.toMatchObject({ data: { metadata: { requested: 2, succeeded: 2 }, results: [{ index: 0, ok: true }, { index: 1, ok: true }] } });
+    for (const [index, field] of ["maxPages", "maxDepth", "sameDomain", "save", "unknown"].entries()) {
+      await expect(facade.request("web.readBatch", { items: [{ url: "https://fixture.invalid/webx", [field]: field === "save" ? { path: "x.md" } : 1 }] }, { ...facadeOptions, idempotencyKey: `facade-batch-invalid-${index}` })).rejects.toThrow("is not supported");
+    }
+    await expect(facade.request("web.content", { contentId: directMetadata.contentId, offset: 8, limit: 20 }, { ...facadeOptions, idempotencyKey: "facade-content-001" })).resolves.toMatchObject({ summary: "Stored content", data: { metadata: { mode: "exact", offset: 8 } } });
+    await expect(facade.request("web.content", { contentId: directMetadata.contentId, offset: 0, query: "routes" }, { ...facadeOptions, idempotencyKey: "facade-content-invalid" })).rejects.toThrow("mutually exclusive");
     const saved = await facade.request("web.read", { url: "https://fixture.invalid/webx", save: { path: "fixtures/webx.md" } }, { ...facadeOptions, idempotencyKey: "facade-save-001" });
     expect(saved).toMatchObject({ summary: "Web content saved as Markdown", trust: "local", data: { saved: true, relativePath: "fixtures/webx.md", complete: true } });
     expect(await readFile(join(exportRoot, "fixtures", "webx.md"), "utf8")).toContain("WebX routes search, read");
@@ -185,7 +193,14 @@ describe("actual WebX Unix runtime", () => {
     await facade.stop({ ownerId: "facade-owner" });
 
     await browser.stop();
-    await expect(client.capabilities()).rejects.toMatchObject<WebxError>({ status: 502 });
+    await expect(client.capabilities()).resolves.toMatchObject({
+      capabilities: [
+        { id: "search", healthy: true },
+        { id: "read", healthy: true },
+        { id: "browser", healthy: false },
+      ],
+      browserPaths: [],
+    });
     browser = new FakeBrowserd(browserPath);
     await browser.start();
     expect((await client.capabilities()).browserPaths).toHaveLength(2);

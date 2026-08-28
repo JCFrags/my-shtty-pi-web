@@ -24,7 +24,7 @@ export const WebSearchSchema = Type.Object({
   domains: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 253, pattern: "^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$", description: "Strict allowed host name, such as docs.python.org. Do not pass a URL, path, or site: prefix." }), { maxItems: 32, description: "Optional strict allowed hosts. Every returned URL must match one of these hosts or its subdomains." })),
 }, strict);
 
-export const WebReadSchema = Type.Object({
+const directReadProperties = {
   url: Type.String({ minLength: 1, maxLength: 8192, pattern: "^https?://", description: "Exact public HTTP(S) URL to read. Use web_search first when the URL is unknown." }),
   query: Type.Optional(Type.String({ maxLength: 8192, description: "Optional topic or section selector. Omit for the complete extracted main content." })),
   view: Type.Optional(StringEnum(["main", "outline", "raw"] as const, { description: "Extraction view. main is the readable default; outline returns structure; raw preserves source-oriented text." })),
@@ -33,14 +33,33 @@ export const WebReadSchema = Type.Object({
   itemLimit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500, description: "Maximum structured JSON collection items. Use with itemOffset for item pagination." })),
   maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000, description: "Explicit content bound. Omit for a full read. If it binds the result, use the reported nextContentOffset." })),
   contentOffset: Type.Optional(Type.Integer({ minimum: 0, maximum: 100_000_000, description: "Continuation offset reported by a prior direct read. Keep the same URL and options. Do not invent this value or combine it with linked crawling." })),
-  maxPages: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Maximum linked pages to read. Default: 1. Set above 1 only when linked sources are explicitly needed." })),
-  maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 3, description: "Maximum link-following depth. Default: 0. Any positive value enables linked crawling." })),
-  sameDomain: Type.Optional(Type.Boolean({ description: "Keep linked crawling on the starting domain. Default: true. Set false only when cited external primary sources are required." })),
+};
+
+export const WebReadSchema = Type.Object({
+  ...directReadProperties,
+  maxPages: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Advanced legacy-compatible linked crawl page limit. Default: 1. Set above 1 only for an explicit crawl." })),
+  maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 3, description: "Advanced legacy-compatible linked crawl depth. Default: 0. Any positive value enables crawling." })),
+  sameDomain: Type.Optional(Type.Boolean({ description: "Advanced linked crawl control. Keep links on the starting domain by default." })),
   save: Type.Optional(Type.Object({
     path: Type.String({ minLength: 3, maxLength: 4096, pattern: "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\).+\\.[mM][dD]$", description: "Relative .md path below the private WebX export directory. WebX returns the absolute saved path." }),
     overwrite: Type.Optional(Type.Boolean({ description: "Replace an existing file atomically. Default: false. Set true only when replacement is intended." })),
   }, { ...strict, description: "Save one extracted page as UTF-8 Markdown and return compact file metadata instead of the body. Not compatible with structured JSON projection or linked crawling." })),
 }, strict);
+
+export const WebReadBatchSchema = Type.Object({
+  items: Type.Array(Type.Object(directReadProperties, strict), { minItems: 1, maxItems: 5, description: "Directly read 1 to 5 separate sources in input order with fixed maximum concurrency 3." }),
+}, strict);
+
+const contentBase = {
+  contentId: Type.String({ minLength: 36, maxLength: 36, pattern: "^cnt_[A-Za-z0-9_-]{32}$", description: "Opaque content ID returned by web_read or web_content." }),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 30_000, description: "Maximum normalized-content characters to return. Default: 30000." })),
+};
+
+export const WebContentSchema = Type.Union([
+  Type.Object({ ...contentBase, offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 100_000_000, description: "Exact character offset in the stored normalized content. Default: 0." })) }, strict),
+  Type.Object({ ...contentBase, findText: Type.String({ minLength: 1, maxLength: 8192, description: "Exact case-insensitive text to locate. Returns bounded context around the match." }) }, strict),
+  Type.Object({ ...contentBase, query: Type.String({ minLength: 1, maxLength: 8192, description: "Topic query for a bounded focused passage from the stored content." }) }, strict),
+], { description: "Retrieve normalized content by opaque ID without a network request. Exact offset mode and focused findText or query mode are mutually exclusive." });
 
 export const BrowserOpenSchema = Type.Object({
   url: Type.Optional(Type.String({ minLength: 1, maxLength: 8192, pattern: "^https?://", description: "Optional initial public HTTP(S) URL. Omit to open a blank owned session." })),

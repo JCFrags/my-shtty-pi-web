@@ -19,9 +19,13 @@ import {
   type CapabilityCatalog,
   type CrawlRequest,
   type CrawlResponse,
+  type ContentRequest,
+  type StoredContent,
   type RangeReadRequest,
   type RangeReadResponse,
   type ReadRequest,
+  type ReadBatchRequest,
+  type ReadBatchResponse,
   type RequestOptions,
   type SearchRequest,
   type SearchResponse,
@@ -78,6 +82,14 @@ export class WebxClient {
 
   read(request: ReadRequest, options: RequestOptions): Promise<BoundedContent> {
     return this.call("POST", "/v1/read", request, requireIdempotency(options));
+  }
+
+  readBatch(request: ReadBatchRequest, options: RequestOptions): Promise<ReadBatchResponse> {
+    return this.call("POST", "/v1/read-batch", request, requireIdempotency(options));
+  }
+
+  content(request: ContentRequest, options: RequestOptions): Promise<StoredContent> {
+    return this.call("POST", "/v1/content", request, requireIdempotency(options));
   }
 
   crawl(request: CrawlRequest, options: RequestOptions): Promise<CrawlResponse> {

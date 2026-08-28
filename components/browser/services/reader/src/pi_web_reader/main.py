@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from urllib.parse import urlparse
 
 from .pipeline import (
     MAX_PUBLIC_REDIRECTS,
@@ -47,7 +48,36 @@ class ReadPayload(BaseModel):
     content_offset: int = Field(default=0, ge=0, le=100_000_000, alias="contentOffset")
 
 
-pipeline = ReaderPipeline()
+def _pipeline() -> ReaderPipeline:
+    """Permit one explicit loopback fixture only in the deterministic smoke process."""
+    fixture = os.getenv("PI_WEB_TEST_LOOPBACK_ORIGIN")
+    if fixture is None:
+        return ReaderPipeline()
+    parsed = urlparse(fixture)
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname != "fixture.invalid"
+        or parsed.port is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise RuntimeError("PI_WEB_TEST_LOOPBACK_ORIGIN must be http://fixture.invalid:PORT")
+
+    async def fixture_resolver(host: str, port: int) -> list[str]:
+        if host != "fixture.invalid" or port != parsed.port:
+            raise ValueError("deterministic reader refused a non-fixture destination")
+        return ["127.0.0.1"]
+
+    return ReaderPipeline(
+        resolver=fixture_resolver,
+        test_loopback_fixture=("fixture.invalid", parsed.port),
+    )
+
+
+pipeline = _pipeline()
 app = FastAPI(title="Pi Web Reader", version="0.1.0")
 
 

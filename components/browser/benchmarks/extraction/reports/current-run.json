@@ -1,0 +1,1976 @@
+{
+  "schemaVersion": 2,
+  "manifestSha256": "0f2be2d883e7b1966a6e749ea532e96de276ca3b1190422dcd0b77a8a03052cc",
+  "environment": {
+    "python": "3.13.14",
+    "platform": "linux",
+    "packages": {
+      "trafilatura": "2.1.0",
+      "docling": "2.115.0",
+      "httpx": "0.28.1"
+    },
+    "pdftotext": "pdftotext version 26.01.0",
+    "documentService": "not started; normal PDF uses local pdftotext and Office is skipped"
+  },
+  "limits": {
+    "caseSeconds": 60,
+    "totalSeconds": 300,
+    "inputBytes": 131072,
+    "outputBytes": 65536,
+    "memoryBytes": 4294967296,
+    "diskBytes": 8388608,
+    "processes": 64,
+    "reportBytes": 262144,
+    "cases": 64
+  },
+  "summary": {
+    "extractionPassed": 9,
+    "extractionFailed": 13,
+    "acquisitionContractsPassed": 3,
+    "acquisitionContractsFailed": 0,
+    "skipped": 5,
+    "qualityRegressions": []
+  },
+  "results": [
+    {
+      "id": "technical-docs",
+      "class": "technical-docs",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "trafilatura",
+        "requiredMarkerRetention": {
+          "retained": 4,
+          "total": 5,
+          "markers": {
+            "Bounded API Guide": true,
+            "request budget": true,
+            "read(url, max_chars=2000)": true,
+            "65536": false,
+            "Reference contract": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 3,
+          "markers": {
+            "Accept cookies": false,
+            "Sign in": false,
+            "Advertisement": false
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 2,
+            "required": 2,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          },
+          "tables": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          },
+          "links": {
+            "observed": 1,
+            "required": 1,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {
+          "extractor": "trafilatura"
+        },
+        "outputCharacters": 182,
+        "outputBytes": 182,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 388.329,
+        "peakRssBytes": 90947584,
+        "temporaryDiskHighWaterBytes": 1913,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "news-article",
+      "class": "news-article",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "trafilatura",
+        "requiredMarkerRetention": {
+          "retained": 4,
+          "total": 4,
+          "markers": {
+            "City Opens Solar Lab": true,
+            "24 workstations": true,
+            "monthly results": true,
+            "Read the methods": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 1,
+          "total": 3,
+          "markers": {
+            "Accept cookies": false,
+            "Sign in": false,
+            "Advertisement": true
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 282,
+        "outputBytes": 282,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 311.312,
+        "peakRssBytes": 60493824,
+        "temporaryDiskHighWaterBytes": 1993,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "blog",
+      "class": "blog",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "trafilatura",
+        "requiredMarkerRetention": {
+          "retained": 4,
+          "total": 4,
+          "markers": {
+            "Building a Small Parser": true,
+            "explicit input and output bounds": true,
+            "tokens = scan(source)": true,
+            "Source example": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 3,
+          "markers": {
+            "Accept cookies": false,
+            "Sign in": false,
+            "Advertisement": false
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 2,
+            "pass": false
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 263,
+        "outputBytes": 263,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 312.208,
+        "peakRssBytes": 60485632,
+        "temporaryDiskHighWaterBytes": 1981,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "product",
+      "class": "product",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "trafilatura",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "Atlas Sensor": true,
+            "seven days locally": true,
+            "Specifications": true,
+            "30 days": true,
+            "Product manual": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 3,
+          "markers": {
+            "Accept cookies": false,
+            "Sign in": false,
+            "Advertisement": false
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 2,
+            "pass": false
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          },
+          "links": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 207,
+        "outputBytes": 207,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 311.487,
+        "peakRssBytes": 60432384,
+        "temporaryDiskHighWaterBytes": 1933,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "wikipedia-like",
+      "class": "wikipedia-like",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "trafilatura",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "Bounded extraction": true,
+            "fixed resource ceilings": true,
+            "Method": true,
+            "Corpus design": true,
+            "References": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 3,
+          "markers": {
+            "Accept cookies": false,
+            "Sign in": false,
+            "Advertisement": false
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 3,
+            "pass": false
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 297,
+        "outputBytes": 297,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 309.081,
+        "peakRssBytes": 60555264,
+        "temporaryDiskHighWaterBytes": 2055,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "github-repository",
+      "class": "github-repository",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "trafilatura",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "example / bounded-reader": true,
+            "offline extraction benchmark": true,
+            "pnpm benchmark:extraction": true,
+            "Issues": true,
+            "License": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 1,
+          "total": 3,
+          "markers": {
+            "Accept cookies": false,
+            "Sign in": true,
+            "Advertisement": false
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 2,
+            "pass": false
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 2,
+            "pass": false
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 193,
+        "outputBytes": 193,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 309.037,
+        "peakRssBytes": 60612608,
+        "temporaryDiskHighWaterBytes": 1989,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "github-issue",
+      "class": "issue-or-pull-request",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "trafilatura",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "Keep table headings": true,
+            "Issue #42": true,
+            "Region and Value": true,
+            "North and 42": true,
+            "candidate patch": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 1,
+          "total": 3,
+          "markers": {
+            "Accept cookies": false,
+            "Sign in": true,
+            "Advertisement": false
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 2,
+            "pass": false
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 271,
+        "outputBytes": 272,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 308.741,
+        "peakRssBytes": 60448768,
+        "temporaryDiskHighWaterBytes": 2061,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "hacker-news-thread",
+      "class": "hacker-news-like",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "trafilatura",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "Ask HN": true,
+            "user_one": true,
+            "no network": true,
+            "user_two": true,
+            "Fixed time": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 2,
+          "total": 2,
+          "markers": {
+            "Guidelines": true,
+            "FAQ": true
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 241,
+        "outputBytes": 241,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 309.432,
+        "peakRssBytes": 60567552,
+        "temporaryDiskHighWaterBytes": 1951,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "forum-thread",
+      "class": "reddit-forum-like",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "trafilatura",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "Stable document benchmarks": true,
+            "starter_user": true,
+            "reply_user": true,
+            "allowed loss": true,
+            "Reply": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 2,
+          "total": 2,
+          "markers": {
+            "Log in": true,
+            "Get app": true
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 257,
+        "outputBytes": 257,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 309.023,
+        "peakRssBytes": 60698624,
+        "temporaryDiskHighWaterBytes": 2007,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "static-html",
+      "class": "static-html",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "trafilatura",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "Static Status Page": true,
+            "All extraction services": true,
+            "Reader operational": true,
+            "Converter operational": true,
+            "History": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 3,
+          "markers": {
+            "Accept cookies": false,
+            "Sign in": false,
+            "Advertisement": false
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 2,
+            "pass": false
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 210,
+        "outputBytes": 210,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 308.671,
+        "peakRssBytes": 60510208,
+        "temporaryDiskHighWaterBytes": 1958,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "javascript-shell-fallback",
+      "class": "javascript-shell",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "markdown-fallback",
+        "requiredMarkerRetention": {
+          "retained": 3,
+          "total": 3,
+          "markers": {
+            "Dynamic Documentation": true,
+            "bounded client API": true,
+            "client.read": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 1,
+          "markers": {
+            "Loading application": false
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 2,
+            "required": 2,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 1,
+            "required": 1,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {},
+        "outputCharacters": 160,
+        "outputBytes": 160,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 310.031,
+        "peakRssBytes": 60116992,
+        "temporaryDiskHighWaterBytes": 1998,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "cookie-wall",
+      "class": "cookie-wall",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "raw",
+        "requiredMarkerRetention": {
+          "retained": 1,
+          "total": 2,
+          "markers": {
+            "Privacy choices": false,
+            "Accept cookies": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {
+          "extractor": "trafilatura",
+          "renderRequired": true
+        },
+        "outputCharacters": 60,
+        "outputBytes": 60,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 385.464,
+        "peakRssBytes": 90951680,
+        "temporaryDiskHighWaterBytes": 1927,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "challenge-response",
+      "class": "challenge-captcha",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "raw",
+        "requiredMarkerRetention": {
+          "retained": 1,
+          "total": 2,
+          "markers": {
+            "Security check": false,
+            "CAPTCHA challenge": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {
+          "extractor": "trafilatura",
+          "renderRequired": true
+        },
+        "outputCharacters": 66,
+        "outputBytes": 66,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 390.545,
+        "peakRssBytes": 90869760,
+        "temporaryDiskHighWaterBytes": 1934,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "json-api",
+      "class": "json-api",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "structured-json",
+        "requiredMarkerRetention": {
+          "retained": 4,
+          "total": 4,
+          "markers": {
+            "alpha": true,
+            "ready": true,
+            "beta": true,
+            "bounded": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 2,
+          "required": 2,
+          "pass": true
+        },
+        "adapterEvidence": {
+          "returnedItems": 2,
+          "totalItems": 2
+        },
+        "outputCharacters": 114,
+        "outputBytes": 114,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 308.685,
+        "peakRssBytes": 60252160,
+        "temporaryDiskHighWaterBytes": 1909,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "rss-feed",
+      "class": "rss",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "trafilatura",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "Reader Updates": true,
+            "Bounded release": true,
+            "finite output limits": true,
+            "Offline fixtures": true,
+            "local and deterministic": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 2,
+            "required": 2,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 228,
+        "outputBytes": 228,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 309.812,
+        "peakRssBytes": 60518400,
+        "temporaryDiskHighWaterBytes": 1916,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "atom-feed",
+      "class": "atom",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "trafilatura",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "Extraction Notes": true,
+            "Stable quality report": true,
+            "boilerplate leakage": true,
+            "Portable memory measure": true,
+            "Peak resident set size": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {
+          "extractor": "trafilatura"
+        },
+        "outputCharacters": 195,
+        "outputBytes": 195,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 385.39,
+        "peakRssBytes": 91017216,
+        "temporaryDiskHighWaterBytes": 1903,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "plain-text",
+      "class": "plain-text",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "raw",
+        "requiredMarkerRetention": {
+          "retained": 3,
+          "total": 3,
+          "markers": {
+            "Plain Text Operations Note": true,
+            "raw text path": true,
+            "local, small, and deterministic": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {},
+        "outputCharacters": 159,
+        "outputBytes": 159,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 308.279,
+        "peakRssBytes": 60149760,
+        "temporaryDiskHighWaterBytes": 1691,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "negotiated-markdown",
+      "class": "negotiated-markdown",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "markdown-negotiation",
+        "requiredMarkerRetention": {
+          "retained": 4,
+          "total": 4,
+          "markers": {
+            "Negotiated Markdown Guide": true,
+            "server-selected Markdown": true,
+            "pnpm benchmark:extraction": true,
+            "Review rules": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 2,
+            "required": 2,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 1,
+            "required": 1,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 1,
+            "required": 1,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {},
+        "outputCharacters": 191,
+        "outputBytes": 191,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 308.464,
+        "peakRssBytes": 60219392,
+        "temporaryDiskHighWaterBytes": 1850,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "oversized-response",
+      "class": "oversized-response",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "error",
+        "requiredMarkerRetention": {
+          "retained": 0,
+          "total": 1,
+          "markers": {
+            "OVERSIZED_REQUIRED_MARKER": false
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {},
+        "outputCharacters": 0,
+        "outputBytes": 0,
+        "error": "LimitError: input exceeds 131072 bytes"
+      },
+      "runtime": {
+        "wallMilliseconds": 0,
+        "peakRssBytes": 0,
+        "temporaryDiskHighWaterBytes": 0,
+        "descendantProcessHighWater": 0
+      }
+    },
+    {
+      "id": "bad-charset",
+      "class": "bad-charset",
+      "adapter": "current",
+      "status": "contract-passed",
+      "quality": {
+        "outcome": "pass",
+        "contract": "acquisition",
+        "observed": {
+          "requestedUrls": [
+            "https://corpus.example/bad-charset.html",
+            "https://corpus.example/bad-charset.html.md",
+            "https://corpus.example/index.md"
+          ],
+          "redirectChain": [
+            "https://corpus.example/bad-charset.html"
+          ],
+          "finalUrl": "https://corpus.example/bad-charset.html",
+          "contentEncoding": "identity",
+          "rawBytes": 182,
+          "decodedBytes": 182
+        },
+        "readerObserved": {
+          "outputBytes": 143,
+          "requiredMarkerRetention": {
+            "retained": 3,
+            "total": 3,
+            "markers": {
+              "Café Encoding Note": true,
+              "naïve": true,
+              "extraction review": true
+            }
+          }
+        },
+        "checks": {
+          "finalUrl": true,
+          "contentEncoding": true,
+          "rawBytes": true,
+          "decodedBytes": true,
+          "readerDecodedRequiredMarkers": true
+        },
+        "extractionMetrics": {
+          "outcome": "fail",
+          "path": "trafilatura",
+          "requiredMarkerRetention": {
+            "retained": 3,
+            "total": 3,
+            "markers": {
+              "Café Encoding Note": true,
+              "naïve": true,
+              "extraction review": true
+            }
+          },
+          "forbiddenBoilerplateLeakage": {
+            "leaked": 0,
+            "total": 0,
+            "markers": {}
+          },
+          "preservation": {
+            "headings": {
+              "observed": 0,
+              "required": 1,
+              "pass": false
+            },
+            "codeBlocks": {
+              "observed": 0,
+              "required": 0,
+              "pass": true
+            },
+            "tables": {
+              "observed": 0,
+              "required": 0,
+              "pass": true
+            },
+            "links": {
+              "observed": 0,
+              "required": 0,
+              "pass": true
+            }
+          },
+          "structuredRowCompleteness": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "adapterEvidence": {
+            "extractor": "stdlib-fallback"
+          },
+          "outputCharacters": 140,
+          "outputBytes": 143,
+          "error": null
+        }
+      },
+      "runtime": {
+        "wallMilliseconds": 314.329,
+        "peakRssBytes": 60588032,
+        "temporaryDiskHighWaterBytes": 2094,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "redirect-chain",
+      "class": "redirect-chain-metadata",
+      "adapter": "current",
+      "status": "contract-passed",
+      "quality": {
+        "outcome": "pass",
+        "contract": "acquisition",
+        "observed": {
+          "requestedUrls": [
+            "https://corpus.example/redirect.html",
+            "https://one.example/",
+            "https://two.example/",
+            "https://three.example/final",
+            "https://three.example/final.md",
+            "https://three.example/index.md"
+          ],
+          "redirectChain": [
+            "https://corpus.example/redirect.html",
+            "https://one.example/",
+            "https://two.example/",
+            "https://three.example/final"
+          ],
+          "finalUrl": "https://three.example/final",
+          "contentEncoding": "identity",
+          "rawBytes": 198,
+          "decodedBytes": 198
+        },
+        "readerObserved": {
+          "outputBytes": 136,
+          "requiredMarkerRetention": {
+            "retained": 3,
+            "total": 3,
+            "markers": {
+              "Redirect Target": true,
+              "three-hop redirect chain": true,
+              "Final resource": true
+            }
+          }
+        },
+        "checks": {
+          "redirectChain": true,
+          "finalUrl": true
+        },
+        "extractionMetrics": {
+          "outcome": "fail",
+          "path": "trafilatura",
+          "requiredMarkerRetention": {
+            "retained": 3,
+            "total": 3,
+            "markers": {
+              "Redirect Target": true,
+              "three-hop redirect chain": true,
+              "Final resource": true
+            }
+          },
+          "forbiddenBoilerplateLeakage": {
+            "leaked": 0,
+            "total": 0,
+            "markers": {}
+          },
+          "preservation": {
+            "headings": {
+              "observed": 0,
+              "required": 1,
+              "pass": false
+            },
+            "codeBlocks": {
+              "observed": 0,
+              "required": 0,
+              "pass": true
+            },
+            "tables": {
+              "observed": 0,
+              "required": 0,
+              "pass": true
+            },
+            "links": {
+              "observed": 0,
+              "required": 1,
+              "pass": false
+            }
+          },
+          "structuredRowCompleteness": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "adapterEvidence": {
+            "extractor": "stdlib-fallback"
+          },
+          "outputCharacters": 136,
+          "outputBytes": 136,
+          "error": null
+        }
+      },
+      "runtime": {
+        "wallMilliseconds": 308.568,
+        "peakRssBytes": 60579840,
+        "temporaryDiskHighWaterBytes": 2306,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "compressed-content",
+      "class": "compressed-content-metadata",
+      "adapter": "current",
+      "status": "contract-passed",
+      "quality": {
+        "outcome": "pass",
+        "contract": "acquisition",
+        "observed": {
+          "requestedUrls": [
+            "https://corpus.example/compressed.html",
+            "https://corpus.example/compressed.html.md",
+            "https://corpus.example/index.md"
+          ],
+          "redirectChain": [
+            "https://corpus.example/compressed.html"
+          ],
+          "finalUrl": "https://corpus.example/compressed.html",
+          "contentEncoding": "gzip",
+          "rawBytes": 145,
+          "decodedBytes": 188
+        },
+        "readerObserved": {
+          "outputBytes": 146,
+          "requiredMarkerRetention": {
+            "retained": 3,
+            "total": 3,
+            "markers": {
+              "Compressed Response": true,
+              "gzip decompression": true,
+              "raw and decoded byte limits": true
+            }
+          }
+        },
+        "checks": {
+          "finalUrl": true,
+          "contentEncoding": true,
+          "rawBytes": true,
+          "decodedBytes": true,
+          "readerDecompressedRequiredMarkers": true
+        },
+        "extractionMetrics": {
+          "outcome": "fail",
+          "path": "trafilatura",
+          "requiredMarkerRetention": {
+            "retained": 3,
+            "total": 3,
+            "markers": {
+              "Compressed Response": true,
+              "gzip decompression": true,
+              "raw and decoded byte limits": true
+            }
+          },
+          "forbiddenBoilerplateLeakage": {
+            "leaked": 0,
+            "total": 0,
+            "markers": {}
+          },
+          "preservation": {
+            "headings": {
+              "observed": 0,
+              "required": 1,
+              "pass": false
+            },
+            "codeBlocks": {
+              "observed": 0,
+              "required": 0,
+              "pass": true
+            },
+            "tables": {
+              "observed": 0,
+              "required": 0,
+              "pass": true
+            },
+            "links": {
+              "observed": 0,
+              "required": 0,
+              "pass": true
+            }
+          },
+          "structuredRowCompleteness": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "adapterEvidence": {
+            "extractor": "stdlib-fallback"
+          },
+          "outputCharacters": 146,
+          "outputBytes": 146,
+          "error": null
+        }
+      },
+      "runtime": {
+        "wallMilliseconds": 313.299,
+        "peakRssBytes": 60657664,
+        "temporaryDiskHighWaterBytes": 2082,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "pdf-text",
+      "class": "pdf-text",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "document",
+        "requiredMarkerRetention": {
+          "retained": 2,
+          "total": 2,
+          "markers": {
+            "Ordinary PDF Guide": true,
+            "Bounded extraction keeps required content": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {
+          "documentConverter": "pdftotext"
+        },
+        "outputCharacters": 61,
+        "outputBytes": 61,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 314.432,
+        "peakRssBytes": 60354560,
+        "temporaryDiskHighWaterBytes": 1842,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "pdf-table",
+      "class": "pdf-table",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "document",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "Regional Metrics": true,
+            "Region": true,
+            "Value": true,
+            "North": true,
+            "42": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {
+          "documentConverter": "pdftotext"
+        },
+        "outputCharacters": 39,
+        "outputBytes": 39,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 319.717,
+        "peakRssBytes": 60538880,
+        "temporaryDiskHighWaterBytes": 1813,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "scanned-pdf",
+      "class": "scanned-pdf",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "error",
+        "requiredMarkerRetention": {
+          "retained": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {},
+        "outputCharacters": 0,
+        "outputBytes": 0,
+        "error": "RuntimeError: document conversion failed"
+      },
+      "runtime": {
+        "wallMilliseconds": 329.084,
+        "peakRssBytes": 60653568,
+        "temporaryDiskHighWaterBytes": 807,
+        "descendantProcessHighWater": 1
+      }
+    },
+    {
+      "id": "docx",
+      "class": "docx",
+      "adapter": "current",
+      "status": "skipped",
+      "quality": {
+        "outcome": "fail",
+        "path": "error",
+        "requiredMarkerRetention": {
+          "retained": 0,
+          "total": 3,
+          "markers": {
+            "Quarterly Operations Brief": false,
+            "North region": false,
+            "42 safe deployments": false
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {},
+        "outputCharacters": 0,
+        "outputBytes": 0,
+        "error": "EnvironmentSkip: offline Docling service and declared model assets are unavailable"
+      },
+      "runtime": {
+        "wallMilliseconds": 0,
+        "peakRssBytes": 0,
+        "temporaryDiskHighWaterBytes": 0,
+        "descendantProcessHighWater": 0
+      }
+    },
+    {
+      "id": "pptx",
+      "class": "pptx",
+      "adapter": "current",
+      "status": "skipped",
+      "quality": {
+        "outcome": "fail",
+        "path": "error",
+        "requiredMarkerRetention": {
+          "retained": 0,
+          "total": 2,
+          "markers": {
+            "Release Readiness": false,
+            "All bounded checks passed": false
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "adapterEvidence": {},
+        "outputCharacters": 0,
+        "outputBytes": 0,
+        "error": "EnvironmentSkip: offline Docling service and declared model assets are unavailable"
+      },
+      "runtime": {
+        "wallMilliseconds": 0,
+        "peakRssBytes": 0,
+        "temporaryDiskHighWaterBytes": 0,
+        "descendantProcessHighWater": 0
+      }
+    },
+    {
+      "id": "xlsx",
+      "class": "xlsx",
+      "adapter": "current",
+      "status": "skipped",
+      "quality": {
+        "outcome": "fail",
+        "path": "error",
+        "requiredMarkerRetention": {
+          "retained": 0,
+          "total": 4,
+          "markers": {
+            "Region": false,
+            "Value": false,
+            "North": false,
+            "42": false
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 1,
+            "pass": false
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 2,
+          "pass": false
+        },
+        "adapterEvidence": {},
+        "outputCharacters": 0,
+        "outputBytes": 0,
+        "error": "EnvironmentSkip: offline Docling service and declared model assets are unavailable"
+      },
+      "runtime": {
+        "wallMilliseconds": 0,
+        "peakRssBytes": 0,
+        "temporaryDiskHighWaterBytes": 0,
+        "descendantProcessHighWater": 0
+      }
+    },
+    {
+      "id": "optional:secondary-html",
+      "class": "optional-adapter",
+      "adapter": "secondary-html",
+      "status": "skipped",
+      "quality": {
+        "reason": "adapter module is not configured"
+      }
+    },
+    {
+      "id": "optional:alternate-pdf",
+      "class": "optional-adapter",
+      "adapter": "alternate-pdf",
+      "status": "skipped",
+      "quality": {
+        "reason": "adapter module is not configured"
+      }
+    }
+  ]
+}

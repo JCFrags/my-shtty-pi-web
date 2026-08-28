@@ -10,14 +10,17 @@
   "scripts": {
     "lint": "eslint .",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm -r --if-present test",
-    "test:python": "cd components/browser && uv run pytest tests/reader tests/docling",
+    "test": "pnpm -r --if-present test && node --test scripts/*.test.mjs",
+    "test:python": "cd components/browser && uv run --offline pytest tests/reader tests/docling benchmarks/extraction/tests",
+    "benchmark:extraction": "cd components/browser && uv run --offline python benchmarks/extraction/run.py",
+    "test:extraction": "cd components/browser && uv run --offline python benchmarks/extraction/generate_fixtures.py --check && uv run --offline pytest benchmarks/extraction/tests && uv run --offline python benchmarks/extraction/run.py",
     "test:live": "pnpm --filter @webx/pi-webx exec tsx ../../scripts/live-web-acceptance.ts",
     "check:rust": "cd components/browser && cargo check --workspace",
     "test:rust": "cd components/browser && cargo test --workspace"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@types/node": "24.12.4",
     "@vitest/coverage-v8": "4.1.10",
     "eslint": "10.8.1",
     "typescript": "6.0.3",

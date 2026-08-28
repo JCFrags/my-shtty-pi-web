@@ -9,10 +9,13 @@ import json
 import os
 import re
 import socket
+import stat
 import subprocess
 import tempfile
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urljoin, urlparse, urlunparse
 
@@ -45,6 +48,15 @@ MARKDOWN_TYPES = {"text/markdown", "text/x-markdown"}
 TEXT_TYPES = MARKDOWN_TYPES | {"text/plain", "application/json", "application/ld+json"}
 MAX_PUBLIC_REDIRECTS = 10
 MAX_RANGE_BYTES = 1_048_576
+DEFAULT_HTTP_TIMEOUT_SECONDS = 30.0
+MAX_HTTP_TIMEOUT_SECONDS = 120.0
+DEFAULT_MAX_RAW_BYTES = 32 * 1024 * 1024
+MAX_MAX_RAW_BYTES = 256 * 1024 * 1024
+DEFAULT_MAX_DECOMPRESSED_BYTES = 64 * 1024 * 1024
+MAX_MAX_DECOMPRESSED_BYTES = 512 * 1024 * 1024
+DEFAULT_MAX_REDIRECTS = 5
+DEFAULT_ACQUISITION_CONCURRENCY = 8
+MAX_ACQUISITION_CONCURRENCY = 32
 
 Resolver = Callable[[str, int], Awaitable[list[str]]]
 
@@ -79,6 +91,47 @@ class FetchResult:
     text: str
     content: bytes
     headers: dict[str, str]
+
+
+@dataclass(slots=True, frozen=True)
+class DocumentHandoff:
+    path: Path
+    size: int
+    sha256: str
+
+
+@contextmanager
+def staged_document(content: bytes) -> Iterator[DocumentHandoff]:
+    configured = os.getenv("PI_WEB_DOCUMENT_STAGING_DIR")
+    runtime = os.getenv("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    root = Path(configured) if configured else Path(runtime) / "pi-web-documents"
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    root_info = root.lstat()
+    if not stat.S_ISDIR(root_info.st_mode) or root.is_symlink():
+        raise ValueError("document staging root must be a real directory")
+    if root_info.st_uid != os.getuid() or stat.S_IMODE(root_info.st_mode) & 0o077:
+        raise ValueError("document staging root must be private and owned by the reader")
+    root = root.resolve(strict=True)
+
+    descriptor, raw_path = tempfile.mkstemp(prefix="document-", dir=root)
+    path = Path(raw_path)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "wb", closefd=False) as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        yield DocumentHandoff(
+            path=path,
+            size=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+        )
+    finally:
+        os.close(descriptor)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 @dataclass(slots=True)
@@ -147,29 +200,69 @@ class ReaderPipeline:
         *,
         timeout_seconds: float | None = None,
         max_download_bytes: int | None = None,
+        max_raw_bytes: int | None = None,
+        max_redirects: int | None = None,
+        acquisition_concurrency: int | None = None,
         docling_url: str | None = None,
         user_agent: str = "Pi-Web-Reader/0.1 (+local self-hosted reader)",
         resolver: Resolver | None = None,
         transport_factory: Callable[[dict[str, str]], Any] | None = None,
+        test_loopback_fixture: tuple[str, int] | None = None,
     ) -> None:
-        configured_timeout = os.getenv("PI_WEB_HTTP_TIMEOUT_SECONDS")
-        configured_max = os.getenv("PI_WEB_MAX_DOWNLOAD_BYTES")
-        self.timeout_seconds = (
-            timeout_seconds
-            if timeout_seconds is not None
-            else parse_optional_number(configured_timeout)
+        self.timeout_seconds = bounded_number(
+            timeout_seconds,
+            os.getenv("PI_WEB_HTTP_TIMEOUT_SECONDS"),
+            default=DEFAULT_HTTP_TIMEOUT_SECONDS,
+            maximum=MAX_HTTP_TIMEOUT_SECONDS,
+            name="HTTP timeout",
         )
-        self.max_download_bytes = (
-            max_download_bytes
-            if max_download_bytes is not None
-            else parse_optional_integer(configured_max)
+        self.max_download_bytes = bounded_integer(
+            max_download_bytes,
+            os.getenv("PI_WEB_MAX_DOWNLOAD_BYTES"),
+            default=DEFAULT_MAX_DECOMPRESSED_BYTES,
+            maximum=MAX_MAX_DECOMPRESSED_BYTES,
+            name="decompressed byte limit",
         )
+        self.max_raw_bytes = bounded_integer(
+            max_raw_bytes,
+            os.getenv("PI_WEB_MAX_RAW_DOWNLOAD_BYTES"),
+            default=DEFAULT_MAX_RAW_BYTES,
+            maximum=MAX_MAX_RAW_BYTES,
+            name="raw byte limit",
+        )
+        self.max_redirects = bounded_integer(
+            max_redirects,
+            os.getenv("PI_WEB_MAX_REDIRECTS"),
+            default=DEFAULT_MAX_REDIRECTS,
+            maximum=MAX_PUBLIC_REDIRECTS,
+            name="redirect limit",
+            minimum=0,
+        )
+        concurrency = bounded_integer(
+            acquisition_concurrency,
+            os.getenv("PI_WEB_ACQUISITION_CONCURRENCY"),
+            default=DEFAULT_ACQUISITION_CONCURRENCY,
+            maximum=MAX_ACQUISITION_CONCURRENCY,
+            name="acquisition concurrency",
+        )
+        self._acquisition_slots = asyncio.Semaphore(concurrency)
         self.docling_url = docling_url or os.getenv("PI_WEB_DOCLING_URL", "http://127.0.0.1:8792/")
         self.user_agent = user_agent
         self.resolver = resolver or resolve_public_addresses
         self.transport_factory = transport_factory or pinned_transport
+        self.test_loopback_fixture = test_loopback_fixture
+
+    def _validated_pin(self, host: str, port: int, addresses: list[str]) -> str:
+        if self.test_loopback_fixture == (host, port) and addresses == ["127.0.0.1"]:
+            return "127.0.0.1"
+        return validate_public_addresses(host, addresses)
 
     async def read_range(self, request: RangeReadRequest) -> RangeReadResult:
+        async with self._acquisition_slots:
+            async with asyncio.timeout(self.timeout_seconds):
+                return await self._read_range(request)
+
+    async def _read_range(self, request: RangeReadRequest) -> RangeReadResult:
         validate_range_request(request)
         if httpx is None:
             raise RuntimeError(
@@ -192,7 +285,7 @@ class ReaderPipeline:
             assert host is not None
             port = parsed.port or (443 if parsed.scheme == "https" else 80)
             addresses = await self.resolver(host, port)
-            pinned = validate_public_addresses(host, addresses)
+            pinned = self._validated_pin(host, port, addresses)
             transport = self.transport_factory({host.lower().rstrip("."): pinned})
             async with (
                 httpx.AsyncClient(
@@ -249,6 +342,11 @@ class ReaderPipeline:
         raise ValueError("too many redirects")
 
     async def read(self, request: ReadRequest) -> ReadResult:
+        async with self._acquisition_slots:
+            async with asyncio.timeout(self.timeout_seconds):
+                return await self._read(request)
+
+    async def _read(self, request: ReadRequest) -> ReadResult:
         validate_public_url_syntax(request.url)
         original = await self._fetch(
             request.url,
@@ -309,30 +407,40 @@ class ReaderPipeline:
         return result
 
     async def _read_document(self, fetched: FetchResult, request: ReadRequest) -> ReadResult:
-        if httpx is None:
-            raise RuntimeError("httpx is required to invoke the Docling worker")
-        payload = {
-            "url": fetched.url,
-            "mediaType": fetched.media_type,
-            "dataBase64": base64.b64encode(fetched.content).decode("ascii"),
-            "includeStructured": request.view == "raw",
-        }
+        converted: dict[str, Any] = {}
         converter = "docling"
-        converted: dict[str, Any]
-        try:
-            async with httpx.AsyncClient(timeout=httpx_timeout(self.timeout_seconds)) as client:
-                response = await client.post(urljoin(self.docling_url, "v1/convert"), json=payload)
-                response.raise_for_status()
-                converted = response.json()
-            markdown = str(converted.get("markdown") or "")
-            if not useful_text(markdown):
-                raise ValueError("document converter returned no useful text")
-        except (httpx.HTTPError, ValueError, KeyError, TypeError, json.JSONDecodeError):
-            if fetched.media_type != "application/pdf":
+        if fetched.media_type == "application/pdf" and request.view != "raw":
+            try:
+                markdown = await asyncio.to_thread(extract_pdf_text, fetched.content)
+                converter = "pdftotext"
+            except (OSError, RuntimeError, subprocess.SubprocessError):
+                pass
+        if converter == "docling":
+            if httpx is None:
+                raise RuntimeError("httpx is required to invoke the Docling worker")
+            try:
+                with staged_document(fetched.content) as handoff:
+                    payload = {
+                        "url": fetched.url,
+                        "mediaType": fetched.media_type,
+                        "filePath": str(handoff.path),
+                        "size": handoff.size,
+                        "sha256": handoff.sha256,
+                        "includeStructured": request.view == "raw",
+                    }
+                    async with httpx.AsyncClient(
+                        timeout=httpx_timeout(self.timeout_seconds), trust_env=False
+                    ) as client:
+                        response = await client.post(
+                            urljoin(self.docling_url, "v1/convert"), json=payload
+                        )
+                        response.raise_for_status()
+                        converted = response.json()
+                markdown = str(converted.get("markdown") or "")
+                if not useful_text(markdown):
+                    raise ValueError("document converter returned no useful text")
+            except (httpx.HTTPError, ValueError, KeyError, TypeError, json.JSONDecodeError):
                 raise RuntimeError("document conversion failed") from None
-            markdown = await asyncio.to_thread(extract_pdf_text, fetched.content)
-            converted = {}
-            converter = "pdftotext-fallback"
         title = str(converted.get("title") or infer_title(markdown, fetched.url))
         focused = select_query_context(markdown, request.query) if request.query else markdown
         result = finalize_text_result(fetched, focused, request, "document", title=title)
@@ -343,7 +451,7 @@ class ReaderPipeline:
                 "documentConverter": converter,
                 "documentMediaType": fetched.media_type,
                 "originalSha256": hashlib.sha256(fetched.content).hexdigest(),
-                "originalDataBase64": payload["dataBase64"],
+                "originalBytes": len(fetched.content),
                 "pages": converted.get("pages", []),
                 "tables": converted.get("tables", []),
                 "images": converted.get("images", []),
@@ -367,13 +475,13 @@ class ReaderPipeline:
         headers = {"Accept": accept, "User-Agent": self.user_agent}
         timeout = httpx_timeout(self.timeout_seconds)
         current = url
-        for redirect_count in range(MAX_PUBLIC_REDIRECTS + 1):
+        for redirect_count in range(self.max_redirects + 1):
             parsed = validate_public_url_syntax(current)
             host = parsed.hostname
             assert host is not None
             port = parsed.port or (443 if parsed.scheme == "https" else 80)
             addresses = await self.resolver(host, port)
-            pinned = validate_public_addresses(host, addresses)
+            pinned = self._validated_pin(host, port, addresses)
             transport = self.transport_factory({host.lower().rstrip("."): pinned})
             async with (
                 httpx.AsyncClient(
@@ -389,20 +497,17 @@ class ReaderPipeline:
                     location = response.headers.get("location")
                     if not location:
                         raise ValueError("redirect response has no location")
-                    if redirect_count >= MAX_PUBLIC_REDIRECTS:
+                    if redirect_count >= self.max_redirects:
                         raise ValueError("too many redirects")
                     current = urljoin(current, location)
                     validate_public_url_syntax(current)
                     continue
                 response.raise_for_status()
-                chunks: list[bytes] = []
-                size = 0
-                async for chunk in response.aiter_bytes():
-                    size += len(chunk)
-                    if self.max_download_bytes is not None and size > self.max_download_bytes:
-                        raise ValueError(f"response exceeds {self.max_download_bytes} bytes")
-                    chunks.append(chunk)
-                content = b"".join(chunks)
+                content = await read_bounded_response(
+                    response,
+                    max_raw_bytes=self.max_raw_bytes,
+                    max_decompressed_bytes=self.max_download_bytes,
+                )
                 media_type = content_type(response.headers.get("content-type"))
                 encoding = response.encoding or "utf-8"
                 text = content.decode(encoding, errors="replace")
@@ -418,7 +523,7 @@ class ReaderPipeline:
 
 
 def extract_pdf_text(content: bytes) -> str:
-    """Extract PDF text with the local Poppler utility as a bounded fallback."""
+    """Extract PDF text with the bounded local Poppler utility."""
     with tempfile.TemporaryDirectory(prefix="pi-web-pdf-") as directory:
         source = os.path.join(directory, "input.pdf")
         output = os.path.join(directory, "output.txt")
@@ -434,8 +539,8 @@ def extract_pdf_text(content: bytes) -> str:
             raise RuntimeError("PDF extraction failed")
         with open(output, encoding="utf-8", errors="replace") as handle:
             text = handle.read()
-    if not useful_text(text):
-        raise RuntimeError("PDF extraction returned no useful text")
+    if not any(character.isalnum() for character in text):
+        raise RuntimeError("PDF extraction returned no text")
     return text
 
 
@@ -478,24 +583,95 @@ def parse_content_range(value: str | None) -> tuple[int, int, int | None]:
     return start, end, total
 
 
-def parse_optional_number(value: str | None) -> float | None:
-    if value is None or not value.strip():
-        return None
-    parsed = float(value)
-    return parsed if parsed > 0 else None
+def bounded_number(
+    explicit: float | None,
+    configured: str | None,
+    *,
+    default: float,
+    maximum: float,
+    name: str,
+) -> float:
+    try:
+        value = explicit if explicit is not None else (
+            float(configured) if configured is not None and configured.strip() else default
+        )
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} must be a number") from error
+    if isinstance(value, bool) or not 0 < value <= maximum:
+        raise ValueError(f"{name} must be greater than 0 and at most {maximum}")
+    return float(value)
 
 
-def parse_optional_integer(value: str | None) -> int | None:
-    if value is None or not value.strip():
-        return None
-    parsed = int(value)
-    return parsed if parsed > 0 else None
+def bounded_integer(
+    explicit: int | None,
+    configured: str | None,
+    *,
+    default: int,
+    maximum: int,
+    name: str,
+    minimum: int = 1,
+) -> int:
+    try:
+        value = explicit if explicit is not None else (
+            int(configured) if configured is not None and configured.strip() else default
+        )
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} must be an integer") from error
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be from {minimum} to {maximum}")
+    return value
 
 
-def httpx_timeout(seconds: float | None):
-    if seconds is None:
-        return None
+def httpx_timeout(seconds: float):
     return httpx.Timeout(seconds, connect=min(seconds, 10.0))
+
+
+async def read_bounded_response(
+    response: Any,
+    *,
+    max_raw_bytes: int,
+    max_decompressed_bytes: int,
+) -> bytes:
+    content_length = response.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_length = int(content_length)
+        except ValueError as error:
+            raise ValueError("response has an invalid Content-Length") from error
+        if declared_length < 0 or declared_length > max_raw_bytes:
+            raise ValueError(f"raw response exceeds {max_raw_bytes} bytes")
+
+    # In-memory transports can supply an already-consumed response. Its content has no
+    # separate wire stream, so apply both limits to the available bytes.
+    if response.is_stream_consumed:
+        content = response.content
+        if len(content) > max_raw_bytes:
+            raise ValueError(f"raw response exceeds {max_raw_bytes} bytes")
+        if len(content) > max_decompressed_bytes:
+            raise ValueError(f"decompressed response exceeds {max_decompressed_bytes} bytes")
+        return content
+
+    # HTTPX owns content decoding. Read its raw stream directly so both the wire-size
+    # and decompressed-size ceilings apply, including to chunked compressed responses.
+    decoder = response._get_content_decoder()  # type: ignore[attr-defined]
+    chunks: list[bytes] = []
+    raw_size = 0
+    decompressed_size = 0
+    async for raw_chunk in response.aiter_raw():
+        raw_size += len(raw_chunk)
+        if raw_size > max_raw_bytes:
+            raise ValueError(f"raw response exceeds {max_raw_bytes} bytes")
+        chunk = decoder.decode(raw_chunk)
+        decompressed_size += len(chunk)
+        if decompressed_size > max_decompressed_bytes:
+            raise ValueError(f"decompressed response exceeds {max_decompressed_bytes} bytes")
+        chunks.append(chunk)
+    final_chunk = decoder.flush()
+    decompressed_size += len(final_chunk)
+    if decompressed_size > max_decompressed_bytes:
+        raise ValueError(f"decompressed response exceeds {max_decompressed_bytes} bytes")
+    chunks.append(final_chunk)
+    return b"".join(chunks)
 
 
 def content_type(value: str | None) -> str:

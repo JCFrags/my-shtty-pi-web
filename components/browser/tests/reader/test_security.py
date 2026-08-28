@@ -62,6 +62,24 @@ def test_public_dns_result_is_selected_deterministically() -> None:
     )
 
 
+def test_loopback_fixture_exception_is_disabled_by_default() -> None:
+    pipeline = module.ReaderPipeline()
+    with pytest.raises(ValueError, match="private or special"):
+        pipeline._validated_pin("fixture.invalid", 41234, ["127.0.0.1"])
+
+
+def test_loopback_fixture_exception_is_exact_and_explicit() -> None:
+    pipeline = module.ReaderPipeline(test_loopback_fixture=("fixture.invalid", 41234))
+    assert pipeline._validated_pin("fixture.invalid", 41234, ["127.0.0.1"]) == "127.0.0.1"
+    for host, port, addresses in [
+        ("other.invalid", 41234, ["127.0.0.1"]),
+        ("fixture.invalid", 41235, ["127.0.0.1"]),
+        ("fixture.invalid", 41234, ["127.0.0.1", "93.184.216.34"]),
+    ]:
+        with pytest.raises(ValueError, match="private or special"):
+            pipeline._validated_pin(host, port, addresses)
+
+
 @pytest.mark.asyncio
 async def test_network_backend_connects_only_to_pinned_address() -> None:
     calls: list[tuple[str, int]] = []

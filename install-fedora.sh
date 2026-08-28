@@ -2,6 +2,26 @@
 set -Eeuo pipefail
 
 SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+case "${1:-}" in
+  --stage)
+    shift
+    exec "$SOURCE_ROOT/scripts/pi-web-stage" --source "$SOURCE_ROOT" "$@"
+    ;;
+  --cutover-plan)
+    [[ $# -eq 3 ]] || { echo "usage: $0 --cutover-plan CANDIDATE EVIDENCE" >&2; exit 2; }
+    exec "$SOURCE_ROOT/scripts/pi-web-cutover" --plan --candidate "$2" --evidence "$3"
+    ;;
+  --cutover-apply)
+    [[ $# -eq 3 ]] || { echo "usage: $0 --cutover-apply CANDIDATE EVIDENCE" >&2; exit 2; }
+    exec "$SOURCE_ROOT/scripts/pi-web-cutover" --apply --candidate "$2" --evidence "$3"
+    ;;
+  --cutover-rollback)
+    [[ $# -eq 2 ]] || { echo "usage: $0 --cutover-rollback RUN_ID" >&2; exit 2; }
+    exec "$SOURCE_ROOT/scripts/pi-web-cutover" --rollback "$2"
+    ;;
+  "") ;;
+  *) echo "usage: $0 [--stage [OPTIONS] | --cutover-plan CANDIDATE EVIDENCE | --cutover-apply CANDIDATE EVIDENCE | --cutover-rollback RUN_ID]" >&2; exit 2 ;;
+esac
 PREFIX="${PI_WEB_PREFIX:-$HOME/.local}"
 INSTALL_ROOT="${PI_WEB_INSTALL_ROOT:-$PREFIX/lib/pi-web-tools}"
 BIN_DIR="$PREFIX/bin"
@@ -140,7 +160,7 @@ EOF
 cat > "$UNIT_DIR/pi-web-reader.service" <<EOF
 [Unit]
 Description=Pi Web direct reader
-After=network-online.target pi-web-docling.service
+After=network-online.target
 [Service]
 WorkingDirectory=$BROWSER_ROOT
 ExecStart=$DATA_HOME/pi-web/python-env/bin/pi-web-reader
@@ -154,8 +174,8 @@ EOF
 cat > "$UNIT_DIR/webxd.service" <<EOF
 [Unit]
 Description=Pi Web authority
-After=pi-browserd.service pi-web-reader.service pi-web-crawl.service pi-web-egress-proxy.service pi-web-searxng.service
-Requires=pi-browserd.service pi-web-reader.service pi-web-crawl.service pi-web-egress-proxy.service
+After=pi-web-reader.service pi-web-searxng.service
+Wants=pi-web-reader.service pi-web-searxng.service
 [Service]
 WorkingDirectory=$INSTALL_ROOT
 ExecStart=/usr/bin/node $INSTALL_ROOT/apps/webxd/dist/apps/webxd/src/main.js
@@ -172,7 +192,7 @@ cat > "$BIN_DIR/pi-web" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 case "\${1:-}" in
-  doctor) shift; exec "$BIN_DIR/pi-browserd" doctor "\$@" ;;
+  doctor) shift; exec /usr/bin/node "$INSTALL_ROOT/scripts/pi-web-doctor.mjs" "\$@" ;;
   workspace) shift; exec "$BIN_DIR/pi-browser-workspace" "\$@" ;;
   audit) shift; exec /usr/bin/node "$INSTALL_ROOT/scripts/pi-web-audit.mjs" "\$@" ;;
   status) exec systemctl --user status webxd pi-browserd pi-web-reader pi-web-crawl pi-web-docling pi-web-searxng ;;
@@ -194,15 +214,19 @@ EOF
 
 log "Starting services"
 systemctl --user daemon-reload
-systemctl --user enable pi-web-egress-proxy.service pi-web-docling.service pi-web-reader.service pi-web-crawl.service pi-browserd.service webxd.service
-systemctl --user restart pi-web-egress-proxy.service pi-web-docling.service pi-web-reader.service pi-web-crawl.service pi-browserd.service webxd.service pi-web-searxng.service
+systemctl --user enable pi-web-reader.service pi-web-searxng.service webxd.service
+systemctl --user restart pi-web-reader.service pi-web-searxng.service webxd.service
+for optional_unit in pi-web-egress-proxy.service pi-web-docling.service pi-web-crawl.service pi-browserd.service; do
+  systemctl --user enable "$optional_unit" || log "Optional service could not be enabled: $optional_unit"
+  systemctl --user restart "$optional_unit" || log "Optional service could not be started: $optional_unit"
+done
 # The container maps this directory to its internal service user. Keep the host
 # directory private after the image entrypoint adjusts its ownership.
 podman unshare chmod 0700 "$CONFIG_HOME/pi-web/searxng"
 
 log "Verifying the installation"
-systemctl --user --quiet is-active pi-web-egress-proxy pi-web-docling pi-web-reader pi-web-crawl pi-browserd pi-web-searxng webxd
-"$BIN_DIR/pi-browserd" doctor --json || true
+systemctl --user --quiet is-active pi-web-reader pi-web-searxng webxd
+"$BIN_DIR/pi-web" doctor --json
 rm -rf "$CARGO_TARGET_DIR"
 if [[ "$SOURCE_ROOT" != "$INSTALL_ROOT" ]]; then rm -rf "$INSTALL_ROOT.old"; fi
 printf '\nPi Web Tools installed at %s. Run `pi-web status` for service status.\n' "$INSTALL_ROOT"

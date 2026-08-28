@@ -10,6 +10,8 @@ import {
   BrowserObserveSchema,
   BrowserOpenSchema,
   BrowserTabsSchema,
+  WebContentSchema,
+  WebReadBatchSchema,
   WebReadSchema,
   WebSearchSchema,
 } from "./schemas.js";
@@ -24,7 +26,6 @@ import {
 
 const STATUS_KEY = "pi-webx";
 const REFRESH_MS = 60_000;
-const REQUIRED_BROWSER_PATH = "agent-browser/chrome";
 const WEB_MODES = ["off", "read", "browser", "debug"] as const;
 const WORKSPACE_ACTIONS = ["show", "hide", "list", "attach", "takeover", "return"] as const;
 type WorkspaceAction = (typeof WORKSPACE_ACTIONS)[number];
@@ -43,8 +44,9 @@ const WEBX_AGENT_GUIDANCE = `
 WebX is Pi's primary internet interface. Use it automatically for current facts, public URLs, APIs, documents, and website interaction. Do not ask the user to enable web mode.
 - Choose one starting tool: web_read for a known URL or API, or web_search when the source or exact URL is unknown.
 - web_search needs only a complete query. It returns ranked links by default. Set output=extracts only when short query-focused passages from selected pages are useful. Add domains only as strict host requirements. Put time terms such as latest, today, or a year in the query.
-- A normal web_read returns complete main content. Omit maxChars for a full read. Use query only to select a relevant section. Use fields, itemOffset, and itemLimit only for structured JSON collections; fields preserve one object per result. Use save only when the requested product is a local Markdown copy; it writes below WebX's private export directory and returns compact metadata instead of the body.
-- Continue only when a result reports a bound. Reuse the same web_read URL and options with the reported contentOffset, itemOffset, or section query. Do not invent a continuation offset. contentOffset is for a direct single-page read, not linked crawling.
+- For normal multi-source research, use web_search to find sources, then web_read_batch for 1 to 5 selected independent direct reads. It keeps ordered source envelopes separate, runs at most 3 reads at once, and preserves successes when another source fails.
+- A normal web_read returns a bounded passage and an opaque content ID for the stored normalized body. Use web_content to continue or focus that stored body without another network request. Use query only to select a relevant section. Use fields, itemOffset, and itemLimit only for structured JSON collections; fields preserve one object per result. Linked crawl controls are advanced legacy-compatible behavior, not the normal research path. Use save only for an explicit user-directed local Markdown export.
+- Continue stored content only from reported metadata. Use web_content with the exact nextStoredOffset, or use findText or query for a focused passage. Use web_read contentOffset only for a reported source continuation after the stored body ends. Do not invent a continuation offset.
 - web_search sends the query without invented variants. Link results use search snippets. Extract results come only from successful page reads and remain separate by source. Search never follows page links or synthesizes a conclusion. In web_read, maxPages/maxDepth follows linked pages.
 - Use browser_open only for dynamic rendering, interaction, DOM inspection, or a visual check that web_read cannot complete. Then use browser_observe before every browser_act decision. Prefer semantic refs from an interactive observation; use bound visual coordinates only when semantics are insufficient. Observe again after state changes. Close the session with browser_tabs.
 - The browser tool does not expose uploads or downloads. Never enter credentials, authenticate, purchase, publish, or perform a destructive action without explicit user approval.
@@ -58,11 +60,15 @@ function capabilityError(capabilities: WebxCapabilities): string | undefined {
     return `WebX API major mismatch: facade requires ${SUPPORTED_API_MAJOR}.x, daemon reports ${capabilities.apiVersion}.`;
   }
   if (capabilities.daemon !== "ready") return "WebX daemon is unavailable. Direct fallback is disabled.";
-  const paths = capabilities.browserPathIds;
-  if (!paths.includes(REQUIRED_BROWSER_PATH)) {
-    return "WebX capability contract must report the required visual agent-browser/chrome path.";
-  }
   return undefined;
+}
+
+function operationAvailable(operation: string, capabilities: WebxCapabilities): boolean {
+  if (operation === "web.search") return capabilities.groups.search;
+  if (operation === "web.read" || operation === "web.readBatch" || operation === "web.content") return capabilities.groups.read;
+  if (operation === "browser.debug") return capabilities.groups.browserDebug;
+  if (operation.startsWith("browser.")) return capabilities.groups.browser;
+  return false;
 }
 
 function ownerId(ctx: ExtensionContext): string {
@@ -145,6 +151,7 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
       if (!sdk || !capabilities || !lifecycle || lifecycle.signal.aborted || !activeOwner || !activeCwd) {
         throw new Error(diagnostic);
       }
+      if (!operationAvailable(operation, capabilities)) throw new Error(`${operation} is unavailable because its backend is unhealthy.`);
       const combined = AbortSignal.any([signal, lifecycle.signal]);
       const requestOptions = {
         signal: combined,
@@ -152,7 +159,7 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
         ownerId: activeOwner,
         cwd: activeCwd,
       };
-      const auditedOperation = operation === "web.search" || operation === "web.read" ? operation : undefined;
+      const auditedOperation = operation === "web.search" || operation === "web.read" || operation === "web.readBatch" ? operation : undefined;
       const startedAt = new Date();
       try {
         let result = await sdk.request(operation, params, requestOptions);
@@ -193,7 +200,9 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
         return text;
       },
     });
-    pi.registerTool({ name: "web_read", label: "Read web content", description: "Read a known public URL, API, feed, article, PDF, or document. By default it returns complete extracted main content up to the source limit. A query selects relevant sections; fields and item pagination apply to structured JSON; contentOffset continues only a bound reported by a prior direct read; maxPages/maxDepth explicitly follow links. An explicit save writes one extracted page as Markdown below WebX's private export directory and returns compact file metadata.", promptSnippet: "Read a known URL or API as content, selected sections, structured rows, a continuation, or a saved Markdown file", promptGuidelines: ["Use web_read for a known URL. Omit maxChars for a full read; use query for section selection, JSON fields with item pagination for API collections, and contentOffset only when the prior result reports it. Use web_read save only when a local Markdown copy is requested, and never overwrite unless replacement is intended."], parameters: WebReadSchema, execute: invoke("web.read") });
+    pi.registerTool({ name: "web_read", label: "Read web content", description: "Read a known public URL, API, feed, article, PDF, or document. It returns a bounded passage and stores the normalized extracted body under an opaque content ID. A query selects relevant sections; fields and item pagination apply to structured JSON; contentOffset continues only a reported source bound; maxPages/maxDepth explicitly follow links. An explicit save writes one extracted page as Markdown below WebX's private export directory and returns compact file metadata.", promptSnippet: "Read a known URL or API as a bounded passage, structured rows, a continuation, or a saved Markdown file", promptGuidelines: ["Use web_read for a known URL. Use web_content with the returned content ID for stored continuation or focus. Use contentOffset only after the stored body reports a source continuation. Use web_read save only when a local Markdown copy is requested, and never overwrite unless replacement is intended."], parameters: WebReadSchema, execute: invoke("web.read") });
+    pi.registerTool({ name: "web_read_batch", label: "Read multiple web sources", description: "Read 1 to 5 independent direct-read items. Each item accepts the same direct selectors as web_read, but not crawl or save controls. WebX uses fixed maximum concurrency 3 and returns one ordered result envelope per item. One source failure does not remove successful sources, and each successful source has its own untrusted-content label and stored content ID.", promptSnippet: "Read up to five selected sources as separate ordered results", promptGuidelines: ["For normal multi-source research, use web_search and then pass selected sources to web_read_batch. Keep each returned source separate. After web_read_batch, use web_content with each successful source content ID for continuation or focus."], parameters: WebReadBatchSchema, execute: invoke("web.readBatch") });
+    pi.registerTool({ name: "web_content", label: "Retrieve stored web content", description: "Retrieve normalized content already stored by WebX under an opaque content ID. Exact offset mode returns a bounded passage with exact continuation metadata. Focused findText or query mode returns a bounded relevant passage. It never refetches the source.", promptSnippet: "Continue or focus normalized stored content without a network request", promptGuidelines: ["Use web_content only with a content ID returned by web_read or web_content. Use the exact reported nextOffset for continuation. Do not combine offset with findText or query."], parameters: WebContentSchema, execute: invoke("web.content") });
     pi.registerTool({ name: "browser_open", label: "Open browser", description: "Open an owned Chrome session only when direct reading cannot handle dynamic rendering, interaction, DOM state, or a visual check. The default agent-browser/chrome path is required and supports no upload or download action.", promptSnippet: "Open an owned browser only for dynamic content, interaction, DOM state, or visual checks", promptGuidelines: ["Use browser_open only after web_read is insufficient. Keep the returned sessionId and tabId, observe before acting, and close the session when finished."], parameters: BrowserOpenSchema, execute: invoke("browser.open") });
     pi.registerTool({ name: "browser_tabs", label: "Manage browser tabs", description: "List owned browser sessions or close one owned tab or session. Always close the session after browser work.", promptSnippet: "List or close this agent's owned browser sessions and tabs", promptGuidelines: ["Use browser_tabs with close-session after browser work; use list when the owned session or tab identifier is unknown."], parameters: BrowserTabsSchema, execute: invoke("browser.tabs") });
     pi.registerTool({ name: "browser_observe", label: "Observe browser", description: "Inspect the current state of an owned browser tab. Use interactive for semantic refs, main for compact page text, visual for screenshot-bound coordinates, full for more DOM content, and diff after a known state change.", promptSnippet: "Observe current browser text, semantic controls, DOM state, changes, or screenshot-bound pixels", promptGuidelines: ["Use browser_observe before each browser_act decision. Prefer interactive semantic refs; use visual coordinates only with the observationId and viewportId from the latest visual observation."], parameters: BrowserObserveSchema, execute: invoke("browser.observe") });
@@ -228,6 +237,7 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
     const workspace = async (action: WorkspaceAction, sessionId: string | undefined, tabId: string | undefined, ctx: ExtensionContext) => {
       assertTrusted(ctx);
       if (!sdk || !capabilities || !lifecycle || !activeOwner || !activeCwd) throw new Error(diagnostic);
+      if (!capabilities.groups.browser) throw new Error("Browser workspace controls are unavailable because the browser backend is unhealthy.");
       let selectedSessionId = sessionId;
       if ((action === "attach" || action === "takeover" || action === "return") && !selectedSessionId) {
         if (!ctx.hasUI) {

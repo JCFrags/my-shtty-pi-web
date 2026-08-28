@@ -17,6 +17,7 @@ const runtime = new WebxdRuntime({
   readerUrl: process.env.WEBX_READER_URL ?? "http://127.0.0.1:8787",
   crawlUrl: process.env.WEBX_CRAWL_URL ?? "http://127.0.0.1:8793",
   cacheDirectory: process.env.WEBX_CACHE_DIR ?? `${cacheHome}/pi-web/responses`,
+  contentDirectory: process.env.WEBX_CONTENT_DIR ?? `${cacheHome}/pi-web/content`,
   authenticateActor: sameUserPiActorAuthenticator,
   browserDestinationAuthority: destinationAuthority,
 });

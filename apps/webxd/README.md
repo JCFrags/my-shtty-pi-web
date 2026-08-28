@@ -36,14 +36,26 @@ Optional `domains` and query `site:` values are intersected. Conflicting constra
 
 Optional `output: "extracts"` reads top distinct pages in groups of four. It tries at most eight pages and returns at most four short contiguous query-focused passages. A passage is returned only after a successful page read. A search-engine snippet is never substituted for a failed extract. Failed reads are skipped and reported through partial metadata. Search never follows page links or synthesizes a cross-source answer. A total provider failure is a retryable error. A healthy search with no result remains a successful empty result.
 
+## Normalized-content store
+
+Direct reads store only normalized extracted text. They never store original response bytes or document base64 as the normalized artifact. Content IDs are random and opaque. The store has positive limits for total bytes, entry count, item bytes, and retention. It prunes on insertion and startup. Files default to `$XDG_CACHE_HOME/pi-web/content`; `WEBX_CONTENT_DIR` can select another directory.
+
+The `/v1/read-batch` route accepts 1 to 5 direct-read items. Batch items do not accept crawl or save controls. It runs at most three reads at once. It returns ordered separate success or failure envelopes. Each success uses the same normalized-content storage behavior as `/v1/read`.
+
+The `/v1/content` route supports exact offset retrieval and focused `findText` or `query` retrieval. These modes are mutually exclusive. The route reads only the store and never fetches a URL.
+
 ## Short-lived cache
 
-Search responses, including extract output, use a 15-minute cache. Direct `web_read` results use a six-hour cache. The cache keeps up to 512 recent entries in RAM and up to 10 GiB on SSD. Files default to `$XDG_CACHE_HOME/pi-web/responses` with user-only permissions. `WEBX_CACHE_DIR` can select another directory. Cache failures never block a live request.
+Search responses, including extract output, use a 15-minute cache. Direct `web_read` results use a six-hour cache. The cache keeps up to 256 entries and 32 MiB in RAM. It keeps up to 2,048 entries and 512 MiB on SSD. One serialized response can use at most 4.3 MB. Oversized entries are not cached. Disk scans and pruning keep bounded in-memory state. Files default to `$XDG_CACHE_HOME/pi-web/responses` with user-only permissions. `WEBX_CACHE_DIR` can select another directory. Cache failures never block a live request.
+
+Identical eligible search and read work is coalesced under at most 256 in-flight keys. Each caller keeps independent cancellation. The shared operation stops only when no waiter remains.
+
+Successful mutation idempotency records expire after 15 minutes. They use at most 1,024 entries and 16 MiB.
 
 This cache reduces repeated search-provider and website traffic. It is not a durable research archive and has no Pi-facing recall operations. When a change alters cached search semantics, update the search cache format version so an older response cannot mask the new behavior.
 
 ## Public routes
 
-The Pi-facing authority covers search, read, research, capabilities, browser workspace, and browser create/list/get/observe/frame/act/debug/control/cancel/close-session/close-tab. Page-library functions are reserved for a future separate research-archive extension. Internal artifact routes support bounded component transfers and are not Pi tools.
+The Pi-facing authority covers search, read, stored normalized content, capabilities, browser workspace, and browser create/list/get/observe/frame/act/debug/control/cancel/close-session/close-tab. Page-library functions are reserved for a future separate research-archive extension. Internal artifact routes support bounded component transfers and are not Pi tools.
 
 Page history search returns explicit `501 unavailable`. Safe browser debug permits `console`, `network`, `html`, `pdf`, `record-start`, and `record-stop`. Secret-bearing `evaluate`, `cookies`, and `storage` operations are refused.

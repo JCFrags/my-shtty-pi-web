@@ -20,9 +20,9 @@ The default adapter uses an `AGENT_BROWSER_NAMESPACE=pi-web-v1` namespace and a 
 
 `web_read` first asks the reader service for text. The reader performs Markdown content negotiation, original text handling, `.md`/`index.md`, nearest `llms.txt`, optional `llms-full.txt`, and Trafilatura extraction. A detected client-rendered shell returns `renderRequired` rather than launching an unowned browser. The coordinator then renders through an agent-owned transient Lightpanda session and records a Chromium escalation if Lightpanda fails. Active authenticated tabs are read directly through the browser backend.
 
-PDF and office bytes are converted by Docling. Original bytes, Markdown, and large structured results enter the artifact store; Pi sees a bounded initial section and artifact identifiers.
+PDF and office bytes are converted by Docling. The reader writes each fetched document to an owner-only file under `$PI_WEB_DOCUMENT_STAGING_DIR` or `$XDG_RUNTIME_DIR/pi-web-documents`. It gives Docling only the file path, size, digest, media type, and source URL. Docling validates the staging root and file, copies verified bytes through a no-follow file descriptor, and removes its private copy after conversion. The reader removes the handoff file after each success, failure, or cancellation. Document bytes do not enter reader results or audit records.
 
-Search, reader, and Pi RPC operations have no fixed deadline by default. Deployments may opt into timeouts through environment or configuration values. Response and observation bounds do not discard data: complete content is persisted and pageable through artifacts.
+Direct reader acquisitions have finite defaults: a 30-second total deadline, 32 MiB raw response limit, 64 MiB decompressed response limit, five redirects, and eight concurrent acquisitions. Deployments can use `PI_WEB_HTTP_TIMEOUT_SECONDS`, `PI_WEB_MAX_RAW_DOWNLOAD_BYTES`, `PI_WEB_MAX_DOWNLOAD_BYTES`, `PI_WEB_MAX_REDIRECTS`, and `PI_WEB_ACQUISITION_CONCURRENCY` for bounded overrides. The reader still validates each redirect destination, pins each approved connection, and disables ambient proxies. Response and observation bounds do not discard extracted text: complete extracted content is pageable through artifacts.
 
 ## Failure behavior
 

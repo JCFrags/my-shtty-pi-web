@@ -2,11 +2,13 @@ import { WebxClient } from "./client.js";
 import { nodeNdjsonConnectionFactory } from "./node-unix.js";
 import { UnixSocketTransport } from "./transport.js";
 import { defaultExportRoot, saveReadMarkdown, validateRelativeMarkdownPath } from "./save-markdown.js";
-import type { BrowserAction, BrowserPathId, BrowserVisualFrame, ReadRequest, ReadSaveOptions, RequestOptions, VisualGuard } from "./types.js";
+import type { BoundedContent, BrowserAction, BrowserPathId, BrowserVisualFrame, ContentRequest, DirectReadRequest, ReadBatchRequest, ReadRequest, ReadSaveOptions, RequestOptions, VisualGuard } from "./types.js";
 
 export const FACADE_OPERATION_INVENTORY = {
   "web.search": "search",
   "web.read": "read",
+  "web.readBatch": "readBatch; 1 to 5 ordered sources with concurrency 3",
+  "web.content": "content; stored normalized content only",
   "browser.open": "createBrowserSession",
   "browser.tabs": "list/closeBrowserTab/closeBrowserSession; discard and restore unavailable",
   "browser.observe": "observeBrowser plus getBrowserVisualFrame for visual binding",
@@ -23,7 +25,7 @@ export interface FacadeResult {
   readonly artifactPayload?: { readonly artifactId: string; readonly mediaType: string; readonly dataBase64: string; readonly size: number; readonly complete: boolean; readonly mode: "image" | "raw"; readonly offset?: number; readonly nextOffset?: number | null; readonly eof?: boolean };
   readonly trust?: "untrusted-external" | "local";
 }
-export interface FacadeCapabilities { readonly apiVersion: string; readonly daemon: "ready" | "unavailable"; readonly groups: { readonly web: boolean; readonly browser: boolean; readonly browserDebug: boolean }; readonly browserPathIds: readonly string[] }
+export interface FacadeCapabilities { readonly apiVersion: string; readonly daemon: "ready" | "unavailable"; readonly groups: { readonly search: boolean; readonly read: boolean; readonly browser: boolean; readonly browserDebug: boolean }; readonly browserPathIds: readonly string[] }
 interface ObservationBinding { readonly ownerId: string; readonly sessionId: string; readonly frame: BrowserVisualFrame }
 
 /** SDK adapter for the singular Pi facade operation names. */
@@ -49,11 +51,12 @@ export class WebxFacadeClient {
     try {
       const catalog = await client.capabilities({ signal: options.signal });
       const paths = catalog.browserPaths.map((path) => path.pathId);
-      if (!paths.includes("agent-browser/chrome")) throw new Error("WebX did not report the required visual browser path");
-      return { apiVersion: catalog.apiVersion, daemon: "ready", groups: { web: true, browser: true, browserDebug: true }, browserPathIds: paths };
+      const healthy = (id: "search" | "read" | "browser") => catalog.capabilities.some((capability) => capability.id === id && capability.enabled && capability.healthy);
+      const browser = healthy("browser") && paths.includes("agent-browser/chrome");
+      return { apiVersion: catalog.apiVersion, daemon: "ready", groups: { search: healthy("search"), read: healthy("read"), browser, browserDebug: browser }, browserPathIds: paths };
     } catch (error) {
       if (options.signal.aborted) throw error;
-      return { apiVersion: "2.0.0", daemon: "unavailable", groups: { web: false, browser: false, browserDebug: false }, browserPathIds: [] };
+      return { apiVersion: "2.0.0", daemon: "unavailable", groups: { search: false, read: false, browser: false, browserDebug: false }, browserPathIds: [] };
     }
   }
 
@@ -66,6 +69,8 @@ export class WebxFacadeClient {
       return external("Search results", await client.search({ query: requiredString(value.query, "query"), output: optionalSearchOutput(value.output), domains: optionalStringArray(value.domains, "domains") }, requestOptions));
     }
     if (operation === "web.read") return this.read(client, value, requestOptions);
+    if (operation === "web.readBatch") return external("Batch read results", await client.readBatch(readBatchRequest(value), requestOptions));
+    if (operation === "web.content") return external("Stored content", await client.content(contentRequest(value), requestOptions));
     if (operation === "browser.open") { rejectPresent(value, ["newTab"], operation); return local("Browser session opened", await client.createBrowserSession({ pathId: browserPath(value.pathId), url: optionalString(value.url), visible: optionalBoolean(value.visible), label: optionalString(value.label) }, requestOptions)); }
     if (operation === "browser.tabs") return this.browserTabs(client, value, requestOptions);
     if (operation === "browser.observe") return this.observe(client, value, options, requestOptions);
@@ -104,7 +109,27 @@ export class WebxFacadeClient {
     };
     const content = await client.read(request, options);
     if (save === undefined) return external("Read result", content);
-    return local("Web content saved as Markdown", await saveReadMarkdown(content, requestedUrl, save, this.exportRoot));
+    const completeContent = await this.completeStoredContentForSave(client, content, options);
+    return local("Web content saved as Markdown", await saveReadMarkdown(completeContent, requestedUrl, save, this.exportRoot));
+  }
+
+  private async completeStoredContentForSave(client: WebxClient, content: BoundedContent, options: RequestOptions): Promise<BoundedContent> {
+    const metadata = typeof content.metadata === "object" && content.metadata !== null ? content.metadata as Record<string, unknown> : {};
+    const contentId = typeof metadata.contentId === "string" ? metadata.contentId : undefined;
+    if (contentId === undefined) return content;
+    const chunks: string[] = [];
+    let offset = 0;
+    for (;;) {
+      const part = await client.content({ contentId, offset, limit: 30_000 }, { ...options, idempotencyKey: `${options.idempotencyKey}:save:${offset}` });
+      chunks.push(part.untrustedContent);
+      const next = part.metadata.nextOffset;
+      if (next === null || next === undefined) break;
+      offset = next;
+    }
+    const reader = typeof metadata.reader === "object" && metadata.reader !== null ? metadata.reader as Record<string, unknown> : {};
+    const sourceComplete = reader.sourceComplete;
+    const truncated = sourceComplete === true ? false : sourceComplete === false ? true : reader.complete !== true;
+    return { ...content, untrustedContent: chunks.join(""), truncated, metadata };
   }
 
   private async browserTabs(client: WebxClient, input: Record<string, unknown>, options: RequestOptions): Promise<FacadeResult> {
@@ -178,6 +203,44 @@ function local(summary: string, data: unknown): FacadeResult { return { summary,
 function unavailable(operation: string, reason: string): Error { const error = new Error(`${operation} is unavailable: ${reason}`); error.name = "WebxUnavailableError"; return error; }
 function object(value: unknown): Record<string, unknown> { if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError("operation input must be an object"); return value as Record<string, unknown>; }
 function optionalObject(value: unknown): Readonly<Record<string, unknown>> | undefined { return value === undefined ? undefined : object(value); }
+function readBatchRequest(value: Record<string, unknown>): ReadBatchRequest {
+  for (const key of Object.keys(value)) if (key !== "items") throw new TypeError(`${key} is not supported by web.readBatch`);
+  if (!Array.isArray(value.items) || value.items.length < 1 || value.items.length > 5) throw new TypeError("items must contain 1 to 5 direct read requests");
+  return { items: value.items.map((item, index) => directReadRequest(object(item), `items[${index}]`)) };
+}
+function directReadRequest(value: Record<string, unknown>, name: string): DirectReadRequest {
+  const allowed = new Set(["url", "query", "view", "fields", "itemOffset", "itemLimit", "maxChars", "contentOffset"]);
+  for (const key of Object.keys(value)) if (!allowed.has(key)) throw new TypeError(`${name}.${key} is not supported by web.readBatch`);
+  const url = requiredString(value.url, `${name}.url`);
+  if (!/^https?:\/\//u.test(url) || url.length > 8_192) throw new TypeError(`${name}.url must be a public HTTP(S) URL`);
+  const query = optionalString(value.query);
+  if (query !== undefined && query.length > 8_192) throw new TypeError(`${name}.query must contain at most 8192 characters`);
+  const fields = optionalStringArray(value.fields, `${name}.fields`);
+  if (fields !== undefined && (fields.length > 32 || fields.some((field) => field.length < 1 || field.length > 256))) throw new TypeError(`${name}.fields must contain at most 32 property names`);
+  return {
+    url, query, view: optionalReadView(value.view), fields,
+    itemOffset: boundedOptionalInteger(value.itemOffset, `${name}.itemOffset`, 0, 1_000_000),
+    itemLimit: boundedOptionalInteger(value.itemLimit, `${name}.itemLimit`, 1, 500),
+    maxChars: boundedOptionalInteger(value.maxChars, `${name}.maxChars`, 1, 1_000_000),
+    contentOffset: boundedOptionalInteger(value.contentOffset, `${name}.contentOffset`, 0, 100_000_000),
+  };
+}
+function contentRequest(value: Record<string, unknown>): ContentRequest {
+  for (const key of Object.keys(value)) if (!["contentId", "offset", "limit", "findText", "query"].includes(key)) throw new TypeError(`${key} is not supported by web.content`);
+  const offset = boundedOptionalInteger(value.offset, "offset", 0, 100_000_000);
+  const limit = boundedOptionalInteger(value.limit, "limit", 1, 30_000);
+  const findText = optionalString(value.findText);
+  const query = optionalString(value.query);
+  if (findText !== undefined && query !== undefined || offset !== undefined && (findText !== undefined || query !== undefined)) throw new TypeError("offset mode and focused mode are mutually exclusive");
+  if (findText !== undefined && (findText.length < 1 || findText.length > 8_192)) throw new TypeError("findText must contain 1 to 8192 characters");
+  if (query !== undefined && (query.trim().length < 1 || query.length > 8_192)) throw new TypeError("query must contain 1 to 8192 characters");
+  return { contentId: requiredString(value.contentId, "contentId"), offset, limit, findText, query };
+}
+function boundedOptionalInteger(value: unknown, name: string, minimum: number, maximum: number): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < minimum || value > maximum) throw new TypeError(`${name} must be an integer from ${minimum} to ${maximum}`);
+  return value;
+}
 function readSaveOptions(value: unknown): ReadSaveOptions | undefined {
   if (value === undefined) return undefined;
   const save = object(value);

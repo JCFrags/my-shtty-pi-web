@@ -33,6 +33,7 @@ The focused suite proves:
 - stable origin and adversarial manifest versions and hashes across starts;
 - literal loopback-only listening;
 - representative HTML, SPA, redirect, malformed, bounds, robots, auth, crawl, feed, API, and failure routes;
+- web-only slow, endless, oversized, compressed-expansion, redirect-loop, special-redirect, mixed-DNS, bad-charset, and partial-body cases;
 - reason-coded SSRF, encoded-address, DNS-rebinding, redirect, and browser-subresource inputs;
 - a protected counter of exactly zero for every denial harness input;
 - generated archive traversal, absolute-path, symlink, compression-ratio, and malformed-document fixtures without expansion;
@@ -62,10 +63,32 @@ Main routes:
 | `/api/items` | stable JSON API |
 | `/failure/status/503` | fixed status and retry metadata |
 | `/failure/slow?ms=N` | bounded deterministic delay from 0 to 2000 ms |
+| `/failure/endless` | sends one stable prefix and waits until the client cancels |
+| `/failure/partial-body` | sends 23 of 64 declared bytes and closes the response |
 | `/failure/disconnect` | connection termination |
 | `/protected/counter` | current protected access count |
 | `/protected/resource` | increments the protected access count once per request |
 | `POST /protected/reset` | resets the protected counter for an isolated test |
+
+## Web failure fixture discovery
+
+`GET /web/manifest.json` returns a stable manifest for web-reader and fetch-policy tests. These fixtures use only the loopback origin. Redirect targets use private, link-local, or non-HTTP values, but the fixture tests inspect each `Location` header without following it. Mixed DNS cases use `.invalid` hostnames and documentation addresses. They do not query or change DNS.
+
+Main web failure routes:
+
+| Route | Purpose |
+|---|---|
+| `/bounds/large` | oversized response with exact length and stable hash |
+| `/bounds/compressed` | small gzip wire body with exact expanded bytes |
+| `/redirect/loop/a`, `/redirect/loop/b` | two-hop redirect loop |
+| `/redirect/private-address` | redirect candidate to an RFC 1918 address |
+| `/redirect/link-local` | redirect candidate to the metadata link-local address |
+| `/redirect/non-http` | redirect candidate with a `file:` scheme |
+| `/encoding/unknown` | unknown declared charset with stable UTF-8 bytes |
+| `/encoding/mismatch` | ASCII declaration with stable UTF-8 bytes |
+| `/encoding/malformed-utf8` | UTF-8 declaration with one invalid byte sequence |
+
+`src/web.mjs` exports ordered mixed-DNS answers and all expected outcomes. The endless response ends only when the client cancels or the fixture stops. The fixture stop operation destroys all open loopback sockets.
 
 ## Adversarial fixture discovery
 
