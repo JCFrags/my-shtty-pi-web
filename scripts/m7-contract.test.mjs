@@ -110,7 +110,20 @@ test("cutover plan, apply, and rollback stay inside isolated HOME and restore by
   const releases = join(temporary, "releases"); await mkdir(home);
   const staged = JSON.parse(run(stageScript, ["--source", root, "--release-root", releases, "--test-no-build"], { HOME: home }));
   const evidence = join(temporary, "evidence.json"); await writeFile(evidence, JSON.stringify({ ok: true, mode: "deterministic" }));
-  const { fake, log } = await fakeSystemctl(temporary);
+  const fake = join(temporary, "systemctl"); const log = join(temporary, "systemctl.log"); const rollbackMode = join(temporary, "core-only");
+  await writeFile(fake, `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${log}"
+case "$*" in
+  '--user is-active --quiet '*)
+    if [[ -f "${rollbackMode}" && "$4" =~ ^(pi-browserd|pi-web-crawl|pi-web-docling|pi-web-egress-proxy)\\.service$ ]]; then exit 3; fi
+    exit 0 ;;
+  '--user is-enabled '*) echo enabled; exit 0 ;;
+  '--user stop '*)
+    if [[ -f "${rollbackMode}" && "$*" == *"pi-browserd.service"* ]]; then echo 'inactive optional unit was stopped' >&2; exit 9; fi ;;
+esac
+exit 0
+`);
+  await chmod(fake, 0o755);
   const env = { HOME: home, PI_WEB_PREFIX: prefix, XDG_CONFIG_HOME: config, XDG_STATE_HOME: state };
   const plan = JSON.parse(run(cutoverScript, ["--plan", "--candidate", staged.candidate, "--evidence", evidence, "--test-mode", "--run-id", "contract-run"], env));
   assert.equal(plan.coreIndependentFromOptionalWorkers, true);
@@ -124,6 +137,7 @@ test("cutover plan, apply, and rollback stay inside isolated HOME and restore by
   const journal = JSON.parse(await readFile(join(state, "pi-web/cutovers/contract-run/journal.json"), "utf8"));
   assert.equal(Object.keys(journal.before).length, plan.replacementPaths.length);
   assert.equal(Object.keys(journal.servicesBefore).length, 7);
+  await writeFile(rollbackMode, "optional units are absent after web-core cutover\n");
   run(cutoverScript, ["--rollback", "contract-run", "--systemctl", fake], env);
   assert.equal((await lstat(oldInstall)).isDirectory(), true);
   assert.equal(await readFile(join(oldInstall, "legacy-marker"), "utf8"), "exact old bytes\n");
