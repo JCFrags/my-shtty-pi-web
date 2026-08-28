@@ -324,6 +324,7 @@ async def production_read(
     try:
         reader = pipeline.ReaderPipeline(
             timeout_seconds=30,
+            documents_enabled=True,
             max_download_bytes=1_000_000,
             max_raw_bytes=1_000_000,
             max_redirects=5,
