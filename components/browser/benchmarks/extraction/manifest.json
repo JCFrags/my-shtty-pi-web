@@ -1,0 +1,738 @@
+{
+  "schemaVersion": 1,
+  "limits": {
+    "caseSeconds": 60,
+    "totalSeconds": 300,
+    "inputBytes": 131072,
+    "outputBytes": 65536,
+    "memoryBytes": 4294967296,
+    "diskBytes": 8388608,
+    "processes": 64,
+    "reportBytes": 262144,
+    "cases": 64
+  },
+  "cases": [
+    {
+      "id": "technical-docs",
+      "file": "docs.html",
+      "sha256": "59b5d59218ac1b52137a8ee9ba0d1ece9e6a7243b80ddaef012bb981dbea79ed",
+      "class": "technical-docs",
+      "mediaType": "text/html",
+      "expectedPath": "static-html",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Bounded API Guide",
+        "request budget",
+        "read(url, max_chars=2000)",
+        "65536",
+        "Reference contract"
+      ],
+      "forbiddenMarkers": [
+        "Accept cookies",
+        "Sign in",
+        "Advertisement"
+      ],
+      "structure": {
+        "headings": 2,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 1,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "news-article",
+      "file": "news.html",
+      "sha256": "1cd8a17e460cbaabb9c8e2896b29d7545788ab397d1e607a2865e3b7cf666359",
+      "class": "news-article",
+      "mediaType": "text/html",
+      "expectedPath": "static-html",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "City Opens Solar Lab",
+        "24 workstations",
+        "monthly results",
+        "Read the methods"
+      ],
+      "forbiddenMarkers": [
+        "Accept cookies",
+        "Sign in",
+        "Advertisement"
+      ],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "blog",
+      "file": "blog.html",
+      "sha256": "cdd4825069baaf9baca739478a6e6f9b4998ef2f771747e86118899ecc4e83a6",
+      "class": "blog",
+      "mediaType": "text/html",
+      "expectedPath": "static-html",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Building a Small Parser",
+        "explicit input and output bounds",
+        "tokens = scan(source)",
+        "Source example"
+      ],
+      "forbiddenMarkers": [
+        "Accept cookies",
+        "Sign in",
+        "Advertisement"
+      ],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "product",
+      "file": "product.html",
+      "sha256": "2aa460c6de4f3ed096b3e4045c670391ef7c375bc73c23a39a25ec6f063463b7",
+      "class": "product",
+      "mediaType": "text/html",
+      "expectedPath": "static-html",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Atlas Sensor",
+        "seven days locally",
+        "Specifications",
+        "30 days",
+        "Product manual"
+      ],
+      "forbiddenMarkers": [
+        "Accept cookies",
+        "Sign in",
+        "Advertisement"
+      ],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "wikipedia-like",
+      "file": "wikipedia.html",
+      "sha256": "95d364b463205e2d257cf29ec9d62859989a363cf970eda5bd9f8baa8214a4f5",
+      "class": "wikipedia-like",
+      "mediaType": "text/html",
+      "expectedPath": "static-html",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Bounded extraction",
+        "fixed resource ceilings",
+        "Method",
+        "Corpus design",
+        "References"
+      ],
+      "forbiddenMarkers": [
+        "Accept cookies",
+        "Sign in",
+        "Advertisement"
+      ],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "github-repository",
+      "file": "github-repo.html",
+      "sha256": "c2f4479ef1b49b052567db94504e9988bd837b9465566a7293b79a6cafce82d3",
+      "class": "github-repository",
+      "mediaType": "text/html",
+      "expectedPath": "static-html",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "example / bounded-reader",
+        "offline extraction benchmark",
+        "pnpm benchmark:extraction",
+        "Issues",
+        "License"
+      ],
+      "forbiddenMarkers": [
+        "Accept cookies",
+        "Sign in",
+        "Advertisement"
+      ],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "github-issue",
+      "file": "github-issue.html",
+      "sha256": "b279405f8a53d9503961e70f9f557bfeea4ad3d87f4da3855401b99d0348bf08",
+      "class": "issue-or-pull-request",
+      "mediaType": "text/html",
+      "expectedPath": "static-html",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Keep table headings",
+        "Issue #42",
+        "Region and Value",
+        "North and 42",
+        "candidate patch"
+      ],
+      "forbiddenMarkers": [
+        "Accept cookies",
+        "Sign in",
+        "Advertisement"
+      ],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "hacker-news-thread",
+      "file": "hn-thread.html",
+      "sha256": "303f4b56a4822a1eac63e2c74f8982615456887eac07a621c2ecc499e37d9a93",
+      "class": "hacker-news-like",
+      "mediaType": "text/html",
+      "expectedPath": "static-html",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Ask HN",
+        "user_one",
+        "no network",
+        "user_two",
+        "Fixed time"
+      ],
+      "forbiddenMarkers": [
+        "Guidelines",
+        "FAQ"
+      ],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "forum-thread",
+      "file": "forum-thread.html",
+      "sha256": "f738be1556740bca5b0e98d88133e6b7724b63c06a9fbcfa87d8aeddaf89d5ce",
+      "class": "reddit-forum-like",
+      "mediaType": "text/html",
+      "expectedPath": "static-html",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Stable document benchmarks",
+        "starter_user",
+        "reply_user",
+        "allowed loss",
+        "Reply"
+      ],
+      "forbiddenMarkers": [
+        "Log in",
+        "Get app"
+      ],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "static-html",
+      "file": "static.html",
+      "sha256": "3f55c337ea960d41fbc7812212a0d9a6a0fa05feeeeb5ca4af6049cbb0cca4ab",
+      "class": "static-html",
+      "mediaType": "text/html",
+      "expectedPath": "static-html",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Static Status Page",
+        "All extraction services",
+        "Reader operational",
+        "Converter operational",
+        "History"
+      ],
+      "forbiddenMarkers": [
+        "Accept cookies",
+        "Sign in",
+        "Advertisement"
+      ],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "javascript-shell-fallback",
+      "file": "js-shell.html",
+      "sha256": "27276e37f1e0f72a9f9e8837f711d3752aa7db8f42855703e8411e96b4933eea",
+      "class": "javascript-shell",
+      "mediaType": "text/html",
+      "expectedPath": "markdown-fallback",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Dynamic Documentation",
+        "bounded client API",
+        "client.read"
+      ],
+      "forbiddenMarkers": [
+        "Loading application"
+      ],
+      "structure": {
+        "headings": 2,
+        "codeBlocks": 1,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost.",
+      "fallbackFile": "js-shell.md",
+      "fallbackSha256": "467fa45d531365a1305bb6de1105362632dee6ec6bcce387efe14b05904c71b3"
+    },
+    {
+      "id": "cookie-wall",
+      "file": "cookie-wall.html",
+      "sha256": "2837cee459e90c5a41fcffdb23e027db3e8fbd9ff5da9917e1ee597766f5eb81",
+      "class": "cookie-wall",
+      "mediaType": "text/html",
+      "expectedPath": "render-required",
+      "expectedOutcome": "render-required",
+      "requiredMarkers": [
+        "Privacy choices",
+        "Accept cookies"
+      ],
+      "forbiddenMarkers": [],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "The protected article is unavailable. Keep only bounded challenge evidence."
+    },
+    {
+      "id": "challenge-response",
+      "file": "challenge.html",
+      "sha256": "2ab99d6151189d2699743f2cb24c03e132a046f534262aeb6d966f1f24fe9d2d",
+      "class": "challenge-captcha",
+      "mediaType": "text/html",
+      "expectedPath": "render-required",
+      "expectedOutcome": "render-required",
+      "requiredMarkers": [
+        "Security check",
+        "CAPTCHA challenge"
+      ],
+      "forbiddenMarkers": [],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "The protected content is unavailable. Keep only bounded challenge evidence."
+    },
+    {
+      "id": "json-api",
+      "file": "api.json",
+      "sha256": "c1699659a77dcce33ea25b52923dd4dced2f935562112fa6a7e8b4d956d20ecb",
+      "class": "json-api",
+      "mediaType": "application/json",
+      "expectedPath": "structured-json",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "alpha",
+        "ready",
+        "beta",
+        "bounded"
+      ],
+      "forbiddenMarkers": [],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 2
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost.",
+      "fields": [
+        "id",
+        "name",
+        "status"
+      ]
+    },
+    {
+      "id": "rss-feed",
+      "file": "feed.rss",
+      "sha256": "4a74e01f187cd2a7740bf2d05802afc7a79bc1f7a576fb5544f168271eae66c3",
+      "class": "rss",
+      "mediaType": "application/rss+xml",
+      "expectedPath": "feed",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Reader Updates",
+        "Bounded release",
+        "finite output limits",
+        "Offline fixtures",
+        "local and deterministic"
+      ],
+      "forbiddenMarkers": [],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 2,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "atom-feed",
+      "file": "feed.atom",
+      "sha256": "7b5d1b8450a81bf667d7fe1e343e08dfb6df11c9d57b57e3ef9d47658789950e",
+      "class": "atom",
+      "mediaType": "application/atom+xml",
+      "expectedPath": "feed",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Extraction Notes",
+        "Stable quality report",
+        "boilerplate leakage",
+        "Portable memory measure",
+        "Peak resident set size"
+      ],
+      "forbiddenMarkers": [],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "plain-text",
+      "file": "plain.txt",
+      "sha256": "048d49acc8833d39e832d6069bf83530c0a69a31c6f9d6954db2298b798322b3",
+      "class": "plain-text",
+      "mediaType": "text/plain",
+      "expectedPath": "raw",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Plain Text Operations Note",
+        "raw text path",
+        "local, small, and deterministic"
+      ],
+      "forbiddenMarkers": [],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "negotiated-markdown",
+      "file": "negotiated.md",
+      "sha256": "8400e8498922c075c6e8d0cf6730063062f1aa1f05fb8c6a2c7786ff2b7f58bc",
+      "class": "negotiated-markdown",
+      "mediaType": "text/markdown",
+      "expectedPath": "markdown-negotiation",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Negotiated Markdown Guide",
+        "server-selected Markdown",
+        "pnpm benchmark:extraction",
+        "Review rules"
+      ],
+      "forbiddenMarkers": [],
+      "structure": {
+        "headings": 2,
+        "codeBlocks": 1,
+        "tables": 0,
+        "links": 1,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "oversized-response",
+      "file": "oversized.txt",
+      "sha256": "c31bb8dcb582b65ad03a1780eb1ebf65c95df0dd4d3785478d0f1c0815d834e3",
+      "class": "oversized-response",
+      "mediaType": "text/plain",
+      "expectedPath": "input-limit",
+      "expectedOutcome": "limit-error",
+      "requiredMarkers": [
+        "OVERSIZED_REQUIRED_MARKER"
+      ],
+      "forbiddenMarkers": [],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "The runner must reject all output because the input exceeds 131072 bytes."
+    },
+    {
+      "id": "bad-charset",
+      "file": "bad-charset.html",
+      "sha256": "d25898ed9d0901ea022f91d247ab9885fae260ca160fe4501f0ba3050add89b4",
+      "class": "bad-charset",
+      "mediaType": "text/html",
+      "expectedPath": "static-html",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Café Encoding Note",
+        "naïve",
+        "extraction review"
+      ],
+      "forbiddenMarkers": [],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost.",
+      "charset": "latin-1"
+    },
+    {
+      "id": "redirect-chain",
+      "file": "redirect.html",
+      "sha256": "f1bf17678ca3bf63fa0e3c28b974c163c8a7af0c5284f8391f984374b5e29aa3",
+      "class": "redirect-chain-metadata",
+      "mediaType": "text/html",
+      "expectedPath": "static-html",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Redirect Target",
+        "three-hop redirect chain",
+        "Final resource"
+      ],
+      "forbiddenMarkers": [],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost.",
+      "metadata": {
+        "redirectChain": [
+          "https://one.example/",
+          "https://two.example/",
+          "https://three.example/final"
+        ],
+        "finalUrl": "https://three.example/final"
+      }
+    },
+    {
+      "id": "compressed-content",
+      "file": "compressed.html",
+      "sha256": "cbf74ab088c2c12ea5d4f148b62f82f338cdcb366efeaeffec6502ee08857c4c",
+      "class": "compressed-content-metadata",
+      "mediaType": "text/html",
+      "expectedPath": "static-html",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Compressed Response",
+        "gzip decompression",
+        "raw and decoded byte limits"
+      ],
+      "forbiddenMarkers": [],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost.",
+      "metadata": {
+        "contentEncoding": "gzip",
+        "rawBytes": 142,
+        "decodedBytes": 188
+      }
+    },
+    {
+      "id": "pdf-text",
+      "file": "text.pdf",
+      "sha256": "d7193183f045bf787a0886c01ca9a3dbe7087e879ea6dbac62cc88d2993e6ac7",
+      "class": "pdf-text",
+      "mediaType": "application/pdf",
+      "expectedPath": "document",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Ordinary PDF Guide",
+        "Bounded extraction keeps required content"
+      ],
+      "forbiddenMarkers": [],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Font and page geometry can be lost."
+    },
+    {
+      "id": "pdf-table",
+      "file": "table.pdf",
+      "sha256": "86d037631966a5f56a5e28471ece54afd74a134bd7854d9444794f1663b5eae1",
+      "class": "pdf-table",
+      "mediaType": "application/pdf",
+      "expectedPath": "document",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Regional Metrics",
+        "Region",
+        "Value",
+        "North",
+        "42"
+      ],
+      "forbiddenMarkers": [],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 1,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Exact cell borders can be lost."
+    },
+    {
+      "id": "scanned-pdf",
+      "file": "scanned.pdf",
+      "sha256": "6f14ffcaee98f38e3c2da36e9a9eff0cdeb5518fb9765560102fa08fdc0c01a7",
+      "class": "scanned-pdf",
+      "mediaType": "application/pdf",
+      "expectedPath": "document",
+      "expectedOutcome": "empty-or-error",
+      "requiredMarkers": [],
+      "forbiddenMarkers": [],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "This synthetic image has no embedded text. Empty output is allowed and records the OCR escalation gap."
+    },
+    {
+      "id": "docx",
+      "file": "sample.docx",
+      "sha256": "568db1852b7381914aba3a1c97a86cb40c9839278d2e62111d91e66a7ecf0410",
+      "class": "docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "expectedPath": "document",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Quarterly Operations Brief",
+        "North region",
+        "42 safe deployments"
+      ],
+      "forbiddenMarkers": [],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Word page geometry and style can be lost."
+    },
+    {
+      "id": "pptx",
+      "file": "sample.pptx",
+      "sha256": "03941164255e9aded4e33e5422067ebd563f7323fb761d4025e865d6555eafc9",
+      "class": "pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "expectedPath": "document",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Release Readiness",
+        "All bounded checks passed"
+      ],
+      "forbiddenMarkers": [],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 0,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Slide geometry, transitions, and style can be lost."
+    },
+    {
+      "id": "xlsx",
+      "file": "sample.xlsx",
+      "sha256": "f676fa6f2ff6b7b0f36c4c215b867e83417c4abcd5bd1fd1acafd08f6dd2b88b",
+      "class": "xlsx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "expectedPath": "document",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Region",
+        "Value",
+        "North",
+        "42"
+      ],
+      "forbiddenMarkers": [],
+      "structure": {
+        "headings": 0,
+        "codeBlocks": 0,
+        "tables": 1,
+        "links": 0,
+        "structuredRows": 2
+      },
+      "allowedLoss": "Spreadsheet formulas and cell style can be lost."
+    }
+  ]
+}

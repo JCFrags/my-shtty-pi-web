@@ -1,0 +1,1902 @@
+{
+  "schemaVersion": 1,
+  "manifestSha256": "a17d07603b46fba2fe8958b7a47ea9eeacd0b3c749b5042b0a6c8a9bcc3efb3f",
+  "environment": {
+    "python": "3.13.14",
+    "platform": "linux",
+    "packages": {
+      "trafilatura": "2.1.0",
+      "docling": "2.115.0",
+      "httpx": "0.28.1"
+    },
+    "pdftotext": "pdftotext version 26.01.0"
+  },
+  "limits": {
+    "caseSeconds": 60,
+    "totalSeconds": 300,
+    "inputBytes": 131072,
+    "outputBytes": 65536,
+    "memoryBytes": 4294967296,
+    "diskBytes": 8388608,
+    "processes": 64,
+    "reportBytes": 262144,
+    "cases": 64
+  },
+  "summary": {
+    "passed": 19,
+    "failed": 9,
+    "skipped": 2,
+    "qualityRegressions": []
+  },
+  "results": [
+    {
+      "id": "technical-docs",
+      "class": "technical-docs",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "static-html",
+        "requiredMarkerRetention": {
+          "retained": 4,
+          "total": 5,
+          "markers": {
+            "Bounded API Guide": true,
+            "request budget": true,
+            "read(url, max_chars=2000)": true,
+            "65536": false,
+            "Reference contract": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 3,
+          "markers": {
+            "Accept cookies": false,
+            "Sign in": false,
+            "Advertisement": false
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 2,
+            "required": 2,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 1,
+            "required": 1,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "extractor": "trafilatura"
+        },
+        "outputCharacters": 182,
+        "outputBytes": 182,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 57.91,
+        "peakRssBytesApprox": 89686016,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "news-article",
+      "class": "news-article",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "static-html",
+        "requiredMarkerRetention": {
+          "retained": 4,
+          "total": 4,
+          "markers": {
+            "City Opens Solar Lab": true,
+            "24 workstations": true,
+            "monthly results": true,
+            "Read the methods": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 1,
+          "total": 3,
+          "markers": {
+            "Accept cookies": false,
+            "Sign in": false,
+            "Advertisement": true
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 282,
+        "outputBytes": 282,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 0.439,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "blog",
+      "class": "blog",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "static-html",
+        "requiredMarkerRetention": {
+          "retained": 4,
+          "total": 4,
+          "markers": {
+            "Building a Small Parser": true,
+            "explicit input and output bounds": true,
+            "tokens = scan(source)": true,
+            "Source example": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 3,
+          "markers": {
+            "Accept cookies": false,
+            "Sign in": false,
+            "Advertisement": false
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 263,
+        "outputBytes": 263,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 0.14,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "product",
+      "class": "product",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "static-html",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "Atlas Sensor": true,
+            "seven days locally": true,
+            "Specifications": true,
+            "30 days": true,
+            "Product manual": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 3,
+          "markers": {
+            "Accept cookies": false,
+            "Sign in": false,
+            "Advertisement": false
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 207,
+        "outputBytes": 207,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 0.135,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "wikipedia-like",
+      "class": "wikipedia-like",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "static-html",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "Bounded extraction": true,
+            "fixed resource ceilings": true,
+            "Method": true,
+            "Corpus design": true,
+            "References": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 3,
+          "markers": {
+            "Accept cookies": false,
+            "Sign in": false,
+            "Advertisement": false
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 297,
+        "outputBytes": 297,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 0.126,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "github-repository",
+      "class": "github-repository",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "static-html",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "example / bounded-reader": true,
+            "offline extraction benchmark": true,
+            "pnpm benchmark:extraction": true,
+            "Issues": true,
+            "License": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 1,
+          "total": 3,
+          "markers": {
+            "Accept cookies": false,
+            "Sign in": true,
+            "Advertisement": false
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 193,
+        "outputBytes": 193,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 0.121,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "github-issue",
+      "class": "issue-or-pull-request",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "static-html",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "Keep table headings": true,
+            "Issue #42": true,
+            "Region and Value": true,
+            "North and 42": true,
+            "candidate patch": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 1,
+          "total": 3,
+          "markers": {
+            "Accept cookies": false,
+            "Sign in": true,
+            "Advertisement": false
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 271,
+        "outputBytes": 272,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 0.133,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "hacker-news-thread",
+      "class": "hacker-news-like",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "static-html",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "Ask HN": true,
+            "user_one": true,
+            "no network": true,
+            "user_two": true,
+            "Fixed time": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 2,
+          "total": 2,
+          "markers": {
+            "Guidelines": true,
+            "FAQ": true
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 241,
+        "outputBytes": 241,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 0.116,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "forum-thread",
+      "class": "reddit-forum-like",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "static-html",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "Stable document benchmarks": true,
+            "starter_user": true,
+            "reply_user": true,
+            "allowed loss": true,
+            "Reply": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 2,
+          "total": 2,
+          "markers": {
+            "Log in": true,
+            "Get app": true
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 257,
+        "outputBytes": 257,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 0.124,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "static-html",
+      "class": "static-html",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "static-html",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "Static Status Page": true,
+            "All extraction services": true,
+            "Reader operational": true,
+            "Converter operational": true,
+            "History": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 3,
+          "markers": {
+            "Accept cookies": false,
+            "Sign in": false,
+            "Advertisement": false
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 210,
+        "outputBytes": 210,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 0.113,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "javascript-shell-fallback",
+      "class": "javascript-shell",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "markdown-fallback",
+        "requiredMarkerRetention": {
+          "retained": 3,
+          "total": 3,
+          "markers": {
+            "Dynamic Documentation": true,
+            "bounded client API": true,
+            "client.read": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 1,
+          "markers": {
+            "Loading application": false
+          }
+        },
+        "preservation": {
+          "headings": {
+            "observed": 2,
+            "required": 2,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 1,
+            "required": 1,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {},
+        "outputCharacters": 160,
+        "outputBytes": 160,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 1.717,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "cookie-wall",
+      "class": "cookie-wall",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "render-required",
+        "requiredMarkerRetention": {
+          "retained": 1,
+          "total": 2,
+          "markers": {
+            "Privacy choices": false,
+            "Accept cookies": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "extractor": "trafilatura",
+          "renderRequired": true
+        },
+        "outputCharacters": 60,
+        "outputBytes": 60,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 1.171,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "challenge-response",
+      "class": "challenge-captcha",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "render-required",
+        "requiredMarkerRetention": {
+          "retained": 1,
+          "total": 2,
+          "markers": {
+            "Security check": false,
+            "CAPTCHA challenge": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "extractor": "trafilatura",
+          "renderRequired": true
+        },
+        "outputCharacters": 66,
+        "outputBytes": 66,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 1.091,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "json-api",
+      "class": "json-api",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "structured-json",
+        "requiredMarkerRetention": {
+          "retained": 4,
+          "total": 4,
+          "markers": {
+            "alpha": true,
+            "ready": true,
+            "beta": true,
+            "bounded": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 2,
+          "required": 2,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "returnedItems": 2,
+          "totalItems": 2
+        },
+        "outputCharacters": 114,
+        "outputBytes": 114,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 0.068,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "rss-feed",
+      "class": "rss",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "feed",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "Reader Updates": true,
+            "Bounded release": true,
+            "finite output limits": true,
+            "Offline fixtures": true,
+            "local and deterministic": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 2,
+            "required": 2,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 228,
+        "outputBytes": 228,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 0.153,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "atom-feed",
+      "class": "atom",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "feed",
+        "requiredMarkerRetention": {
+          "retained": 5,
+          "total": 5,
+          "markers": {
+            "Extraction Notes": true,
+            "Stable quality report": true,
+            "boilerplate leakage": true,
+            "Portable memory measure": true,
+            "Peak resident set size": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "extractor": "trafilatura"
+        },
+        "outputCharacters": 195,
+        "outputBytes": 195,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 0.919,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "plain-text",
+      "class": "plain-text",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "raw",
+        "requiredMarkerRetention": {
+          "retained": 3,
+          "total": 3,
+          "markers": {
+            "Plain Text Operations Note": true,
+            "raw text path": true,
+            "local, small, and deterministic": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {},
+        "outputCharacters": 159,
+        "outputBytes": 159,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 0.021,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "negotiated-markdown",
+      "class": "negotiated-markdown",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "markdown-negotiation",
+        "requiredMarkerRetention": {
+          "retained": 4,
+          "total": 4,
+          "markers": {
+            "Negotiated Markdown Guide": true,
+            "server-selected Markdown": true,
+            "pnpm benchmark:extraction": true,
+            "Review rules": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 2,
+            "required": 2,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 1,
+            "required": 1,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 1,
+            "required": 1,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {},
+        "outputCharacters": 191,
+        "outputBytes": 191,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 0.023,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "oversized-response",
+      "class": "oversized-response",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "error",
+        "requiredMarkerRetention": {
+          "retained": 0,
+          "total": 1,
+          "markers": {
+            "OVERSIZED_REQUIRED_MARKER": false
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {},
+        "outputCharacters": 0,
+        "outputBytes": 0,
+        "error": "LimitError: input exceeds 131072 bytes"
+      },
+      "runtime": {
+        "wallMilliseconds": 0.006,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "bad-charset",
+      "class": "bad-charset",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "static-html",
+        "requiredMarkerRetention": {
+          "retained": 3,
+          "total": 3,
+          "markers": {
+            "Café Encoding Note": true,
+            "naïve": true,
+            "extraction review": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 140,
+        "outputBytes": 143,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 0.158,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "redirect-chain",
+      "class": "redirect-chain-metadata",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "static-html",
+        "requiredMarkerRetention": {
+          "retained": 3,
+          "total": 3,
+          "markers": {
+            "Redirect Target": true,
+            "three-hop redirect chain": true,
+            "Final resource": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {
+          "redirectChain": true,
+          "finalUrl": true
+        },
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 136,
+        "outputBytes": 136,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 0.122,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "compressed-content",
+      "class": "compressed-content-metadata",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "static-html",
+        "requiredMarkerRetention": {
+          "retained": 3,
+          "total": 3,
+          "markers": {
+            "Compressed Response": true,
+            "gzip decompression": true,
+            "raw and decoded byte limits": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {
+          "contentEncoding": true,
+          "rawBytes": true,
+          "decodedBytes": true
+        },
+        "adapterEvidence": {
+          "extractor": "stdlib-fallback"
+        },
+        "outputCharacters": 146,
+        "outputBytes": 146,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 0.106,
+        "peakRssBytesApprox": 89882624,
+        "temporaryDiskBytes": 0,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "pdf-text",
+      "class": "pdf-text",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "document",
+        "requiredMarkerRetention": {
+          "retained": 2,
+          "total": 2,
+          "markers": {
+            "Ordinary PDF Guide": true,
+            "Bounded extraction keeps required content": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "documentConverter": "docling"
+        },
+        "outputCharacters": 61,
+        "outputBytes": 61,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 4002.046,
+        "peakRssBytesApprox": 2258223104,
+        "temporaryDiskBytes": 651,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "pdf-table",
+      "class": "pdf-table",
+      "adapter": "current",
+      "status": "failed",
+      "quality": {
+        "outcome": "fail",
+        "path": "document",
+        "requiredMarkerRetention": {
+          "retained": 4,
+          "total": 5,
+          "markers": {
+            "Regional Metrics": false,
+            "Region": true,
+            "Value": true,
+            "North": true,
+            "42": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 3,
+            "required": 1,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 2,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "documentConverter": "docling"
+        },
+        "outputCharacters": 68,
+        "outputBytes": 68,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 863.059,
+        "peakRssBytesApprox": 2580275200,
+        "temporaryDiskBytes": 1357,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "scanned-pdf",
+      "class": "scanned-pdf",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "document",
+        "requiredMarkerRetention": {
+          "retained": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "documentConverter": "docling"
+        },
+        "outputCharacters": 0,
+        "outputBytes": 0,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 852.974,
+        "peakRssBytesApprox": 2799853568,
+        "temporaryDiskBytes": 1964,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "docx",
+      "class": "docx",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "document",
+        "requiredMarkerRetention": {
+          "retained": 3,
+          "total": 3,
+          "markers": {
+            "Quarterly Operations Brief": true,
+            "North region": true,
+            "42 safe deployments": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "documentConverter": "docling"
+        },
+        "outputCharacters": 71,
+        "outputBytes": 71,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 54.421,
+        "peakRssBytesApprox": 2799853568,
+        "temporaryDiskBytes": 3170,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "pptx",
+      "class": "pptx",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "document",
+        "requiredMarkerRetention": {
+          "retained": 2,
+          "total": 2,
+          "markers": {
+            "Release Readiness": true,
+            "All bounded checks passed": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 0,
+          "required": 0,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "documentConverter": "docling"
+        },
+        "outputCharacters": 45,
+        "outputBytes": 45,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 55.192,
+        "peakRssBytesApprox": 2799853568,
+        "temporaryDiskBytes": 103782,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "xlsx",
+      "class": "xlsx",
+      "adapter": "current",
+      "status": "passed",
+      "quality": {
+        "outcome": "pass",
+        "path": "document",
+        "requiredMarkerRetention": {
+          "retained": 4,
+          "total": 4,
+          "markers": {
+            "Region": true,
+            "Value": true,
+            "North": true,
+            "42": true
+          }
+        },
+        "forbiddenBoilerplateLeakage": {
+          "leaked": 0,
+          "total": 0,
+          "markers": {}
+        },
+        "preservation": {
+          "headings": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "codeBlocks": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "tables": {
+            "observed": 3,
+            "required": 1,
+            "pass": true
+          },
+          "links": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          }
+        },
+        "structuredRowCompleteness": {
+          "observed": 2,
+          "required": 2,
+          "pass": true
+        },
+        "metadataRetention": {},
+        "adapterEvidence": {
+          "documentConverter": "docling"
+        },
+        "outputCharacters": 68,
+        "outputBytes": 68,
+        "error": null
+      },
+      "runtime": {
+        "wallMilliseconds": 53.942,
+        "peakRssBytesApprox": 2799853568,
+        "temporaryDiskBytes": 105897,
+        "processesApprox": 1
+      }
+    },
+    {
+      "id": "optional:secondary-html",
+      "class": "optional-adapter",
+      "adapter": "secondary-html",
+      "status": "skipped",
+      "quality": {
+        "reason": "adapter command is not configured"
+      }
+    },
+    {
+      "id": "optional:alternate-pdf",
+      "class": "optional-adapter",
+      "adapter": "alternate-pdf",
+      "status": "skipped",
+      "quality": {
+        "reason": "adapter command is not configured"
+      }
+    }
+  ]
+}

@@ -103,3 +103,14 @@ cargo test --workspace
 ```
 
 Generated dependencies and build output are not source and must not be committed.
+
+### Offline extraction benchmark
+
+Run the deterministic extraction corpus and its contract tests from the repository root:
+
+```bash
+pnpm test:extraction
+pnpm benchmark:extraction
+```
+
+The benchmark uses local fixtures only. It compares current quality with the reviewed baseline. See [`components/browser/benchmarks/extraction/README.md`](components/browser/benchmarks/extraction/README.md) for limits, metrics, optional adapter slots, and baseline review steps.
