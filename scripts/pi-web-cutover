@@ -294,7 +294,9 @@ def main() -> int:
         install_signal_traps()
         current_state = service_state(args.systemctl)
         try:
-            run_systemctl(args.systemctl, ["stop", *UNITS])
+            active_units = [unit for unit in UNITS if current_state[unit]["active"]]
+            if active_units:
+                run_systemctl(args.systemctl, ["stop", *active_units])
             affected = set(journal.get("completedPaths", []))
             if journal.get("inProgressPath"):
                 affected.add(journal["inProgressPath"])
