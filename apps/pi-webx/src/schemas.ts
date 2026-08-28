@@ -42,6 +42,17 @@ export const WebReadSchema = Type.Object({
   }, { ...strict, description: "Save one extracted page as UTF-8 Markdown and return compact file metadata instead of the body. Not compatible with structured JSON projection or linked crawling." })),
 }, strict);
 
+const contentBase = {
+  contentId: Type.String({ minLength: 36, maxLength: 36, pattern: "^cnt_[A-Za-z0-9_-]{32}$", description: "Opaque content ID returned by web_read or web_content." }),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 30_000, description: "Maximum normalized-content characters to return. Default: 30000." })),
+};
+
+export const WebContentSchema = Type.Union([
+  Type.Object({ ...contentBase, offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 100_000_000, description: "Exact character offset in the stored normalized content. Default: 0." })) }, strict),
+  Type.Object({ ...contentBase, findText: Type.String({ minLength: 1, maxLength: 8192, description: "Exact case-insensitive text to locate. Returns bounded context around the match." }) }, strict),
+  Type.Object({ ...contentBase, query: Type.String({ minLength: 1, maxLength: 8192, description: "Topic query for a bounded focused passage from the stored content." }) }, strict),
+], { description: "Retrieve normalized content by opaque ID without a network request. Exact offset mode and focused findText or query mode are mutually exclusive." });
+
 export const BrowserOpenSchema = Type.Object({
   url: Type.Optional(Type.String({ minLength: 1, maxLength: 8192, pattern: "^https?://", description: "Optional initial public HTTP(S) URL. Omit to open a blank owned session." })),
   pathId: Type.Optional(StringEnum(["agent-browser/chrome", "pinchtab/chrome"] as const, { description: "Browser path. Omit for the required agent-browser/chrome default. Use pinchtab/chrome only when capabilities report it." })),

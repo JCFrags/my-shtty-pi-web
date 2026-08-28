@@ -110,6 +110,27 @@ export interface ReadRequest {
   readonly visibility?: Visibility;
 }
 
+export interface ContentRequest {
+  readonly contentId: string;
+  readonly offset?: number;
+  readonly limit?: number;
+  readonly findText?: string;
+  readonly query?: string;
+}
+
+export interface StoredContent extends BoundedContent {
+  readonly metadata: {
+    readonly contentId: string;
+    readonly mode: "exact" | "findText" | "query";
+    readonly totalCharacters: number;
+    readonly returnedCharacters: number;
+    readonly offset?: number;
+    readonly nextOffset?: number | null;
+    readonly matchOffset?: number;
+    readonly expiresAt: string;
+  };
+}
+
 export interface RangeReadRequest {
   readonly url: string;
   readonly offset: number;

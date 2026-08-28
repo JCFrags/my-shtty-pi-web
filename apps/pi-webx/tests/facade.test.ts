@@ -10,6 +10,7 @@ import {
   BrowserObserveSchema,
   BrowserOpenSchema,
   BrowserTabsSchema,
+  WebContentSchema,
   WebReadSchema,
   WebSearchSchema,
 } from "../src/schemas.js";
@@ -99,7 +100,7 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   const sdk = new MockSdk();
   const fx = harness(sdk);
   assert.deepEqual(fx.tools.map((tool) => tool.name), [
-    "web_search", "web_read",
+    "web_search", "web_read", "web_content",
     "browser_open", "browser_tabs", "browser_observe", "browser_act", "browser_debug",
   ]);
   assert.deepEqual([...fx.commands.keys()], ["web"]);
@@ -193,6 +194,12 @@ test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "/tmp/page.md" } }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "page.txt" } }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "page.md", overwrite: "yes" } }), false);
+  const contentId = `cnt_${"x".repeat(32)}`;
+  assert.equal(Value.Check(WebContentSchema, { contentId, offset: 10, limit: 100 }), true);
+  assert.equal(Value.Check(WebContentSchema, { contentId, findText: "needle", limit: 100 }), true);
+  assert.equal(Value.Check(WebContentSchema, { contentId, query: "topic", limit: 100 }), true);
+  assert.equal(Value.Check(WebContentSchema, { contentId, offset: 10, query: "topic" }), false);
+  assert.equal(Value.Check(WebContentSchema, { contentId, limit: 30_001 }), false);
   assert.equal(Value.Check(BrowserOpenSchema, { pathId: "agent-browser/chrome" }), true);
   assert.equal(Value.Check(BrowserOpenSchema, { newTab: true }), false);
   assert.equal(Value.Check(BrowserTabsSchema, { action: "discard-tab" }), false);
@@ -356,6 +363,16 @@ test("output compaction and visual transfer have deterministic bounds", () => {
   assert.match(JSON.stringify(continued.content), /Content truncated/);
   assert.doesNotMatch(JSON.stringify(continued.content), /artifactId|pageId|saved=|recallable=/);
 
+  const visibleId = `cnt_${"z".repeat(32)}`;
+  const hostileTitle = "hostile-title-".repeat(10_000);
+  const titled = presentResult({ summary: "read", title: hostileTitle, data: {
+    title: hostileTitle, url: "https://example.test/long", untrustedContent: "body", truncated: true,
+    metadata: { contentId: visibleId, reader: { contentId: visibleId, returnedCharacters: 4, totalCharacters: 40_000, nextStoredOffset: 4 } },
+  } });
+  const titledText = titled.content[0]?.type === "text" ? titled.content[0].text : "";
+  assert.ok(titledText.length <= MAX_MODEL_CHARS);
+  assert.match(titledText, new RegExp(visibleId));
+
   const paged = presentResult({ summary: "read", data: {
     title: "API rows", url: "https://example.test/api", untrustedContent: "[]", truncated: false,
     metadata: { reader: { returnedItems: 5, matchedItems: 10, nextItemOffset: 5, returnedCharacters: 2, totalCharacters: 2, complete: true } },
@@ -375,8 +392,9 @@ test("output compaction and visual transfer have deterministic bounds", () => {
 
   const completePage = "main-content-".repeat(5_000);
   const complete = presentResult({ summary: "read", data: { title: "Full page", url: "https://example.test/full", untrustedContent: completePage, truncated: false } });
-  assert.ok((complete.content[0]?.type === "text" ? complete.content[0].text : "").includes(completePage));
-  assert.doesNotMatch(JSON.stringify(complete.content), /truncated by Pi WebX facade/);
+  const completeText = complete.content[0]?.type === "text" ? complete.content[0].text : "";
+  assert.ok(completeText.length <= MAX_MODEL_CHARS);
+  assert.match(completeText, /truncated by Pi WebX facade/);
 
   const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(100)]);
   const image = presentResult({

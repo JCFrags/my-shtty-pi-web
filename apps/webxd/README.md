@@ -36,6 +36,12 @@ Optional `domains` and query `site:` values are intersected. Conflicting constra
 
 Optional `output: "extracts"` reads top distinct pages in groups of four. It tries at most eight pages and returns at most four short contiguous query-focused passages. A passage is returned only after a successful page read. A search-engine snippet is never substituted for a failed extract. Failed reads are skipped and reported through partial metadata. Search never follows page links or synthesizes a cross-source answer. A total provider failure is a retryable error. A healthy search with no result remains a successful empty result.
 
+## Normalized-content store
+
+Direct reads store only normalized extracted text. They never store original response bytes or document base64 as the normalized artifact. Content IDs are random and opaque. The store has positive limits for total bytes, entry count, item bytes, and retention. It prunes on insertion and startup. Files default to `$XDG_CACHE_HOME/pi-web/content`; `WEBX_CONTENT_DIR` can select another directory.
+
+The `/v1/content` route supports exact offset retrieval and focused `findText` or `query` retrieval. These modes are mutually exclusive. The route reads only the store and never fetches a URL.
+
 ## Short-lived cache
 
 Search responses, including extract output, use a 15-minute cache. Direct `web_read` results use a six-hour cache. The cache keeps up to 512 recent entries in RAM and up to 10 GiB on SSD. Files default to `$XDG_CACHE_HOME/pi-web/responses` with user-only permissions. `WEBX_CACHE_DIR` can select another directory. Cache failures never block a live request.
@@ -44,6 +50,6 @@ This cache reduces repeated search-provider and website traffic. It is not a dur
 
 ## Public routes
 
-The Pi-facing authority covers search, read, research, capabilities, browser workspace, and browser create/list/get/observe/frame/act/debug/control/cancel/close-session/close-tab. Page-library functions are reserved for a future separate research-archive extension. Internal artifact routes support bounded component transfers and are not Pi tools.
+The Pi-facing authority covers search, read, stored normalized content, capabilities, browser workspace, and browser create/list/get/observe/frame/act/debug/control/cancel/close-session/close-tab. Page-library functions are reserved for a future separate research-archive extension. Internal artifact routes support bounded component transfers and are not Pi tools.
 
 Page history search returns explicit `501 unavailable`. Safe browser debug permits `console`, `network`, `html`, `pdf`, `record-start`, and `record-stop`. Secret-bearing `evaluate`, `cookies`, and `storage` operations are refused.

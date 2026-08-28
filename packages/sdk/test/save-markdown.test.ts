@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import { lstat, mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { rm } from "node:fs/promises";
+import { WebxFacadeClient } from "../src/facade.js";
 import { renderSavedMarkdown, saveReadMarkdown, validateRelativeMarkdownPath } from "../src/save-markdown.js";
 import type { BoundedContent } from "../src/types.js";
 
@@ -61,6 +62,19 @@ describe("Markdown save", () => {
     await writeFile(join(exportRoot, "target.md"), "old");
     await symlink(join(exportRoot, "target.md"), join(exportRoot, "alias.md"));
     await expect(saveReadMarkdown(content(), "https://example.test/", { path: "alias.md", overwrite: true }, exportRoot)).rejects.toThrow("symbolic link");
+  });
+
+  it("marks a complete source as complete after exact stored pagination reconstructs it", async () => {
+    const contentId = `cnt_${"x".repeat(32)}`;
+    const initial = content({ untrustedContent: "first passage", truncated: true, metadata: { contentId, reader: { complete: false, sourceComplete: true } } });
+    const client = { content: vi.fn(async () => ({ ...content({ untrustedContent: "complete stored body" }), metadata: { contentId, mode: "exact" as const, totalCharacters: 20, returnedCharacters: 20, offset: 0, nextOffset: null, expiresAt: "2026-08-28T00:00:00.000Z" } })) };
+    const facade = new WebxFacadeClient("/tmp/unused-webx.sock");
+    const reconstruct = facade as unknown as { completeStoredContentForSave(client: unknown, value: BoundedContent, options: { idempotencyKey: string }): Promise<BoundedContent> };
+    const reconstructed = await reconstruct.completeStoredContentForSave(client, initial, { idempotencyKey: "save-complete" });
+    const exportRoot = await root();
+    const result = await saveReadMarkdown(reconstructed, "https://example.test/page", { path: "complete.md" }, exportRoot);
+    expect(result.complete).toBe(true);
+    expect(await readFile(result.path, "utf8")).toContain("complete: true\n---\n\ncomplete stored body");
   });
 
   it("marks a bounded extraction as incomplete", async () => {

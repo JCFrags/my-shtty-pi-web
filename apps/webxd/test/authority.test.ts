@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebxAuthority } from "../src/authority.js";
+import { NormalizedContentStore } from "../src/content-store.js";
 import { PUBLIC_SOURCES } from "../src/fixtures.js";
 import type { AuthorityActor, BrowserDaemonPort } from "../src/ports.js";
 
@@ -159,7 +160,8 @@ describe("WebxAuthority", () => {
         truncated: false,
       }), { status: 200, headers: { "content-type": "application/json" } });
     }));
-    const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888", readerUrl: "http://127.0.0.1:8787" });
+    const contentStore = new NormalizedContentStore();
+    const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888", readerUrl: "http://127.0.0.1:8787", contentStore });
     const result = await call(instance, actor(), "POST", "/v1/search", { query: "Product feature support", output: "extracts", domains: ["docs.example.org"] }, "extract-search");
     const body = result.body as { hits: Array<{ snippet: string }>; metadata: { searches: number; pagesRead: number; readAttempts: number; partial: boolean } };
     expect(result.status).toBe(200);
@@ -169,6 +171,7 @@ describe("WebxAuthority", () => {
     expect(requests.filter((item) => item.url.includes("/search"))).toHaveLength(1);
     expect(requests.filter((item) => item.url.includes(":8787/"))).toHaveLength(6);
     expect(maximumReaders).toBe(4);
+    expect(await contentStore.stats()).toEqual({ entries: 0, bytes: 0 });
   });
 
   it("reads a bounded byte range into an integrity-checked owner artifact", async () => {
@@ -349,6 +352,65 @@ describe("WebxAuthority", () => {
     expect(response).toMatchObject({ status: 200, body: { capabilities: [
       { id: "search", healthy: true }, { id: "read", healthy: false }, { id: "browser", healthy: true },
     ] } });
+  });
+
+  it("stores normalized read content and retrieves exact or focused passages without refetching", async () => {
+    const normalized = `${"prefix ".repeat(5_000)}UNIQUE NEEDLE ${"suffix ".repeat(5_000)}`;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ url: "https://docs.example/page", title: "Stored page", content: normalized, truncated: false, metadata: { totalCharacters: normalized.length } }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const read = await call(instance, actor(), "POST", "/v1/read", { url: "https://docs.example/page" }, "stored-read-001");
+    expect(read).toMatchObject({ status: 200, body: { truncated: true, metadata: { contentId: expect.stringMatching(/^cnt_/u), reader: { returnedCharacters: 30_000, nextStoredOffset: 30_000 } } } });
+    const readBody = read.body as { metadata: { contentId: string } };
+    const exact = await call(instance, actor(), "POST", "/v1/content", { contentId: readBody.metadata.contentId, offset: 30_000, limit: 100 }, "stored-exact-001");
+    expect(exact).toMatchObject({ status: 200, body: { metadata: { mode: "exact", offset: 30_000, returnedCharacters: 100 } } });
+    const focused = await call(instance, actor(), "POST", "/v1/content", { contentId: readBody.metadata.contentId, findText: "unique needle", limit: 200 }, "stored-focus-001");
+    expect(focused).toMatchObject({ status: 200, body: { untrustedContent: expect.stringContaining("UNIQUE NEEDLE"), metadata: { mode: "findText", matchOffset: expect.any(Number) } } });
+    const queried = await call(instance, actor(), "POST", "/v1/content", { contentId: readBody.metadata.contentId, query: "unique needle", limit: 200 }, "stored-query-001");
+    expect(queried).toMatchObject({ status: 200, body: { untrustedContent: expect.stringContaining("UNIQUE NEEDLE"), metadata: { mode: "query" } } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces a cached read whose owned stored content was evicted", async () => {
+    let sequence = 0;
+    const contentStore = new NormalizedContentStore({ maxEntries: 1, nextId: () => `cnt_${(++sequence).toString(36).padStart(32, "a")}` });
+    const sources = [
+      { hitId: "one", ownerPrincipalId: "principal-a", title: "One", url: "https://fixture.invalid/one", content: "first body", visibility: "public" as const },
+      { hitId: "two", ownerPrincipalId: "principal-a", title: "Two", url: "https://fixture.invalid/two", content: "second body", visibility: "public" as const },
+    ];
+    const instance = new WebxAuthority({ browser: browser(), sources, clock: { now: () => "2026-08-27T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, contentStore });
+    const first = await call(instance, actor(), "POST", "/v1/read", { url: sources[0].url }, "cache-eviction-1");
+    const oldId = (first.body as { metadata: { contentId: string } }).metadata.contentId;
+    await call(instance, actor(), "POST", "/v1/read", { url: sources[1].url }, "cache-eviction-2");
+    const replacement = await call(instance, actor(), "POST", "/v1/read", { url: sources[0].url }, "cache-eviction-3");
+    const newId = (replacement.body as { metadata: { contentId: string } }).metadata.contentId;
+    expect(newId).not.toBe(oldId);
+    expect(await call(instance, actor(), "POST", "/v1/content", { contentId: newId }, "cache-eviction-content")).toMatchObject({ status: 200, body: { untrustedContent: "first body" } });
+  });
+
+  it("acquires complete structured rows when maxChars is omitted", async () => {
+    const projected = JSON.stringify([{ id: 1, value: `${"x".repeat(40_000)}ROW-END` }]);
+    let readerRequest: { maxChars?: number; fields?: string[]; itemLimit?: number } = {};
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      readerRequest = JSON.parse(String(init?.body)) as typeof readerRequest;
+      return new Response(JSON.stringify({ url: "https://api.example/rows", title: "Rows", content: projected, truncated: false, metadata: { returnedItems: 1, totalItems: 1 } }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const read = await call(instance, actor(), "POST", "/v1/read", { url: "https://api.example/rows", fields: ["id", "value"], itemLimit: 1 }, "structured-complete");
+    expect(readerRequest).toMatchObject({ maxChars: 1_000_000, fields: ["id", "value"], itemLimit: 1 });
+    const contentId = (read.body as { metadata: { contentId: string } }).metadata.contentId;
+    const tail = await call(instance, actor(), "POST", "/v1/content", { contentId, offset: 30_000, limit: 20_000 }, "structured-tail");
+    expect((tail.body as { untrustedContent: string }).untrustedContent).toContain("ROW-END");
+  });
+
+  it("validates stored-content modes and hides missing or other-owner IDs", async () => {
+    const instance = authority();
+    const read = await call(instance, actor(), "POST", "/v1/read", { url: "https://fixture.invalid/webx" }, "content-validation-read");
+    const contentId = (read.body as { metadata: { contentId: string } }).metadata.contentId;
+    expect(await call(instance, actor(), "POST", "/v1/content", { contentId, offset: 0, query: "webx" }, "content-invalid-mode")).toMatchObject({ status: 400, body: { code: "invalid-request" } });
+    expect(await call(instance, actor(), "POST", "/v1/content", { contentId, limit: 30_001 }, "content-invalid-limit")).toMatchObject({ status: 400, body: { code: "invalid-request" } });
+    expect(await call(instance, actor("other"), "POST", "/v1/content", { contentId }, "content-other-owner")).toMatchObject({ status: 404, body: { code: "content-not-found" } });
+    expect(await call(instance, actor(), "POST", "/v1/content", { contentId: `cnt_${"x".repeat(32)}` }, "content-missing")).toMatchObject({ status: 404, body: { code: "content-not-found" } });
   });
 
   it("reports response limits and cancellation without fallback", async () => {
