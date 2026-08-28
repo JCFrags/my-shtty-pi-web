@@ -77,6 +77,32 @@ test("smoke blocks Python bytecode writes and plan accepts the unchanged candida
   assert.equal(plan.treeSha256, staged.treeSha256);
 });
 
+test("installed Python units cannot change a candidate before a plan after rollback", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "webx-m7-installed-python-"));
+  const home = join(temporary, "home"); const prefix = join(home, ".local"); const config = join(home, ".config"); const state = join(home, ".state");
+  await mkdir(home);
+  const staged = JSON.parse(run(stageScript, ["--source", root, "--release-root", join(temporary, "releases"), "--test-no-build"], { HOME: home }));
+  const packageRoot = join(staged.candidate, "components/browser/services/reader/src");
+  const smoked = runResult("/usr/bin/python3", ["-c", "import pi_web_reader"], { PYTHONPATH: packageRoot, PYTHONDONTWRITEBYTECODE: "1" });
+  assert.equal(smoked.status, 0, smoked.stderr);
+  const evidence = join(temporary, "evidence.json"); await writeFile(evidence, JSON.stringify({ ok: true, mode: "deterministic" }));
+  const { fake } = await fakeSystemctl(temporary);
+  const env = { HOME: home, PI_WEB_PREFIX: prefix, XDG_CONFIG_HOME: config, XDG_STATE_HOME: state };
+  const firstPlan = JSON.parse(run(cutoverScript, ["--plan", "--candidate", staged.candidate, "--evidence", evidence, "--test-mode"], env));
+  assert.equal(firstPlan.treeSha256, staged.treeSha256);
+  run(cutoverScript, ["--apply", "--candidate", staged.candidate, "--evidence", evidence, "--test-mode", "--run-id", "python-integrity", "--systemctl", fake], env);
+  const pythonUnits = ["pi-web-reader.service", "pi-web-docling.service", "pi-web-crawl.service", "pi-web-egress-proxy.service"];
+  for (const unit of pythonUnits) assert.match(await readFile(join(config, "systemd/user", unit), "utf8"), /^Environment=PYTHONDONTWRITEBYTECODE=1$/mu);
+  const readerUnit = await readFile(join(config, "systemd/user/pi-web-reader.service"), "utf8");
+  const unitEnvironment = Object.fromEntries([...readerUnit.matchAll(/^Environment=([^=]+)=(.*)$/gmu)].map((match) => [match[1], match[2]]));
+  const launched = runResult("/usr/bin/python3", ["-c", "import pi_web_reader"], { ...unitEnvironment, PYTHONPATH: packageRoot });
+  assert.equal(launched.status, 0, launched.stderr);
+  await assert.rejects(lstat(join(packageRoot, "pi_web_reader/__pycache__")));
+  run(cutoverScript, ["--rollback", "python-integrity", "--systemctl", fake], env);
+  const secondPlan = JSON.parse(run(cutoverScript, ["--plan", "--candidate", staged.candidate, "--evidence", evidence, "--test-mode"], env));
+  assert.equal(secondPlan.treeSha256, staged.treeSha256);
+});
+
 test("cutover plan, apply, and rollback stay inside isolated HOME and restore bytes", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "webx-m7-cutover-"));
   const home = join(temporary, "home"); const prefix = join(home, ".local"); const config = join(home, ".config"); const state = join(home, ".state");
