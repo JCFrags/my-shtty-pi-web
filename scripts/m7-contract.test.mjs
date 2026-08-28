@@ -61,6 +61,22 @@ test("smoke contract has unique candidate paths, finite ports, and evidence boun
   assert.match(smoke, /document-fail/);
 });
 
+test("smoke blocks Python bytecode writes and plan accepts the unchanged candidate", async () => {
+  const smoke = await readFile(smokeScript, "utf8");
+  assert.equal((smoke.match(/PYTHONDONTWRITEBYTECODE: "1"/gu) ?? []).length, 2);
+  const temporary = await mkdtemp(join(tmpdir(), "webx-m7-bytecode-"));
+  const home = join(temporary, "home"); const releases = join(temporary, "releases");
+  await mkdir(home);
+  const staged = JSON.parse(run(stageScript, ["--source", root, "--release-root", releases, "--test-no-build"], { HOME: home }));
+  const packageRoot = join(staged.candidate, "components/browser/services/reader/src");
+  const imported = runResult("/usr/bin/python3", ["-c", "import pi_web_reader"], { PYTHONPATH: packageRoot, PYTHONDONTWRITEBYTECODE: "1" });
+  assert.equal(imported.status, 0, imported.stderr);
+  await assert.rejects(lstat(join(packageRoot, "pi_web_reader/__pycache__")));
+  const evidence = join(temporary, "evidence.json"); await writeFile(evidence, JSON.stringify({ ok: true, mode: "deterministic" }));
+  const plan = JSON.parse(run(cutoverScript, ["--plan", "--candidate", staged.candidate, "--evidence", evidence, "--test-mode"], { HOME: home }));
+  assert.equal(plan.treeSha256, staged.treeSha256);
+});
+
 test("cutover plan, apply, and rollback stay inside isolated HOME and restore bytes", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "webx-m7-cutover-"));
   const home = join(temporary, "home"); const prefix = join(home, ".local"); const config = join(home, ".config"); const state = join(home, ".state");

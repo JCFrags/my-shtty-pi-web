@@ -170,7 +170,7 @@ async function deterministic() {
   });
   fixture.listen(0, "127.0.0.1"); await once(fixture, "listening");
   const fixtureAddress = fixture.address(); assert(fixtureAddress && typeof fixtureAddress !== "string"); fixturePort = fixtureAddress.port; origin = `http://fixture.invalid:${fixturePort}`;
-  const common = { ...process.env, XDG_RUNTIME_DIR: runtime, XDG_CACHE_HOME: cache, XDG_STATE_HOME: stateBase, WEBXD_SOCKET: socket, WEBX_CACHE_DIR: cache, WEBX_CONTENT_DIR: content };
+  const common = { ...process.env, PYTHONDONTWRITEBYTECODE: "1", XDG_RUNTIME_DIR: runtime, XDG_CACHE_HOME: cache, XDG_STATE_HOME: stateBase, WEBXD_SOCKET: socket, WEBX_CACHE_DIR: cache, WEBX_CONTENT_DIR: content };
   const { port: readerPort } = await startReader(common, { PI_WEB_TEST_LOOPBACK_ORIGIN: origin, PI_WEB_DOCLING_URL: "http://127.0.0.1:1/", PI_WEB_HTTP_TIMEOUT_SECONDS: "5" });
   launch(process.execPath, [join(candidate, "apps/webxd/dist/apps/webxd/src/main.js")], { ...common, WEBX_SEARX_URL: `http://127.0.0.1:${fixturePort}`, WEBX_READER_URL: `http://127.0.0.1:${readerPort}`, WEBX_CRAWL_URL: "http://127.0.0.1:1/", BROWSERD_SOCKET: join(runtime, "absent-browser.sock") });
   for (let attempt = 0; attempt < 100; attempt += 1) { try { await stat(socket); break; } catch { await new Promise((done) => setTimeout(done, 100)); } }
@@ -218,7 +218,7 @@ async function deterministic() {
 async function liveCore() {
   const deterministicOk = checks.every((check) => check.ok === true);
   record("deterministic gate before live mode", deterministicOk);
-  const common = { ...process.env, XDG_RUNTIME_DIR: runtime, XDG_CACHE_HOME: cache, XDG_STATE_HOME: stateBase, WEBXD_SOCKET: socket, WEBX_CACHE_DIR: cache, WEBX_CONTENT_DIR: content };
+  const common = { ...process.env, PYTHONDONTWRITEBYTECODE: "1", XDG_RUNTIME_DIR: runtime, XDG_CACHE_HOME: cache, XDG_STATE_HOME: stateBase, WEBXD_SOCKET: socket, WEBX_CACHE_DIR: cache, WEBX_CONTENT_DIR: content };
   const { port: readerPort } = await startReader(common, { PI_WEB_HTTP_TIMEOUT_SECONDS: "45" });
   launch(process.execPath, [join(candidate, "apps/webxd/dist/apps/webxd/src/main.js")], { ...common, WEBX_SEARX_URL: process.env.WEBX_LIVE_SEARX_URL ?? "http://127.0.0.1:8888", WEBX_READER_URL: `http://127.0.0.1:${readerPort}`, BROWSERD_SOCKET: join(runtime, "absent-browser.sock") });
   for (let attempt = 0; attempt < 100; attempt += 1) { try { await stat(socket); break; } catch { await new Promise((done) => setTimeout(done, 100)); } }
