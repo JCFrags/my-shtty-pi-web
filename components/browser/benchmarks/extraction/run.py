@@ -577,11 +577,13 @@ def compare_baseline(path: Path, quality_rows: list[dict[str, Any]]) -> list[str
 
 def candidate_decision(
     results: list[dict[str, Any]],
-    candidate: str = REVISED_HTML_ADAPTER,
+    candidate: str,
+    expected_classes: set[str],
 ) -> dict[str, Any]:
     """Apply the M7 replacement gate without changing the M6 absolute gate."""
     current = {row["class"]: row for row in results if row["adapter"] == "current"}
     proposed = {row["class"]: row for row in results if row["adapter"] == candidate}
+    missing_cases = sorted(expected_classes - proposed.keys())
     improved = sorted(
         name
         for name, row in proposed.items()
@@ -624,6 +626,8 @@ def candidate_decision(
         if (row["quality"].get("error") or "").startswith("LimitError")
     )
     failures = []
+    if missing_cases:
+        failures.append("candidate cases are missing")
     if len(improved) < 2:
         failures.append("fewer than two weak classes improved")
     if marker_failures:
@@ -640,6 +644,7 @@ def candidate_decision(
         "candidate": candidate,
         "adopt": not failures,
         "improvedWeakClasses": improved,
+        "missingCases": missing_cases,
         "markerFailures": marker_failures,
         "boilerplateLeaks": boilerplate_leaks,
         "structureFailures": structure_failures,
@@ -768,8 +773,9 @@ def main() -> int:
     quality_rows = stable_quality(results)
     regressions = [] if args.no_compare or args.write_baseline else compare_baseline(args.baseline, quality_rows)
     eligibility = absolute_eligibility(results)
+    expected_html_classes = {case["class"] for case in html_cases}
     extraction_decisions = [
-        candidate_decision(results, adapter)
+        candidate_decision(results, adapter, expected_html_classes)
         for adapter in (REVISED_HTML_ADAPTER, *NODE_HTML_ADAPTERS)
     ]
     current_results = [row for row in results if row["adapter"] == "current"]

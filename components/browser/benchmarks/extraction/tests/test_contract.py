@@ -276,8 +276,9 @@ def test_all_html_candidates_run_through_reader_and_have_explicit_decisions() ->
     }
     expected_adapters = {runner.REVISED_HTML_ADAPTER, *runner.NODE_HTML_ADAPTERS}
     assert set(decisions) == expected_adapters
+    expected_classes = {case["class"] for case in html_cases}
     assert all(
-        decisions[adapter] == runner.candidate_decision(report["results"], adapter)
+        decisions[adapter] == runner.candidate_decision(report["results"], adapter, expected_classes)
         for adapter in expected_adapters
     )
     assert all(not decision["adopt"] for decision in decisions.values())
@@ -298,6 +299,23 @@ def test_all_html_candidates_run_through_reader_and_have_explicit_decisions() ->
         for summary in report["candidateSummary"].values()
     )
     assert all("runtime" not in row for row in report["results"] if row["adapter"] == "current")
+
+
+def test_candidate_gate_rejects_incomplete_candidate_coverage() -> None:
+    report = json.loads((ROOT / "reports/current-run.json").read_text())
+    expected_classes = {
+        case["class"] for case in manifest()["cases"]
+        if case["mediaType"] == "text/html"
+        and case.get("caseKind") != "acquisition-contract"
+    }
+    incomplete = [
+        row for row in report["results"]
+        if row["adapter"] != "defuddle" or row["class"] in {"cookie-wall", "challenge-captcha"}
+    ]
+    decision = runner.candidate_decision(incomplete, "defuddle", expected_classes)
+    assert decision["adopt"] is False
+    assert set(decision["missingCases"]) == expected_classes - {"cookie-wall", "challenge-captcha"}
+    assert "candidate cases are missing" in decision["failures"]
 
 
 def test_optional_adapters_are_skipped_and_report_is_bounded() -> None:
