@@ -18,7 +18,7 @@
       "sha256": "59b5d59218ac1b52137a8ee9ba0d1ece9e6a7243b80ddaef012bb981dbea79ed",
       "class": "technical-docs",
       "mediaType": "text/html",
-      "expectedPath": "static-html",
+      "expectedPath": "trafilatura",
       "expectedOutcome": "success",
       "requiredMarkers": [
         "Bounded API Guide",
@@ -26,6 +26,178 @@
         "read(url, max_chars=2000)",
         "65536",
         "Reference contract"
+      ],
+      "forbiddenMarkers": [
+        "Accept cookies",
+        "Sign in",
+        "Advertisement"
+      ],
+      "structure": {
+        "headings": 2,
+        "codeBlocks": 1,
+        "tables": 1,
+        "links": 1,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "news-article",
+      "file": "news.html",
+      "sha256": "1cd8a17e460cbaabb9c8e2896b29d7545788ab397d1e607a2865e3b7cf666359",
+      "class": "news-article",
+      "mediaType": "text/html",
+      "expectedPath": "trafilatura",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "City Opens Solar Lab",
+        "24 workstations",
+        "monthly results",
+        "Read the methods"
+      ],
+      "forbiddenMarkers": [
+        "Accept cookies",
+        "Sign in",
+        "Advertisement"
+      ],
+      "structure": {
+        "headings": 1,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 1,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "blog",
+      "file": "blog.html",
+      "sha256": "cdd4825069baaf9baca739478a6e6f9b4998ef2f771747e86118899ecc4e83a6",
+      "class": "blog",
+      "mediaType": "text/html",
+      "expectedPath": "trafilatura",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Building a Small Parser",
+        "explicit input and output bounds",
+        "tokens = scan(source)",
+        "Source example"
+      ],
+      "forbiddenMarkers": [
+        "Accept cookies",
+        "Sign in",
+        "Advertisement"
+      ],
+      "structure": {
+        "headings": 2,
+        "codeBlocks": 1,
+        "tables": 0,
+        "links": 1,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "product",
+      "file": "product.html",
+      "sha256": "2aa460c6de4f3ed096b3e4045c670391ef7c375bc73c23a39a25ec6f063463b7",
+      "class": "product",
+      "mediaType": "text/html",
+      "expectedPath": "trafilatura",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Atlas Sensor",
+        "seven days locally",
+        "Specifications",
+        "30 days",
+        "Product manual"
+      ],
+      "forbiddenMarkers": [
+        "Accept cookies",
+        "Sign in",
+        "Advertisement"
+      ],
+      "structure": {
+        "headings": 2,
+        "codeBlocks": 0,
+        "tables": 1,
+        "links": 1,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "wikipedia-like",
+      "file": "wikipedia.html",
+      "sha256": "95d364b463205e2d257cf29ec9d62859989a363cf970eda5bd9f8baa8214a4f5",
+      "class": "wikipedia-like",
+      "mediaType": "text/html",
+      "expectedPath": "trafilatura",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Bounded extraction",
+        "fixed resource ceilings",
+        "Method",
+        "Corpus design",
+        "References"
+      ],
+      "forbiddenMarkers": [
+        "Accept cookies",
+        "Sign in",
+        "Advertisement"
+      ],
+      "structure": {
+        "headings": 3,
+        "codeBlocks": 0,
+        "tables": 0,
+        "links": 1,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "github-repository",
+      "file": "github-repo.html",
+      "sha256": "c2f4479ef1b49b052567db94504e9988bd837b9465566a7293b79a6cafce82d3",
+      "class": "github-repository",
+      "mediaType": "text/html",
+      "expectedPath": "trafilatura",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "example / bounded-reader",
+        "offline extraction benchmark",
+        "pnpm benchmark:extraction",
+        "Issues",
+        "License"
+      ],
+      "forbiddenMarkers": [
+        "Accept cookies",
+        "Sign in",
+        "Advertisement"
+      ],
+      "structure": {
+        "headings": 2,
+        "codeBlocks": 1,
+        "tables": 0,
+        "links": 2,
+        "structuredRows": 0
+      },
+      "allowedLoss": "Minor spacing and visual style can be lost."
+    },
+    {
+      "id": "github-issue",
+      "file": "github-issue.html",
+      "sha256": "b279405f8a53d9503961e70f9f557bfeea4ad3d87f4da3855401b99d0348bf08",
+      "class": "issue-or-pull-request",
+      "mediaType": "text/html",
+      "expectedPath": "trafilatura",
+      "expectedOutcome": "success",
+      "requiredMarkers": [
+        "Keep table headings",
+        "Issue #42",
+        "Region and Value",
+        "North and 42",
+        "candidate patch"
       ],
       "forbiddenMarkers": [
         "Accept cookies",
@@ -42,184 +214,12 @@
       "allowedLoss": "Minor spacing and visual style can be lost."
     },
     {
-      "id": "news-article",
-      "file": "news.html",
-      "sha256": "1cd8a17e460cbaabb9c8e2896b29d7545788ab397d1e607a2865e3b7cf666359",
-      "class": "news-article",
-      "mediaType": "text/html",
-      "expectedPath": "static-html",
-      "expectedOutcome": "success",
-      "requiredMarkers": [
-        "City Opens Solar Lab",
-        "24 workstations",
-        "monthly results",
-        "Read the methods"
-      ],
-      "forbiddenMarkers": [
-        "Accept cookies",
-        "Sign in",
-        "Advertisement"
-      ],
-      "structure": {
-        "headings": 0,
-        "codeBlocks": 0,
-        "tables": 0,
-        "links": 0,
-        "structuredRows": 0
-      },
-      "allowedLoss": "Minor spacing and visual style can be lost."
-    },
-    {
-      "id": "blog",
-      "file": "blog.html",
-      "sha256": "cdd4825069baaf9baca739478a6e6f9b4998ef2f771747e86118899ecc4e83a6",
-      "class": "blog",
-      "mediaType": "text/html",
-      "expectedPath": "static-html",
-      "expectedOutcome": "success",
-      "requiredMarkers": [
-        "Building a Small Parser",
-        "explicit input and output bounds",
-        "tokens = scan(source)",
-        "Source example"
-      ],
-      "forbiddenMarkers": [
-        "Accept cookies",
-        "Sign in",
-        "Advertisement"
-      ],
-      "structure": {
-        "headings": 0,
-        "codeBlocks": 0,
-        "tables": 0,
-        "links": 0,
-        "structuredRows": 0
-      },
-      "allowedLoss": "Minor spacing and visual style can be lost."
-    },
-    {
-      "id": "product",
-      "file": "product.html",
-      "sha256": "2aa460c6de4f3ed096b3e4045c670391ef7c375bc73c23a39a25ec6f063463b7",
-      "class": "product",
-      "mediaType": "text/html",
-      "expectedPath": "static-html",
-      "expectedOutcome": "success",
-      "requiredMarkers": [
-        "Atlas Sensor",
-        "seven days locally",
-        "Specifications",
-        "30 days",
-        "Product manual"
-      ],
-      "forbiddenMarkers": [
-        "Accept cookies",
-        "Sign in",
-        "Advertisement"
-      ],
-      "structure": {
-        "headings": 0,
-        "codeBlocks": 0,
-        "tables": 0,
-        "links": 0,
-        "structuredRows": 0
-      },
-      "allowedLoss": "Minor spacing and visual style can be lost."
-    },
-    {
-      "id": "wikipedia-like",
-      "file": "wikipedia.html",
-      "sha256": "95d364b463205e2d257cf29ec9d62859989a363cf970eda5bd9f8baa8214a4f5",
-      "class": "wikipedia-like",
-      "mediaType": "text/html",
-      "expectedPath": "static-html",
-      "expectedOutcome": "success",
-      "requiredMarkers": [
-        "Bounded extraction",
-        "fixed resource ceilings",
-        "Method",
-        "Corpus design",
-        "References"
-      ],
-      "forbiddenMarkers": [
-        "Accept cookies",
-        "Sign in",
-        "Advertisement"
-      ],
-      "structure": {
-        "headings": 0,
-        "codeBlocks": 0,
-        "tables": 0,
-        "links": 0,
-        "structuredRows": 0
-      },
-      "allowedLoss": "Minor spacing and visual style can be lost."
-    },
-    {
-      "id": "github-repository",
-      "file": "github-repo.html",
-      "sha256": "c2f4479ef1b49b052567db94504e9988bd837b9465566a7293b79a6cafce82d3",
-      "class": "github-repository",
-      "mediaType": "text/html",
-      "expectedPath": "static-html",
-      "expectedOutcome": "success",
-      "requiredMarkers": [
-        "example / bounded-reader",
-        "offline extraction benchmark",
-        "pnpm benchmark:extraction",
-        "Issues",
-        "License"
-      ],
-      "forbiddenMarkers": [
-        "Accept cookies",
-        "Sign in",
-        "Advertisement"
-      ],
-      "structure": {
-        "headings": 0,
-        "codeBlocks": 0,
-        "tables": 0,
-        "links": 0,
-        "structuredRows": 0
-      },
-      "allowedLoss": "Minor spacing and visual style can be lost."
-    },
-    {
-      "id": "github-issue",
-      "file": "github-issue.html",
-      "sha256": "b279405f8a53d9503961e70f9f557bfeea4ad3d87f4da3855401b99d0348bf08",
-      "class": "issue-or-pull-request",
-      "mediaType": "text/html",
-      "expectedPath": "static-html",
-      "expectedOutcome": "success",
-      "requiredMarkers": [
-        "Keep table headings",
-        "Issue #42",
-        "Region and Value",
-        "North and 42",
-        "candidate patch"
-      ],
-      "forbiddenMarkers": [
-        "Accept cookies",
-        "Sign in",
-        "Advertisement"
-      ],
-      "structure": {
-        "headings": 0,
-        "codeBlocks": 0,
-        "tables": 0,
-        "links": 0,
-        "structuredRows": 0
-      },
-      "allowedLoss": "Minor spacing and visual style can be lost."
-    },
-    {
       "id": "hacker-news-thread",
       "file": "hn-thread.html",
       "sha256": "303f4b56a4822a1eac63e2c74f8982615456887eac07a621c2ecc499e37d9a93",
       "class": "hacker-news-like",
       "mediaType": "text/html",
-      "expectedPath": "static-html",
+      "expectedPath": "trafilatura",
       "expectedOutcome": "success",
       "requiredMarkers": [
         "Ask HN",
@@ -233,10 +233,10 @@
         "FAQ"
       ],
       "structure": {
-        "headings": 0,
+        "headings": 1,
         "codeBlocks": 0,
         "tables": 0,
-        "links": 0,
+        "links": 1,
         "structuredRows": 0
       },
       "allowedLoss": "Minor spacing and visual style can be lost."
@@ -247,7 +247,7 @@
       "sha256": "f738be1556740bca5b0e98d88133e6b7724b63c06a9fbcfa87d8aeddaf89d5ce",
       "class": "reddit-forum-like",
       "mediaType": "text/html",
-      "expectedPath": "static-html",
+      "expectedPath": "trafilatura",
       "expectedOutcome": "success",
       "requiredMarkers": [
         "Stable document benchmarks",
@@ -261,10 +261,10 @@
         "Get app"
       ],
       "structure": {
-        "headings": 0,
+        "headings": 1,
         "codeBlocks": 0,
         "tables": 0,
-        "links": 0,
+        "links": 1,
         "structuredRows": 0
       },
       "allowedLoss": "Minor spacing and visual style can be lost."
@@ -275,7 +275,7 @@
       "sha256": "3f55c337ea960d41fbc7812212a0d9a6a0fa05feeeeb5ca4af6049cbb0cca4ab",
       "class": "static-html",
       "mediaType": "text/html",
-      "expectedPath": "static-html",
+      "expectedPath": "trafilatura",
       "expectedOutcome": "success",
       "requiredMarkers": [
         "Static Status Page",
@@ -290,10 +290,10 @@
         "Advertisement"
       ],
       "structure": {
-        "headings": 0,
+        "headings": 2,
         "codeBlocks": 0,
         "tables": 0,
-        "links": 0,
+        "links": 1,
         "structuredRows": 0
       },
       "allowedLoss": "Minor spacing and visual style can be lost."
@@ -331,7 +331,7 @@
       "sha256": "2837cee459e90c5a41fcffdb23e027db3e8fbd9ff5da9917e1ee597766f5eb81",
       "class": "cookie-wall",
       "mediaType": "text/html",
-      "expectedPath": "render-required",
+      "expectedPath": "raw",
       "expectedOutcome": "render-required",
       "requiredMarkers": [
         "Privacy choices",
@@ -339,7 +339,7 @@
       ],
       "forbiddenMarkers": [],
       "structure": {
-        "headings": 0,
+        "headings": 1,
         "codeBlocks": 0,
         "tables": 0,
         "links": 0,
@@ -353,7 +353,7 @@
       "sha256": "2ab99d6151189d2699743f2cb24c03e132a046f534262aeb6d966f1f24fe9d2d",
       "class": "challenge-captcha",
       "mediaType": "text/html",
-      "expectedPath": "render-required",
+      "expectedPath": "raw",
       "expectedOutcome": "render-required",
       "requiredMarkers": [
         "Security check",
@@ -361,7 +361,7 @@
       ],
       "forbiddenMarkers": [],
       "structure": {
-        "headings": 0,
+        "headings": 1,
         "codeBlocks": 0,
         "tables": 0,
         "links": 0,
@@ -404,7 +404,7 @@
       "sha256": "4a74e01f187cd2a7740bf2d05802afc7a79bc1f7a576fb5544f168271eae66c3",
       "class": "rss",
       "mediaType": "application/rss+xml",
-      "expectedPath": "feed",
+      "expectedPath": "trafilatura",
       "expectedOutcome": "success",
       "requiredMarkers": [
         "Reader Updates",
@@ -429,7 +429,7 @@
       "sha256": "7b5d1b8450a81bf667d7fe1e343e08dfb6df11c9d57b57e3ef9d47658789950e",
       "class": "atom",
       "mediaType": "application/atom+xml",
-      "expectedPath": "feed",
+      "expectedPath": "trafilatura",
       "expectedOutcome": "success",
       "requiredMarkers": [
         "Extraction Notes",
@@ -522,7 +522,7 @@
       "sha256": "d25898ed9d0901ea022f91d247ab9885fae260ca160fe4501f0ba3050add89b4",
       "class": "bad-charset",
       "mediaType": "text/html",
-      "expectedPath": "static-html",
+      "expectedPath": "trafilatura",
       "expectedOutcome": "success",
       "requiredMarkers": [
         "Café Encoding Note",
@@ -531,14 +531,24 @@
       ],
       "forbiddenMarkers": [],
       "structure": {
-        "headings": 0,
+        "headings": 1,
         "codeBlocks": 0,
         "tables": 0,
         "links": 0,
         "structuredRows": 0
       },
       "allowedLoss": "Minor spacing and visual style can be lost.",
-      "charset": "latin-1"
+      "charset": "latin-1",
+      "caseKind": "acquisition-contract",
+      "acquisition": {
+        "charset": "iso-8859-1"
+      },
+      "acquisitionExpected": {
+        "finalUrl": "https://corpus.example/bad-charset.html",
+        "contentEncoding": "identity",
+        "rawBytes": 182,
+        "decodedBytes": 182
+      }
     },
     {
       "id": "redirect-chain",
@@ -546,7 +556,7 @@
       "sha256": "f1bf17678ca3bf63fa0e3c28b974c163c8a7af0c5284f8391f984374b5e29aa3",
       "class": "redirect-chain-metadata",
       "mediaType": "text/html",
-      "expectedPath": "static-html",
+      "expectedPath": "trafilatura",
       "expectedOutcome": "success",
       "requiredMarkers": [
         "Redirect Target",
@@ -555,15 +565,24 @@
       ],
       "forbiddenMarkers": [],
       "structure": {
-        "headings": 0,
+        "headings": 1,
         "codeBlocks": 0,
         "tables": 0,
-        "links": 0,
+        "links": 1,
         "structuredRows": 0
       },
       "allowedLoss": "Minor spacing and visual style can be lost.",
-      "metadata": {
+      "caseKind": "acquisition-contract",
+      "acquisition": {
+        "redirects": [
+          "https://one.example/",
+          "https://two.example/",
+          "https://three.example/final"
+        ]
+      },
+      "acquisitionExpected": {
         "redirectChain": [
+          "https://corpus.example/redirect.html",
           "https://one.example/",
           "https://two.example/",
           "https://three.example/final"
@@ -577,7 +596,7 @@
       "sha256": "cbf74ab088c2c12ea5d4f148b62f82f338cdcb366efeaeffec6502ee08857c4c",
       "class": "compressed-content-metadata",
       "mediaType": "text/html",
-      "expectedPath": "static-html",
+      "expectedPath": "trafilatura",
       "expectedOutcome": "success",
       "requiredMarkers": [
         "Compressed Response",
@@ -586,16 +605,21 @@
       ],
       "forbiddenMarkers": [],
       "structure": {
-        "headings": 0,
+        "headings": 1,
         "codeBlocks": 0,
         "tables": 0,
         "links": 0,
         "structuredRows": 0
       },
       "allowedLoss": "Minor spacing and visual style can be lost.",
-      "metadata": {
+      "caseKind": "acquisition-contract",
+      "acquisition": {
+        "compression": "gzip"
+      },
+      "acquisitionExpected": {
+        "finalUrl": "https://corpus.example/compressed.html",
         "contentEncoding": "gzip",
-        "rawBytes": 142,
+        "rawBytes": 145,
         "decodedBytes": 188
       }
     },

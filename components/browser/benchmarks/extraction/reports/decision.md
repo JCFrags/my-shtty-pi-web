@@ -1,28 +1,29 @@
 # WP1-M6 extraction decision
 
-## Reviewed baseline
+## Reviewed offline baseline
 
-The reviewed run has 28 current-adapter cases. It also has two skipped optional-adapter slots. The current adapter retains all declared required markers in 23 cases. It records known losses instead of hiding them in one score.
+The clean offline run has 28 current cases. It records 8 extraction passes, 14 extraction failures, 3 acquisition-contract passes, and 3 current environment skips. Two optional candidate slots are also skipped.
 
-Weak representative classes include these cases:
+The adapter calls `ReaderPipeline.read` with deterministic injected acquisition. Expected annotations do not select reader behavior. All static HTML cases use the production `trafilatura` source. Feed XML also uses the production `trafilatura` source. JavaScript shell fallback uses the production Markdown candidate flow. Challenge results use the production `raw` source and `renderRequired` metadata.
 
-- Technical documentation loses one table value and flattens code and table structure.
-- News, GitHub-like, Hacker News-like, and forum-like pages leak some navigation or footer text.
-- Cookie and challenge shells lose their first heading while they keep the key challenge sentence.
-- The PDF table keeps the table cells but loses the separate title.
+The reviewed fixture semantics require source headings, code blocks, tables, and links. Current HTML extraction keeps most required text but flattens all reviewed HTML heading, code, table, and link structure. Technical documentation also loses one required table value. Cookie and challenge shells lose one required heading marker. These are visible baseline failures.
 
-The static adapter keeps all required content in the blog, product, Wikipedia-like, static page, bad-charset, redirect, and compressed-response cases. JSON keeps both structured rows. RSS and Atom keep their required entry text. Negotiated Markdown keeps headings, code, and its link. The plain-text path keeps all required text.
+JSON keeps both structured rows. Negotiated Markdown keeps its headings, code block, and link. Plain text keeps all required text. RSS and Atom keep their required text and declared structure.
 
-Docling keeps the required ordinary PDF text, DOCX text, PPTX text, and XLSX table cells in this reviewed environment. The image-only scanned PDF has no embedded text and is allowed to return empty output or a clean error. This case makes the OCR escalation gap visible.
+Bad charset, redirect, and gzip cases pass separate acquisition contracts. They do not count as extraction passes. Their observed values come from the deterministic transport and reader behavior. The runner does not copy expected metadata into a result.
 
-## PDF route
+## Offline document capability
 
-This run does not justify a production change to use `pdftotext` first. Docling preserved the required ordinary PDF content. The production fallback remains available when Docling fails. The corpus does not show that a first-route change improves two weak representative classes. Keep Docling escalation for tables, layout, Office files, and scanned files.
+The benchmark does not start Docling. It does not declare RapidOCR model assets. DOCX, PPTX, and XLSX are visible environment skips. The report makes no claim that these formats work from an undeclared model cache.
+
+PDF cases exercise the current production fallback when the Docling service is unavailable. In this clean offline run, `pdftotext` does not find useful text in the synthetic ordinary, table, or scanned PDF fixtures. The ordinary PDF and table PDF are visible failures. The scanned PDF clean error matches its reviewed empty-or-error contract.
+
+This evidence describes offline capability only. It does not justify a routing change. It does not show that `pdftotext` should become the first PDF route. It also does not measure a working Docling service with reviewed local model assets.
 
 ## Extractor decision
 
-No candidate adapter was configured. Both optional slots are reported as skipped. There is no measured candidate evidence.
+No candidate adapter is present. Both reviewed candidate slots are skipped. There is no replacement evidence.
 
-Keep the current production routing. Do not replace an extractor.
+No extractor replacement is justified. Keep current production routing unchanged.
 
-A future candidate must improve at least two weak representative classes. It must not add a required-marker loss. It must not weaken acquisition or SSRF security. It must have an acceptable license, installed size, dependency set, deployment method, memory use, and runtime. Review each separate metric and the affected fixture output before a routing change.
+A future candidate must improve at least two weak representative classes. It must not add required-marker loss. It must keep acquisition and SSRF controls. It must use an acceptable license and deployment method. Review dependency size, installed size, memory, runtime, and every separate quality metric before a routing change.

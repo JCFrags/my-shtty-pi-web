@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "manifestSha256": "a17d07603b46fba2fe8958b7a47ea9eeacd0b3c749b5042b0a6c8a9bcc3efb3f",
+  "schemaVersion": 2,
+  "manifestSha256": "0f2be2d883e7b1966a6e749ea532e96de276ca3b1190422dcd0b77a8a03052cc",
   "environment": {
     "python": "3.13.14",
     "platform": "linux",
@@ -9,7 +9,8 @@
       "docling": "2.115.0",
       "httpx": "0.28.1"
     },
-    "pdftotext": "pdftotext version 26.01.0"
+    "pdftotext": "pdftotext version 26.01.0",
+    "documentService": "not started; PDF uses the production fallback and Office is skipped"
   },
   "limits": {
     "caseSeconds": 60,
@@ -23,9 +24,11 @@
     "cases": 64
   },
   "summary": {
-    "passed": 19,
-    "failed": 9,
-    "skipped": 2,
+    "extractionPassed": 8,
+    "extractionFailed": 14,
+    "acquisitionContractsPassed": 3,
+    "acquisitionContractsFailed": 0,
+    "skipped": 5,
     "qualityRegressions": []
   },
   "results": [
@@ -36,7 +39,7 @@
       "status": "failed",
       "quality": {
         "outcome": "fail",
-        "path": "static-html",
+        "path": "trafilatura",
         "requiredMarkerRetention": {
           "retained": 4,
           "total": 5,
@@ -65,13 +68,13 @@
           },
           "codeBlocks": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           },
           "tables": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           },
           "links": {
             "observed": 1,
@@ -84,7 +87,6 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {
           "extractor": "trafilatura"
         },
@@ -93,10 +95,10 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 57.91,
-        "peakRssBytesApprox": 89686016,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 387.11,
+        "peakRssBytes": 90861568,
+        "temporaryDiskHighWaterBytes": 1913,
+        "descendantProcessHighWater": 1
       }
     },
     {
@@ -106,7 +108,7 @@
       "status": "failed",
       "quality": {
         "outcome": "fail",
-        "path": "static-html",
+        "path": "trafilatura",
         "requiredMarkerRetention": {
           "retained": 4,
           "total": 4,
@@ -129,8 +131,8 @@
         "preservation": {
           "headings": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           },
           "codeBlocks": {
             "observed": 0,
@@ -144,8 +146,8 @@
           },
           "links": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           }
         },
         "structuredRowCompleteness": {
@@ -153,7 +155,6 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {
           "extractor": "stdlib-fallback"
         },
@@ -162,20 +163,20 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 0.439,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 315.784,
+        "peakRssBytes": 60555264,
+        "temporaryDiskHighWaterBytes": 1993,
+        "descendantProcessHighWater": 1
       }
     },
     {
       "id": "blog",
       "class": "blog",
       "adapter": "current",
-      "status": "passed",
+      "status": "failed",
       "quality": {
-        "outcome": "pass",
-        "path": "static-html",
+        "outcome": "fail",
+        "path": "trafilatura",
         "requiredMarkerRetention": {
           "retained": 4,
           "total": 4,
@@ -198,13 +199,13 @@
         "preservation": {
           "headings": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 2,
+            "pass": false
           },
           "codeBlocks": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           },
           "tables": {
             "observed": 0,
@@ -213,8 +214,8 @@
           },
           "links": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           }
         },
         "structuredRowCompleteness": {
@@ -222,7 +223,6 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {
           "extractor": "stdlib-fallback"
         },
@@ -231,20 +231,20 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 0.14,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 308.639,
+        "peakRssBytes": 60514304,
+        "temporaryDiskHighWaterBytes": 1981,
+        "descendantProcessHighWater": 1
       }
     },
     {
       "id": "product",
       "class": "product",
       "adapter": "current",
-      "status": "passed",
+      "status": "failed",
       "quality": {
-        "outcome": "pass",
-        "path": "static-html",
+        "outcome": "fail",
+        "path": "trafilatura",
         "requiredMarkerRetention": {
           "retained": 5,
           "total": 5,
@@ -268,8 +268,8 @@
         "preservation": {
           "headings": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 2,
+            "pass": false
           },
           "codeBlocks": {
             "observed": 0,
@@ -278,13 +278,13 @@
           },
           "tables": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           },
           "links": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           }
         },
         "structuredRowCompleteness": {
@@ -292,7 +292,6 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {
           "extractor": "stdlib-fallback"
         },
@@ -301,20 +300,20 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 0.135,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 313.95,
+        "peakRssBytes": 60432384,
+        "temporaryDiskHighWaterBytes": 1933,
+        "descendantProcessHighWater": 1
       }
     },
     {
       "id": "wikipedia-like",
       "class": "wikipedia-like",
       "adapter": "current",
-      "status": "passed",
+      "status": "failed",
       "quality": {
-        "outcome": "pass",
-        "path": "static-html",
+        "outcome": "fail",
+        "path": "trafilatura",
         "requiredMarkerRetention": {
           "retained": 5,
           "total": 5,
@@ -338,8 +337,8 @@
         "preservation": {
           "headings": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 3,
+            "pass": false
           },
           "codeBlocks": {
             "observed": 0,
@@ -353,8 +352,8 @@
           },
           "links": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           }
         },
         "structuredRowCompleteness": {
@@ -362,7 +361,6 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {
           "extractor": "stdlib-fallback"
         },
@@ -371,10 +369,10 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 0.126,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 308.657,
+        "peakRssBytes": 60665856,
+        "temporaryDiskHighWaterBytes": 2055,
+        "descendantProcessHighWater": 1
       }
     },
     {
@@ -384,7 +382,7 @@
       "status": "failed",
       "quality": {
         "outcome": "fail",
-        "path": "static-html",
+        "path": "trafilatura",
         "requiredMarkerRetention": {
           "retained": 5,
           "total": 5,
@@ -408,13 +406,13 @@
         "preservation": {
           "headings": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 2,
+            "pass": false
           },
           "codeBlocks": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           },
           "tables": {
             "observed": 0,
@@ -423,8 +421,8 @@
           },
           "links": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 2,
+            "pass": false
           }
         },
         "structuredRowCompleteness": {
@@ -432,7 +430,6 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {
           "extractor": "stdlib-fallback"
         },
@@ -441,10 +438,10 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 0.121,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 308.565,
+        "peakRssBytes": 60473344,
+        "temporaryDiskHighWaterBytes": 1989,
+        "descendantProcessHighWater": 1
       }
     },
     {
@@ -454,7 +451,7 @@
       "status": "failed",
       "quality": {
         "outcome": "fail",
-        "path": "static-html",
+        "path": "trafilatura",
         "requiredMarkerRetention": {
           "retained": 5,
           "total": 5,
@@ -478,8 +475,8 @@
         "preservation": {
           "headings": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 2,
+            "pass": false
           },
           "codeBlocks": {
             "observed": 0,
@@ -493,8 +490,8 @@
           },
           "links": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           }
         },
         "structuredRowCompleteness": {
@@ -502,7 +499,6 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {
           "extractor": "stdlib-fallback"
         },
@@ -511,10 +507,10 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 0.133,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 308.627,
+        "peakRssBytes": 60407808,
+        "temporaryDiskHighWaterBytes": 2061,
+        "descendantProcessHighWater": 1
       }
     },
     {
@@ -524,7 +520,7 @@
       "status": "failed",
       "quality": {
         "outcome": "fail",
-        "path": "static-html",
+        "path": "trafilatura",
         "requiredMarkerRetention": {
           "retained": 5,
           "total": 5,
@@ -547,8 +543,8 @@
         "preservation": {
           "headings": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           },
           "codeBlocks": {
             "observed": 0,
@@ -562,8 +558,8 @@
           },
           "links": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           }
         },
         "structuredRowCompleteness": {
@@ -571,7 +567,6 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {
           "extractor": "stdlib-fallback"
         },
@@ -580,10 +575,10 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 0.116,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 309.062,
+        "peakRssBytes": 60485632,
+        "temporaryDiskHighWaterBytes": 1951,
+        "descendantProcessHighWater": 1
       }
     },
     {
@@ -593,7 +588,7 @@
       "status": "failed",
       "quality": {
         "outcome": "fail",
-        "path": "static-html",
+        "path": "trafilatura",
         "requiredMarkerRetention": {
           "retained": 5,
           "total": 5,
@@ -616,8 +611,8 @@
         "preservation": {
           "headings": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           },
           "codeBlocks": {
             "observed": 0,
@@ -631,8 +626,8 @@
           },
           "links": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           }
         },
         "structuredRowCompleteness": {
@@ -640,7 +635,6 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {
           "extractor": "stdlib-fallback"
         },
@@ -649,20 +643,20 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 0.124,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 314.858,
+        "peakRssBytes": 60461056,
+        "temporaryDiskHighWaterBytes": 2007,
+        "descendantProcessHighWater": 1
       }
     },
     {
       "id": "static-html",
       "class": "static-html",
       "adapter": "current",
-      "status": "passed",
+      "status": "failed",
       "quality": {
-        "outcome": "pass",
-        "path": "static-html",
+        "outcome": "fail",
+        "path": "trafilatura",
         "requiredMarkerRetention": {
           "retained": 5,
           "total": 5,
@@ -686,8 +680,8 @@
         "preservation": {
           "headings": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 2,
+            "pass": false
           },
           "codeBlocks": {
             "observed": 0,
@@ -701,8 +695,8 @@
           },
           "links": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           }
         },
         "structuredRowCompleteness": {
@@ -710,7 +704,6 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {
           "extractor": "stdlib-fallback"
         },
@@ -719,10 +712,10 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 0.113,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 308.95,
+        "peakRssBytes": 60542976,
+        "temporaryDiskHighWaterBytes": 1958,
+        "descendantProcessHighWater": 1
       }
     },
     {
@@ -776,17 +769,16 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {},
         "outputCharacters": 160,
         "outputBytes": 160,
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 1.717,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 309.924,
+        "peakRssBytes": 60137472,
+        "temporaryDiskHighWaterBytes": 1998,
+        "descendantProcessHighWater": 1
       }
     },
     {
@@ -796,7 +788,7 @@
       "status": "failed",
       "quality": {
         "outcome": "fail",
-        "path": "render-required",
+        "path": "raw",
         "requiredMarkerRetention": {
           "retained": 1,
           "total": 2,
@@ -813,8 +805,8 @@
         "preservation": {
           "headings": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           },
           "codeBlocks": {
             "observed": 0,
@@ -837,7 +829,6 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {
           "extractor": "trafilatura",
           "renderRequired": true
@@ -847,10 +838,10 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 1.171,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 391.77,
+        "peakRssBytes": 90853376,
+        "temporaryDiskHighWaterBytes": 1927,
+        "descendantProcessHighWater": 1
       }
     },
     {
@@ -860,7 +851,7 @@
       "status": "failed",
       "quality": {
         "outcome": "fail",
-        "path": "render-required",
+        "path": "raw",
         "requiredMarkerRetention": {
           "retained": 1,
           "total": 2,
@@ -877,8 +868,8 @@
         "preservation": {
           "headings": {
             "observed": 0,
-            "required": 0,
-            "pass": true
+            "required": 1,
+            "pass": false
           },
           "codeBlocks": {
             "observed": 0,
@@ -901,7 +892,6 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {
           "extractor": "trafilatura",
           "renderRequired": true
@@ -911,10 +901,10 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 1.091,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 386.356,
+        "peakRssBytes": 90779648,
+        "temporaryDiskHighWaterBytes": 1934,
+        "descendantProcessHighWater": 1
       }
     },
     {
@@ -967,7 +957,6 @@
           "required": 2,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {
           "returnedItems": 2,
           "totalItems": 2
@@ -977,10 +966,10 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 0.068,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 309.362,
+        "peakRssBytes": 60252160,
+        "temporaryDiskHighWaterBytes": 1909,
+        "descendantProcessHighWater": 1
       }
     },
     {
@@ -990,7 +979,7 @@
       "status": "passed",
       "quality": {
         "outcome": "pass",
-        "path": "feed",
+        "path": "trafilatura",
         "requiredMarkerRetention": {
           "retained": 5,
           "total": 5,
@@ -1034,7 +1023,6 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {
           "extractor": "stdlib-fallback"
         },
@@ -1043,10 +1031,10 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 0.153,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 308.533,
+        "peakRssBytes": 60399616,
+        "temporaryDiskHighWaterBytes": 1916,
+        "descendantProcessHighWater": 1
       }
     },
     {
@@ -1056,7 +1044,7 @@
       "status": "passed",
       "quality": {
         "outcome": "pass",
-        "path": "feed",
+        "path": "trafilatura",
         "requiredMarkerRetention": {
           "retained": 5,
           "total": 5,
@@ -1100,7 +1088,6 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {
           "extractor": "trafilatura"
         },
@@ -1109,10 +1096,10 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 0.919,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 380.616,
+        "peakRssBytes": 90853376,
+        "temporaryDiskHighWaterBytes": 1903,
+        "descendantProcessHighWater": 1
       }
     },
     {
@@ -1164,17 +1151,16 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {},
         "outputCharacters": 159,
         "outputBytes": 159,
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 0.021,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 308.492,
+        "peakRssBytes": 60198912,
+        "temporaryDiskHighWaterBytes": 1691,
+        "descendantProcessHighWater": 1
       }
     },
     {
@@ -1227,17 +1213,16 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {},
         "outputCharacters": 191,
         "outputBytes": 191,
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 0.023,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 314.534,
+        "peakRssBytes": 60256256,
+        "temporaryDiskHighWaterBytes": 1850,
+        "descendantProcessHighWater": 1
       }
     },
     {
@@ -1287,232 +1272,297 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
         "adapterEvidence": {},
         "outputCharacters": 0,
         "outputBytes": 0,
         "error": "LimitError: input exceeds 131072 bytes"
       },
       "runtime": {
-        "wallMilliseconds": 0.006,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 0,
+        "peakRssBytes": 0,
+        "temporaryDiskHighWaterBytes": 0,
+        "descendantProcessHighWater": 0
       }
     },
     {
       "id": "bad-charset",
       "class": "bad-charset",
       "adapter": "current",
-      "status": "passed",
+      "status": "contract-passed",
       "quality": {
         "outcome": "pass",
-        "path": "static-html",
-        "requiredMarkerRetention": {
-          "retained": 3,
-          "total": 3,
-          "markers": {
-            "Café Encoding Note": true,
-            "naïve": true,
-            "extraction review": true
-          }
+        "contract": "acquisition",
+        "observed": {
+          "requestedUrls": [
+            "https://corpus.example/bad-charset.html",
+            "https://corpus.example/bad-charset.html.md",
+            "https://corpus.example/index.md"
+          ],
+          "redirectChain": [
+            "https://corpus.example/bad-charset.html"
+          ],
+          "finalUrl": "https://corpus.example/bad-charset.html",
+          "contentEncoding": "identity",
+          "rawBytes": 182,
+          "decodedBytes": 182
         },
-        "forbiddenBoilerplateLeakage": {
-          "leaked": 0,
-          "total": 0,
-          "markers": {}
+        "checks": {
+          "finalUrl": true,
+          "contentEncoding": true,
+          "rawBytes": true,
+          "decodedBytes": true
         },
-        "preservation": {
-          "headings": {
+        "extractionMetrics": {
+          "outcome": "fail",
+          "path": "trafilatura",
+          "requiredMarkerRetention": {
+            "retained": 3,
+            "total": 3,
+            "markers": {
+              "Café Encoding Note": true,
+              "naïve": true,
+              "extraction review": true
+            }
+          },
+          "forbiddenBoilerplateLeakage": {
+            "leaked": 0,
+            "total": 0,
+            "markers": {}
+          },
+          "preservation": {
+            "headings": {
+              "observed": 0,
+              "required": 1,
+              "pass": false
+            },
+            "codeBlocks": {
+              "observed": 0,
+              "required": 0,
+              "pass": true
+            },
+            "tables": {
+              "observed": 0,
+              "required": 0,
+              "pass": true
+            },
+            "links": {
+              "observed": 0,
+              "required": 0,
+              "pass": true
+            }
+          },
+          "structuredRowCompleteness": {
             "observed": 0,
             "required": 0,
             "pass": true
           },
-          "codeBlocks": {
-            "observed": 0,
-            "required": 0,
-            "pass": true
+          "adapterEvidence": {
+            "extractor": "stdlib-fallback"
           },
-          "tables": {
-            "observed": 0,
-            "required": 0,
-            "pass": true
-          },
-          "links": {
-            "observed": 0,
-            "required": 0,
-            "pass": true
-          }
-        },
-        "structuredRowCompleteness": {
-          "observed": 0,
-          "required": 0,
-          "pass": true
-        },
-        "metadataRetention": {},
-        "adapterEvidence": {
-          "extractor": "stdlib-fallback"
-        },
-        "outputCharacters": 140,
-        "outputBytes": 143,
-        "error": null
+          "outputCharacters": 140,
+          "outputBytes": 143,
+          "error": null
+        }
       },
       "runtime": {
-        "wallMilliseconds": 0.158,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 308.878,
+        "peakRssBytes": 60596224,
+        "temporaryDiskHighWaterBytes": 2094,
+        "descendantProcessHighWater": 1
       }
     },
     {
       "id": "redirect-chain",
       "class": "redirect-chain-metadata",
       "adapter": "current",
-      "status": "passed",
+      "status": "contract-passed",
       "quality": {
         "outcome": "pass",
-        "path": "static-html",
-        "requiredMarkerRetention": {
-          "retained": 3,
-          "total": 3,
-          "markers": {
-            "Redirect Target": true,
-            "three-hop redirect chain": true,
-            "Final resource": true
-          }
+        "contract": "acquisition",
+        "observed": {
+          "requestedUrls": [
+            "https://corpus.example/redirect.html",
+            "https://one.example/",
+            "https://two.example/",
+            "https://three.example/final",
+            "https://three.example/final.md",
+            "https://three.example/index.md"
+          ],
+          "redirectChain": [
+            "https://corpus.example/redirect.html",
+            "https://one.example/",
+            "https://two.example/",
+            "https://three.example/final"
+          ],
+          "finalUrl": "https://three.example/final",
+          "contentEncoding": "identity",
+          "rawBytes": 198,
+          "decodedBytes": 198
         },
-        "forbiddenBoilerplateLeakage": {
-          "leaked": 0,
-          "total": 0,
-          "markers": {}
-        },
-        "preservation": {
-          "headings": {
-            "observed": 0,
-            "required": 0,
-            "pass": true
-          },
-          "codeBlocks": {
-            "observed": 0,
-            "required": 0,
-            "pass": true
-          },
-          "tables": {
-            "observed": 0,
-            "required": 0,
-            "pass": true
-          },
-          "links": {
-            "observed": 0,
-            "required": 0,
-            "pass": true
-          }
-        },
-        "structuredRowCompleteness": {
-          "observed": 0,
-          "required": 0,
-          "pass": true
-        },
-        "metadataRetention": {
+        "checks": {
           "redirectChain": true,
           "finalUrl": true
         },
-        "adapterEvidence": {
-          "extractor": "stdlib-fallback"
-        },
-        "outputCharacters": 136,
-        "outputBytes": 136,
-        "error": null
+        "extractionMetrics": {
+          "outcome": "fail",
+          "path": "trafilatura",
+          "requiredMarkerRetention": {
+            "retained": 3,
+            "total": 3,
+            "markers": {
+              "Redirect Target": true,
+              "three-hop redirect chain": true,
+              "Final resource": true
+            }
+          },
+          "forbiddenBoilerplateLeakage": {
+            "leaked": 0,
+            "total": 0,
+            "markers": {}
+          },
+          "preservation": {
+            "headings": {
+              "observed": 0,
+              "required": 1,
+              "pass": false
+            },
+            "codeBlocks": {
+              "observed": 0,
+              "required": 0,
+              "pass": true
+            },
+            "tables": {
+              "observed": 0,
+              "required": 0,
+              "pass": true
+            },
+            "links": {
+              "observed": 0,
+              "required": 1,
+              "pass": false
+            }
+          },
+          "structuredRowCompleteness": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "adapterEvidence": {
+            "extractor": "stdlib-fallback"
+          },
+          "outputCharacters": 136,
+          "outputBytes": 136,
+          "error": null
+        }
       },
       "runtime": {
-        "wallMilliseconds": 0.122,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 310.085,
+        "peakRssBytes": 60542976,
+        "temporaryDiskHighWaterBytes": 2306,
+        "descendantProcessHighWater": 1
       }
     },
     {
       "id": "compressed-content",
       "class": "compressed-content-metadata",
       "adapter": "current",
-      "status": "passed",
+      "status": "contract-passed",
       "quality": {
         "outcome": "pass",
-        "path": "static-html",
-        "requiredMarkerRetention": {
-          "retained": 3,
-          "total": 3,
-          "markers": {
-            "Compressed Response": true,
-            "gzip decompression": true,
-            "raw and decoded byte limits": true
-          }
+        "contract": "acquisition",
+        "observed": {
+          "requestedUrls": [
+            "https://corpus.example/compressed.html",
+            "https://corpus.example/compressed.html.md",
+            "https://corpus.example/index.md"
+          ],
+          "redirectChain": [
+            "https://corpus.example/compressed.html"
+          ],
+          "finalUrl": "https://corpus.example/compressed.html",
+          "contentEncoding": "gzip",
+          "rawBytes": 145,
+          "decodedBytes": 188
         },
-        "forbiddenBoilerplateLeakage": {
-          "leaked": 0,
-          "total": 0,
-          "markers": {}
-        },
-        "preservation": {
-          "headings": {
-            "observed": 0,
-            "required": 0,
-            "pass": true
-          },
-          "codeBlocks": {
-            "observed": 0,
-            "required": 0,
-            "pass": true
-          },
-          "tables": {
-            "observed": 0,
-            "required": 0,
-            "pass": true
-          },
-          "links": {
-            "observed": 0,
-            "required": 0,
-            "pass": true
-          }
-        },
-        "structuredRowCompleteness": {
-          "observed": 0,
-          "required": 0,
-          "pass": true
-        },
-        "metadataRetention": {
+        "checks": {
+          "finalUrl": true,
           "contentEncoding": true,
           "rawBytes": true,
           "decodedBytes": true
         },
-        "adapterEvidence": {
-          "extractor": "stdlib-fallback"
-        },
-        "outputCharacters": 146,
-        "outputBytes": 146,
-        "error": null
+        "extractionMetrics": {
+          "outcome": "fail",
+          "path": "trafilatura",
+          "requiredMarkerRetention": {
+            "retained": 3,
+            "total": 3,
+            "markers": {
+              "Compressed Response": true,
+              "gzip decompression": true,
+              "raw and decoded byte limits": true
+            }
+          },
+          "forbiddenBoilerplateLeakage": {
+            "leaked": 0,
+            "total": 0,
+            "markers": {}
+          },
+          "preservation": {
+            "headings": {
+              "observed": 0,
+              "required": 1,
+              "pass": false
+            },
+            "codeBlocks": {
+              "observed": 0,
+              "required": 0,
+              "pass": true
+            },
+            "tables": {
+              "observed": 0,
+              "required": 0,
+              "pass": true
+            },
+            "links": {
+              "observed": 0,
+              "required": 0,
+              "pass": true
+            }
+          },
+          "structuredRowCompleteness": {
+            "observed": 0,
+            "required": 0,
+            "pass": true
+          },
+          "adapterEvidence": {
+            "extractor": "stdlib-fallback"
+          },
+          "outputCharacters": 146,
+          "outputBytes": 146,
+          "error": null
+        }
       },
       "runtime": {
-        "wallMilliseconds": 0.106,
-        "peakRssBytesApprox": 89882624,
-        "temporaryDiskBytes": 0,
-        "processesApprox": 1
+        "wallMilliseconds": 309.262,
+        "peakRssBytes": 60538880,
+        "temporaryDiskHighWaterBytes": 2082,
+        "descendantProcessHighWater": 1
       }
     },
     {
       "id": "pdf-text",
       "class": "pdf-text",
       "adapter": "current",
-      "status": "passed",
+      "status": "failed",
       "quality": {
-        "outcome": "pass",
-        "path": "document",
+        "outcome": "fail",
+        "path": "error",
         "requiredMarkerRetention": {
-          "retained": 2,
+          "retained": 0,
           "total": 2,
           "markers": {
-            "Ordinary PDF Guide": true,
-            "Bounded extraction keeps required content": true
+            "Ordinary PDF Guide": false,
+            "Bounded extraction keeps required content": false
           }
         },
         "forbiddenBoilerplateLeakage": {
@@ -1547,19 +1597,16 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
-        "adapterEvidence": {
-          "documentConverter": "docling"
-        },
-        "outputCharacters": 61,
-        "outputBytes": 61,
-        "error": null
+        "adapterEvidence": {},
+        "outputCharacters": 0,
+        "outputBytes": 0,
+        "error": "RuntimeError: PDF extraction returned no useful text"
       },
       "runtime": {
-        "wallMilliseconds": 4002.046,
-        "peakRssBytesApprox": 2258223104,
-        "temporaryDiskBytes": 651,
-        "processesApprox": 1
+        "wallMilliseconds": 324.407,
+        "peakRssBytes": 60436480,
+        "temporaryDiskHighWaterBytes": 801,
+        "descendantProcessHighWater": 1
       }
     },
     {
@@ -1569,16 +1616,16 @@
       "status": "failed",
       "quality": {
         "outcome": "fail",
-        "path": "document",
+        "path": "error",
         "requiredMarkerRetention": {
-          "retained": 4,
+          "retained": 0,
           "total": 5,
           "markers": {
             "Regional Metrics": false,
-            "Region": true,
-            "Value": true,
-            "North": true,
-            "42": true
+            "Region": false,
+            "Value": false,
+            "North": false,
+            "42": false
           }
         },
         "forbiddenBoilerplateLeakage": {
@@ -1598,9 +1645,9 @@
             "pass": true
           },
           "tables": {
-            "observed": 3,
+            "observed": 0,
             "required": 1,
-            "pass": true
+            "pass": false
           },
           "links": {
             "observed": 0,
@@ -1609,23 +1656,20 @@
           }
         },
         "structuredRowCompleteness": {
-          "observed": 2,
+          "observed": 0,
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
-        "adapterEvidence": {
-          "documentConverter": "docling"
-        },
-        "outputCharacters": 68,
-        "outputBytes": 68,
-        "error": null
+        "adapterEvidence": {},
+        "outputCharacters": 0,
+        "outputBytes": 0,
+        "error": "RuntimeError: PDF extraction returned no useful text"
       },
       "runtime": {
-        "wallMilliseconds": 863.059,
-        "peakRssBytesApprox": 2580275200,
-        "temporaryDiskBytes": 1357,
-        "processesApprox": 1
+        "wallMilliseconds": 314.104,
+        "peakRssBytes": 60567552,
+        "temporaryDiskHighWaterBytes": 787,
+        "descendantProcessHighWater": 1
       }
     },
     {
@@ -1635,7 +1679,7 @@
       "status": "passed",
       "quality": {
         "outcome": "pass",
-        "path": "document",
+        "path": "error",
         "requiredMarkerRetention": {
           "retained": 0,
           "total": 0,
@@ -1673,36 +1717,33 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
-        "adapterEvidence": {
-          "documentConverter": "docling"
-        },
+        "adapterEvidence": {},
         "outputCharacters": 0,
         "outputBytes": 0,
-        "error": null
+        "error": "RuntimeError: PDF extraction returned no useful text"
       },
       "runtime": {
-        "wallMilliseconds": 852.974,
-        "peakRssBytesApprox": 2799853568,
-        "temporaryDiskBytes": 1964,
-        "processesApprox": 1
+        "wallMilliseconds": 314.264,
+        "peakRssBytes": 60633088,
+        "temporaryDiskHighWaterBytes": 819,
+        "descendantProcessHighWater": 1
       }
     },
     {
       "id": "docx",
       "class": "docx",
       "adapter": "current",
-      "status": "passed",
+      "status": "skipped",
       "quality": {
-        "outcome": "pass",
-        "path": "document",
+        "outcome": "fail",
+        "path": "error",
         "requiredMarkerRetention": {
-          "retained": 3,
+          "retained": 0,
           "total": 3,
           "markers": {
-            "Quarterly Operations Brief": true,
-            "North region": true,
-            "42 safe deployments": true
+            "Quarterly Operations Brief": false,
+            "North region": false,
+            "42 safe deployments": false
           }
         },
         "forbiddenBoilerplateLeakage": {
@@ -1737,35 +1778,32 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
-        "adapterEvidence": {
-          "documentConverter": "docling"
-        },
-        "outputCharacters": 71,
-        "outputBytes": 71,
-        "error": null
+        "adapterEvidence": {},
+        "outputCharacters": 0,
+        "outputBytes": 0,
+        "error": "EnvironmentSkip: offline Docling service and declared model assets are unavailable"
       },
       "runtime": {
-        "wallMilliseconds": 54.421,
-        "peakRssBytesApprox": 2799853568,
-        "temporaryDiskBytes": 3170,
-        "processesApprox": 1
+        "wallMilliseconds": 0,
+        "peakRssBytes": 0,
+        "temporaryDiskHighWaterBytes": 0,
+        "descendantProcessHighWater": 0
       }
     },
     {
       "id": "pptx",
       "class": "pptx",
       "adapter": "current",
-      "status": "passed",
+      "status": "skipped",
       "quality": {
-        "outcome": "pass",
-        "path": "document",
+        "outcome": "fail",
+        "path": "error",
         "requiredMarkerRetention": {
-          "retained": 2,
+          "retained": 0,
           "total": 2,
           "markers": {
-            "Release Readiness": true,
-            "All bounded checks passed": true
+            "Release Readiness": false,
+            "All bounded checks passed": false
           }
         },
         "forbiddenBoilerplateLeakage": {
@@ -1800,37 +1838,34 @@
           "required": 0,
           "pass": true
         },
-        "metadataRetention": {},
-        "adapterEvidence": {
-          "documentConverter": "docling"
-        },
-        "outputCharacters": 45,
-        "outputBytes": 45,
-        "error": null
+        "adapterEvidence": {},
+        "outputCharacters": 0,
+        "outputBytes": 0,
+        "error": "EnvironmentSkip: offline Docling service and declared model assets are unavailable"
       },
       "runtime": {
-        "wallMilliseconds": 55.192,
-        "peakRssBytesApprox": 2799853568,
-        "temporaryDiskBytes": 103782,
-        "processesApprox": 1
+        "wallMilliseconds": 0,
+        "peakRssBytes": 0,
+        "temporaryDiskHighWaterBytes": 0,
+        "descendantProcessHighWater": 0
       }
     },
     {
       "id": "xlsx",
       "class": "xlsx",
       "adapter": "current",
-      "status": "passed",
+      "status": "skipped",
       "quality": {
-        "outcome": "pass",
-        "path": "document",
+        "outcome": "fail",
+        "path": "error",
         "requiredMarkerRetention": {
-          "retained": 4,
+          "retained": 0,
           "total": 4,
           "markers": {
-            "Region": true,
-            "Value": true,
-            "North": true,
-            "42": true
+            "Region": false,
+            "Value": false,
+            "North": false,
+            "42": false
           }
         },
         "forbiddenBoilerplateLeakage": {
@@ -1850,9 +1885,9 @@
             "pass": true
           },
           "tables": {
-            "observed": 3,
+            "observed": 0,
             "required": 1,
-            "pass": true
+            "pass": false
           },
           "links": {
             "observed": 0,
@@ -1861,23 +1896,20 @@
           }
         },
         "structuredRowCompleteness": {
-          "observed": 2,
+          "observed": 0,
           "required": 2,
-          "pass": true
+          "pass": false
         },
-        "metadataRetention": {},
-        "adapterEvidence": {
-          "documentConverter": "docling"
-        },
-        "outputCharacters": 68,
-        "outputBytes": 68,
-        "error": null
+        "adapterEvidence": {},
+        "outputCharacters": 0,
+        "outputBytes": 0,
+        "error": "EnvironmentSkip: offline Docling service and declared model assets are unavailable"
       },
       "runtime": {
-        "wallMilliseconds": 53.942,
-        "peakRssBytesApprox": 2799853568,
-        "temporaryDiskBytes": 105897,
-        "processesApprox": 1
+        "wallMilliseconds": 0,
+        "peakRssBytes": 0,
+        "temporaryDiskHighWaterBytes": 0,
+        "descendantProcessHighWater": 0
       }
     },
     {
@@ -1886,7 +1918,7 @@
       "adapter": "secondary-html",
       "status": "skipped",
       "quality": {
-        "reason": "adapter command is not configured"
+        "reason": "adapter module is not configured"
       }
     },
     {
@@ -1895,7 +1927,7 @@
       "adapter": "alternate-pdf",
       "status": "skipped",
       "quality": {
-        "reason": "adapter command is not configured"
+        "reason": "adapter module is not configured"
       }
     }
   ]

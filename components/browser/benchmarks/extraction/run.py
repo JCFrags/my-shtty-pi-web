@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import gzip
 import hashlib
+import importlib
 import importlib.metadata
 import json
 import os
-# These settings make model-backed adapters fail closed instead of fetching assets.
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-os.environ.setdefault("DOCLING_SERVE_ENABLE_REMOTE_SERVICES", "false")
 import re
 import resource
-import shlex
 import signal
 import subprocess
 import sys
@@ -23,35 +21,20 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+# Model libraries must not fetch assets during import or conversion.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("DOCLING_SERVE_ENABLE_REMOTE_SERVICES", "false")
+os.environ.setdefault("MODELSCOPE_OFFLINE", "1")
+
 ROOT = Path(__file__).resolve().parent
 BROWSER = ROOT.parents[1]
 sys.path.insert(0, str(BROWSER / "services/reader/src"))
-sys.path.insert(0, str(BROWSER / "services/docling/src"))
 from pi_web_reader import pipeline  # noqa: E402
-from pi_web_docling.converter import ConvertRequest, convert_document  # noqa: E402
-
-
-_NETWORK_BLOCKED = False
-
-
-def offline_audit(event: str, _args: tuple[Any, ...]) -> None:
-    if _NETWORK_BLOCKED and event in {"socket.connect", "socket.getaddrinfo"}:
-        raise RuntimeError("network access is disabled for the offline corpus")
-
-
-sys.addaudithook(offline_audit)
 
 
 class LimitError(RuntimeError):
-    pass
-
-
-class CaseTimeout(TimeoutError):
-    pass
-
-
-def alarm_handler(_signum: int, _frame: Any) -> None:
-    raise CaseTimeout("case time limit exceeded")
+    """A benchmark resource ceiling was crossed."""
 
 
 @dataclass
@@ -61,187 +44,503 @@ class Extracted:
     metadata: dict[str, Any]
 
 
-def _current_adapter(case: dict[str, Any], content: bytes, temp: Path) -> Extracted:
-    media_type = case["mediaType"]
-    charset = case.get("charset", "utf-8")
-    text = content.decode(charset, errors="replace")
-    url = f"https://corpus.example/{case['file']}"
-    request = pipeline.ReadRequest(url=url, max_chars=1_000_000, fields=tuple(case.get("fields", [])))
-    fetched = pipeline.FetchResult(url=url, status=200, media_type=media_type, text=text, content=content, headers={})
-    expected_path = case["expectedPath"]
-    if media_type == "application/json" or media_type.endswith("+json"):
-        result = pipeline.finalize_json_result(fetched, request)
-        return Extracted(result.content, result.source, result.metadata)
-    if media_type in pipeline.DOCUMENT_TYPES:
-        staging = temp / "handoff"
-        staging.mkdir(mode=0o700, exist_ok=True)
-        source = staging / Path(case["file"]).name
-        source.write_bytes(content)
-        source.chmod(0o600)
-        old = os.environ.get("PI_WEB_DOCUMENT_STAGING_DIR")
-        os.environ["PI_WEB_DOCUMENT_STAGING_DIR"] = str(staging)
-        global _NETWORK_BLOCKED
-        try:
-            try:
-                _NETWORK_BLOCKED = True
-                converted = convert_document(ConvertRequest(str(source), len(content), hashlib.sha256(content).hexdigest(), media_type, url, True))
-                markdown = str(converted.get("markdown") or "")
-                converter = "docling"
-            except Exception:
-                if media_type != "application/pdf":
-                    raise
-                markdown = pipeline.extract_pdf_text(content)
-                converted = {"pages": [], "tables": [], "images": []}
-                converter = "pdftotext-fallback"
-        finally:
-            _NETWORK_BLOCKED = False
-            if old is None:
-                os.environ.pop("PI_WEB_DOCUMENT_STAGING_DIR", None)
-            else:
-                os.environ["PI_WEB_DOCUMENT_STAGING_DIR"] = old
-        return Extracted(markdown, "document", {"documentConverter": converter, **{key: converted.get(key) for key in ("pages", "tables", "images")}})
-    if media_type in pipeline.TEXT_TYPES:
-        source_name = "markdown-negotiation" if media_type in pipeline.MARKDOWN_TYPES else "raw"
-        result = pipeline.finalize_text_result(fetched, text, request, source_name)
-        return Extracted(result.content, result.source, result.metadata)
-    extracted, _title, meta = pipeline.extract_html(text, request)
-    if expected_path == "markdown-fallback" and pipeline.looks_like_javascript_shell(text, extracted):
-        fallback_path = ROOT / "fixtures" / case["fallbackFile"]
-        fallback_bytes = fallback_path.read_bytes()
-        if hashlib.sha256(fallback_bytes).hexdigest() != case["fallbackSha256"]:
-            raise RuntimeError(f"fallback fixture hash mismatch: {case['id']}")
-        fallback = fallback_bytes.decode("utf-8")
-        fallback_result = pipeline.finalize_text_result(fetched, fallback, request, "markdown-fallback")
-        return Extracted(fallback_result.content, fallback_result.source, fallback_result.metadata)
-    if expected_path == "feed":
-        return Extracted(extracted, "feed", meta)
-    if pipeline.useful_text(extracted) and not pipeline.looks_like_javascript_shell(text, extracted):
-        return Extracted(extracted, "static-html", meta)
-    shell = extracted or pipeline.html_to_text(text)
-    return Extracted(shell, "render-required", {**meta, "renderRequired": True})
+@dataclass
+class MonitoredResult:
+    value: dict[str, Any] | None
+    error: str | None
+    wall_ms: float
+    peak_rss: int
+    disk_high_water: int
+    process_high_water: int
 
 
-def current_adapter(case: dict[str, Any], content: bytes, temp: Path) -> Extracted:
-    """Run current extraction with declared local acquisition metadata."""
-    extracted = _current_adapter(case, content, temp)
-    return Extracted(
-        extracted.content,
-        extracted.path,
-        {**extracted.metadata, **case.get("metadata", {})},
-    )
+# Values are reviewed module names, not shell commands. The repository has no candidate now.
+OPTIONAL_ADAPTERS: dict[str, str] = {}
+OPTIONAL_ENV = {
+    "secondary-html": "WEBX_BENCH_HTML_ADAPTER",
+    "alternate-pdf": "WEBX_BENCH_PDF_ADAPTER",
+}
 
 
-def external_adapter(command: str, case: dict[str, Any], fixture: Path, timeout: int) -> Extracted:
-    completed = subprocess.run(
-        [*shlex.split(command), str(fixture), case["mediaType"]],
-        input=json.dumps({"case": case}), text=True, capture_output=True, timeout=timeout,
-        env={**os.environ, "NO_PROXY": "*", "no_proxy": "*"}, check=False,
-    )
-    if completed.returncode != 0:
-        raise RuntimeError(f"optional adapter exited {completed.returncode}: {completed.stderr[:500]}")
-    if len(completed.stdout.encode()) > 65_536:
-        raise LimitError("optional adapter output exceeds 65536 bytes")
-    value = json.loads(completed.stdout)
-    return Extracted(str(value["content"]), str(value.get("path", "candidate")), dict(value.get("metadata", {})))
+def resolve_optional_adapter(configured: str | None) -> str | None:
+    """Resolve only a reviewed in-repository module name."""
+    return OPTIONAL_ADAPTERS.get(configured or "")
 
 
-def count_structure(text: str, kind: str) -> int:
-    if kind == "headings": return len(re.findall(r"(?m)^#{1,6}\s+\S", text))
-    if kind == "codeBlocks": return len(re.findall(r"```", text)) // 2
-    if kind == "tables": return len(re.findall(r"(?m)^\s*\|?.+\|.+$", text))
-    if kind == "links": return len(re.findall(r"\[[^]]+\]\([^)]+\)|https?://", text))
-    return 0
+def offline_audit(event: str, _args: tuple[Any, ...]) -> None:
+    if event in {"socket.connect", "socket.connect_ex", "socket.getaddrinfo"}:
+        raise RuntimeError("network access is disabled for the offline corpus")
 
 
-def quality(case: dict[str, Any], extracted: Extracted | None, error: str | None) -> dict[str, Any]:
-    expected = case["expectedOutcome"]
-    if extracted is None:
-        outcome_ok = expected in {"limit-error", "empty-or-error"}
-        text = ""
-        path = "error"
-    else:
-        text, path = extracted.content, extracted.path
-        outcome_ok = (expected == "success" and path == case["expectedPath"]) or (expected == path) or (expected == "empty-or-error" and not text.strip())
-    skip_content_checks = extracted is None and expected in {"limit-error", "empty-or-error"}
-    required = {marker: marker in text for marker in case["requiredMarkers"]}
-    forbidden = {marker: marker in text for marker in case["forbiddenMarkers"]}
-    structure = case["structure"]
-    measured = {key: (count_structure(text, key) if key != "structuredRows" else structured_rows(extracted)) for key in structure}
-    structure_ok = {key: measured[key] >= value for key, value in structure.items()}
-    metadata_ok = {key: extracted is not None and extracted.metadata.get(key) == value for key, value in case.get("metadata", {}).items()}
-    return {
-        "outcome": "pass" if outcome_ok and (skip_content_checks or (all(required.values()) and not any(forbidden.values()) and all(structure_ok.values()) and all(metadata_ok.values()))) else "fail",
-        "path": path,
-        "requiredMarkerRetention": {"retained": sum(required.values()), "total": len(required), "markers": required},
-        "forbiddenBoilerplateLeakage": {"leaked": sum(forbidden.values()), "total": len(forbidden), "markers": forbidden},
-        "preservation": {key: {"observed": measured[key], "required": structure[key], "pass": structure_ok[key]} for key in ("headings", "codeBlocks", "tables", "links")},
-        "structuredRowCompleteness": {"observed": measured["structuredRows"], "required": structure["structuredRows"], "pass": structure_ok["structuredRows"]},
-        "metadataRetention": metadata_ok,
-        "adapterEvidence": ({key: extracted.metadata[key] for key in ("extractor", "documentConverter", "renderRequired", "returnedItems", "totalItems") if key in extracted.metadata} if extracted is not None else {}),
-        "outputCharacters": len(text), "outputBytes": len(text.encode()), "error": error,
-    }
-
-
-def structured_rows(extracted: Extracted | None) -> int:
-    if extracted is None: return 0
-    returned = extracted.metadata.get("returnedItems")
-    if isinstance(returned, int): return returned
-    tables = extracted.metadata.get("tables")
-    if isinstance(tables, list) and tables:
-        rows = tables[0].get("rows")
-        return int(rows or 0)
-    return 0
+sys.addaudithook(offline_audit)
 
 
 def directory_bytes(path: Path) -> int:
-    return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
+    total = 0
+    try:
+        paths = list(path.rglob("*"))
+    except FileNotFoundError:
+        return 0
+    for item in paths:
+        try:
+            if item.is_file():
+                total += item.stat().st_size
+        except FileNotFoundError:
+            pass
+    return total
 
 
-def descendant_processes() -> int:
-    """Return a Linux descendant snapshot or one on other systems."""
-    children_file = Path(f"/proc/{os.getpid()}/task/{os.getpid()}/children")
-    if not children_file.exists(): return 1
-    seen: set[int] = set()
-    pending = [os.getpid()]
+def descendants(root_pid: int) -> set[int]:
+    """Return the process tree on Linux, or only the root on other systems."""
+    if not Path("/proc").exists():
+        return {root_pid}
+    seen = {root_pid}
+    pending = [root_pid]
     while pending:
         pid = pending.pop()
-        path = Path(f"/proc/{pid}/task/{pid}/children")
-        try: children = [int(value) for value in path.read_text().split()]
-        except (FileNotFoundError, PermissionError): children = []
+        task = Path(f"/proc/{pid}/task/{pid}/children")
+        try:
+            children = [int(value) for value in task.read_text().split()]
+        except (FileNotFoundError, PermissionError, ProcessLookupError):
+            children = []
         for child in children:
-            if child not in seen: seen.add(child); pending.append(child)
-    return 1 + len(seen)
+            if child not in seen:
+                seen.add(child)
+                pending.append(child)
+    return seen
+
+
+def process_rss(pids: set[int]) -> int:
+    total = 0
+    for pid in pids:
+        try:
+            for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+                if line.startswith("VmRSS:"):
+                    total += int(line.split()[1]) * 1024
+                    break
+        except (FileNotFoundError, PermissionError, ProcessLookupError, ValueError):
+            pass
+    return total
+
+
+def kill_group(process: subprocess.Popen[Any]) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        process.kill()
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        process.kill()
+
+
+def child_limits(limits: dict[str, int]) -> None:
+    os.setsid()
+    if hasattr(resource, "RLIMIT_AS"):
+        resource.setrlimit(resource.RLIMIT_AS, (limits["memoryBytes"], limits["memoryBytes"]))
+    if hasattr(resource, "RLIMIT_CPU"):
+        cpu = max(1, int(limits["caseSeconds"]) + 1)
+        resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu))
+    if hasattr(resource, "RLIMIT_FSIZE"):
+        size = min(limits["diskBytes"], limits["reportBytes"])
+        resource.setrlimit(resource.RLIMIT_FSIZE, (size, size))
+    if hasattr(resource, "RLIMIT_CORE"):
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+
+def run_isolated(job: dict[str, Any], limits: dict[str, int], run_deadline: float) -> MonitoredResult:
+    remaining = run_deadline - time.monotonic()
+    if remaining <= 0:
+        return MonitoredResult(None, "LimitError: total time limit exceeded", 0, 0, 0, 0)
+    case_seconds = min(float(limits["caseSeconds"]), remaining)
+    started = time.monotonic()
+    with tempfile.TemporaryDirectory(prefix="webx-extraction-case-") as raw_temp:
+        temp = Path(raw_temp)
+        job_path = temp / "job.json"
+        result_path = temp / "result.json"
+        job_path.write_text(json.dumps(job), encoding="utf-8")
+        command = [sys.executable, str(Path(__file__).resolve()), "--worker", str(job_path), str(result_path)]
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            preexec_fn=lambda: child_limits(limits),
+        )
+        peak_rss = 0
+        disk_high = directory_bytes(temp)
+        process_high = 1
+        violation: str | None = None
+        while process.poll() is None:
+            tree = descendants(process.pid)
+            rss = process_rss(tree)
+            disk = directory_bytes(temp)
+            peak_rss = max(peak_rss, rss)
+            disk_high = max(disk_high, disk)
+            process_high = max(process_high, len(tree))
+            if rss > limits["memoryBytes"]:
+                violation = "memory limit exceeded"
+            elif len(tree) > limits["processes"]:
+                violation = "process limit exceeded"
+            elif disk > limits["diskBytes"]:
+                violation = "temporary disk limit exceeded"
+            elif time.monotonic() - started > case_seconds:
+                violation = "case time limit exceeded" if time.monotonic() < run_deadline else "total time limit exceeded"
+            if violation:
+                kill_group(process)
+                break
+            time.sleep(0.005)
+        tree = descendants(process.pid)
+        peak_rss = max(peak_rss, process_rss(tree))
+        disk_high = max(disk_high, directory_bytes(temp))
+        process_high = max(process_high, len(tree))
+        elapsed = round((time.monotonic() - started) * 1000, 3)
+        if violation:
+            return MonitoredResult(None, f"LimitError: {violation}", elapsed, peak_rss, disk_high, process_high)
+        if process.returncode != 0:
+            if process.returncode == -getattr(signal, "SIGXFSZ", 25):
+                error = "LimitError: temporary disk or worker result file limit exceeded"
+            elif process.returncode in {-signal.SIGKILL, -getattr(signal, "SIGSEGV", 11)} and peak_rss >= limits["memoryBytes"] * 9 // 10:
+                error = "LimitError: memory limit exceeded"
+            else:
+                error = f"WorkerError: child exited {process.returncode}"
+            return MonitoredResult(None, error, elapsed, peak_rss, disk_high, process_high)
+        try:
+            if result_path.stat().st_size > limits["reportBytes"]:
+                raise LimitError("worker result limit exceeded")
+            value = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, LimitError) as exc:
+            return MonitoredResult(None, f"{type(exc).__name__}: {exc}", elapsed, peak_rss, disk_high, process_high)
+        if value.get("error"):
+            error = str(value["error"])[:500]
+            if error.startswith("MemoryError"):
+                error = "LimitError: memory limit exceeded"
+            elif "Errno 27" in error:
+                error = "LimitError: temporary disk or worker result file limit exceeded"
+            return MonitoredResult(None, error, elapsed, peak_rss, disk_high, process_high)
+        return MonitoredResult(value, None, elapsed, peak_rss, disk_high, process_high)
+
+
+class FixtureAcquisition:
+    """Supply deterministic HTTP responses and record observed acquisition facts."""
+
+    def __init__(self, case: dict[str, Any], content: bytes) -> None:
+        self.case = case
+        self.content = content
+        self.requested: list[str] = []
+        self.raw_bytes = len(content)
+        self.decoded_bytes = len(content)
+        self.content_encoding = "identity"
+
+    def handler(self, request: Any):
+        httpx = pipeline.httpx
+        assert httpx is not None
+        url = str(request.url)
+        self.requested.append(url)
+        acquisition = self.case.get("acquisition", {})
+        redirects = acquisition.get("redirects", [])
+        if redirects:
+            chain = [f"https://corpus.example/{self.case['file']}", *redirects]
+            if url in chain[:-1]:
+                return httpx.Response(302, headers={"location": chain[chain.index(url) + 1]}, request=request)
+            if url != chain[-1]:
+                return httpx.Response(404, request=request)
+        primary = redirects[-1] if redirects else f"https://corpus.example/{self.case['file']}"
+        if url == primary:
+            body = self.content
+            headers = {"content-type": self.case["mediaType"]}
+            if charset := acquisition.get("charset"):
+                headers["content-type"] += f"; charset={charset}"
+            if acquisition.get("compression") == "gzip":
+                body = gzip.compress(self.content, mtime=0)
+                headers["content-encoding"] = "gzip"
+                headers["content-length"] = str(len(body))
+                self.raw_bytes = len(body)
+                self.content_encoding = "gzip"
+            self.decoded_bytes = len(self.content)
+            return httpx.Response(200, headers=headers, content=body, request=request)
+        fallback = self.case.get("fallbackFile")
+        if fallback and url == primary + ".md":
+            data = (ROOT / "fixtures" / fallback).read_bytes()
+            if hashlib.sha256(data).hexdigest() != self.case["fallbackSha256"]:
+                raise RuntimeError("fallback fixture hash mismatch")
+            return httpx.Response(200, headers={"content-type": "text/markdown"}, content=data, request=request)
+        return httpx.Response(404, request=request)
+
+    def evidence(self, final_url: str) -> dict[str, Any]:
+        return {
+            "requestedUrls": self.requested,
+            "redirectChain": self.requested[: self.requested.index(final_url) + 1] if final_url in self.requested else self.requested,
+            "finalUrl": final_url,
+            "contentEncoding": self.content_encoding,
+            "rawBytes": self.raw_bytes,
+            "decodedBytes": self.decoded_bytes,
+        }
+
+
+async def production_read(case: dict[str, Any], content: bytes) -> tuple[Extracted, dict[str, Any]]:
+    httpx = pipeline.httpx
+    if httpx is None:
+        raise RuntimeError("httpx is not installed")
+    acquisition = FixtureAcquisition(case, content)
+    real_client = httpx.AsyncClient
+
+    def client_factory(*args: Any, **kwargs: Any):
+        # Acquisition passes its transport. The Docling client does not. A fixed 503
+        # models an unavailable local worker and exercises the production PDF fallback.
+        if "transport" not in kwargs:
+            kwargs["transport"] = httpx.MockTransport(
+                lambda request: httpx.Response(503, request=request, json={"detail": "offline benchmark has no Docling service"})
+            )
+        return real_client(*args, **kwargs)
+
+    pipeline.httpx.AsyncClient = client_factory
+    try:
+        reader = pipeline.ReaderPipeline(
+            timeout_seconds=30,
+            max_download_bytes=1_000_000,
+            max_raw_bytes=1_000_000,
+            max_redirects=5,
+            resolver=lambda _host, _port: asyncio.sleep(0, result=["93.184.216.34"]),
+            transport_factory=lambda _pins: httpx.MockTransport(acquisition.handler),
+        )
+        request = pipeline.ReadRequest(
+            url=f"https://corpus.example/{case['file']}",
+            max_chars=1_000_000,
+            fields=tuple(case.get("fields", [])),
+        )
+        result = await reader.read(request)
+    finally:
+        pipeline.httpx.AsyncClient = real_client
+    return Extracted(result.content, result.source, result.metadata), acquisition.evidence(result.url)
+
+
+def validate_input_size(data: bytes, limit: int) -> None:
+    if len(data) > limit:
+        raise LimitError(f"input exceeds {limit} bytes")
+
+
+def validate_output_size(content: str, limit: int) -> None:
+    if len(content.encode("utf-8")) > limit:
+        raise LimitError(f"output exceeds {limit} bytes")
+
+
+def worker_case(job: dict[str, Any]) -> dict[str, Any]:
+    case = job["case"]
+    fixture = ROOT / "fixtures" / case["file"]
+    data = fixture.read_bytes()
+    if hashlib.sha256(data).hexdigest() != case["sha256"]:
+        raise RuntimeError(f"fixture hash mismatch: {case['id']}")
+    validate_input_size(data, job["limits"]["inputBytes"])
+    adapter = job.get("adapter", "current")
+    if adapter == "current":
+        extracted, acquisition = asyncio.run(production_read(case, data))
+    else:
+        module_name = resolve_optional_adapter(job.get("adapterKey"))
+        if module_name is None:
+            raise RuntimeError("optional adapter is not in the reviewed allowlist")
+        value = importlib.import_module(module_name).extract(case, fixture)
+        extracted = Extracted(str(value["content"]), str(value["path"]), dict(value.get("metadata", {})))
+        acquisition = {}
+    validate_output_size(extracted.content, job["limits"]["outputBytes"])
+    return {"extracted": asdict(extracted), "acquisition": acquisition}
+
+
+def worker_probe(job: dict[str, Any]) -> dict[str, Any]:
+    action = job["action"]
+    amount = int(job.get("amount", 0))
+    if action == "sleep":
+        time.sleep(float(job["seconds"]))
+    elif action == "memory":
+        value = bytearray(amount)
+        for index in range(0, len(value), 4096):
+            value[index] = 1
+        time.sleep(1)
+    elif action == "process":
+        children = [subprocess.Popen([sys.executable, "-c", "import time; time.sleep(2)"]) for _ in range(amount)]
+        time.sleep(2)
+        for child in children:
+            child.wait()
+    elif action == "disk":
+        with (Path(job["directory"]) / "probe.bin").open("wb") as handle:
+            handle.write(b"x" * amount)
+            handle.flush()
+            os.fsync(handle.fileno())
+        time.sleep(1)
+    elif action == "output":
+        return {"payload": "x" * amount}
+    return {"ok": True}
+
+
+def worker_main(job_path: Path, result_path: Path) -> int:
+    try:
+        job = json.loads(job_path.read_text(encoding="utf-8"))
+        if job.get("mode") == "probe":
+            if job.get("action") == "disk":
+                job["directory"] = str(result_path.parent)
+            value = worker_probe(job)
+        else:
+            value = worker_case(job)
+        result = {"value": value}
+    except Exception as exc:
+        result = {"error": f"{type(exc).__name__}: {exc}"[:500]}
+    result_path.write_text(json.dumps(result), encoding="utf-8")
+    return 0
+
+
+def count_structure(text: str, kind: str) -> int:
+    if kind == "headings":
+        return len(re.findall(r"(?m)^#{1,6}\s+\S", text))
+    if kind == "codeBlocks":
+        return len(re.findall(r"```", text)) // 2
+    if kind == "tables":
+        lines = text.splitlines()
+        return sum(1 for line in lines if re.match(r"^\s*\|?\s*:?-+", line) and "|" in line)
+    if kind == "links":
+        return len(re.findall(r"\[[^]]+\]\([^)]+\)|https?://", text))
+    return 0
+
+
+def structured_rows(extracted: Extracted | None) -> int:
+    if extracted is None:
+        return 0
+    returned = extracted.metadata.get("returnedItems")
+    if isinstance(returned, int):
+        return returned
+    tables = extracted.metadata.get("tables")
+    if isinstance(tables, list) and tables:
+        return int(tables[0].get("rows") or 0)
+    return 0
+
+
+def extraction_quality(case: dict[str, Any], extracted: Extracted | None, error: str | None) -> dict[str, Any]:
+    text = extracted.content if extracted else ""
+    path = extracted.path if extracted else "error"
+    expected = case["expectedOutcome"]
+    if expected == "empty-or-error":
+        outcome_ok = extracted is None or not text.strip()
+    elif expected == "limit-error":
+        outcome_ok = error is not None and "LimitError" in error
+    elif expected == "render-required":
+        outcome_ok = extracted is not None and bool(extracted.metadata.get("renderRequired"))
+    else:
+        outcome_ok = extracted is not None and path == case["expectedPath"]
+    required = {marker: marker in text for marker in case["requiredMarkers"]}
+    forbidden = {marker: marker in text for marker in case["forbiddenMarkers"]}
+    measured = {
+        key: structured_rows(extracted) if key == "structuredRows" else count_structure(text, key)
+        for key in case["structure"]
+    }
+    structure_ok = {key: measured[key] >= value for key, value in case["structure"].items()}
+    checks_ok = all(required.values()) and not any(forbidden.values()) and all(structure_ok.values())
+    if expected in {"limit-error", "empty-or-error"} and extracted is None:
+        checks_ok = True
+    return {
+        "outcome": "pass" if outcome_ok and checks_ok else "fail",
+        "path": path,
+        "requiredMarkerRetention": {"retained": sum(required.values()), "total": len(required), "markers": required},
+        "forbiddenBoilerplateLeakage": {"leaked": sum(forbidden.values()), "total": len(forbidden), "markers": forbidden},
+        "preservation": {key: {"observed": measured[key], "required": case["structure"][key], "pass": structure_ok[key]} for key in ("headings", "codeBlocks", "tables", "links")},
+        "structuredRowCompleteness": {"observed": measured["structuredRows"], "required": case["structure"]["structuredRows"], "pass": structure_ok["structuredRows"]},
+        "adapterEvidence": ({key: extracted.metadata[key] for key in ("extractor", "documentConverter", "renderRequired", "returnedItems", "totalItems") if key in extracted.metadata} if extracted else {}),
+        "outputCharacters": len(text),
+        "outputBytes": len(text.encode("utf-8")),
+        "error": error,
+    }
+
+
+def acquisition_quality(case: dict[str, Any], observed: dict[str, Any], extraction: dict[str, Any]) -> dict[str, Any]:
+    expected = case["acquisitionExpected"]
+    checks = {key: observed.get(key) == value for key, value in expected.items()}
+    return {
+        "outcome": "pass" if all(checks.values()) else "fail",
+        "contract": "acquisition",
+        "observed": observed,
+        "checks": checks,
+        "extractionMetrics": extraction,
+    }
 
 
 def environment() -> dict[str, Any]:
     packages = {}
     for name in ("trafilatura", "docling", "httpx"):
-        try: packages[name] = importlib.metadata.version(name)
-        except importlib.metadata.PackageNotFoundError: packages[name] = "missing"
-    return {"python": sys.version.split()[0], "platform": sys.platform, "packages": packages, "pdftotext": tool_version("pdftotext", "-v")}
+        try:
+            packages[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            packages[name] = "missing"
+    return {
+        "python": sys.version.split()[0],
+        "platform": sys.platform,
+        "packages": packages,
+        "pdftotext": tool_version("pdftotext", "-v"),
+        "documentService": "not started; PDF uses the production fallback and Office is skipped",
+    }
 
 
 def tool_version(command: str, flag: str) -> str:
     try:
         result = subprocess.run([command, flag], capture_output=True, text=True, timeout=3, check=False)
         return (result.stdout or result.stderr).splitlines()[0][:160]
-    except (OSError, subprocess.SubprocessError): return "missing"
+    except (OSError, subprocess.SubprocessError, IndexError):
+        return "missing"
 
 
 def stable_quality(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return deterministic current-adapter quality without variable resource data."""
     keys = ("id", "adapter", "status", "quality")
     return [{key: item[key] for key in keys} for item in results if item["adapter"] == "current"]
 
 
-def exit_code(regressions: list[str]) -> int:
-    return 1 if regressions else 0
-
-
 def compare_baseline(path: Path, quality_rows: list[dict[str, Any]]) -> list[str]:
-    if not path.exists(): return ["baseline is missing"]
-    old = json.loads(path.read_text()).get("quality", [])
+    if not path.exists():
+        return ["baseline is missing"]
+    old = json.loads(path.read_text(encoding="utf-8")).get("quality", [])
     return [] if old == quality_rows else ["deterministic quality differs from the reviewed baseline"]
+
+
+def encode_report(report: dict[str, Any], limit: int) -> bytes:
+    encoded = (json.dumps(report, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    if len(encoded) > limit:
+        raise LimitError("report size limit exceeded")
+    return encoded
+
+
+def run_case(
+    case: dict[str, Any],
+    limits: dict[str, int],
+    deadline: float,
+    adapter: str = "current",
+    adapter_key: str | None = None,
+) -> dict[str, Any]:
+    fixture = ROOT / "fixtures" / case["file"]
+    data = fixture.read_bytes()
+    if hashlib.sha256(data).hexdigest() != case["sha256"]:
+        raise RuntimeError(f"fixture hash mismatch: {case['id']}")
+    if len(data) > limits["inputBytes"]:
+        monitored = MonitoredResult(None, f"LimitError: input exceeds {limits['inputBytes']} bytes", 0, 0, 0, 0)
+    elif case["mediaType"] in pipeline.DOCUMENT_TYPES and case["mediaType"] != "application/pdf":
+        quality = extraction_quality(case, None, "EnvironmentSkip: offline Docling service and declared model assets are unavailable")
+        return {"id": case["id"], "class": case["class"], "adapter": adapter, "status": "skipped", "quality": quality, "runtime": {"wallMilliseconds": 0, "peakRssBytes": 0, "temporaryDiskHighWaterBytes": 0, "descendantProcessHighWater": 0}}
+    else:
+        monitored = run_isolated(
+            {"case": case, "limits": limits, "adapter": adapter, "adapterKey": adapter_key},
+            limits,
+            deadline,
+        )
+    payload = monitored.value.get("value") if monitored.value else None
+    extracted = Extracted(**payload["extracted"]) if payload else None
+    observed = payload.get("acquisition", {}) if payload else {}
+    quality = extraction_quality(case, extracted, monitored.error)
+    if case.get("caseKind") == "acquisition-contract":
+        quality = acquisition_quality(case, observed, quality)
+    if case.get("caseKind") == "acquisition-contract":
+        status = "contract-passed" if quality["outcome"] == "pass" else "contract-failed"
+    else:
+        status = "passed" if quality["outcome"] == "pass" else "failed"
+    return {
+        "id": case["id"], "class": case["class"], "adapter": adapter, "status": status, "quality": quality,
+        "runtime": {"wallMilliseconds": monitored.wall_ms, "peakRssBytes": monitored.peak_rss, "temporaryDiskHighWaterBytes": monitored.disk_high_water, "descendantProcessHighWater": monitored.process_high_water},
+    }
 
 
 def main() -> int:
@@ -250,71 +549,59 @@ def main() -> int:
     parser.add_argument("--baseline", type=Path, default=ROOT / "current-baseline.json")
     parser.add_argument("--write-baseline", action="store_true")
     parser.add_argument("--no-compare", action="store_true")
+    parser.add_argument("--worker", nargs=2, metavar=("JOB", "RESULT"))
     args = parser.parse_args()
-    manifest = json.loads((ROOT / "manifest.json").read_text())
+    if args.worker:
+        return worker_main(Path(args.worker[0]), Path(args.worker[1]))
+    manifest_bytes = (ROOT / "manifest.json").read_bytes()
+    manifest = json.loads(manifest_bytes)
     limits = manifest["limits"]
-    if len(manifest["cases"]) > limits["cases"]: raise LimitError("manifest case limit exceeded")
-    signal.signal(signal.SIGALRM, alarm_handler)
-    start_total = time.monotonic()
-    results: list[dict[str, Any]] = []
-    adapter_commands = {"secondary-html": os.getenv("WEBX_BENCH_HTML_ADAPTER"), "alternate-pdf": os.getenv("WEBX_BENCH_PDF_ADAPTER")}
-    with tempfile.TemporaryDirectory(prefix="webx-extraction-bench-") as raw_temp:
-        temp = Path(raw_temp)
-        for case in manifest["cases"]:
-            if time.monotonic() - start_total > limits["totalSeconds"]: raise LimitError("total time limit exceeded")
-            fixture = ROOT / "fixtures" / case["file"]
-            data = fixture.read_bytes()
-            if hashlib.sha256(data).hexdigest() != case["sha256"]: raise RuntimeError(f"fixture hash mismatch: {case['id']}")
-            before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-            started = time.monotonic(); extracted = None; error = None
-            try:
-                remaining = limits["totalSeconds"] - (time.monotonic() - start_total)
-                signal.setitimer(signal.ITIMER_REAL, min(limits["caseSeconds"], max(0.001, remaining)))
-                if len(data) > limits["inputBytes"]: raise LimitError(f"input exceeds {limits['inputBytes']} bytes")
-                extracted = current_adapter(case, data, temp)
-                if len(extracted.content.encode()) > limits["outputBytes"]: raise LimitError(f"output exceeds {limits['outputBytes']} bytes")
-            except Exception as exc:
-                error = f"{type(exc).__name__}: {exc}"[:500]
-            finally: signal.setitimer(signal.ITIMER_REAL, 0)
-            elapsed = round((time.monotonic() - started) * 1000, 3)
-            peak = max(before, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) * 1024
-            disk = directory_bytes(temp); processes = descendant_processes()
-            if peak > limits["memoryBytes"] or disk > limits["diskBytes"] or processes > limits["processes"]:
-                extracted = None
-                error = f"LimitError: resource ceiling exceeded (memory={peak}, disk={disk}, processes={processes})"
-            q = quality(case, extracted, error)
-            status = "passed" if q["outcome"] == "pass" else "failed"
-            results.append({"id": case["id"], "class": case["class"], "adapter": "current", "status": status, "quality": q, "runtime": {"wallMilliseconds": elapsed, "peakRssBytesApprox": peak, "temporaryDiskBytes": disk, "processesApprox": processes}})
-        for adapter, command in adapter_commands.items():
-            if not command:
-                results.append({"id": f"optional:{adapter}", "class": "optional-adapter", "adapter": adapter, "status": "skipped", "quality": {"reason": "adapter command is not configured"}})
-                continue
-            selected = [case for case in manifest["cases"] if (adapter == "secondary-html" and case["mediaType"] == "text/html") or (adapter == "alternate-pdf" and case["mediaType"] == "application/pdf")]
-            for case in selected:
-                fixture = ROOT / "fixtures" / case["file"]
-                started = time.monotonic(); extracted = None; error = None
-                try:
-                    remaining = limits["totalSeconds"] - (time.monotonic() - start_total)
-                    signal.setitimer(signal.ITIMER_REAL, min(limits["caseSeconds"], max(0.001, remaining)))
-                    extracted = external_adapter(command, case, fixture, min(limits["caseSeconds"], max(1, int(remaining))))
-                except Exception as exc:
-                    error = f"{type(exc).__name__}: {exc}"[:500]
-                finally:
-                    signal.setitimer(signal.ITIMER_REAL, 0)
-                q = quality(case, extracted, error)
-                results.append({"id": case["id"], "class": case["class"], "adapter": adapter, "status": "passed" if q["outcome"] == "pass" else "failed", "quality": q, "runtime": {"wallMilliseconds": round((time.monotonic() - started) * 1000, 3), "peakRssBytesApprox": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024}})
+    if len(manifest["cases"]) > limits["cases"]:
+        raise LimitError("manifest case limit exceeded")
+    deadline = time.monotonic() + limits["totalSeconds"]
+    run_environment = environment()
+    results = [run_case(case, limits, deadline) for case in manifest["cases"]]
+    for adapter, variable in OPTIONAL_ENV.items():
+        configured = os.getenv(variable)
+        if not configured or resolve_optional_adapter(configured) is None:
+            reason = "adapter module is not configured" if not configured else "adapter module is not in the reviewed allowlist"
+            results.append({"id": f"optional:{adapter}", "class": "optional-adapter", "adapter": adapter, "status": "skipped", "quality": {"reason": reason}})
+            continue
+        selected = [case for case in manifest["cases"] if (adapter == "secondary-html" and case["mediaType"] == "text/html") or (adapter == "alternate-pdf" and case["mediaType"] == "application/pdf")]
+        results.extend(run_case(case, limits, deadline, adapter, configured) for case in selected)
+    if time.monotonic() > deadline:
+        raise LimitError("total time limit exceeded")
     quality_rows = stable_quality(results)
     regressions = [] if args.no_compare or args.write_baseline else compare_baseline(args.baseline, quality_rows)
-    report = {"schemaVersion": 1, "manifestSha256": hashlib.sha256((ROOT / "manifest.json").read_bytes()).hexdigest(), "environment": environment(), "limits": limits, "summary": {"passed": sum(x["status"] == "passed" for x in results), "failed": sum(x["status"] == "failed" for x in results), "skipped": sum(x["status"] == "skipped" for x in results), "qualityRegressions": regressions}, "results": results}
-    encoded = (json.dumps(report, indent=2, ensure_ascii=False) + "\n").encode()
-    if len(encoded) > limits["reportBytes"]: raise LimitError("report size limit exceeded")
-    args.report.parent.mkdir(parents=True, exist_ok=True); args.report.write_bytes(encoded)
+    report = {
+        "schemaVersion": 2,
+        "manifestSha256": hashlib.sha256(manifest_bytes).hexdigest(),
+        "environment": run_environment,
+        "limits": limits,
+        "summary": {
+            "extractionPassed": sum(row["status"] == "passed" for row in results),
+            "extractionFailed": sum(row["status"] == "failed" for row in results),
+            "acquisitionContractsPassed": sum(row["status"] == "contract-passed" for row in results),
+            "acquisitionContractsFailed": sum(row["status"] == "contract-failed" for row in results),
+            "skipped": sum(row["status"] == "skipped" for row in results),
+            "qualityRegressions": regressions,
+        },
+        "results": results,
+    }
+    encoded = encode_report(report, limits["reportBytes"])
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_bytes(encoded)
     if args.write_baseline:
-        args.baseline.write_text(json.dumps({"schemaVersion": 1, "environment": report["environment"], "quality": quality_rows}, indent=2, ensure_ascii=False) + "\n")
-    print(f"Extraction corpus: {report['summary']['passed']} passed, {report['summary']['failed']} failed, {report['summary']['skipped']} skipped")
-    if regressions: print("Baseline comparison: " + "; ".join(regressions), file=sys.stderr)
-    # The reviewed baseline can contain known extraction losses. Only drift is gating.
-    return exit_code(regressions)
+        args.baseline.write_text(json.dumps({"schemaVersion": 2, "environment": report["environment"], "quality": quality_rows}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(
+        f"Extraction corpus: {report['summary']['extractionPassed']} extraction passed, "
+        f"{report['summary']['extractionFailed']} extraction failed, "
+        f"{report['summary']['acquisitionContractsPassed']} acquisition contracts passed, "
+        f"{report['summary']['skipped']} skipped"
+    )
+    if regressions:
+        print("Baseline comparison: " + "; ".join(regressions), file=sys.stderr)
+    return 1 if regressions else 0
 
 
 if __name__ == "__main__":

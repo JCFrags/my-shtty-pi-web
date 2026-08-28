@@ -4,7 +4,10 @@ import hashlib
 import importlib.util
 import json
 import sys
+import time
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).parents[1]
 SPEC = importlib.util.spec_from_file_location("extraction_benchmark", ROOT / "run.py")
@@ -30,11 +33,48 @@ def test_manifest_covers_required_classes_and_annotations() -> None:
         "pdf-table", "scanned-pdf", "docx", "pptx", "xlsx",
     }
     assert required <= {case["class"] for case in data["cases"]}
+    production_paths = {"trafilatura", "markdown-fallback", "raw", "structured-json", "markdown-negotiation", "document", "input-limit"}
     for case in data["cases"]:
         assert case["requiredMarkers"] is not None
         assert case["forbiddenMarkers"] is not None
         assert set(case["structure"]) == {"headings", "codeBlocks", "tables", "links", "structuredRows"}
-        assert case["expectedOutcome"] and case["expectedPath"] and case["allowedLoss"]
+        assert case["expectedOutcome"] and case["expectedPath"] in production_paths and case["allowedLoss"]
+
+
+def test_representative_structure_requirements_are_meaningful() -> None:
+    cases = {case["id"]: case for case in manifest()["cases"]}
+    assert cases["technical-docs"]["structure"] == {"headings": 2, "codeBlocks": 1, "tables": 1, "links": 1, "structuredRows": 0}
+    assert cases["blog"]["structure"]["codeBlocks"] == 1
+    assert cases["product"]["structure"]["tables"] == 1
+    assert cases["github-repository"]["structure"]["links"] == 2
+    assert cases["negotiated-markdown"]["structure"]["headings"] == 2
+    assert cases["pdf-table"]["structure"]["tables"] == 1
+
+
+def test_acquisition_contracts_do_not_use_expected_metadata_as_results() -> None:
+    contracts = [case for case in manifest()["cases"] if case.get("caseKind") == "acquisition-contract"]
+    assert {case["class"] for case in contracts} == {"bad-charset", "redirect-chain-metadata", "compressed-content-metadata"}
+    for case in contracts:
+        assert "metadata" not in case
+        assert case["acquisitionExpected"]
+    report = json.loads((ROOT / "reports/current-run.json").read_text())
+    rows = {row["id"]: row for row in report["results"]}
+    for case in contracts:
+        quality = rows[case["id"]]["quality"]
+        assert quality["contract"] == "acquisition"
+        assert quality["observed"] is not case["acquisitionExpected"]
+        assert "extractionMetrics" in quality
+
+
+def test_expected_annotations_do_not_select_production_behavior() -> None:
+    case = next(case for case in manifest()["cases"] if case["id"] == "plain-text")
+    changed = json.loads(json.dumps(case))
+    changed["expectedPath"] = "trafilatura"
+    limits = manifest()["limits"]
+    original = runner.worker_case({"case": case, "limits": limits})
+    measured_after_annotation_change = runner.worker_case({"case": changed, "limits": limits})
+    assert original == measured_after_annotation_change
+    assert original["extracted"]["path"] == "raw"
 
 
 def test_fixture_hashes_and_generator_are_stable() -> None:
@@ -55,9 +95,7 @@ def test_fixture_hashes_and_generator_are_stable() -> None:
 
 
 def runner_import_generator():
-    generator_spec = importlib.util.spec_from_file_location(
-        "extraction_fixture_generator", ROOT / "generate_fixtures.py"
-    )
+    generator_spec = importlib.util.spec_from_file_location("extraction_fixture_generator", ROOT / "generate_fixtures.py")
     assert generator_spec and generator_spec.loader
     generator = importlib.util.module_from_spec(generator_spec)
     generator_spec.loader.exec_module(generator)
@@ -76,6 +114,59 @@ def test_runner_bounds_are_finite_and_small() -> None:
     assert 0 < limits["reportBytes"] <= 256 * 1024
 
 
+def probe_limits(**changes):
+    limits = dict(manifest()["limits"])
+    limits.update({"caseSeconds": 2, "totalSeconds": 4, "memoryBytes": 1024**3, "diskBytes": 1024**2, "processes": 8, "reportBytes": 256 * 1024})
+    limits.update(changes)
+    return limits
+
+
+def test_input_output_and_report_limits_fail_deterministically() -> None:
+    with pytest.raises(runner.LimitError, match="input"):
+        runner.validate_input_size(b"1234", 3)
+    with pytest.raises(runner.LimitError, match="output"):
+        runner.validate_output_size("éé", 3)
+    with pytest.raises(runner.LimitError, match="report"):
+        runner.encode_report({"value": "x" * 100}, 20)
+
+
+def test_case_and_total_time_limits_are_parent_enforced() -> None:
+    limits = probe_limits(caseSeconds=0.1)
+    result = runner.run_isolated({"mode": "probe", "action": "sleep", "seconds": 1}, limits, time.monotonic() + 3)
+    assert result.error == "LimitError: case time limit exceeded"
+    limits = probe_limits(caseSeconds=2)
+    result = runner.run_isolated({"mode": "probe", "action": "sleep", "seconds": 1}, limits, time.monotonic() + 0.1)
+    assert result.error == "LimitError: total time limit exceeded"
+
+
+def test_memory_process_and_disk_limits_are_parent_enforced() -> None:
+    memory = runner.run_isolated(
+        {"mode": "probe", "action": "memory", "amount": 768 * 1024**2},
+        probe_limits(memoryBytes=512 * 1024**2),
+        time.monotonic() + 4,
+    )
+    assert memory.error and "memory limit exceeded" in memory.error
+    processes = runner.run_isolated(
+        {"mode": "probe", "action": "process", "amount": 5},
+        probe_limits(processes=2),
+        time.monotonic() + 4,
+    )
+    assert processes.error == "LimitError: process limit exceeded"
+    disk = runner.run_isolated(
+        {"mode": "probe", "action": "disk", "amount": 256 * 1024},
+        probe_limits(diskBytes=64 * 1024),
+        time.monotonic() + 4,
+    )
+    assert disk.error and "limit exceeded" in disk.error
+
+
+def test_optional_adapter_value_cannot_execute_a_command(tmp_path: Path) -> None:
+    marker = tmp_path / "executed"
+    configured = f"sh -c 'touch {marker}'"
+    assert runner.resolve_optional_adapter(configured) is None
+    assert not marker.exists()
+
+
 def test_baseline_separates_environment_from_stable_quality() -> None:
     baseline = json.loads((ROOT / "current-baseline.json").read_text())
     assert set(baseline) == {"schemaVersion", "environment", "quality"}
@@ -85,6 +176,16 @@ def test_baseline_separates_environment_from_stable_quality() -> None:
     changed = json.loads(json.dumps(baseline["quality"]))
     changed[0]["status"] = "changed"
     assert runner.compare_baseline(ROOT / "current-baseline.json", changed)
+
+
+def test_offline_document_capability_is_visible() -> None:
+    report = json.loads((ROOT / "reports/current-run.json").read_text())
+    rows = {row["id"]: row for row in report["results"]}
+    for case_id in ("docx", "pptx", "xlsx"):
+        assert rows[case_id]["status"] == "skipped"
+        assert "offline Docling" in rows[case_id]["quality"]["error"]
+    for case_id in ("pdf-text", "pdf-table", "scanned-pdf"):
+        assert rows[case_id]["quality"]["adapterEvidence"].get("documentConverter") != "docling"
 
 
 def test_optional_adapters_are_skipped_and_report_is_bounded() -> None:
@@ -99,5 +200,4 @@ def test_quality_snapshot_and_command_exit_semantics() -> None:
     baseline = json.loads((ROOT / "current-baseline.json").read_text())
     report = json.loads((ROOT / "reports/current-run.json").read_text())
     assert runner.stable_quality(report["results"]) == baseline["quality"]
-    assert runner.exit_code([]) == 0
-    assert runner.exit_code(["quality regression"]) == 1
+    assert runner.compare_baseline(ROOT / "current-baseline.json", runner.stable_quality(report["results"])) == []
