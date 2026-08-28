@@ -593,7 +593,9 @@ async function openCommand(args: string[]) {
   if (positionals.length > 1) {
     fail(`unexpected ${positionals[1]} (one url; --split <direction> opens a new pane)`);
   }
-  if (!noMerge && !args.some((arg) => arg.startsWith("--ssh="))) {
+  const targeted = Boolean(process.env.TERMINAL_BROWSER_INTEROP_TARGET);
+  const wouldSplit = split !== null || !interactiveTty();
+  if (!noMerge && (wouldSplit || targeted) && !args.some((arg) => arg.startsWith("--ssh="))) {
     if (await tryAdopt(args)) return;
   }
   await requireGraphics(await currentTerminal());
