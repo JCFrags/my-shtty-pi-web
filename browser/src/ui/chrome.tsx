@@ -41,6 +41,7 @@ export function Chrome({
   tabs,
   newTab,
   urlEdit,
+  noOverlays,
   popup,
   zoomHud,
   download,
@@ -63,6 +64,7 @@ export function Chrome({
   tabs: TabRow[];
   newTab: NewTabView | null;
   urlEdit: boolean;
+  noOverlays: boolean;
   popup: PopupView | null;
   zoomHud: number | null;
   download: DownloadView | null;
@@ -76,7 +78,7 @@ export function Chrome({
   devtoolsSurface: Surface;
 }) {
   const theme = useMemo(() => makeTheme(colors), [colors]);
-  const progress = useProgress(state.loading);
+  const progress = useProgress(!noOverlays && state.loading);
   return (
     <Box
       style={{

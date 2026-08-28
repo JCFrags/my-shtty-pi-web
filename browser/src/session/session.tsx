@@ -709,6 +709,7 @@ class Session {
             : null
         }
         urlEdit={this.urlEditOpen}
+        noOverlays={this.sessionFlags.noOverlays || this.appTabActive()}
         popup={this.popupView()}
         zoomHud={this.zoomHud}
         download={this.download}
