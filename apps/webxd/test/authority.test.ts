@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createServer } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebxAuthority } from "../src/authority.js";
 import { NormalizedContentStore } from "../src/content-store.js";
@@ -364,6 +365,7 @@ describe("WebxAuthority", () => {
     vi.mocked(failedBrowser.capabilities).mockRejectedValue(new Error("browser offline"));
     const healthFetch = vi.fn(async (input: unknown) => {
       const url = new URL(String(input));
+      if (url.port === "8888" && url.pathname === "/config") return new Response(JSON.stringify({ engines: [] }), { status: 200 });
       if (url.port === "8787" && url.pathname === "/health") return new Response(JSON.stringify({ ok: true }), { status: 200 });
       throw new Error(`unexpected probe: ${url}`);
     });
@@ -383,14 +385,71 @@ describe("WebxAuthority", () => {
       browserPaths: [],
     } });
     expect(JSON.stringify(response.body)).not.toContain("crawl");
-    expect(healthFetch).toHaveBeenCalledTimes(1);
-    expect(new URL(String(healthFetch.mock.calls[0]?.[0])).pathname).toBe("/health");
+    expect(healthFetch).toHaveBeenCalledTimes(2);
+    const probePaths = healthFetch.mock.calls.map((call) => new URL(String(call[0])).pathname);
+    expect(probePaths).toEqual(expect.arrayContaining(["/config", "/health"]));
+    expect(probePaths).not.toContain("/search");
+  });
+
+  it.each([
+    ["non-2xx response", async () => new Response(JSON.stringify({ error: "offline" }), { status: 503 }), "search backend returned HTTP 503"],
+    ["malformed JSON", async () => new Response("not JSON", { status: 200 }), "local service returned invalid JSON"],
+    ["timeout", async () => { throw new DOMException("probe timed out", "TimeoutError"); }, "probe timed out"],
+    ["oversized response", async () => new Response(JSON.stringify({ value: "x".repeat(2 * 1024 * 1024) }), { status: 200 }), "exceeded 2097152 bytes"],
+  ])("reports SearXNG %s as unhealthy", async (_case, fetchResult, reason) => {
+    const healthFetch = vi.fn(fetchResult);
+    vi.stubGlobal("fetch", healthFetch);
+    const instance = new WebxAuthority({
+      browser: browser(), sources: PUBLIC_SOURCES,
+      clock: { now: () => "2026-08-27T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` },
+      searxUrl: "http://127.0.0.1:8888",
+    });
+    const response = await call(instance, actor(), "GET", "/v1/capabilities");
+    expect(response.status).toBe(200);
+    expect((response.body as { capabilities: unknown[] }).capabilities[0]).toMatchObject({ id: "search", enabled: true, healthy: false, reason: expect.stringContaining(reason) });
+    expect(new URL(String(healthFetch.mock.calls[0]?.[0])).pathname).toBe("/config");
+  });
+
+  it("reports a dead local SearXNG process as unhealthy", async () => {
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("test server did not bind TCP");
+    await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
+    const instance = new WebxAuthority({
+      browser: browser(), sources: PUBLIC_SOURCES,
+      clock: { now: () => "2026-08-27T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` },
+      searxUrl: `http://127.0.0.1:${address.port}`,
+    });
+    const response = await call(instance, actor(), "GET", "/v1/capabilities");
+    expect(response.status).toBe(200);
+    expect((response.body as { capabilities: unknown[] }).capabilities[0]).toMatchObject({ id: "search", enabled: true, healthy: false, reason: expect.stringContaining("search backend is unavailable") });
+  });
+
+  it("propagates caller cancellation from the SearXNG health probe", async () => {
+    let probeSignal: AbortSignal | undefined;
+    const healthFetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+      expect(new URL(String(input)).pathname).toBe("/config");
+      probeSignal = init?.signal ?? undefined;
+      return await new Promise<Response>((_resolve, reject) => probeSignal?.addEventListener("abort", () => reject(probeSignal?.reason), { once: true }));
+    });
+    vi.stubGlobal("fetch", healthFetch);
+    const instance = new WebxAuthority({
+      browser: browser(), sources: PUBLIC_SOURCES,
+      clock: { now: () => "2026-08-27T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` },
+      searxUrl: "http://127.0.0.1:8888",
+    });
+    const caller = new AbortController();
+    const pending = instance.handle(actor(), { method: "GET", path: "/v1/capabilities", maxResponseBytes: 1_048_576, signal: caller.signal });
+    await vi.waitFor(() => expect(probeSignal).toBeDefined());
+    caller.abort(new DOMException("caller stopped", "AbortError"));
+    await expect(pending).resolves.toMatchObject({ status: 499, body: { code: "cancelled", retryable: false } });
   });
 
   it("does not let reader health remove healthy search", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
       const url = new URL(String(input));
-      if (url.port === "8888") return new Response(JSON.stringify({ results: [] }), { status: 200 });
+      if (url.port === "8888" && url.pathname === "/config") return new Response(JSON.stringify({ engines: [] }), { status: 200 });
       throw new Error("reader offline");
     }));
     const instance = new WebxAuthority({

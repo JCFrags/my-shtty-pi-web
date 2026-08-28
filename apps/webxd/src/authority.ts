@@ -29,7 +29,7 @@ import type { AuthorityActor, AuthorityClock, AuthorityIdSource, BrowserDaemonPo
 import { WebCache, type WebCacheOptions } from "./cache.js";
 import { ContentEntryTooLargeError, NormalizedContentStore, type NormalizedContentRecord } from "./content-store.js";
 import { BrowserPortError, isBrowserPathId } from "./ports.js";
-import { BoundedLocalJsonClient, LOCAL_JSON_LIMITS, localHttpConfigurationError } from "./local-json-client.js";
+import { BoundedLocalJsonClient, LOCAL_JSON_LIMITS } from "./local-json-client.js";
 
 const DEFAULT_CONTENT_CHARS = 16_384;
 const MAX_CONTENT_CHARS = 100_000;
@@ -185,12 +185,16 @@ export class WebxAuthority {
   }
 
   private async searchHealth(signal?: AbortSignal): Promise<{ enabled: boolean; healthy: boolean; reason?: string }> {
-    if (signal?.aborted) throw signal.reason;
     if (this.options.searxUrl === undefined) return { enabled: this.options.sources.length > 0, healthy: this.options.sources.length > 0 };
-    const configurationError = localHttpConfigurationError(this.options.searxUrl);
-    return configurationError === undefined
-      ? { enabled: true, healthy: true }
-      : { enabled: true, healthy: false, reason: `search backend configuration is invalid: ${configurationError}` };
+    try {
+      const response = await this.#localJson.request<unknown>(new URL("/config", this.options.searxUrl), {}, LOCAL_JSON_LIMITS.health, signal);
+      if (!response.ok) return { enabled: true, healthy: false, reason: `search backend returned HTTP ${response.status}` };
+      if (response.payload === undefined) return { enabled: true, healthy: false, reason: "search backend returned an invalid health response" };
+      return { enabled: true, healthy: true };
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      return { enabled: true, healthy: false, reason: `search backend is unavailable: ${safeMessage(error)}` };
+    }
   }
 
   private async readHealth(signal?: AbortSignal): Promise<{ enabled: boolean; healthy: boolean; reason?: string }> {
