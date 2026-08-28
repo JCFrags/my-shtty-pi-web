@@ -144,7 +144,7 @@ function visibleCharacters(result: unknown): number {
 }
 function resultEvidence(result: unknown) { return { structuredSdkBytes: Buffer.byteLength(JSON.stringify(result)), piVisibleCharacters: visibleCharacters(result) }; }
 async function captureStorage(label: string) {
-  storageSnapshots.push({ label, measuredUnixMs: Date.now(), cache: await directoryMeasure(cache), content: await directoryMeasure(content), audit: await directoryMeasure(join(stateBase, "pi-web/audit/events")) });
+  storageSnapshots.push({ label, measuredUnixMs: Date.now(), runtime: await directoryMeasure(runtime), cache: await directoryMeasure(cache), content: await directoryMeasure(content), audit: await directoryMeasure(join(stateBase, "pi-web/audit/events")) });
 }
 
 async function deterministic() {
@@ -247,8 +247,8 @@ finally {
   await sampleResources(); await captureStorage("final-before-cleanup");
   await stopChildren(); if (fixture?.listening) { const activeFixture = fixture; await new Promise<void>((done) => activeFixture.close(() => done())); }
   clearInterval(resourceTimer); clearTimeout(totalDeadline);
-  const names = ["cache", "content", "audit"] as const;
-  const storageHighWater = Object.fromEntries(names.map((name) => [name, storageSnapshots.reduce<{ files: number; bytes: number; measuredUnixMs: number }>((maximum, snapshot) => { const value = snapshot[name] as { files: number; bytes: number }; return value.bytes >= maximum.bytes ? { ...value, measuredUnixMs: snapshot.measuredUnixMs as number } : maximum; }, { files: 0, bytes: 0, measuredUnixMs: 0 })]));
+  const names = ["runtime", "cache", "content", "audit"] as const;
+  const storageHighWater = Object.fromEntries(names.map((name) => [name, storageSnapshots.reduce<{ files: number; bytes: number; measuredUnixMs: number; label: string }>((maximum, snapshot) => { const value = snapshot[name] as { files: number; bytes: number }; const label = snapshot.label as string; return value.bytes > maximum.bytes || maximum.measuredUnixMs === 0 || (value.bytes === maximum.bytes && label.includes("high-water-before-cleanup")) ? { ...value, measuredUnixMs: snapshot.measuredUnixMs as number, label } : maximum; }, { files: 0, bytes: 0, measuredUnixMs: 0, label: "unmeasured" })]));
   const evidence = { schemaVersion: 1, runId, candidateCommit: candidateManifest.commit, candidateTreeSha256: candidateManifest.candidateTreeSha256, mode: live ? "live" : "deterministic", ok: failure === undefined, failure, elapsedMs: Date.now() - started, limits: { requestMs: REQUEST_MS, totalMs: TOTAL_MS, evidenceBytes: MAX_EVIDENCE_BYTES, piVisibleCharacters: MAX_VISIBLE_CHARS, batchConcurrency: 3 }, checks, resources: await resources(), storage: { snapshots: storageSnapshots, highWater: storageHighWater }, auditEvidence: "Metadata-only counts and byte high-water measurements. No response, audit body, or secret is present.", journal };
   const encoded = JSON.stringify(evidence, null, 2) + "\n";
   if (Buffer.byteLength(encoded) > MAX_EVIDENCE_BYTES) failure ??= "evidence exceeded 262144 bytes"; else await writeFile(join(state, "evidence.json"), encoded, { mode: 0o600 });

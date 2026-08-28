@@ -54,6 +54,7 @@ test("smoke contract has unique candidate paths, finite ports, and evidence boun
   assert.match(smoke, /attempt <= 5/);
   assert.match(smoke, /cgroupIsolation: "unproven"/);
   assert.match(smoke, /deterministic-high-water-before-cleanup/);
+  assert.match(smoke, /names = \["runtime", "cache", "content", "audit"\]/);
   assert.match(smoke, /fixtureNonLoopback === 0/);
   assert.match(smoke, /web\.readBatch/);
   assert.match(smoke, /web\.content/);
