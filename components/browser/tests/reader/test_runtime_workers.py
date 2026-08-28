@@ -63,14 +63,15 @@ def test_runtime_compatibility_rejects_missing_decompression_hook(
 @pytest.mark.asyncio
 async def test_html_extraction_runs_through_bounded_worker() -> None:
     pipeline = module.ReaderPipeline(worker_timeout_seconds=5)
-    content, title, metadata = await pipeline._extract_html(
+    extraction = await pipeline._extract_html(
         "<html><head><title>Worker</title></head><body><h1>Worker</h1>"
         "<p>Useful content from the isolated extraction worker.</p></body></html>",
         module.ReadRequest(url="https://public.example/"),
     )
-    assert title == "Worker"
-    assert "Useful content" in content
-    assert metadata["extractor"] in {"trafilatura", "stdlib-fallback"}
+    assert extraction.title == "Worker"
+    assert "Useful content" in extraction.content
+    assert extraction.extractor in {"trafilatura", "stdlib-fallback"}
+    assert extraction.metadata["extractor"] == extraction.extractor
 
 
 @pytest.mark.asyncio

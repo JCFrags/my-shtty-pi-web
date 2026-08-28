@@ -40,6 +40,28 @@ def test_llms_candidates_walk_to_origin() -> None:
     ]
 
 
+def test_neutral_extractor_contract_returns_identity_and_metadata() -> None:
+    result = module.run_html_extractor(
+        "<title>Contract</title><main><h1>Contract</h1><p>Bounded extractor content for a deterministic contract test.</p></main>",
+        "https://example.test/contract",
+        "main",
+        None,
+    )
+    assert result.title == "Contract"
+    assert result.extractor in {"trafilatura", "stdlib-fallback"}
+    assert result.metadata["extractor"] == result.extractor
+    assert "Contract" in result.content
+
+
+def test_content_quality_is_not_a_length_only_gate() -> None:
+    repeated_noise = "Enable JavaScript " * 20
+    useful = "Short release note with eight distinct words and one stable result."
+    assert len(repeated_noise) > len(useful)
+    assert not module.content_quality(repeated_noise).acceptable
+    assert module.content_quality(useful).acceptable
+    assert module.content_quality(useful) == module.content_quality(useful)
+
+
 def test_static_html_extraction_removes_script_and_navigation_noise() -> None:
     document = """
     <html><head><title>Useful Guide</title><script>window.big = 'noise'</script></head>

@@ -148,6 +148,22 @@ async function captureStorage(label: string) {
 }
 
 async function deterministic() {
+  const extractionReport = JSON.parse(await readFile(join(candidate, "components/browser/benchmarks/extraction/reports/current-run.json"), "utf8")) as {
+    absoluteEligibility: { eligible: boolean };
+    candidateDecisions: Array<{ candidate: string; adopt: boolean; failures: string[] }>;
+    adoptedHtmlExtractor: string | null;
+  };
+  const adoptedDecision = extractionReport.candidateDecisions.find((decision) => decision.adopt);
+  record(
+    "reviewed extraction corpus evidence is present",
+    extractionReport.absoluteEligibility.eligible
+      && extractionReport.candidateDecisions.length >= 3
+      && extractionReport.adoptedHtmlExtractor === (adoptedDecision?.candidate ?? null),
+    {
+      candidateDecisions: extractionReport.candidateDecisions,
+      adoptedHtmlExtractor: extractionReport.adoptedHtmlExtractor,
+    },
+  );
   let fixturePort = 0;
   let origin = "";
   fixture = createServer((request, response) => {

@@ -1,31 +1,39 @@
-# WP1-M6 extraction decision
+# WP1-M7 HTML extraction decision
 
-## Reviewed offline baseline
+## Decision
 
-The clean offline run has 28 current cases. It records 9 extraction passes, 13 extraction failures, 3 acquisition-contract passes, and 3 current environment skips. Two optional candidate slots are also skipped.
+Keep current Trafilatura production routing. No evaluated HTML candidate meets the full M7 gate. `adoptedHtmlExtractor` is therefore `null` in the corpus report.
 
-The adapter calls `ReaderPipeline.read` with deterministic injected acquisition. Expected annotations do not select reader behavior. All static HTML cases use the production `trafilatura` source. Feed XML also uses the production `trafilatura` source. JavaScript shell fallback uses the production Markdown candidate flow. Challenge results use the production `raw` source and `renderRequired` metadata.
+The M6 reviewed baseline remains `current-baseline.json`. Candidate rows do not change that baseline. The report keeps current totals in `summary` and expanded totals per candidate in `candidateSummary`.
 
-The reviewed fixture semantics require source headings, code blocks, tables, and links. The technical documentation result retains two headings and one link. The other direct `trafilatura` HTML results retain no measured heading or link structure. All required code-block and table structure in direct HTML results is lost. The technical documentation result also loses one required table value. Cookie and challenge shells each lose one required heading marker. The JavaScript shell uses the Markdown fallback and retains two headings and one code block. These measured losses and retained structures are visible in the baseline.
+## Shared extraction contract
 
-JSON keeps both structured rows. Negotiated Markdown keeps its headings, code block, and link. Plain text keeps all required text. RSS and Atom keep their required text and declared structure.
+`HtmlExtractor` receives only HTML, URL, view, and query. It returns content, title, extractor identity, and metadata. `ReaderPipeline` sends production and candidate inputs through the same bounded worker protocol. Acquisition, DNS pinning, SSRF checks, redirects, response limits, worker time, memory, process, disk, and output limits remain outside the extractor.
 
-Bad charset, redirect, and gzip cases pass separate acquisition contracts. They do not count as extraction passes. Their observed values come from the deterministic transport and reader behavior. The runner does not copy expected metadata into a result.
+The production worker uses current Trafilatura settings. The first candidate changes only Trafilatura settings. It enables recall, disables precision preference, disables de-duplication, and keeps Markdown links and tables. The other two adapters are benchmark-only Node workers. Defuddle returns Markdown. Mozilla Readability returns cleaned HTML, which Turndown converts with ATX headings, fenced code, inline links, and a deterministic table rule.
 
-## Offline document capability
+## Candidate results
 
-The benchmark does not start Docling. It does not declare RapidOCR model assets. DOCX, PPTX, and XLSX are visible environment skips. The report makes no claim that these formats work from an undeclared model cache.
+Recall-oriented Trafilatura retains all required markers. It does not improve two weak classes. It leaks reviewed boilerplate in five classes, misses required structure in twelve classes, and loses paragraph boundaries in five classes.
 
-Normal PDF cases exercise the bounded local `pdftotext` path before optional Docling escalation. The ordinary PDF passes and keeps both required markers. The table PDF keeps all five required text markers, but it remains a visible failure because plain text does not preserve the required table structure. The scanned PDF has no local text. It escalates to the unavailable offline Docling worker and matches its reviewed empty-or-error contract. Raw PDF view still selects Docling for structured output.
+Defuddle improves three weak classes. It still loses required markers in eight classes, misses required structure in nine classes, and loses paragraph boundaries in one class.
 
-This routing change is justified by two results. An installed read of a valid short text PDF failed when the empty local Docling model directory returned 502 and the old global 80-character gate rejected correct `pdftotext` output. The corrected installed path returns that text without Docling. The offline corpus also improves the ordinary PDF from failure to pass without marker loss in another case. The benchmark still does not measure a working Docling service with reviewed local model assets.
+Readability with Turndown improves two weak classes. It loses a required marker in one class, leaks reviewed boilerplate in five classes, misses required structure in ten classes, and loses paragraph boundaries in six classes.
 
-## Extractor decision
+Every candidate stays within the reviewed per-case limits. In the reviewed run, each HTML case completes in less than one second. Peak process-tree resident memory stays below 160 MiB. These samples remain in candidate rows. They are evidence, not a new limit.
 
-No candidate adapter is present. Both reviewed candidate slots are skipped. There is no replacement evidence.
+No candidate preserves all newly required markers, prevents all boilerplate leakage, and retains all required headings, links, fenced code, table values, and paragraph structure. Do not force a primary or fallback change.
 
-No HTML extractor replacement is justified. Keep the current HTML extraction routing.
+## Dependency and scope review
 
-Use bounded local `pdftotext` first for a normal PDF. Accept valid short extracted text. Use Docling for raw structured PDF view and when local extraction fails or returns no alphanumeric text. This keeps the private document handoff for escalation and does not add a dependency or model download.
+Defuddle 0.19.3 is MIT. Mozilla Readability 0.6.0 is Apache-2.0. Turndown 7.2.4 is MIT. LinkeDOM 0.18.13 is ISC. They are exact root development dependencies with a locked transitive graph. They are not dependencies of `pi-web-reader` and no production extractor imports them.
 
-A future extractor candidate must improve at least two weak representative classes. It must not add required-marker loss. It must keep acquisition and SSRF controls. It must use an acceptable license and deployment method. Review dependency size, installed size, memory, runtime, and every separate quality metric before another routing change.
+Scrapling is rejected for this milestone. Its parser is part of a broader scraping system with HTTP fetching, TLS impersonation, proxy rotation, sessions, anti-bot behavior, and Playwright or Chrome automation. The reviewed project evidence does not show an equivalent fetch-independent main-content extractor. Adding it would duplicate acquisition and browser controls and would expand the trust and dependency boundary.
+
+## Fallback quality
+
+`useful_text` now delegates to a deterministic quality score. The score uses word and alphanumeric counts, paragraph shape, repeated-line ratio, and explicit shell or access boilerplate. Long repeated shell text can no longer pass only because it has at least 80 characters. The score and its signals are present in static extraction metadata.
+
+Candidate smoke now records the corpus absolute gate, every candidate decision, and the selected extractor identity. The existing cutover flow consumes this smoke evidence. This adds corpus evidence without changing deployment routing.
+
+Acquisition contracts run only for current production routing. HTML candidates share that routing but do not duplicate acquisition cases. Candidate totals therefore cannot create acquisition failures. The current summary remains 9 extraction passes, 13 extraction failures, 3 acquisition-contract passes, no acquisition-contract failures, and 5 skips.

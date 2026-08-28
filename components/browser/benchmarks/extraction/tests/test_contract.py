@@ -247,10 +247,63 @@ def test_offline_document_capability_is_visible() -> None:
         assert rows[case_id]["quality"]["adapterEvidence"].get("documentConverter") != "docling"
 
 
+def test_all_html_candidates_run_through_reader_and_have_explicit_decisions() -> None:
+    report = json.loads((ROOT / "reports/current-run.json").read_text())
+    revised = [
+        row for row in report["results"]
+        if row["adapter"] == runner.REVISED_HTML_ADAPTER
+    ]
+    html_cases = [
+        case for case in manifest()["cases"]
+        if case["mediaType"] == "text/html"
+        and case.get("caseKind") != "acquisition-contract"
+    ]
+    assert len(revised) == len(html_cases)
+    direct_html = [
+        row["quality"].get("extractionMetrics", row["quality"])
+        for row in revised
+        if row["quality"].get("extractionMetrics", row["quality"])["path"]
+        == "trafilatura"
+    ]
+    assert direct_html
+    assert all(
+        quality["adapterEvidence"].get("extractor")
+        in {runner.REVISED_HTML_ADAPTER, "stdlib-fallback"}
+        for quality in direct_html
+    )
+    decisions = {
+        decision["candidate"]: decision for decision in report["candidateDecisions"]
+    }
+    expected_adapters = {runner.REVISED_HTML_ADAPTER, *runner.NODE_HTML_ADAPTERS}
+    assert set(decisions) == expected_adapters
+    assert all(
+        decisions[adapter] == runner.candidate_decision(report["results"], adapter)
+        for adapter in expected_adapters
+    )
+    assert all(not decision["adopt"] for decision in decisions.values())
+    assert report["adoptedHtmlExtractor"] is None
+    assert set(report["candidateSummary"]) == expected_adapters
+    assert report["summary"] == {
+        "extractionPassed": 9,
+        "extractionFailed": 13,
+        "acquisitionContractsPassed": 3,
+        "acquisitionContractsFailed": 0,
+        "skipped": 5,
+        "qualityRegressions": [],
+        "absoluteEligible": True,
+    }
+    assert all(
+        summary["acquisitionContractsPassed"] == 0
+        and summary["acquisitionContractsFailed"] == 0
+        for summary in report["candidateSummary"].values()
+    )
+    assert all("runtime" not in row for row in report["results"] if row["adapter"] == "current")
+
+
 def test_optional_adapters_are_skipped_and_report_is_bounded() -> None:
     report = json.loads((ROOT / "reports/current-run.json").read_text())
-    skipped = [row for row in report["results"] if row["adapter"] != "current"]
-    assert {row["adapter"] for row in skipped} == {"secondary-html", "alternate-pdf"}
+    skipped = [row for row in report["results"] if row["adapter"] in runner.OPTIONAL_ENV]
+    assert {row["adapter"] for row in skipped} == set(runner.OPTIONAL_ENV)
     assert all(row["status"] == "skipped" for row in skipped)
     assert (ROOT / "reports/current-run.json").stat().st_size <= manifest()["limits"]["reportBytes"]
 

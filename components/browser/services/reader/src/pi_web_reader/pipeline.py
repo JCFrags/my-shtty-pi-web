@@ -21,6 +21,14 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urljoin, urlparse, urlunparse
 
+from pi_web_reader.extractors import (
+    CURRENT_TRAF_ID,
+    REVISED_TRAF_ID,
+    EXTRACTORS,
+    HtmlExtraction,
+    extract_html as run_html_extractor,
+)
+
 try:
     import httpcore
     import httpx
@@ -29,11 +37,6 @@ except ImportError:  # core unit tests exercise pure functions without optional 
     httpcore = None  # type: ignore[assignment]
     httpx = None  # type: ignore[assignment]
     AutoBackend = object  # type: ignore[assignment,misc]
-
-try:
-    import trafilatura
-except ImportError:
-    trafilatura = None  # type: ignore[assignment]
 
 ReadView = Literal["main", "outline", "raw"]
 
@@ -220,6 +223,8 @@ class ReaderPipeline:
         resolver: Resolver | None = None,
         transport_factory: Callable[[dict[str, str]], Any] | None = None,
         test_loopback_fixture: tuple[str, int] | None = None,
+        html_extractor: str = CURRENT_TRAF_ID,
+        html_worker_command: tuple[str, ...] | None = None,
     ) -> None:
         self.timeout_seconds = bounded_number(
             timeout_seconds,
@@ -278,6 +283,17 @@ class ReaderPipeline:
         self.resolver = resolver or resolve_public_addresses
         self.transport_factory = transport_factory or pinned_transport
         self.test_loopback_fixture = test_loopback_fixture
+        if html_worker_command is None:
+            if html_extractor not in EXTRACTORS:
+                raise ValueError(f"unknown HTML extractor: {html_extractor}")
+            html_worker_command = (
+                sys.executable,
+                str(HTML_WORKER_PATH),
+                html_extractor,
+            )
+        if not html_worker_command:
+            raise ValueError("HTML worker command must not be empty")
+        self._html_worker_command = html_worker_command
 
     def _validated_pin(self, host: str, port: int, addresses: list[str]) -> str:
         if self.test_loopback_fixture == (host, port) and addresses == ["127.0.0.1"]:
@@ -398,10 +414,14 @@ class ReaderPipeline:
                 return finalize_text_result(fetched, fetched.text, request, "markdown-fallback")
 
         # 4. Preserve the requested page when static extraction yields useful content.
-        extracted, title, extraction_meta = await self._extract_html(original.text, request)
-        if useful_text(extracted) and not looks_like_javascript_shell(original.text, extracted):
-            focused = select_query_context(extracted, request.query) if request.query else extracted
-            result = finalize_text_result(original, focused, request, "trafilatura", title=title)
+        extraction = await self._extract_html(original.text, request)
+        extracted = extraction.content
+        title = extraction.title
+        extraction_meta = extraction.metadata
+        static_quality = content_quality(extracted)
+        extraction_meta["contentQuality"] = static_quality.to_dict()
+        if static_quality.acceptable and not looks_like_javascript_shell(original.text, extracted):
+            result = finalize_text_result(original, extracted, request, "trafilatura", title=title)
             result.metadata.update(extraction_meta)
             return result
 
@@ -498,24 +518,32 @@ class ReaderPipeline:
             raise RuntimeError("PDF extraction returned no text")
         return text
 
-    async def _extract_html(
-        self, document: str, request: ReadRequest
-    ) -> tuple[str, str, dict[str, Any]]:
+    async def _extract_html(self, document: str, request: ReadRequest) -> HtmlExtraction:
+        worker_input = json.dumps(
+            {
+                "html": document,
+                "url": request.url,
+                "view": request.view,
+                "query": request.query,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
         output = await self._run_worker_process(
-            (sys.executable, str(HTML_WORKER_PATH), request.view),
-            document.encode("utf-8"),
+            self._html_worker_command,
+            worker_input,
             output_limit=MAX_WORKER_OUTPUT_BYTES,
         )
         try:
             payload = json.loads(output)
-            extracted = str(payload["content"])
-            title = str(payload["title"])
-            extraction_meta = dict(payload["metadata"])
+            return HtmlExtraction(
+                content=str(payload["content"]),
+                title=str(payload["title"]),
+                extractor=str(payload["extractor"]),
+                metadata=dict(payload["metadata"]),
+            )
         except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             raise RuntimeError("HTML extraction worker returned invalid output") from None
-        if request.query:
-            extracted = select_query_context(extracted, request.query)
-        return extracted, title, extraction_meta
 
     async def _run_worker_process(
         self,
@@ -965,39 +993,9 @@ def dedupe(values: Iterable[str]) -> list[str]:
 
 
 def extract_html(document: str, request: ReadRequest) -> tuple[str, str, dict[str, Any]]:
-    title = extract_title(document)
-    if request.view == "raw":
-        return document, title, {"extractor": "raw-html"}
-    if request.view == "outline":
-        outline = outline_from_html(document)
-        if outline:
-            return outline, title, {"extractor": "html-headings"}
-    if trafilatura is not None:
-        # Keep Markdown headings for both main and outline views. Outline rendering
-        # removes body text after extraction.
-        output_format = "markdown"
-        extracted = trafilatura.extract(
-            document,
-            output_format=output_format,
-            include_links=True,
-            include_images=False,
-            include_tables=True,
-            include_comments=False,
-            favor_precision=True,
-            deduplicate=True,
-        )
-        if extracted:
-            if request.view == "outline":
-                extracted = outline_from_markdown(extracted)
-            elif request.query:
-                extracted = select_query_context(extracted, request.query)
-            return extracted, title, {"extractor": "trafilatura"}
-    fallback = html_to_text(document)
-    if request.view == "outline":
-        fallback = outline_from_html(document)
-    elif request.query:
-        fallback = select_query_context(fallback, request.query)
-    return fallback, title, {"extractor": "stdlib-fallback"}
+    """Compatibility wrapper for pure extraction tests and local callers."""
+    result = run_html_extractor(document, request.url, request.view, request.query)
+    return result.content, result.title, result.metadata
 
 
 def finalize_json_result(fetched: FetchResult, request: ReadRequest) -> ReadResult:
@@ -1141,9 +1139,73 @@ def finalize_text_result(
     )
 
 
+@dataclass(slots=True, frozen=True)
+class ContentQuality:
+    score: int
+    acceptable: bool
+    characters: int
+    words: int
+    alphanumeric: int
+    paragraphs: int
+    unique_line_ratio: float
+    boilerplate_hits: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "score": self.score,
+            "acceptable": self.acceptable,
+            "characters": self.characters,
+            "words": self.words,
+            "alphanumeric": self.alphanumeric,
+            "paragraphs": self.paragraphs,
+            "uniqueLineRatio": self.unique_line_ratio,
+            "boilerplateHits": list(self.boilerplate_hits),
+        }
+
+
+def content_quality(value: str) -> ContentQuality:
+    """Score text with deterministic content, shape, repetition, and noise signals."""
+    normalized = normalize_text(value)
+    compact = re.sub(r"\s+", " ", normalized).strip()
+    words = re.findall(r"[\w][\w'’-]*", compact, flags=re.UNICODE)
+    alphanumeric = sum(character.isalnum() for character in compact)
+    paragraphs = len([part for part in re.split(r"\n\s*\n", normalized) if part.strip()])
+    lines = [line.casefold() for line in normalized.splitlines() if line.strip()]
+    unique_line_ratio = len(set(lines)) / len(lines) if lines else 0.0
+    lowered = compact.casefold()
+    boilerplate_hits = tuple(
+        marker
+        for marker in (
+            "enable javascript", "access denied", "verify you are human",
+            "accept all cookies", "subscribe to continue",
+        )
+        if marker in lowered
+    )
+    score = 0
+    score += 20 if alphanumeric >= 24 else 0
+    score += 20 if len(words) >= 8 else 0
+    score += 10 if len(words) >= 20 else 0
+    score += 10 if len(compact) >= 80 else 0
+    score += 10 if paragraphs >= 2 else 0
+    score += 10 if compact and alphanumeric / len(compact) >= 0.45 else 0
+    score += 10 if unique_line_ratio >= 0.6 else 0
+    score -= 30 * len(boilerplate_hits)
+    score = max(0, min(100, score))
+    acceptable = alphanumeric >= 24 and len(words) >= 8 and score >= 60
+    return ContentQuality(
+        score=score,
+        acceptable=acceptable,
+        characters=len(compact),
+        words=len(words),
+        alphanumeric=alphanumeric,
+        paragraphs=paragraphs,
+        unique_line_ratio=round(unique_line_ratio, 4),
+        boilerplate_hits=boilerplate_hits,
+    )
+
+
 def useful_text(value: str) -> bool:
-    compact = re.sub(r"\s+", " ", value).strip()
-    return len(compact) >= 80
+    return content_quality(value).acceptable
 
 
 def looks_like_javascript_shell(source: str, extracted: str) -> bool:

@@ -55,9 +55,15 @@ The report keeps these metrics separate:
 
 Representative fixture requirements come from reviewed fixture semantics. A source heading, code block, table, or link has a nonzero requirement. If current extraction flattens it, the baseline records a visible failure.
 
-## Optional adapters
+## HTML candidate adapters
 
-Environment variables cannot contain commands. They can only name an adapter in the fixed `OPTIONAL_ADAPTERS` module registry in `run.py`. The registry is empty because this repository has no reviewed candidate. Any missing or unknown value is a visible skip. A future reviewed module runs inside the same isolated worker and receives the same limits. Candidate input excludes expected outcomes, paths, markers, structure requirements, allowed loss, and acquisition expectations. The parent applies those annotations only after the candidate returns its result.
+The corpus always benchmarks current Trafilatura first. It then benchmarks recall-oriented Trafilatura, Defuddle, and Mozilla Readability with Turndown. Each candidate receives the same JSON object with only HTML, URL, view, and query. `ReaderPipeline` starts each extractor through the same bounded worker route. Expected outcomes, paths, markers, structure requirements, allowed loss, and acquisition expectations remain in the parent process.
+
+Defuddle 0.19.3 is MIT. Mozilla Readability 0.6.0 is Apache-2.0. Turndown 7.2.4 is MIT. LinkeDOM 0.18.13 is ISC. These exact development dependency versions and their transitive dependencies are in `pnpm-lock.yaml`. They are not Python reader dependencies and no candidate is in production routing.
+
+The report keeps current production totals in `summary`. It keeps expanded candidate totals in `candidateSummary`. `candidateDecisions` contains one full M7 decision for each candidate. Current rows omit volatile runtime samples. Candidate rows retain runtime and memory evidence for resource review.
+
+The alternate PDF environment variable cannot contain a command. It can only name an adapter in the fixed `OPTIONAL_ADAPTERS` module registry in `run.py`. A missing or unknown value is a visible skip.
 
 ## Add a fixture
 

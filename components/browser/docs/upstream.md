@@ -8,6 +8,10 @@ Pi Web Workspace wraps rather than forks its initial browser driver. Verify vers
 - Chromium: Chromium project licenses.
 - SearXNG: searxng/searxng, AGPL-3.0.
 - Trafilatura: adbar/trafilatura, Apache-2.0.
+- Defuddle benchmark adapter: kepano/defuddle, MIT.
+- Mozilla Readability benchmark adapter: mozilla/readability, Apache-2.0.
+- Turndown benchmark converter: mixmark-io/turndown, MIT.
+- LinkeDOM benchmark DOM implementation: WebReflection/linkedom, ISC.
 - Docling: docling-project/docling, MIT.
 - TOON TypeScript implementation/specification: toon-format projects and their licenses.
 - Tauri: tauri-apps/tauri, Apache-2.0/MIT.
