@@ -262,8 +262,10 @@ async function deterministic() {
       const pdf = await client.request("web.read", { url: `${origin}/valid-text.pdf`, maxChars: 2_000 }, options(owner, "valid-text-pdf"));
       record("valid text PDF passes the staged candidate", JSON.stringify(pdf).includes("STAGED TEXT PDF SMOKE"), { ...resultEvidence(pdf), converter: "pdftotext", fixture: "synthetic text PDF" });
     } else {
-      await assert.rejects(client.request("web.read", { url: `${origin}/valid-text.pdf` }, options(owner, "valid-pdf-components-absent")), /documents profile/iu);
-      record("web-core keeps document components explicitly absent", true, { resolvedProfiles: candidateManifest.profile.resolvedProfiles, pdftotextPathExcluded: true });
+      await assert.rejects(client.request("web.read", { url: `${origin}/valid-text.pdf` }, options(owner, "valid-pdf-components-absent")));
+      await assert.rejects(stat(join(candidate, ".venv/bin/pi-web-docling")));
+      assert.deepEqual(candidateManifest.profile.resolvedProfiles, ["web-core"]);
+      record("web-core keeps document components explicitly absent", true, { resolvedProfiles: candidateManifest.profile.resolvedProfiles, doclingLauncherAbsent: true, pdftotextPathExcluded: true });
     }
     await assert.rejects(client.request("web.read", { url: `${origin}/document.pdf` }, options(owner, "document-fail")));
     record("invalid PDF failure evidence contains no private bytes", true, { mediaType: "application/pdf", fixtureBytes: 46, evidence: "status only; document bytes and digest are not recorded" });
