@@ -18,7 +18,7 @@ import type { WebxCapabilities, WebxRequestOptions, WebxResult, WebxSdk } from "
 const readyCapabilities: WebxCapabilities = {
   apiVersion: "2.0.0",
   daemon: "ready",
-  groups: { web: true, browser: true, browserDebug: true },
+  groups: { search: true, read: true, browser: true, browserDebug: true },
   browserPathIds: ["agent-browser/chrome", "pinchtab/chrome"],
 };
 
@@ -286,12 +286,10 @@ test("approval UI offers only allow-once or deny and returns the SDK decision", 
   await fx.events.get("session_shutdown")?.();
 });
 
-test("API mismatch, daemon outage, wrong paths, and untrusted projects fail closed", async () => {
+test("API mismatch, daemon outage, and untrusted projects fail closed", async () => {
   for (const capabilitiesValue of [
     { ...readyCapabilities, apiVersion: "1.0.0" },
     { ...readyCapabilities, daemon: "unavailable" as const },
-    { ...readyCapabilities, browserPathIds: ["agent-browser", "pinchtab/chrome"] as [string, string] },
-    { ...readyCapabilities, browserPathIds: ["rustwright", "pinchtab/chrome"] as [string, string] },
   ]) {
     const sdk = new MockSdk();
     sdk.capabilitiesValue = capabilitiesValue;
@@ -308,6 +306,27 @@ test("API mismatch, daemon outage, wrong paths, and untrusted projects fail clos
   await untrusted.events.get("session_start")?.({}, untrusted.ctx);
   assert.equal(sdk.starts, 0);
   await assert.rejects(untrusted.execute("web_search", { query: "x" }), /not trusted/);
+});
+
+test("optional capability failures preserve each healthy search and read tool", async () => {
+  const cases: Array<{ groups: WebxCapabilities["groups"]; present: string[]; absent: string[] }> = [
+    { groups: { search: true, read: true, browser: false, browserDebug: false }, present: ["web_search", "web_read"], absent: ["browser_open"] },
+    { groups: { search: true, read: false, browser: false, browserDebug: false }, present: ["web_search"], absent: ["web_read", "browser_open"] },
+    { groups: { search: false, read: true, browser: false, browserDebug: false }, present: ["web_read"], absent: ["web_search", "browser_open"] },
+  ];
+  for (const item of cases) {
+    const sdk = new MockSdk();
+    sdk.capabilitiesValue = { ...readyCapabilities, groups: item.groups, browserPathIds: [] };
+    const fx = harness(sdk);
+    await fx.events.get("session_start")?.({}, fx.ctx);
+    for (const name of item.present) assert.ok(fx.active.includes(name), `${name} should remain active`);
+    for (const name of item.absent) assert.ok(!fx.active.includes(name), `${name} should be inactive`);
+    if (item.groups.search) await fx.execute("web_search", { query: "healthy search" });
+    else await assert.rejects(fx.execute("web_search", { query: "unhealthy search" }), /backend is unhealthy/);
+    if (item.groups.read) await fx.execute("web_read", { url: "https://example.test" });
+    else await assert.rejects(fx.execute("web_read", { url: "https://example.test" }), /backend is unhealthy/);
+    await fx.events.get("session_shutdown")?.();
+  }
 });
 
 test("startup and shutdown are clean across reload-style extension replacement", async () => {

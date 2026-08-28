@@ -6,7 +6,8 @@ export interface WebxCapabilities {
   apiVersion: string;
   daemon: "ready" | "unavailable";
   groups: {
-    web: boolean;
+    search: boolean;
+    read: boolean;
     browser: boolean;
     browserDebug: boolean;
   };

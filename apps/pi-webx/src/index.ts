@@ -24,7 +24,6 @@ import {
 
 const STATUS_KEY = "pi-webx";
 const REFRESH_MS = 60_000;
-const REQUIRED_BROWSER_PATH = "agent-browser/chrome";
 const WEB_MODES = ["off", "read", "browser", "debug"] as const;
 const WORKSPACE_ACTIONS = ["show", "hide", "list", "attach", "takeover", "return"] as const;
 type WorkspaceAction = (typeof WORKSPACE_ACTIONS)[number];
@@ -58,11 +57,15 @@ function capabilityError(capabilities: WebxCapabilities): string | undefined {
     return `WebX API major mismatch: facade requires ${SUPPORTED_API_MAJOR}.x, daemon reports ${capabilities.apiVersion}.`;
   }
   if (capabilities.daemon !== "ready") return "WebX daemon is unavailable. Direct fallback is disabled.";
-  const paths = capabilities.browserPathIds;
-  if (!paths.includes(REQUIRED_BROWSER_PATH)) {
-    return "WebX capability contract must report the required visual agent-browser/chrome path.";
-  }
   return undefined;
+}
+
+function operationAvailable(operation: string, capabilities: WebxCapabilities): boolean {
+  if (operation === "web.search") return capabilities.groups.search;
+  if (operation === "web.read") return capabilities.groups.read;
+  if (operation === "browser.debug") return capabilities.groups.browserDebug;
+  if (operation.startsWith("browser.")) return capabilities.groups.browser;
+  return false;
 }
 
 function ownerId(ctx: ExtensionContext): string {
@@ -145,6 +148,7 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
       if (!sdk || !capabilities || !lifecycle || lifecycle.signal.aborted || !activeOwner || !activeCwd) {
         throw new Error(diagnostic);
       }
+      if (!operationAvailable(operation, capabilities)) throw new Error(`${operation} is unavailable because its backend is unhealthy.`);
       const combined = AbortSignal.any([signal, lifecycle.signal]);
       const requestOptions = {
         signal: combined,
@@ -228,6 +232,7 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
     const workspace = async (action: WorkspaceAction, sessionId: string | undefined, tabId: string | undefined, ctx: ExtensionContext) => {
       assertTrusted(ctx);
       if (!sdk || !capabilities || !lifecycle || !activeOwner || !activeCwd) throw new Error(diagnostic);
+      if (!capabilities.groups.browser) throw new Error("Browser workspace controls are unavailable because the browser backend is unhealthy.");
       let selectedSessionId = sessionId;
       if ((action === "attach" || action === "takeover" || action === "return") && !selectedSessionId) {
         if (!ctx.hasUI) {

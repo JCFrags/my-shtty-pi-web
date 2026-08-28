@@ -185,7 +185,14 @@ describe("actual WebX Unix runtime", () => {
     await facade.stop({ ownerId: "facade-owner" });
 
     await browser.stop();
-    await expect(client.capabilities()).rejects.toMatchObject<WebxError>({ status: 502 });
+    await expect(client.capabilities()).resolves.toMatchObject({
+      capabilities: [
+        { id: "search", healthy: true },
+        { id: "read", healthy: true },
+        { id: "browser", healthy: false },
+      ],
+      browserPaths: [],
+    });
     browser = new FakeBrowserd(browserPath);
     await browser.start();
     expect((await client.capabilities()).browserPaths).toHaveLength(2);

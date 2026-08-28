@@ -39,6 +39,7 @@ const EXTRACT_RESULT_LIMIT = 4;
 const EXTRACT_ATTEMPT_LIMIT = 8;
 const EXTRACT_READ_CONCURRENCY = 4;
 const EXTRACT_PASSAGE_CHARS = 700;
+const HEALTH_PROBE_TIMEOUT_MS = 2_000;
 
 interface RawSearchHit { readonly url?: unknown; readonly title?: unknown; readonly content?: unknown; readonly score?: unknown; readonly publishedDate?: unknown; readonly engines?: unknown }
 interface SearchBatch { readonly hits: RawSearchHit[]; readonly unavailable: string[] }
@@ -119,11 +120,19 @@ export class WebxAuthority {
     }
     if (request.method === "GET" && url.pathname === "/v1/capabilities") {
       requireScope(actor, "system.read");
-      const paths = await this.options.browser.capabilities(request.signal);
+      const [search, read, browser] = await Promise.all([
+        this.searchHealth(request.signal),
+        this.readHealth(request.signal),
+        this.browserHealth(request.signal),
+      ]);
       const catalog: CapabilityCatalog = {
         apiVersion: WEBX_API_VERSION,
-        capabilities: ["search", "read", "browser"].map((id) => ({ id: id as CapabilityCatalog["capabilities"][number]["id"], enabled: true, healthy: id !== "browser" || paths.some((path) => path.pathId === "agent-browser/chrome" && path.visual) })),
-        browserPaths: paths,
+        capabilities: [
+          { id: "search", enabled: search.enabled, healthy: search.healthy, ...(search.reason === undefined ? {} : { reason: search.reason }) },
+          { id: "read", enabled: read.enabled, healthy: read.healthy, ...(read.reason === undefined ? {} : { reason: read.reason }) },
+          { id: "browser", enabled: true, healthy: browser.healthy, ...(browser.reason === undefined ? {} : { reason: browser.reason }) },
+        ],
+        browserPaths: browser.paths,
       };
       return ok(catalog);
     }
@@ -136,6 +145,51 @@ export class WebxAuthority {
     }
     if (segments[1] === "browser") return this.browser(actor, request, segments);
     throw problem(404, "not-found", "operation was not found", false);
+  }
+
+  private async searchHealth(signal?: AbortSignal): Promise<{ enabled: boolean; healthy: boolean; reason?: string }> {
+    if (this.options.searxUrl === undefined) return { enabled: this.options.sources.length > 0, healthy: this.options.sources.length > 0 };
+    const probeSignal = healthProbeSignal(signal);
+    try {
+      const endpoint = new URL("/search", this.options.searxUrl);
+      endpoint.searchParams.set("q", "webx capability probe");
+      endpoint.searchParams.set("format", "json");
+      const response = await fetch(endpoint, { signal: probeSignal, headers: { accept: "application/json" } });
+      if (!response.ok) return { enabled: true, healthy: false, reason: `search backend returned HTTP ${response.status}` };
+      const payload = await response.json() as { results?: unknown };
+      if (!Array.isArray(payload.results)) return { enabled: true, healthy: false, reason: "search backend returned an invalid health response" };
+      return { enabled: true, healthy: true };
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      return { enabled: true, healthy: false, reason: `search backend is unavailable: ${safeMessage(error)}` };
+    }
+  }
+
+  private async readHealth(signal?: AbortSignal): Promise<{ enabled: boolean; healthy: boolean; reason?: string }> {
+    if (this.options.readerUrl === undefined) return { enabled: this.options.sources.length > 0, healthy: this.options.sources.length > 0 };
+    const probeSignal = healthProbeSignal(signal);
+    try {
+      const response = await fetch(new URL("/health", this.options.readerUrl), { signal: probeSignal, headers: { accept: "application/json" } });
+      if (!response.ok) return { enabled: true, healthy: false, reason: `reader returned HTTP ${response.status}` };
+      const payload = await response.json() as { ok?: unknown };
+      if (payload.ok !== true) return { enabled: true, healthy: false, reason: "reader returned an invalid health response" };
+      return { enabled: true, healthy: true };
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      return { enabled: true, healthy: false, reason: `reader is unavailable: ${safeMessage(error)}` };
+    }
+  }
+
+  private async browserHealth(signal?: AbortSignal): Promise<{ healthy: boolean; paths: CapabilityCatalog["browserPaths"]; reason?: string }> {
+    const probeSignal = healthProbeSignal(signal);
+    try {
+      const paths = await this.options.browser.capabilities(probeSignal);
+      const healthy = paths.some((path) => path.pathId === "agent-browser/chrome" && path.visual);
+      return healthy ? { healthy, paths } : { healthy, paths, reason: "required visual browser path is unavailable" };
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      return { healthy: false, paths: [], reason: `browser daemon is unavailable: ${safeMessage(error)}` };
+    }
   }
 
   private async search(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<SearchResponse> {
@@ -503,6 +557,11 @@ export class WebxAuthority {
     const owner = this.#browserOwners.get(sessionId);
     if (owner !== undefined && (owner.principalId !== actor.principalId || owner.agentId !== actor.agentId)) throw problem(403, "wrong-owner", "browser session has a different owner", false);
   }
+}
+
+function healthProbeSignal(signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS);
+  return signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
 }
 
 function isSafeDebugOperation(value: unknown): value is BrowserDebugRequest["operation"] {

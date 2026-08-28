@@ -112,7 +112,7 @@ Protocol details and the retained architecture are under `docs/`.
 
 ## Operational boundaries
 
-The initial release is a single trusted Fedora user’s local system. The daemon uses a user-owned Unix socket and capability-token-protected loopback HTTP/WebSocket endpoints; it is not an Internet-facing multi-user service. Optional redaction, confirmation, allowlisting, timeouts, resource ceilings, and isolation can be added around the stable protocol, but they are disabled by default where they could prevent task completion and are not allowed to reduce the baseline browser capability.
+The initial release is a single trusted Fedora user’s local system. The daemon uses a user-owned Unix socket and capability-token-protected loopback HTTP/WebSocket endpoints; it is not an Internet-facing multi-user service. Direct reader acquisitions always use finite timeout, raw-size, decompressed-size, redirect, and concurrency limits. Other optional redaction, confirmation, allowlisting, resource ceilings, and isolation controls can be added around the stable protocol where they do not reduce the baseline browser capability.
 
 Alternate backends currently expose explicit capability metadata and structured `unsupported` responses. They are intentionally not selected automatically and cannot silently replace an active engine or lose browser state.
 

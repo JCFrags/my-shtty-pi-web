@@ -4,7 +4,8 @@ import { isIP } from "node:net";
 import { clearTimeout, setTimeout } from "node:timers";
 import { URL } from "node:url";
 import { createAdversarialManifest } from "./adversarial.mjs";
-import { AUTH_CANARY, bodies, compressedLargeBody, createManifest, largeBody } from "./content.mjs";
+import { AUTH_CANARY, badCharsetBodies, bodies, compressedLargeBody, createManifest, largeBody } from "./content.mjs";
+import { createWebManifest } from "./web.mjs";
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "::1"]);
 const json = (value) => `${JSON.stringify(value)}\n`;
@@ -18,6 +19,7 @@ function assertLocalHost(host) {
 function send(response, status, contentType, body, headers = {}) {
   response.writeHead(status, {
     "cache-control": "no-store",
+    "content-length": String(Buffer.byteLength(body)),
     "content-type": contentType,
     "x-webx-fixture": "1",
     ...headers,
@@ -39,6 +41,7 @@ export function createFixtureOrigin(options = {}) {
 
   const manifest = createManifest();
   const adversarialManifest = createAdversarialManifest();
+  const webManifest = createWebManifest();
   let protectedPackets = 0;
   const sockets = new Set();
   const timers = new Set();
@@ -77,9 +80,18 @@ export function createFixtureOrigin(options = {}) {
     if (path === "/feeds/atom.xml") return send(response, 200, "application/atom+xml; charset=utf-8", bodies.atom);
     if (path === "/api/items") return send(response, 200, "application/json", bodies.api);
     if (path === "/security/manifest.json") return send(response, 200, "application/json", json(adversarialManifest));
+    if (path === "/web/manifest.json") return send(response, 200, "application/json", json(webManifest));
     if (path === "/security/browser-subresources") return send(response, 200, "text/html; charset=utf-8", bodies.browserSecurity);
     if (path === "/security/redirect/start") return send(response, 302, "text/plain; charset=utf-8", "security redirect\n", { location: "/security/redirect/private" });
     if (path === "/security/redirect/private") return send(response, 302, "text/plain; charset=utf-8", "protected redirect\n", { location: "/protected/resource" });
+    if (path === "/redirect/loop/a") return send(response, 302, "text/plain; charset=utf-8", "loop a\n", { location: "/redirect/loop/b" });
+    if (path === "/redirect/loop/b") return send(response, 302, "text/plain; charset=utf-8", "loop b\n", { location: "/redirect/loop/a" });
+    if (path === "/redirect/private-address") return send(response, 302, "text/plain; charset=utf-8", "private redirect\n", { location: "http://10.0.0.7/private" });
+    if (path === "/redirect/link-local") return send(response, 302, "text/plain; charset=utf-8", "link-local redirect\n", { location: "http://169.254.169.254/latest/meta-data" });
+    if (path === "/redirect/non-http") return send(response, 302, "text/plain; charset=utf-8", "special-scheme redirect\n", { location: "file:///webx-fixture/blocked" });
+    if (path === "/encoding/unknown") return send(response, 200, "text/html; charset=x-webx-invalid", badCharsetBodies.unknown);
+    if (path === "/encoding/mismatch") return send(response, 200, "text/html; charset=us-ascii", badCharsetBodies.mismatch);
+    if (path === "/encoding/malformed-utf8") return send(response, 200, "text/html; charset=utf-8", badCharsetBodies.malformedUtf8);
     if (path === "/protected/counter") return send(response, 200, "application/json", json({ packets: protectedPackets }));
     if (path === "/protected/reset" && request.method === "POST") {
       protectedPackets = 0;
@@ -91,6 +103,30 @@ export function createFixtureOrigin(options = {}) {
     }
     if (path === "/failure/status/503") return send(response, 503, "text/plain; charset=utf-8", "deterministic unavailable\n", { "retry-after": "7" });
     if (path === "/failure/disconnect") return request.socket.destroy();
+    if (path === "/failure/endless") {
+      response.writeHead(200, {
+        "cache-control": "no-store",
+        "content-type": "text/plain; charset=utf-8",
+        "x-webx-fixture": "1",
+      });
+      response.write("endless fixture prefix\n");
+      return;
+    }
+    if (path === "/failure/partial-body") {
+      response.writeHead(200, {
+        "cache-control": "no-store",
+        "content-length": "64",
+        "content-type": "text/plain; charset=utf-8",
+        "x-webx-fixture": "1",
+      });
+      response.write("partial fixture prefix\n");
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        response.destroy();
+      }, 0);
+      timers.add(timer);
+      return;
+    }
     if (path === "/failure/slow") {
       const delayText = url.searchParams.get("ms") ?? "100";
       if (!/^\d{1,4}$/.test(delayText)) return send(response, 400, "application/json", json({ error: "invalid_delay" }));
@@ -113,6 +149,7 @@ export function createFixtureOrigin(options = {}) {
   return {
     manifest,
     adversarialManifest,
+    webManifest,
     async start() {
       await new Promise((resolve, reject) => {
         server.once("error", reject);

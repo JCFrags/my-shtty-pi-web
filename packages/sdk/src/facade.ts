@@ -23,7 +23,7 @@ export interface FacadeResult {
   readonly artifactPayload?: { readonly artifactId: string; readonly mediaType: string; readonly dataBase64: string; readonly size: number; readonly complete: boolean; readonly mode: "image" | "raw"; readonly offset?: number; readonly nextOffset?: number | null; readonly eof?: boolean };
   readonly trust?: "untrusted-external" | "local";
 }
-export interface FacadeCapabilities { readonly apiVersion: string; readonly daemon: "ready" | "unavailable"; readonly groups: { readonly web: boolean; readonly browser: boolean; readonly browserDebug: boolean }; readonly browserPathIds: readonly string[] }
+export interface FacadeCapabilities { readonly apiVersion: string; readonly daemon: "ready" | "unavailable"; readonly groups: { readonly search: boolean; readonly read: boolean; readonly browser: boolean; readonly browserDebug: boolean }; readonly browserPathIds: readonly string[] }
 interface ObservationBinding { readonly ownerId: string; readonly sessionId: string; readonly frame: BrowserVisualFrame }
 
 /** SDK adapter for the singular Pi facade operation names. */
@@ -49,11 +49,12 @@ export class WebxFacadeClient {
     try {
       const catalog = await client.capabilities({ signal: options.signal });
       const paths = catalog.browserPaths.map((path) => path.pathId);
-      if (!paths.includes("agent-browser/chrome")) throw new Error("WebX did not report the required visual browser path");
-      return { apiVersion: catalog.apiVersion, daemon: "ready", groups: { web: true, browser: true, browserDebug: true }, browserPathIds: paths };
+      const healthy = (id: "search" | "read" | "browser") => catalog.capabilities.some((capability) => capability.id === id && capability.enabled && capability.healthy);
+      const browser = healthy("browser") && paths.includes("agent-browser/chrome");
+      return { apiVersion: catalog.apiVersion, daemon: "ready", groups: { search: healthy("search"), read: healthy("read"), browser, browserDebug: browser }, browserPathIds: paths };
     } catch (error) {
       if (options.signal.aborted) throw error;
-      return { apiVersion: "2.0.0", daemon: "unavailable", groups: { web: false, browser: false, browserDebug: false }, browserPathIds: [] };
+      return { apiVersion: "2.0.0", daemon: "unavailable", groups: { search: false, read: false, browser: false, browserDebug: false }, browserPathIds: [] };
     }
   }
 

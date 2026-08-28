@@ -35,6 +35,11 @@ export const bodies = Object.freeze({
 
 export const largeBody = Buffer.from(`${FIXTURE_SEED}\n`.repeat(65536), "utf8");
 export const compressedLargeBody = gzipSync(largeBody, { level: 9, mtime: 0 });
+export const badCharsetBodies = Object.freeze({
+  unknown: Buffer.from("<!doctype html><title>Unknown charset</title><p>stable utf-8 café</p>\n", "utf8"),
+  mismatch: Buffer.from("<!doctype html><title>Charset mismatch</title><p>declared ASCII, encoded UTF-8: café</p>\n", "utf8"),
+  malformedUtf8: Buffer.from([0x3c, 0x70, 0x3e, 0x66, 0x69, 0x78, 0x74, 0x75, 0x72, 0x65, 0x3a, 0x20, 0xc3, 0x28, 0x3c, 0x2f, 0x70, 0x3e, 0x0a]),
+});
 
 export function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -63,14 +68,25 @@ const routeDefinitions = [
   ["atom", "GET", "/feeds/atom.xml", "application/atom+xml", "CC0-1.0 generated"],
   ["api", "GET", "/api/items", "application/json", "CC0-1.0 generated"],
   ["security-manifest", "GET", "/security/manifest.json", "application/json", "generated"],
+  ["web-manifest", "GET", "/web/manifest.json", "application/json", "generated"],
   ["security-browser-subresources", "GET", "/security/browser-subresources", "text/html", "CC0-1.0 generated"],
   ["security-redirect-start", "GET", "/security/redirect/start", "text/plain", "generated"],
   ["security-redirect-private", "GET", "/security/redirect/private", "text/plain", "generated"],
+  ["redirect-loop-a", "GET", "/redirect/loop/a", "text/plain", "generated"],
+  ["redirect-loop-b", "GET", "/redirect/loop/b", "text/plain", "generated"],
+  ["redirect-private-address", "GET", "/redirect/private-address", "text/plain", "generated"],
+  ["redirect-link-local", "GET", "/redirect/link-local", "text/plain", "generated"],
+  ["redirect-non-http", "GET", "/redirect/non-http", "text/plain", "generated"],
+  ["encoding-unknown", "GET", "/encoding/unknown", "text/html", "CC0-1.0 generated"],
+  ["encoding-mismatch", "GET", "/encoding/mismatch", "text/html", "CC0-1.0 generated"],
+  ["encoding-malformed-utf8", "GET", "/encoding/malformed-utf8", "text/html", "CC0-1.0 generated"],
   ["protected-counter", "GET", "/protected/counter", "application/json", "generated"],
   ["protected-reset", "POST", "/protected/reset", "application/json", "generated"],
   ["protected-resource", "GET", "/protected/resource", "application/json", "generated"],
   ["failure-status", "GET", "/failure/status/503", "text/plain", "generated"],
   ["failure-slow", "GET", "/failure/slow", "text/plain", "generated"],
+  ["failure-endless", "GET", "/failure/endless", "text/plain", "generated"],
+  ["failure-partial-body", "GET", "/failure/partial-body", "text/plain", "generated"],
   ["failure-disconnect", "GET", "/failure/disconnect", "none", "generated"],
 ];
 
@@ -90,6 +106,9 @@ export function createManifest() {
     "/feeds/atom.xml": bodies.atom,
     "/api/items": bodies.api,
     "/security/browser-subresources": bodies.browserSecurity,
+    "/encoding/unknown": badCharsetBodies.unknown,
+    "/encoding/mismatch": badCharsetBodies.mismatch,
+    "/encoding/malformed-utf8": badCharsetBodies.malformedUtf8,
   };
   const routes = routeDefinitions.map(([id, method, path, contentType, license]) => ({
     id,

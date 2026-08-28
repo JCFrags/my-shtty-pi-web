@@ -15,9 +15,11 @@ except ImportError as error:  # pragma: no cover
 
 
 class ConvertPayload(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
-    data_base64: str = Field(alias="dataBase64")
+    file_path: str = Field(alias="filePath")
+    size: int = Field(ge=0)
+    sha256: str = Field(min_length=64, max_length=64)
     media_type: str = Field(alias="mediaType")
     url: str | None = None
     include_structured: bool = Field(default=False, alias="includeStructured")
@@ -36,7 +38,9 @@ async def convert(payload: ConvertPayload) -> dict[str, Any]:
     try:
         return convert_document(
             ConvertRequest(
-                data_base64=payload.data_base64,
+                file_path=payload.file_path,
+                size=payload.size,
+                sha256=payload.sha256,
                 media_type=payload.media_type,
                 url=payload.url,
                 include_structured=payload.include_structured,

@@ -11,7 +11,7 @@ It contains:
 - the Pi extension that presents one clear tool set;
 - one Fedora installer and uninstaller.
 
-Search and direct reading do not require the visual browser. Browser automation starts only when a dynamic page, interaction, or visual check needs it.
+Search and direct reading do not require the visual browser. Search health depends only on SearXNG. Static read health depends only on the reader. Browser, crawl, and document-converter outages do not remove healthy search or static read tools. Browser automation starts only when a dynamic page, interaction, or visual check needs it.
 
 ## Main directories
 
@@ -37,7 +37,7 @@ Pi must already be installed. Then run:
 ./install-fedora.sh
 ```
 
-The installer stages the source at `~/.local/lib/pi-web-tools`, installs locked dependencies, builds the services and Tauri app, links the Pi extension, and starts user services.
+The installer stages the source at `~/.local/lib/pi-web-tools`, installs locked dependencies, builds the services and Tauri app, links the Pi extension, and starts user services. The install fails if the authority, search backend, or static reader is unhealthy. Optional browser, crawl, and document-converter failures remain visible in status output but do not fail the core install. `pi-web doctor` checks the WebX authority capability catalog rather than only the browser daemon.
 
 Useful commands:
 

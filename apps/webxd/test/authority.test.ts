@@ -308,6 +308,49 @@ describe("WebxAuthority", () => {
     expect(port.captureFrame).toHaveBeenCalledTimes(1);
   });
 
+  it("negotiates search, static read, and optional browser health independently", async () => {
+    const failedBrowser = browser();
+    vi.mocked(failedBrowser.capabilities).mockRejectedValue(new Error("browser offline"));
+    vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
+      const url = new URL(String(input));
+      if (url.port === "8888" && url.pathname === "/search") return new Response(JSON.stringify({ results: [] }), { status: 200 });
+      if (url.port === "8787" && url.pathname === "/health") return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      throw new Error(`unexpected probe: ${url}`);
+    }));
+    const instance = new WebxAuthority({
+      browser: failedBrowser, sources: PUBLIC_SOURCES,
+      clock: { now: () => "2026-08-27T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` },
+      searxUrl: "http://127.0.0.1:8888", readerUrl: "http://127.0.0.1:8787", crawlUrl: "http://127.0.0.1:8793",
+    });
+    const response = await call(instance, actor(), "GET", "/v1/capabilities");
+    expect(response).toMatchObject({ status: 200, body: {
+      capabilities: [
+        { id: "search", enabled: true, healthy: true },
+        { id: "read", enabled: true, healthy: true },
+        { id: "browser", enabled: true, healthy: false },
+      ],
+      browserPaths: [],
+    } });
+    expect(JSON.stringify(response.body)).not.toContain("crawl");
+  });
+
+  it("does not let reader health remove healthy search", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
+      const url = new URL(String(input));
+      if (url.port === "8888") return new Response(JSON.stringify({ results: [] }), { status: 200 });
+      throw new Error("reader offline");
+    }));
+    const instance = new WebxAuthority({
+      browser: browser(), sources: PUBLIC_SOURCES,
+      clock: { now: () => "2026-08-27T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` },
+      searxUrl: "http://127.0.0.1:8888", readerUrl: "http://127.0.0.1:8787",
+    });
+    const response = await call(instance, actor(), "GET", "/v1/capabilities");
+    expect(response).toMatchObject({ status: 200, body: { capabilities: [
+      { id: "search", healthy: true }, { id: "read", healthy: false }, { id: "browser", healthy: true },
+    ] } });
+  });
+
   it("reports response limits and cancellation without fallback", async () => {
     const instance = authority();
     const limited = await call(instance, actor(), "GET", "/v1/capabilities", undefined, undefined, 20);

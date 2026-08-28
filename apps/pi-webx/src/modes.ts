@@ -17,7 +17,8 @@ const rank: Record<WebMode, number> = { off: 0, read: 1, browser: 2, debug: 3 };
 export function availableTools(mode: WebMode, capabilities: WebxCapabilities | undefined): string[] {
   if (!capabilities || capabilities.daemon !== "ready" || mode === "off") return [];
   const tools: string[] = [];
-  if (capabilities.groups.web) tools.push("web_search", "web_read");
+  if (capabilities.groups.search) tools.push("web_search");
+  if (capabilities.groups.read) tools.push("web_read");
   if (rank[mode] >= rank.browser && capabilities.groups.browser) {
     tools.push("browser_open", "browser_tabs", "browser_observe", "browser_act");
   }
