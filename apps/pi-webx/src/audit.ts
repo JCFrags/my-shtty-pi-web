@@ -2,11 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, opendir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { FacadeResult } from "../../../packages/sdk/src/facade.js";
+import { AUDIT_POLICY } from "../../../packages/policy/storage.mjs";
 
-const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1_000;
-const MAX_BYTES = 100 * 1024 * 1024;
-const MAX_RECORD_BYTES = 64 * 1024;
-const MAX_PRUNE_FILES = 8_192;
 const MAX_INPUT_STRING = 2_048;
 const SECRET_KEY = /(?:authorization|cookie|password|passwd|secret|token|api[-_]?key|credential)/iu;
 const SECRET_QUERY_KEY = /^(?:access_token|api[-_]?key|auth|authorization|code|credential|key|password|secret|signature|sig|token)$/iu;
@@ -36,13 +33,13 @@ export class WebAuditLog {
     const timestamp = input.startedAt.toISOString();
     const id = `${timestamp.replace(/[-:.TZ]/gu, "")}-${randomUUID()}`;
     const events = join(this.directory, "events");
-    const metadataEvents = join(events, "metadata-v2");
+    const metadataEvents = join(events, "metadata-v3");
     const directory = join(metadataEvents, timestamp.slice(0, 10));
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await Promise.all([chmod(this.directory, 0o700), chmod(events, 0o700), chmod(metadataEvents, 0o700), chmod(directory, 0o700)]);
     const error = input.error === undefined ? undefined : errorValue(input.error);
     const record = {
-      version: 2,
+      version: 3,
       id,
       timestamp,
       finishedAt: new Date(input.startedAt.getTime() + Math.max(0, input.durationMs)).toISOString(),
@@ -58,7 +55,7 @@ export class WebAuditLog {
       ...(error === undefined ? {} : { error: { name: error.name, messageDigest: digest(error.message) } }),
     };
     const serialized = `${JSON.stringify(record, null, 2)}\n`;
-    if (new TextEncoder().encode(serialized).byteLength > MAX_RECORD_BYTES) throw new Error("audit metadata record exceeds its bound");
+    if (new TextEncoder().encode(serialized).byteLength > AUDIT_POLICY.maxRecordBytes) throw new Error("audit metadata record exceeds its bound");
     const target = join(directory, `${id}.json`);
     const temporary = `${target}.tmp-${process.pid}`;
     try {
@@ -66,18 +63,18 @@ export class WebAuditLog {
       await rename(temporary, target);
     } finally { await unlink(temporary).catch(() => undefined); }
     const now = Date.now();
-    if (now - this.#lastAutomaticPrune >= 60 * 60 * 1_000) {
+    if (now - this.#lastAutomaticPrune >= AUDIT_POLICY.automaticPruneIntervalMs) {
       this.#lastAutomaticPrune = now;
       await this.prune(now);
     }
   }
 
   async prune(now = Date.now()): Promise<void> {
-    const { files, overflow } = await collectJsonFiles(join(this.directory, "events", "metadata-v2"), MAX_PRUNE_FILES);
+    const { files, overflow } = await collectJsonFiles(join(this.directory, "events", "metadata-v3"), AUDIT_POLICY.maxPruneFiles);
     files.sort((left, right) => left.mtimeMs - right.mtimeMs || left.path.localeCompare(right.path));
     let total = files.reduce((sum, file) => sum + file.size, 0);
     for (const file of files) {
-      if (file.mtimeMs >= now - MAX_AGE_MS && total <= MAX_BYTES) continue;
+      if (file.mtimeMs >= now - AUDIT_POLICY.maxAgeMs && total <= AUDIT_POLICY.maxBytes) continue;
       await rm(file.path, { force: true });
       total -= file.size;
     }
@@ -102,11 +99,29 @@ function resultMetadata(result: FacadeResult | undefined): unknown {
   const metadata = asObject(data?.metadata);
   const delivery = asObject(metadata?.delivery);
   const reader = asObject(metadata?.reader);
+  const freshness = asObject(metadata?.freshness);
   const output: Record<string, unknown> = {
     trust: result.trust,
     cache: delivery?.cache,
     coalesced: delivery?.coalesced,
+    freshnessDelivery: stringValue(delivery?.freshness),
+    fetchedAt: stringValue(freshness?.fetchedAt),
+    validatedAt: stringValue(freshness?.validatedAt),
+    validation: stringValue(freshness?.validation),
+    hasEtag: typeof freshness?.etag === "string" || undefined,
+    hasLastModified: typeof freshness?.lastModified === "string" || undefined,
     contentId: stringValue(metadata?.contentId),
+    representation: stringValue(metadata?.representation ?? reader?.representation),
+    requestedUrl: auditUrl(metadata?.requestedUrl ?? reader?.requestedUrl),
+    finalUrl: auditUrl(metadata?.finalUrl ?? reader?.finalUrl),
+    sourceOffset: numberValue(metadata?.sourceOffset ?? reader?.sourceOffset),
+    sourceComplete: booleanValue(metadata?.sourceComplete ?? reader?.sourceComplete),
+    nextSourceOffset: numberValue(metadata?.nextSourceOffset ?? reader?.nextSourceOffset),
+    extractor: stringValue(metadata?.extractor ?? reader?.extractor),
+    mediaType: stringValue(metadata?.mediaType ?? reader?.mediaType),
+    contentSha256: stringValue(metadata?.contentSha256 ?? reader?.contentSha256),
+    createdAt: stringValue(reader?.createdAt),
+    expiresAt: stringValue(reader?.expiresAt),
     sha256: stringValue(data?.sha256),
     bytes: numberValue(data?.bytes ?? reader?.storedBytes),
     characters: numberValue(data?.characters ?? reader?.returnedCharacters),
@@ -118,10 +133,18 @@ function resultMetadata(result: FacadeResult | undefined): unknown {
       const source = asObject(envelope?.result);
       const sourceMetadata = asObject(source?.metadata);
       const sourceDelivery = asObject(sourceMetadata?.delivery);
+      const sourceFreshness = asObject(sourceMetadata?.freshness);
       return {
         index: numberValue(envelope?.index), ok: envelope?.ok === true,
         status: envelope?.ok === true ? "ok" : stringValue(asObject(envelope?.error)?.code),
         contentId: stringValue(sourceMetadata?.contentId), cache: sourceDelivery?.cache, coalesced: sourceDelivery?.coalesced,
+        freshnessDelivery: stringValue(sourceDelivery?.freshness), fetchedAt: stringValue(sourceFreshness?.fetchedAt),
+        validatedAt: stringValue(sourceFreshness?.validatedAt), validation: stringValue(sourceFreshness?.validation),
+        hasEtag: typeof sourceFreshness?.etag === "string" || undefined, hasLastModified: typeof sourceFreshness?.lastModified === "string" || undefined,
+        representation: stringValue(sourceMetadata?.representation), sourceOffset: numberValue(sourceMetadata?.sourceOffset),
+        sourceComplete: booleanValue(sourceMetadata?.sourceComplete), nextSourceOffset: numberValue(sourceMetadata?.nextSourceOffset),
+        extractor: stringValue(sourceMetadata?.extractor), mediaType: stringValue(sourceMetadata?.mediaType),
+        contentSha256: stringValue(sourceMetadata?.contentSha256),
         characters: numberValue(asObject(sourceMetadata?.reader)?.returnedCharacters), bytes: numberValue(asObject(sourceMetadata?.reader)?.storedBytes),
       };
     });
@@ -182,5 +205,7 @@ async function collectJsonFiles(root: string, limit: number): Promise<{ files: A
 function asObject(value: unknown): Record<string, unknown> | undefined { return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 function stringValue(value: unknown): string | undefined { return typeof value === "string" ? value.slice(0, 128) : undefined; }
 function numberValue(value: unknown): number | undefined { return typeof value === "number" && Number.isFinite(value) ? value : undefined; }
+function booleanValue(value: unknown): boolean | undefined { return typeof value === "boolean" ? value : undefined; }
+function auditUrl(value: unknown): string | undefined { return typeof value === "string" ? redactUrl(value).slice(0, 2_048) : undefined; }
 function removeUndefined(value: Record<string, unknown>): Record<string, unknown> { return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)); }
 export async function readAuditRecord(path: string): Promise<unknown> { return JSON.parse(await readFile(path, "utf8")); }

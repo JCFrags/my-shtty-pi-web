@@ -46,6 +46,10 @@ def test_acquisition_defaults_are_finite_and_overrides_are_bounded() -> None:
         module.ReaderPipeline(max_redirects=module.MAX_PUBLIC_REDIRECTS + 1)
     with pytest.raises(ValueError, match="acquisition concurrency"):
         module.ReaderPipeline(acquisition_concurrency=module.MAX_ACQUISITION_CONCURRENCY + 1)
+    with pytest.raises(ValueError, match="worker concurrency"):
+        module.ReaderPipeline(worker_concurrency=module.MAX_WORKER_CONCURRENCY + 1)
+    with pytest.raises(ValueError, match="worker timeout"):
+        module.ReaderPipeline(worker_timeout_seconds=module.MAX_WORKER_TIMEOUT_SECONDS + 1)
 
 
 @pytest.mark.asyncio
@@ -105,6 +109,17 @@ async def test_acquisition_timeout_includes_the_complete_operation() -> None:
     )
     with pytest.raises(TimeoutError):
         await pipeline.read(module.ReadRequest(url="https://public.example/slow"))
+
+
+@pytest.mark.asyncio
+async def test_saturated_acquisition_queue_is_inside_total_deadline() -> None:
+    pipeline = module.ReaderPipeline(timeout_seconds=0.01, acquisition_concurrency=1)
+    await pipeline._acquisition_slots.acquire()
+    try:
+        with pytest.raises(TimeoutError):
+            await pipeline.read(module.ReadRequest(url="https://public.example/queued"))
+    finally:
+        pipeline._acquisition_slots.release()
 
 
 @pytest.mark.asyncio

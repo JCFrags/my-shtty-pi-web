@@ -3,7 +3,6 @@ import type { UnixSocketTransport } from "./transport.js";
 import {
   WEBX_API_MAJOR,
   type ArtifactByteExcerpt,
-  type BoundedContent,
   type BrowserAction,
   type BrowserControlResult,
   type BrowserDebugRequest,
@@ -24,6 +23,7 @@ import {
   type RangeReadRequest,
   type RangeReadResponse,
   type ReadRequest,
+  type ReadContent,
   type ReadBatchRequest,
   type ReadBatchResponse,
   type RequestOptions,
@@ -80,7 +80,7 @@ export class WebxClient {
     return this.call("POST", "/v1/search", request, requireIdempotency(options));
   }
 
-  read(request: ReadRequest, options: RequestOptions): Promise<BoundedContent> {
+  read(request: ReadRequest, options: RequestOptions): Promise<ReadContent> {
     return this.call("POST", "/v1/read", request, requireIdempotency(options));
   }
 

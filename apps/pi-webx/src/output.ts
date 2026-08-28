@@ -49,6 +49,8 @@ function renderData(value: unknown): string | undefined {
       ? `[extracts; ${searches} search(es); ${String(metadata.pagesRead ?? 0)} successful page read(s) from ${String(metadata.readAttempts ?? 0)} attempt(s)]`
       : `[links; ${searches} search(es)]`;
     const notices = [
+      typeof metadata.warning === "string" ? `[Warning: ${clip(metadata.warning, 500)}]` : undefined,
+      typeof metadata.migration === "string" ? `[Migration: ${clip(metadata.migration, 500)}]` : undefined,
       metadata.fallbackUsed === true ? "[A site-query recovery search was required.]" : undefined,
       metadata.partial === true ? "[Partial result: one or more search providers or page reads failed.]" : undefined,
     ].filter((item): item is string => item !== undefined).join("\n");

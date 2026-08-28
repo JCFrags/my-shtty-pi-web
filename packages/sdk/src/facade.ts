@@ -106,6 +106,7 @@ export class WebxFacadeClient {
       maxPages: optionalNumber(value.maxPages),
       maxDepth: optionalNumber(value.maxDepth),
       sameDomain: optionalBoolean(value.sameDomain),
+      refresh: strictOptionalBoolean(value.refresh, "refresh"),
     };
     const content = await client.read(request, options);
     if (save === undefined) return external("Read result", content);
@@ -209,7 +210,7 @@ function readBatchRequest(value: Record<string, unknown>): ReadBatchRequest {
   return { items: value.items.map((item, index) => directReadRequest(object(item), `items[${index}]`)) };
 }
 function directReadRequest(value: Record<string, unknown>, name: string): DirectReadRequest {
-  const allowed = new Set(["url", "query", "view", "fields", "itemOffset", "itemLimit", "maxChars", "contentOffset"]);
+  const allowed = new Set(["url", "query", "view", "fields", "itemOffset", "itemLimit", "maxChars", "contentOffset", "refresh"]);
   for (const key of Object.keys(value)) if (!allowed.has(key)) throw new TypeError(`${name}.${key} is not supported by web.readBatch`);
   const url = requiredString(value.url, `${name}.url`);
   if (!/^https?:\/\//u.test(url) || url.length > 8_192) throw new TypeError(`${name}.url must be a public HTTP(S) URL`);
@@ -223,6 +224,7 @@ function directReadRequest(value: Record<string, unknown>, name: string): Direct
     itemLimit: boundedOptionalInteger(value.itemLimit, `${name}.itemLimit`, 1, 500),
     maxChars: boundedOptionalInteger(value.maxChars, `${name}.maxChars`, 1, 1_000_000),
     contentOffset: boundedOptionalInteger(value.contentOffset, `${name}.contentOffset`, 0, 100_000_000),
+    refresh: strictOptionalBoolean(value.refresh, `${name}.refresh`),
   };
 }
 function contentRequest(value: Record<string, unknown>): ContentRequest {
@@ -255,6 +257,10 @@ function optionalString(value: unknown): string | undefined { return typeof valu
 function requiredNumber(value: unknown, name: string): number { if (typeof value !== "number" || !Number.isFinite(value)) throw new TypeError(`${name} is required`); return value; }
 function optionalNumber(value: unknown): number | undefined { return typeof value === "number" ? value : undefined; }
 function optionalBoolean(value: unknown): boolean | undefined { return typeof value === "boolean" ? value : undefined; }
+function strictOptionalBoolean(value: unknown, name: string): boolean | undefined {
+  if (value === undefined || typeof value === "boolean") return value;
+  throw new TypeError(`${name} must be a boolean`);
+}
 function optionalStringArray(value: unknown, name: string): readonly string[] | undefined { return value === undefined ? undefined : stringArray(value, name); }
 function optionalSearchOutput(value: unknown): "links" | "extracts" | undefined { if (value === undefined) return undefined; if (value === "links" || value === "extracts") return value; throw new TypeError("output must be links or extracts"); }
 function optionalReadView(value: unknown): "main" | "outline" | "raw" | undefined { if (value === undefined) return undefined; if (value === "main" || value === "outline" || value === "raw") return value; throw new TypeError("view is invalid"); }

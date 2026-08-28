@@ -14,6 +14,8 @@ import type {
   RangeReadRequest,
   RangeReadResponse,
   ReadRequest,
+  ReadContent,
+  ReadFreshness,
   ReadBatchRequest,
   ReadBatchResponse,
   SearchHit,
@@ -27,8 +29,10 @@ import type {
 import { BROWSER_PROTOCOL_VERSION, WEBX_API_VERSION } from "../../../packages/sdk/src/index.js";
 import type { AuthorityActor, AuthorityClock, AuthorityIdSource, BrowserDaemonPort, IndexedSource } from "./ports.js";
 import { WebCache, type WebCacheOptions } from "./cache.js";
-import { ContentEntryTooLargeError, NormalizedContentStore, type NormalizedContentRecord } from "./content-store.js";
+import { ContentEntryTooLargeError, NormalizedContentStore, type ContentRepresentation, type NormalizedContentRecord } from "./content-store.js";
 import { BrowserPortError, isBrowserPathId } from "./ports.js";
+import { BoundedLocalJsonClient, LOCAL_JSON_LIMITS } from "./local-json-client.js";
+import { selectCanonicalPassage } from "./passage-selector.js";
 
 const DEFAULT_CONTENT_CHARS = 16_384;
 const MAX_CONTENT_CHARS = 100_000;
@@ -98,6 +102,7 @@ export class WebxAuthority {
   readonly #liveBinaryArtifacts = new Map<string, StoredBinaryArtifact>();
   readonly #cache: WebCache;
   readonly #content: NormalizedContentStore;
+  readonly #localJson = new BoundedLocalJsonClient();
   readonly #idempotencyMaxEntries: number;
   readonly #idempotencyMaxBytes: number;
   readonly #idempotencyTtlMs: number;
@@ -184,15 +189,10 @@ export class WebxAuthority {
 
   private async searchHealth(signal?: AbortSignal): Promise<{ enabled: boolean; healthy: boolean; reason?: string }> {
     if (this.options.searxUrl === undefined) return { enabled: this.options.sources.length > 0, healthy: this.options.sources.length > 0 };
-    const probeSignal = healthProbeSignal(signal);
     try {
-      const endpoint = new URL("/search", this.options.searxUrl);
-      endpoint.searchParams.set("q", "webx capability probe");
-      endpoint.searchParams.set("format", "json");
-      const response = await fetch(endpoint, { signal: probeSignal, headers: { accept: "application/json" } });
+      const response = await this.#localJson.request<unknown>(new URL("/config", this.options.searxUrl), {}, LOCAL_JSON_LIMITS.health, signal);
       if (!response.ok) return { enabled: true, healthy: false, reason: `search backend returned HTTP ${response.status}` };
-      const payload = await response.json() as { results?: unknown };
-      if (!Array.isArray(payload.results)) return { enabled: true, healthy: false, reason: "search backend returned an invalid health response" };
+      if (response.payload === undefined) return { enabled: true, healthy: false, reason: "search backend returned an invalid health response" };
       return { enabled: true, healthy: true };
     } catch (error) {
       if (signal?.aborted) throw error;
@@ -202,12 +202,10 @@ export class WebxAuthority {
 
   private async readHealth(signal?: AbortSignal): Promise<{ enabled: boolean; healthy: boolean; reason?: string }> {
     if (this.options.readerUrl === undefined) return { enabled: this.options.sources.length > 0, healthy: this.options.sources.length > 0 };
-    const probeSignal = healthProbeSignal(signal);
     try {
-      const response = await fetch(new URL("/health", this.options.readerUrl), { signal: probeSignal, headers: { accept: "application/json" } });
+      const response = await this.#localJson.request<{ ok?: unknown }>(new URL("/health", this.options.readerUrl), {}, LOCAL_JSON_LIMITS.health, signal);
       if (!response.ok) return { enabled: true, healthy: false, reason: `reader returned HTTP ${response.status}` };
-      const payload = await response.json() as { ok?: unknown };
-      if (payload.ok !== true) return { enabled: true, healthy: false, reason: "reader returned an invalid health response" };
+      if (response.payload?.ok !== true) return { enabled: true, healthy: false, reason: "reader returned an invalid health response" };
       return { enabled: true, healthy: true };
     } catch (error) {
       if (signal?.aborted) throw error;
@@ -229,7 +227,7 @@ export class WebxAuthority {
 
   private async search(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<SearchResponse> {
     requireScope(actor, scope);
-    const key = { formatVersion: 21, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
+    const key = { formatVersion: 22, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
     const cached = await this.#cache.get<SearchResponse>("search", key);
     if (cached !== undefined) return withSearchDelivery(cached, "hit", false);
     const flightKey = `search\0${createHash("sha256").update(stableStringify({ principalId: actor.principalId, key })).digest("hex")}`;
@@ -295,6 +293,10 @@ export class WebxAuthority {
         searches, fallbackUsed,
         partial: failures.length > 0 || providerWarnings.length > 0 || extractionFailures > 0,
         pagesRead, readAttempts,
+        ...(output === "extracts" ? {
+          warning: "output=extracts is deprecated and remains available through the current 0.x API line.",
+          migration: "Use web_search links, select sources, call web_read_batch, then use web_content for focus or continuation.",
+        } : {}),
       },
     };
   }
@@ -312,10 +314,10 @@ export class WebxAuthority {
       readAttempts += chunk.length;
       const outcomes = await boundedOrderedFanOut(chunk, EXTRACT_READ_CONCURRENCY, async (candidate): Promise<{ pageRead: boolean; hit?: SearchHit }> => {
         try {
-          const page = await this.uncachedRead(readerActor, { url: candidate.url, maxChars: 30_000 }, signal, false);
+          const page = await this.uncachedRead(readerActor, { url: candidate.url, query: stripSiteOperators(query), maxChars: EXTRACT_PASSAGE_CHARS }, signal, false);
           const url = normalizeSearchUrl(page.url || candidate.url);
           if (url === undefined || !urlMatchesDomains(url, domains)) return { pageRead: true };
-          const snippet = contiguousEvidenceExcerpt(page.untrustedContent, query, EXTRACT_PASSAGE_CHARS);
+          const snippet = page.untrustedContent;
           if (snippet.length < 60) return { pageRead: true };
           return {
             pageRead: true,
@@ -354,9 +356,9 @@ export class WebxAuthority {
     endpoint.searchParams.set("q", query);
     endpoint.searchParams.set("format", "json");
     endpoint.searchParams.set("safesearch", "0");
-    const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
+    const response = await this.#localJson.request<{ results?: RawSearchHit[]; unresponsive_engines?: unknown }>(endpoint, {}, LOCAL_JSON_LIMITS.searxQuery, signal);
     if (!response.ok) throw new Error(`SearXNG returned HTTP ${response.status}`);
-    const payload = await response.json() as { results?: RawSearchHit[]; unresponsive_engines?: unknown };
+    const payload = response.payload ?? {};
     const raw = Array.isArray(payload.results) ? payload.results : [];
     const eligible = raw.filter((item) => typeof item.url === "string" && typeof item.title === "string" && urlMatchesDomains(item.url, domains));
     const unavailable = searxUnavailableEngines(payload.unresponsive_engines);
@@ -364,19 +366,26 @@ export class WebxAuthority {
     return { hits: eligible, unavailable };
   }
 
-  private async read(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<BoundedContent> {
+  private async read(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<ReadContent> {
     requireScope(actor, "retrieval.read");
-    const key = { formatVersion: 10, principalId: actor.principalId, request, readerUrl: this.options.readerUrl };
-    const cached = await this.#cache.get<BoundedContent>("read", key);
-    if (cached !== undefined) {
-      const metadata = typeof cached.metadata === "object" && cached.metadata !== null ? cached.metadata as Record<string, unknown> : {};
-      const contentId = typeof metadata.contentId === "string" ? metadata.contentId : undefined;
-      if (contentId !== undefined && await this.#content.get(contentId, actor.principalId) !== undefined) return withReadDelivery(cached, "hit", false);
-    }
-    const flightKey = `read\0${createHash("sha256").update(stableStringify(key)).digest("hex")}`;
-    const shared = await this.#inFlight.run(flightKey, signal, (sharedSignal) => this.uncachedRead(actor, request, sharedSignal));
+    assertReadRequest(request);
+    const canonicalRequest = withoutRefresh(request);
+    const key = { formatVersion: 13, principalId: actor.principalId, request: canonicalRequest, readerUrl: this.options.readerUrl };
+    const entry = await this.#cache.getEntry<ReadContent>("read", key, true);
+    const prior = entry === undefined ? undefined : await this.usableCachedRead(actor, entry.value);
+    if (request.refresh !== true && entry?.fresh === true && prior !== undefined) return withReadDelivery(prior, "hit", false, "cached", this.options.clock.now());
+    const mode = request.refresh === true ? "refresh" : prior === undefined ? "miss" : "stale";
+    const flightKey = `read\0${mode}\0${createHash("sha256").update(stableStringify(key)).digest("hex")}`;
+    const shared = await this.#inFlight.run(flightKey, signal, (sharedSignal) => this.uncachedRead(actor, canonicalRequest, sharedSignal, true, prior) as Promise<ReadContent>);
     await this.#cache.set("read", key, shared.value, READ_CACHE_TTL_MS).catch(() => undefined);
-    return withReadDelivery(shared.value, "miss", shared.coalesced);
+    const freshness = readValidation(shared.value) === "not-modified" ? "revalidated" : "fetched";
+    return withReadDelivery(shared.value, "miss", shared.coalesced, freshness, this.options.clock.now());
+  }
+
+  private async usableCachedRead(actor: AuthorityActor, cached: ReadContent): Promise<ReadContent | undefined> {
+    const metadata = typeof cached.metadata === "object" && cached.metadata !== null ? cached.metadata as Record<string, unknown> : {};
+    const contentId = typeof metadata.contentId === "string" ? metadata.contentId : undefined;
+    return contentId !== undefined && await this.#content.get(contentId, actor.principalId) !== undefined ? cached : undefined;
   }
 
   private async readBatch(actor: AuthorityActor, request: ReadBatchRequest, signal?: AbortSignal): Promise<ReadBatchResponse> {
@@ -395,7 +404,7 @@ export class WebxAuthority {
     return { results, metadata: { requested: results.length, succeeded, failed: results.length - succeeded, maxConcurrency: 3 } };
   }
 
-  private async uncachedRead(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal, retainContent = true): Promise<BoundedContent> {
+  private async uncachedRead(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal, retainContent = true, prior?: ReadContent): Promise<BoundedContent> {
     requireScope(actor, "retrieval.read");
     if (typeof request.url !== "string" || request.url.length === 0) throw problem(400, "invalid-request", "url is required", false);
     const crawlPages = integer(request.maxPages ?? 1, "maxPages", 1, 20);
@@ -409,76 +418,159 @@ export class WebxAuthority {
       const crawled = await this.crawl(actor, { url: request.url, maxPages: crawlPages, maxDepth: crawlDepth, maxChars: sourceChars, sameDomain: request.sameDomain, query: request.query }, signal);
       const successful = crawled.pages.filter((page) => page.ok && page.content);
       const perPageLimit = Math.max(1_500, Math.floor(sourceChars / Math.max(1, successful.length)));
-      const allContent = successful.map((page, index) => `${successful.length > 1 ? `## ${page.title ?? `Page ${index + 1}`}\n\n` : ""}${request.query ? focusedReadContent(page.content ?? "", request.query, perPageLimit) : cleanMainContent(page.content ?? "")}`).join("\n\n");
+      const allContent = successful.map((page, index) => `${successful.length > 1 ? `## ${page.title ?? `Page ${index + 1}`}\n\n` : ""}${request.query ? selectCanonicalPassage(cleanMainContent(page.content ?? ""), request.query, perPageLimit) : cleanMainContent(page.content ?? "")}`).join("\n\n");
       const primary = successful[0];
-      return this.storeRead(actor, primary?.title ?? `Content from ${request.url}`, primary?.url ?? request.url, allContent, requestedChars, crawled.truncated, {
+      return this.storeRead(actor, {
+        title: primary?.title ?? `Content from ${request.url}`, url: primary?.url ?? request.url,
+        requestedUrl: request.url, finalUrl: primary?.url ?? request.url, representation: "crawl-aggregate",
+        sourceOffset: 0, sourceComplete: !crawled.truncated, nextSourceOffset: null,
+        extractor: "crawl4ai", mediaType: "text/markdown", normalizedContent: allContent,
+      }, allContent, requestedChars, {
         engine: "crawl4ai", pageCount: crawled.pageCount,
         pages: crawled.pages.map((page) => ({ title: page.title, url: page.url, depth: page.depth, ok: page.ok })),
-      }, 0, retainContent);
+      }, retainContent);
     }
     const allSources = this.options.sources;
     const input = request as ReadRequest & { query?: string; view?: string; fields?: readonly string[]; itemOffset?: number; itemLimit?: number; contentOffset?: number };
-    const transformed = input.query !== undefined || input.fields !== undefined || input.itemOffset !== undefined || input.itemLimit !== undefined || input.contentOffset !== undefined || (input.view !== undefined && input.view !== "main");
-    let source = !transformed ? allSources.find((item) => item.url === request.url) : undefined;
+    const specializedProjection = input.view === "raw" || input.fields !== undefined || input.itemOffset !== undefined || input.itemLimit !== undefined;
+    let source = !specializedProjection && input.contentOffset === undefined ? allSources.find((item) => item.url === request.url) : undefined;
     const requestedChars = integer(request.maxChars ?? 1_000_000, "maxChars", 1, 1_000_000);
-    const sourceChars = requestedChars;
+    const sourceChars = input.query !== undefined || (!specializedProjection && retainContent) ? 1_000_000 : requestedChars;
     if (source === undefined && this.options.readerUrl !== undefined) {
-      const response = await fetch(new URL("/v1/read", this.options.readerUrl), {
-        method: "POST", signal, headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ url: request.url, query: input.query, view: input.view ?? "main", fields: input.fields ?? [], itemOffset: integer(input.itemOffset ?? 0, "itemOffset", 0, 1_000_000), itemLimit: integer(input.itemLimit ?? 50, "itemLimit", 1, 500), contentOffset: integer(input.contentOffset ?? 0, "contentOffset", 0, 100_000_000), maxChars: sourceChars }),
-      });
+      const priorFreshness = readFreshness(prior);
+      const response = await this.#localJson.request<{ url?: unknown; title?: unknown; content?: unknown; mediaType?: unknown; source?: unknown; truncated?: unknown; metadata?: unknown; notModified?: unknown }>(
+        new URL("/v1/read", this.options.readerUrl),
+        {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            url: request.url,
+            query: undefined,
+            view: specializedProjection ? input.view ?? "main" : "main",
+            fields: specializedProjection ? input.fields ?? [] : [],
+            itemOffset: specializedProjection ? integer(input.itemOffset ?? 0, "itemOffset", 0, 1_000_000) : 0,
+            itemLimit: specializedProjection ? integer(input.itemLimit ?? 50, "itemLimit", 1, 500) : 500,
+            contentOffset: integer(input.contentOffset ?? 0, "contentOffset", 0, 100_000_000),
+            maxChars: sourceChars,
+            etag: priorFreshness?.etag,
+            lastModified: priorFreshness?.lastModified,
+            validatorUrl: prior === undefined ? undefined : prior.metadata.finalUrl,
+          }),
+        },
+        LOCAL_JSON_LIMITS.reader,
+        signal,
+      );
       if (!response.ok) {
-        const failure = parseReaderFailure(response.status, await response.text());
+        const failure = parseReaderFailure(response.status, response.bodyText);
         throw problem(failure.toolStatus, "read-failed", failure.message, failure.retryable);
       }
-      const page = await response.json() as { url?: unknown; title?: unknown; content?: unknown; mediaType?: unknown; source?: unknown; truncated?: unknown; metadata?: unknown };
+      const page = response.payload ?? {};
+      const readerMetadata = typeof page.metadata === "object" && page.metadata !== null ? page.metadata as Record<string, unknown> : {};
+      if (page.notModified === true) {
+        if (prior === undefined) throw new Error("reader returned not-modified without reusable canonical content");
+        return revalidatedRead(prior, readerMetadata, this.options.clock.now());
+      }
       if (typeof page.content !== "string") throw new Error("reader returned no text content");
       const digest = createHash("sha256").update(`${request.url}\0${page.content}`).digest("hex");
       source = { hitId: `hit-${digest.slice(0, 20)}`, ownerPrincipalId: actor.principalId, title: typeof page.title === "string" ? page.title : request.url, url: typeof page.url === "string" ? page.url : request.url, content: page.content, visibility: "public" };
-      const readerMetadata = typeof page.metadata === "object" && page.metadata !== null ? page.metadata as Record<string, unknown> : {};
+      const sourceOffset = integer(input.contentOffset ?? 0, "contentOffset", 0, 100_000_000);
+      const provenNextSourceOffset = safeNextSourceOffset(readerMetadata.nextContentOffset, sourceOffset);
+      const sourceComplete = readerMetadata.complete === true || (page.truncated !== true && provenNextSourceOffset === null);
+      const representation: ContentRepresentation = page.source === "structured-json" ? "structured-projection" : specializedProjection ? input.view === "raw" ? "raw-projection" : "structured-projection" : "canonical-normalized";
+      const extractor = typeof page.source === "string" ? page.source : typeof readerMetadata.resolvedVia === "string" ? readerMetadata.resolvedVia : "reader";
+      const mediaType = typeof page.mediaType === "string" ? page.mediaType : typeof readerMetadata.originalMediaType === "string" ? readerMetadata.originalMediaType : "text/markdown";
+      const stored = {
+        title: source.title, url: source.url, requestedUrl: request.url, finalUrl: source.url,
+        representation, sourceOffset, sourceComplete, nextSourceOffset: provenNextSourceOffset,
+        extractor, mediaType, normalizedContent: source.content,
+      };
+      const presented = input.query !== undefined
+        ? selectCanonicalPassage(source.content, input.query, Math.min(requestedChars, MAX_AGENT_READ_CONTENT_CHARS))
+        : !specializedProjection && input.view === "outline" ? outlineContent(source.content) : source.content;
       const metadata = { requestedUrl: request.url, finalUrl: source.url, source: page.source, substituted: source.url !== request.url, reader: { ...readerMetadata, truncated: page.truncated === true } };
-      return this.storeRead(actor, source.title, source.url, source.content, requestedChars, page.truncated === true, metadata, integer(input.contentOffset ?? 0, "contentOffset", 0, 100_000_000), retainContent);
+      return this.storeRead(actor, stored, presented, requestedChars, metadata, retainContent);
     }
     if (source === undefined || !canRead(actor, source.ownerPrincipalId, source.visibility)) throw problem(404, "not-found", "page was not found", false);
-    return this.storeRead(actor, source.title, source.url, source.content, requestedChars, false, {}, 0, retainContent);
+    const presented = input.query !== undefined
+      ? selectCanonicalPassage(source.content, input.query, Math.min(requestedChars, MAX_AGENT_READ_CONTENT_CHARS))
+      : input.view === "outline" ? outlineContent(source.content) : source.content;
+    return this.storeRead(actor, {
+      title: source.title, url: source.url, requestedUrl: request.url, finalUrl: source.url,
+      representation: "canonical-normalized", sourceOffset: 0, sourceComplete: true, nextSourceOffset: null,
+      extractor: "indexed-source", mediaType: "text/markdown", normalizedContent: source.content,
+    }, presented, requestedChars, {}, retainContent);
   }
 
-  private async storeRead(actor: AuthorityActor, title: string, url: string, normalizedContent: string, requestedChars: number, sourceTruncated: boolean, metadata: Readonly<Record<string, unknown>> = {}, sourceOffset = 0, retainContent = true): Promise<BoundedContent> {
+  private async storeRead(
+    actor: AuthorityActor,
+    source: {
+      readonly title: string; readonly url: string; readonly requestedUrl: string; readonly finalUrl: string;
+      readonly representation: ContentRepresentation; readonly sourceOffset: number; readonly sourceComplete: boolean;
+      readonly nextSourceOffset: number | null; readonly extractor: string; readonly mediaType: string; readonly normalizedContent: string;
+    },
+    presentedContent: string,
+    requestedChars: number,
+    metadata: Readonly<Record<string, unknown>> = {},
+    retainContent = true,
+  ): Promise<BoundedContent> {
     let record: NormalizedContentRecord | undefined;
     if (retainContent) {
       try {
-        record = await this.#content.put({ ownerPrincipalId: actor.principalId, title, url, content: normalizedContent });
+        record = await this.#content.put({
+          ownerPrincipalId: actor.principalId, title: source.title, url: source.url,
+          requestedUrl: source.requestedUrl, finalUrl: source.finalUrl, representation: source.representation,
+          sourceOffset: source.sourceOffset, sourceComplete: source.sourceComplete, nextSourceOffset: source.nextSourceOffset,
+          extractor: source.extractor, mediaType: source.mediaType, content: source.normalizedContent,
+        });
       } catch (error) {
         if (error instanceof ContentEntryTooLargeError) throw problem(413, error.code, error.message, false);
         throw error;
       }
     }
-    const totalCharacters = [...normalizedContent].length;
+    const storedCharacters = [...source.normalizedContent].length;
+    const presentedCharacters = [...presentedContent].length;
     const passageLimit = Math.min(requestedChars, MAX_AGENT_READ_CONTENT_CHARS);
-    const bounded = boundText(normalizedContent, passageLimit);
+    const bounded = boundText(presentedContent, passageLimit);
     const returnedCharacters = [...bounded.text].length;
-    const locallyTruncated = returnedCharacters < totalCharacters;
-    const reader = typeof metadata.reader === "object" && metadata.reader !== null ? metadata.reader as Record<string, unknown> : undefined;
-    const continuation = locallyTruncated ? sourceOffset + returnedCharacters : reader?.nextContentOffset;
+    const locallyTruncated = returnedCharacters < presentedCharacters;
+    const selectionApplied = presentedContent !== source.normalizedContent;
+    const provenance = record === undefined ? {
+      requestedUrl: source.requestedUrl, finalUrl: source.finalUrl, representation: source.representation,
+      sourceOffset: source.sourceOffset, sourceComplete: source.sourceComplete, nextSourceOffset: source.nextSourceOffset,
+      extractor: source.extractor, mediaType: source.mediaType,
+      contentSha256: createHash("sha256").update(source.normalizedContent).digest("hex"),
+    } : recordProvenance(record);
     const contentMetadata = {
       ...(record === undefined ? {} : {
-        contentId: record.contentId,
-        storedCharacters: totalCharacters,
-        storedBytes: record.sizeBytes,
-        expiresAt: new Date(record.expiresAt).toISOString(),
+        contentId: record.contentId, storedCharacters, storedBytes: record.sizeBytes,
+        createdAt: new Date(record.createdAt).toISOString(), expiresAt: new Date(record.expiresAt).toISOString(),
       }),
-      returnedCharacters,
-      totalCharacters,
-      complete: !locallyTruncated && !sourceTruncated,
-      sourceComplete: !sourceTruncated,
-      nextStoredOffset: record !== undefined && locallyTruncated ? returnedCharacters : null,
-      nextContentOffset: locallyTruncated ? continuation : continuation ?? (sourceTruncated ? sourceOffset + totalCharacters : null),
+      ...provenance,
+      returnedCharacters, totalCharacters: storedCharacters,
+      complete: !locallyTruncated && source.sourceComplete,
+      sourceComplete: source.sourceComplete,
+      nextStoredOffset: record !== undefined && !selectionApplied && locallyTruncated ? returnedCharacters : null,
+      nextContentOffset: !locallyTruncated && source.nextSourceOffset !== null ? source.nextSourceOffset : null,
+      selectionApplied,
     };
-    const identity = record === undefined ? {} : { contentId: record.contentId };
+    const identity = record === undefined ? {} : {
+      contentId: record.contentId,
+      createdAt: new Date(record.createdAt).toISOString(),
+      expiresAt: new Date(record.expiresAt).toISOString(),
+    };
+    const reader = typeof metadata.reader === "object" && metadata.reader !== null ? metadata.reader as Record<string, unknown> : undefined;
+    const timestamp = this.options.clock.now();
+    const freshness = {
+      fetchedAt: timestamp,
+      validatedAt: timestamp,
+      cacheAgeMs: 0,
+      cache: "miss" as const,
+      validation: "fetched" as const,
+      ...boundedValidators(reader),
+    };
     const mergedMetadata = reader === undefined
-      ? { ...metadata, ...identity, reader: contentMetadata }
-      : { ...metadata, ...identity, reader: { ...reader, ...contentMetadata } };
-    return { title, url, untrustedContent: bounded.text, truncated: locallyTruncated || sourceTruncated, visibility: "public", metadata: mergedMetadata };
+      ? { ...metadata, ...identity, ...provenance, freshness, reader: contentMetadata }
+      : { ...metadata, ...identity, ...provenance, freshness, reader: { ...reader, ...contentMetadata } };
+    return { title: source.title, url: source.url, untrustedContent: bounded.text, truncated: locallyTruncated || !source.sourceComplete, visibility: "public", metadata: mergedMetadata };
   }
 
   private async content(actor: AuthorityActor, request: ContentRequest): Promise<StoredContent> {
@@ -502,24 +594,29 @@ export class WebxAuthority {
       text = points.slice(offset, offset + limit).join("");
     } else if (request.query !== undefined) {
       mode = "query";
-      text = storedQueryExcerpt(record.content, request.query, limit);
+      text = selectCanonicalPassage(record.content, request.query, limit);
     } else {
       offset = integer(request.offset ?? 0, "offset", 0, points.length);
       text = points.slice(offset, offset + limit).join("");
       nextOffset = offset + [...text].length < points.length ? offset + [...text].length : null;
     }
     const returnedCharacters = [...text].length;
+    const atLocalEof = mode === "exact" && nextOffset === null;
+    const nextContentOffset = atLocalEof && !record.sourceComplete ? record.nextSourceOffset : null;
     return {
       title: record.title,
       url: record.url,
       untrustedContent: text,
-      truncated: mode === "exact" ? nextOffset !== null : returnedCharacters < points.length,
+      truncated: mode === "exact" ? nextOffset !== null || nextContentOffset !== null : returnedCharacters < points.length,
       visibility: "public",
       metadata: {
         contentId: record.contentId, mode, totalCharacters: points.length, returnedCharacters,
+        ...recordProvenance(record),
         ...(offset === undefined ? {} : { offset }),
         ...(nextOffset === undefined ? {} : { nextOffset }),
+        ...(mode === "exact" ? { nextContentOffset } : {}),
         ...(matchOffset === undefined ? {} : { matchOffset }),
+        createdAt: new Date(record.createdAt).toISOString(),
         expiresAt: new Date(record.expiresAt).toISOString(),
       },
     };
@@ -555,17 +652,21 @@ export class WebxAuthority {
     const length = integer(request.length, "length", 1, MAX_RANGE_BYTES);
     if (offset > Number.MAX_SAFE_INTEGER - length) throw problem(400, "invalid-request", "range end exceeds the safe integer bound", false);
     const maxRedirects = integer(request.maxRedirects ?? 4, "maxRedirects", 0, MAX_RANGE_REDIRECTS);
-    const response = await fetch(new URL("/v1/read-range", this.options.readerUrl), {
-      method: "POST",
+    const response = await this.#localJson.request<Record<string, unknown>>(
+      new URL("/v1/read-range", this.options.readerUrl),
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: request.url, offset, length, maxRedirects }),
+      },
+      LOCAL_JSON_LIMITS.reader,
       signal,
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ url: request.url, offset, length, maxRedirects }),
-    });
+    );
     if (!response.ok) {
-      const failure = parseReaderFailure(response.status, await response.text());
+      const failure = parseReaderFailure(response.status, response.bodyText);
       throw problem(failure.toolStatus, "range-read-failed", failure.message, failure.retryable);
     }
-    const value = await response.json() as Record<string, unknown>;
+    const value = response.payload ?? {};
     const requestedUrl = requiredString(value.requestedUrl, "requestedUrl");
     const finalUrl = requiredString(value.finalUrl, "finalUrl");
     if (requestedUrl !== request.url) throw new Error("range reader changed the requested URL");
@@ -758,12 +859,71 @@ function waitForFlight<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T>
   });
 }
 
+function safeNextSourceOffset(value: unknown, sourceOffset: number): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > sourceOffset && value <= 100_000_000 ? value : null;
+}
+function recordProvenance(record: NormalizedContentRecord) {
+  return {
+    requestedUrl: record.requestedUrl, finalUrl: record.finalUrl, representation: record.representation,
+    sourceOffset: record.sourceOffset, sourceComplete: record.sourceComplete, nextSourceOffset: record.nextSourceOffset,
+    extractor: record.extractor, mediaType: record.mediaType, contentSha256: record.contentSha256,
+  };
+}
+function outlineContent(content: string): string {
+  const headings = content.split(/\r?\n/u).filter((line) => /^#{1,6}\s+\S/u.test(line.trim()));
+  return headings.length > 0 ? headings.join("\n") : content.split(/\r?\n{2,}/u).map((part) => part.trim().split(/\r?\n/u)[0] ?? "").filter(Boolean).slice(0, 200).join("\n");
+}
+
 function withSearchDelivery(value: SearchResponse, cache: "hit" | "miss", coalesced: boolean): SearchResponse {
   return { ...value, metadata: { ...value.metadata, delivery: { cache, coalesced } } };
 }
-function withReadDelivery(value: BoundedContent, cache: "hit" | "miss", coalesced: boolean): BoundedContent {
+function withReadDelivery<T extends BoundedContent>(value: T, cache: "hit" | "miss", coalesced: boolean, freshness: "cached" | "fetched" | "revalidated", deliveredAt: string): T {
   const metadata = typeof value.metadata === "object" && value.metadata !== null ? value.metadata : {};
-  return { ...value, metadata: { ...metadata, delivery: { cache, coalesced } } };
+  const priorFreshness = typeof metadata.freshness === "object" && metadata.freshness !== null ? metadata.freshness as ReadFreshness : undefined;
+  const visibleFreshness = priorFreshness === undefined ? undefined : {
+    ...priorFreshness,
+    cacheAgeMs: cacheAgeMilliseconds(priorFreshness.fetchedAt, deliveredAt),
+    cache: freshness === "cached" ? "hit" as const : freshness === "revalidated" ? "revalidated" as const : "miss" as const,
+  };
+  return { ...value, metadata: { ...metadata, ...(visibleFreshness === undefined ? {} : { freshness: visibleFreshness }), delivery: { cache, coalesced, freshness } } } as T;
+}
+function readFreshness(value: ReadContent | undefined): ReadFreshness | undefined {
+  const freshness = value?.metadata.freshness;
+  return typeof freshness === "object" && freshness !== null ? freshness : undefined;
+}
+function readValidation(value: ReadContent): ReadFreshness["validation"] | undefined { return readFreshness(value)?.validation; }
+function boundedValidators(value: Readonly<Record<string, unknown>> | undefined): Pick<ReadFreshness, "etag" | "lastModified"> {
+  const etag = boundedValidator(value?.etag, 1_024);
+  const lastModified = boundedValidator(value?.lastModified, 128);
+  return { ...(etag === undefined ? {} : { etag }), ...(lastModified === undefined ? {} : { lastModified }) };
+}
+function boundedValidator(value: unknown, maximum: number): string | undefined {
+  return typeof value === "string" && value.length >= 1 && value.length <= maximum && !/[\r\n]/u.test(value) ? value : undefined;
+}
+function revalidatedRead(prior: ReadContent, readerMetadata: Readonly<Record<string, unknown>>, validatedAt: string): ReadContent {
+  const previous = readFreshness(prior);
+  if (previous === undefined) throw new Error("cached read has no freshness metadata");
+  const responseValidators = boundedValidators(readerMetadata);
+  const freshness: ReadFreshness = {
+    fetchedAt: previous.fetchedAt,
+    validatedAt,
+    cacheAgeMs: cacheAgeMilliseconds(previous.fetchedAt, validatedAt),
+    cache: "revalidated",
+    validation: "not-modified",
+    etag: responseValidators.etag ?? previous.etag,
+    lastModified: responseValidators.lastModified ?? previous.lastModified,
+  };
+  return { ...prior, metadata: { ...prior.metadata, freshness } };
+}
+function cacheAgeMilliseconds(fetchedAt: string, observedAt: string): number {
+  const fetched = Date.parse(fetchedAt);
+  const observed = Date.parse(observedAt);
+  return Number.isFinite(fetched) && Number.isFinite(observed) ? Math.max(0, observed - fetched) : 0;
+}
+function withoutRefresh(request: ReadRequest): ReadRequest {
+  const { refresh, ...canonical } = request;
+  void refresh;
+  return canonical;
 }
 async function boundedOrderedFanOut<T, R>(items: readonly T[], concurrency: number, run: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
@@ -779,6 +939,14 @@ async function boundedOrderedFanOut<T, R>(items: readonly T[], concurrency: numb
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
   return results;
 }
+function assertReadRequest(request: ReadRequest): void {
+  assertDirectReadRequest(request, new Set(["maxPages", "maxDepth", "sameDomain", "visibility"]));
+  const value = request as unknown as Record<string, unknown>;
+  if (value.maxPages !== undefined) integer(value.maxPages as number, "maxPages", 1, 20);
+  if (value.maxDepth !== undefined) integer(value.maxDepth as number, "maxDepth", 0, 3);
+  if (value.sameDomain !== undefined && typeof value.sameDomain !== "boolean") throw problem(400, "invalid-request", "sameDomain must be a boolean", false);
+  if (value.visibility !== undefined && !["public", "internal", "private", "secret"].includes(String(value.visibility))) throw problem(400, "invalid-request", "visibility is invalid", false);
+}
 function assertReadBatchRequest(request: ReadBatchRequest): void {
   const value = request as unknown as Record<string, unknown>;
   const unknown = Object.keys(value).filter((key) => key !== "items");
@@ -786,10 +954,10 @@ function assertReadBatchRequest(request: ReadBatchRequest): void {
   if (!Array.isArray(value.items) || value.items.length < 1 || value.items.length > 5) throw problem(400, "invalid-request", "items must contain 1 to 5 direct read requests", false);
   for (const item of value.items) assertDirectReadRequest(item);
 }
-function assertDirectReadRequest(input: unknown): void {
-  if (typeof input !== "object" || input === null || Array.isArray(input)) throw problem(400, "invalid-request", "each read batch item must be an object", false);
+function assertDirectReadRequest(input: unknown, additionalAllowed = new Set<string>()): void {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) throw problem(400, "invalid-request", "each read request must be an object", false);
   const value = input as Record<string, unknown>;
-  const allowed = new Set(["url", "query", "view", "fields", "itemOffset", "itemLimit", "maxChars", "contentOffset"]);
+  const allowed = new Set(["url", "query", "view", "fields", "itemOffset", "itemLimit", "maxChars", "contentOffset", "refresh", ...additionalAllowed]);
   const unknown = Object.keys(value).filter((key) => !allowed.has(key));
   if (unknown.length > 0) throw problem(400, "invalid-request", `unsupported read batch item field: ${unknown[0]}`, false);
   if (typeof value.url !== "string" || value.url.length < 1 || value.url.length > 8_192) throw problem(400, "invalid-request", "read batch item url is required", false);
@@ -801,6 +969,7 @@ function assertDirectReadRequest(input: unknown): void {
   if (value.itemLimit !== undefined) integer(value.itemLimit as number, "itemLimit", 1, 500);
   if (value.maxChars !== undefined) integer(value.maxChars as number, "maxChars", 1, 1_000_000);
   if (value.contentOffset !== undefined) integer(value.contentOffset as number, "contentOffset", 0, 100_000_000);
+  if (value.refresh !== undefined && typeof value.refresh !== "boolean") throw problem(400, "invalid-request", "refresh must be a boolean", false);
 }
 function publicProblem(error: unknown): WebxProblem {
   if (isAuthorityFailure(error)) return error.body;
@@ -865,76 +1034,6 @@ function cleanMainContent(value: string): string {
     lines.push(line);
   }
   return lines.join("\n").replace(/\n{3,}/gu, "\n\n").trim();
-}
-
-function focusedReadContent(value: string, query: string, maxChars: number): string {
-  const clean = cleanMainContent(value);
-  if (/notable\s+changes/iu.test(query)) {
-    const match = clean.match(/(?:^|\n)#{2,4}\s+Notable Changes\s*\n([\s\S]*?)(?=\n#{2,4}\s+Commits|$)/iu);
-    if (match?.[1]) {
-      const introduction = clean.slice(0, Math.max(0, match.index ?? 0)).split("\n").filter((line) => /^(?:#|.*\b(?:version|release|lts)\b)/iu.test(line)).slice(0, 5).join("\n");
-      return boundText(`${introduction}\n\n## Notable Changes\n${match[1].trim()}`.trim(), maxChars).text;
-    }
-  }
-  return evidenceExcerpt(clean, query, maxChars);
-}
-
-function evidenceExcerpt(value: string, query: string, maxChars: number): string {
-  const clean = cleanMainContent(value);
-  const terms = [...new Set(query.toLocaleLowerCase().match(/[a-z0-9][a-z0-9.+-]{2,}/gu) ?? [])];
-  const blocks = clean.split(/\n+|(?<=[.!?])\s+(?=[A-Z0-9])/u).map((item) => item.trim()).filter((item) => item.length >= 20);
-  const scored = blocks.map((text, index) => ({ text, index, score: terms.reduce((sum, term) => sum + (text.toLocaleLowerCase().includes(term) ? 1 : 0), 0) }));
-  const positive = scored.filter((item) => item.score > 0);
-  const ranked = (positive.length >= 2 ? positive : scored)
-    .sort((left, right) => right.score - left.score || left.index - right.index);
-  const selected: string[] = [];
-  let length = 0;
-  for (const item of ranked) {
-    if (selected.includes(item.text)) continue;
-    if (selected.length > 0 && length + item.text.length + 2 > maxChars) continue;
-    selected.push(item.text);
-    length += item.text.length + 2;
-    if (length >= maxChars * 0.8 || selected.length >= 10) break;
-  }
-  return boundText(selected.join("\n\n") || clean, maxChars).text.trim();
-}
-
-function storedQueryExcerpt(value: string, query: string, maxChars: number): string {
-  const lower = value.toLocaleLowerCase();
-  const exact = lower.indexOf(query.trim().toLocaleLowerCase());
-  const terms = searchTerms(query);
-  const positions = terms.map((term) => lower.indexOf(term)).filter((position) => position >= 0);
-  const position = exact >= 0 ? exact : positions.length > 0 ? Math.min(...positions) : 0;
-  const pointPosition = [...value.slice(0, position)].length;
-  const points = [...value];
-  const start = Math.max(0, Math.min(pointPosition - Math.floor(maxChars / 5), points.length - maxChars));
-  return points.slice(start, start + maxChars).join("").trim();
-}
-
-function contiguousEvidenceExcerpt(value: string, query: string, maxChars: number): string {
-  const clean = cleanMainContent(value);
-  if (clean.length <= maxChars) return clean;
-  const terms = searchTerms(stripSiteOperators(query));
-  const blocks = clean.split(/\n+|(?<=[.!?])\s+(?=[A-Z0-9])/u).map((text) => text.trim()).filter((text) => text.length >= 20);
-  let best = blocks[0] ?? clean;
-  let bestScore = -1;
-  for (const block of blocks) {
-    const lower = block.toLocaleLowerCase();
-    const score = terms.filter((term) => lower.includes(term)).length;
-    if (score > bestScore) { best = block; bestScore = score; }
-  }
-  const position = Math.max(0, clean.indexOf(best));
-  let start = Math.max(0, position - Math.floor(maxChars * 0.2));
-  if (start > 0) {
-    const boundary = Math.max(clean.lastIndexOf("\n", start), clean.lastIndexOf(" ", start));
-    if (boundary >= 0) start = boundary + 1;
-  }
-  let end = Math.min(clean.length, start + maxChars);
-  if (end < clean.length) {
-    const boundary = Math.max(clean.lastIndexOf("\n", end), clean.lastIndexOf(". ", end));
-    if (boundary > start + Math.floor(maxChars * 0.6)) end = boundary + 1;
-  }
-  return clean.slice(start, end).trim();
 }
 
 function assertContentRequest(request: ContentRequest): void {

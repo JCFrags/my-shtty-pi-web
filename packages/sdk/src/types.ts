@@ -87,6 +87,8 @@ export interface SearchResponse {
     readonly partial: boolean;
     readonly pagesRead: number;
     readonly readAttempts: number;
+    readonly warning?: string;
+    readonly migration?: string;
     readonly delivery?: { readonly cache: "hit" | "miss"; readonly coalesced: boolean };
   };
 }
@@ -105,20 +107,25 @@ export interface ReadRequest {
   readonly itemLimit?: number;
   readonly maxChars?: number;
   readonly contentOffset?: number;
+  /** @deprecated Compatibility field. Use search, readBatch, and content. Retained through the current 0.x API line. */
   readonly maxPages?: number;
+  /** @deprecated Compatibility field. Use search, readBatch, and content. Retained through the current 0.x API line. */
   readonly maxDepth?: number;
+  /** @deprecated Compatibility field. Use search, readBatch, and content. Retained through the current 0.x API line. */
   readonly sameDomain?: boolean;
+  /** Bypass a fresh traffic-cache hit and validate the canonical source again. */
+  readonly refresh?: boolean;
   readonly visibility?: Visibility;
 }
 
-export type DirectReadRequest = Pick<ReadRequest, "url" | "query" | "view" | "fields" | "itemOffset" | "itemLimit" | "maxChars" | "contentOffset">;
+export type DirectReadRequest = Pick<ReadRequest, "url" | "query" | "view" | "fields" | "itemOffset" | "itemLimit" | "maxChars" | "contentOffset" | "refresh">;
 
 export interface ReadBatchRequest {
   readonly items: readonly DirectReadRequest[];
 }
 
 export type ReadBatchEnvelope =
-  | { readonly index: number; readonly url: string; readonly ok: true; readonly result: BoundedContent }
+  | { readonly index: number; readonly url: string; readonly ok: true; readonly result: ReadContent }
   | { readonly index: number; readonly url: string; readonly ok: false; readonly error: WebxProblem };
 
 export interface ReadBatchResponse {
@@ -134,15 +141,52 @@ export interface ContentRequest {
   readonly query?: string;
 }
 
+export type ContentRepresentation = "canonical-normalized" | "raw-projection" | "structured-projection" | "crawl-aggregate";
+
+export interface ContentProvenance extends Readonly<Record<string, unknown>> {
+  readonly requestedUrl: string;
+  readonly finalUrl: string;
+  readonly representation: ContentRepresentation;
+  readonly sourceOffset: number;
+  readonly sourceComplete: boolean;
+  readonly nextSourceOffset: number | null;
+  readonly extractor: string;
+  readonly mediaType: string;
+  readonly contentSha256: string;
+}
+
+export interface ReadFreshness {
+  readonly fetchedAt: string;
+  readonly validatedAt: string;
+  readonly cacheAgeMs: number;
+  readonly cache: "hit" | "miss" | "revalidated";
+  readonly validation: "fetched" | "not-modified";
+  readonly etag?: string;
+  readonly lastModified?: string;
+}
+
+export interface ReadContent extends BoundedContent {
+  readonly metadata: ContentProvenance & {
+    readonly contentId: string;
+    readonly createdAt: string;
+    readonly expiresAt: string;
+    readonly reader: Readonly<Record<string, unknown>> & ContentProvenance;
+    readonly freshness: ReadFreshness;
+    readonly delivery?: { readonly cache: "hit" | "miss"; readonly coalesced: boolean; readonly freshness: "cached" | "fetched" | "revalidated" };
+  };
+}
+
 export interface StoredContent extends BoundedContent {
-  readonly metadata: {
+  readonly metadata: ContentProvenance & {
     readonly contentId: string;
     readonly mode: "exact" | "findText" | "query";
     readonly totalCharacters: number;
     readonly returnedCharacters: number;
     readonly offset?: number;
     readonly nextOffset?: number | null;
+    readonly nextContentOffset?: number | null;
     readonly matchOffset?: number;
+    readonly createdAt: string;
     readonly expiresAt: string;
   };
 }

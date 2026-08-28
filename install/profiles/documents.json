@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "documents",
+  "description": "Explicit local text-PDF conversion. Office and scanned documents require separately validated model assets.",
+  "includes": ["web-core"],
+  "capabilities": ["documents"],
+  "fedoraPackages": ["poppler-utils"],
+  "commands": ["uv", "pdftotext"],
+  "nodeFilters": [],
+  "pythonPackages": ["pi-web-docling"],
+  "units": ["pi-web-docling.service"],
+  "resourceLimits": {
+    "pi-web-docling.service": {
+      "MemoryMax": "4G",
+      "TasksMax": 128,
+      "Concurrency": 1,
+      "QueueSize": 2,
+      "TimeoutSeconds": 120,
+      "MaxInputBytes": 268435456,
+      "MaxTempBytes": 536870912,
+      "MaxOutputBytes": 16777216
+    }
+  }
+}

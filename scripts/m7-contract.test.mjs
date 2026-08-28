@@ -35,7 +35,8 @@ test("stage is versioned and isolated from live paths", async () => {
   const output = JSON.parse(run(stageScript, ["--source", root, "--release-root", releases, "--test-no-build"], { HOME: home, XDG_CONFIG_HOME: join(temporary, "config"), XDG_DATA_HOME: join(temporary, "data"), XDG_STATE_HOME: join(temporary, "state"), XDG_RUNTIME_DIR: join(temporary, "runtime") }));
   assert.match(output.candidate, new RegExp(`${output.commit}$`));
   const manifest = JSON.parse(await readFile(join(output.candidate, "candidate-manifest.json"), "utf8"));
-  assert.deepEqual(manifest.lockedDependencies, ["pnpm-lock.yaml", "components/browser/uv.lock", "components/browser/Cargo.lock"]);
+  assert.deepEqual(manifest.lockedDependencies, ["pnpm-lock.yaml", "components/browser/uv.lock"]);
+  assert.deepEqual(manifest.profile.resolvedProfiles, ["web-core"]);
   assert.equal(manifest.liveChanged, false);
   await assert.rejects(lstat(join(home, ".pi/agent/extensions/pi-web")));
 });
@@ -91,8 +92,8 @@ test("installed Python units cannot change a candidate before a plan after rollb
   const firstPlan = JSON.parse(run(cutoverScript, ["--plan", "--candidate", staged.candidate, "--evidence", evidence, "--test-mode"], env));
   assert.equal(firstPlan.treeSha256, staged.treeSha256);
   run(cutoverScript, ["--apply", "--candidate", staged.candidate, "--evidence", evidence, "--test-mode", "--run-id", "python-integrity", "--systemctl", fake], env);
-  const pythonUnits = ["pi-web-reader.service", "pi-web-docling.service", "pi-web-crawl.service", "pi-web-egress-proxy.service"];
-  for (const unit of pythonUnits) assert.match(await readFile(join(config, "systemd/user", unit), "utf8"), /^Environment=PYTHONDONTWRITEBYTECODE=1$/mu);
+  const readerPath = join(config, "systemd/user/pi-web-reader.service");
+  assert.match(await readFile(readerPath, "utf8"), /^Environment=PYTHONDONTWRITEBYTECODE=1$/mu);
   const readerUnit = await readFile(join(config, "systemd/user/pi-web-reader.service"), "utf8");
   const unitEnvironment = Object.fromEntries([...readerUnit.matchAll(/^Environment=([^=]+)=(.*)$/gmu)].map((match) => [match[1], match[2]]));
   const launched = runResult("/usr/bin/python3", ["-c", "import pi_web_reader"], { ...unitEnvironment, PYTHONPATH: packageRoot });
@@ -129,7 +130,7 @@ test("cutover plan, apply, and rollback stay inside isolated HOME and restore by
   assert.match(await readFile(log, "utf8"), /daemon-reload/);
 });
 
-test("generated and static units skip enable changes while mutable states restore exactly", async () => {
+test("profile transition keeps generated units valid and stops unselected services", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "webx-m7-generated-unit-"));
   const home = join(temporary, "home"); const prefix = join(home, ".local"); const state = join(home, ".state");
   await mkdir(home);
@@ -153,12 +154,14 @@ exit 0
   const env = { HOME: home, PI_WEB_PREFIX: prefix, XDG_CONFIG_HOME: join(home, ".config"), XDG_STATE_HOME: state };
   run(cutoverScript, ["--apply", "--candidate", staged.candidate, "--evidence", evidence, "--test-mode", "--run-id", "generated-unit", "--systemctl", fake], env);
   const calls = await readFile(log, "utf8");
-  assert.match(calls, /--user enable --runtime webxd\.service/);
-  assert.match(calls, /--user disable pi-web-reader\.service/);
-  assert.match(calls, /--user enable pi-browserd\.service/);
+  assert.match(calls, /--user enable webxd\.service/);
+  assert.match(calls, /--user enable pi-web-reader\.service/);
   assert.doesNotMatch(calls, /--user (?:enable|disable).*pi-web-searxng\.service/);
-  assert.doesNotMatch(calls, /--user (?:enable|disable).*pi-web-(?:crawl|docling|egress-proxy)\.service/);
   assert.match(calls, /--user start pi-web-searxng\.service/);
+  for (const unit of ["pi-browserd", "pi-web-crawl", "pi-web-docling", "pi-web-egress-proxy"]) {
+    assert.match(calls, new RegExp(`--user disable ${unit}\\.service`));
+    assert.match(calls, new RegExp(`--user stop ${unit}\\.service`));
+  }
   const journal = JSON.parse(await readFile(join(state, "pi-web/cutovers/generated-unit/journal.json"), "utf8"));
   assert.equal(journal.servicesBefore["pi-web-searxng.service"].enabled, "generated");
 });

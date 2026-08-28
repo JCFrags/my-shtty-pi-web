@@ -54,11 +54,30 @@ class MonitoredResult:
     process_high_water: int
 
 
-# Values are reviewed module names, not shell commands. The repository has no candidate now.
+# Values are reviewed module names, not shell commands. PDF remains the only optional slot.
 OPTIONAL_ADAPTERS: dict[str, str] = {}
 OPTIONAL_ENV = {
     "secondary-html": "WEBX_BENCH_HTML_ADAPTER",
     "alternate-pdf": "WEBX_BENCH_PDF_ADAPTER",
+}
+REVISED_HTML_ADAPTER = "trafilatura-recall"
+NODE_HTML_ADAPTERS = ("defuddle", "readability-turndown")
+NODE_ADAPTER_PATH = ROOT / "html-candidates.mjs"
+
+# This fixed gate is independent of the reviewed baseline. A baseline rewrite cannot
+# make an ineligible extraction run eligible.
+ABSOLUTE_QUALITY_POLICY = {
+    "representativeClasses": (
+        "news-article", "blog", "product", "github-repository", "hacker-news-like",
+        "reddit-forum-like", "static-html", "javascript-shell", "json-api", "rss",
+        "atom", "plain-text", "negotiated-markdown", "pdf-text", "pdf-table",
+    ),
+    "minimumPassedCases": 7,
+    "requireAllMarkers": True,
+}
+EXPECTED_ANNOTATIONS = {
+    "expectedOutcome", "expectedPath", "requiredMarkers", "forbiddenMarkers",
+    "structure", "allowedLoss", "acquisitionExpected", "caseKind",
 }
 
 
@@ -279,7 +298,13 @@ class FixtureAcquisition:
         }
 
 
-async def production_read(case: dict[str, Any], content: bytes) -> tuple[Extracted, dict[str, Any]]:
+async def production_read(
+    case: dict[str, Any],
+    content: bytes,
+    *,
+    html_extractor: str = pipeline.CURRENT_TRAF_ID,
+    html_worker_command: tuple[str, ...] | None = None,
+) -> tuple[Extracted, dict[str, Any]]:
     httpx = pipeline.httpx
     if httpx is None:
         raise RuntimeError("httpx is not installed")
@@ -299,11 +324,14 @@ async def production_read(case: dict[str, Any], content: bytes) -> tuple[Extract
     try:
         reader = pipeline.ReaderPipeline(
             timeout_seconds=30,
+            documents_enabled=True,
             max_download_bytes=1_000_000,
             max_raw_bytes=1_000_000,
             max_redirects=5,
             resolver=lambda _host, _port: asyncio.sleep(0, result=["93.184.216.34"]),
             transport_factory=lambda _pins: httpx.MockTransport(acquisition.handler),
+            html_extractor=html_extractor,
+            html_worker_command=html_worker_command,
         )
         request = pipeline.ReadRequest(
             url=f"https://corpus.example/{case['file']}",
@@ -326,23 +354,42 @@ def validate_output_size(content: str, limit: int) -> None:
         raise LimitError(f"output exceeds {limit} bytes")
 
 
+def execution_case(case: dict[str, Any]) -> dict[str, Any]:
+    """Return adapter input without expected quality annotations."""
+    return {key: value for key, value in case.items() if key not in EXPECTED_ANNOTATIONS}
+
+
 def worker_case(job: dict[str, Any]) -> dict[str, Any]:
-    case = job["case"]
+    case = execution_case(job["case"])
     fixture = ROOT / "fixtures" / case["file"]
     data = fixture.read_bytes()
     if hashlib.sha256(data).hexdigest() != case["sha256"]:
         raise RuntimeError(f"fixture hash mismatch: {case['id']}")
     validate_input_size(data, job["limits"]["inputBytes"])
     adapter = job.get("adapter", "current")
-    if adapter == "current":
-        extracted, acquisition = asyncio.run(production_read(case, data))
+    if adapter in {"current", REVISED_HTML_ADAPTER, *NODE_HTML_ADAPTERS}:
+        extractor = pipeline.CURRENT_TRAF_ID if adapter == "current" else pipeline.REVISED_TRAF_ID
+        worker_command = (
+            ("node", str(NODE_ADAPTER_PATH), adapter)
+            if adapter in NODE_HTML_ADAPTERS
+            else None
+        )
+        extracted, acquisition = asyncio.run(
+            production_read(
+                case,
+                data,
+                html_extractor=extractor,
+                html_worker_command=worker_command,
+            )
+        )
     else:
         module_name = resolve_optional_adapter(job.get("adapterKey"))
         if module_name is None:
             raise RuntimeError("optional adapter is not in the reviewed allowlist")
-        value = importlib.import_module(module_name).extract(case, fixture)
+        value = importlib.import_module(module_name).extract(execution_case(case), fixture)
         extracted = Extracted(str(value["content"]), str(value["path"]), dict(value.get("metadata", {})))
         acquisition = {}
+    extracted.metadata["_benchmarkAdapter"] = adapter
     validate_output_size(extracted.content, job["limits"]["outputBytes"])
     return {"extracted": asdict(extracted), "acquisition": acquisition}
 
@@ -436,7 +483,7 @@ def extraction_quality(case: dict[str, Any], extracted: Extracted | None, error:
     checks_ok = all(required.values()) and not any(forbidden.values()) and all(structure_ok.values())
     if expected in {"limit-error", "empty-or-error"} and extracted is None:
         checks_ok = True
-    return {
+    quality = {
         "outcome": "pass" if outcome_ok and checks_ok else "fail",
         "path": path,
         "requiredMarkerRetention": {"retained": sum(required.values()), "total": len(required), "markers": required},
@@ -448,6 +495,20 @@ def extraction_quality(case: dict[str, Any], extracted: Extracted | None, error:
         "outputBytes": len(text.encode("utf-8")),
         "error": error,
     }
+    if extracted is not None:
+        configured = extracted.metadata.get("_benchmarkAdapter")
+        if configured not in {None, "current"}:
+            source_paragraphs = int(extracted.metadata.get("sourceParagraphs") or 0)
+            output_paragraphs = len(
+                [part for part in re.split(r"\n\s*\n", text) if part.strip()]
+            )
+            required_paragraphs = min(source_paragraphs, 2)
+            quality["paragraphBoundaryPreservation"] = {
+                "observed": output_paragraphs,
+                "required": required_paragraphs,
+                "pass": output_paragraphs >= required_paragraphs,
+            }
+    return quality
 
 
 def acquisition_quality(case: dict[str, Any], observed: dict[str, Any], extraction: dict[str, Any]) -> dict[str, Any]:
@@ -515,6 +576,120 @@ def compare_baseline(path: Path, quality_rows: list[dict[str, Any]]) -> list[str
     return [] if old == quality_rows else ["deterministic quality differs from the reviewed baseline"]
 
 
+def candidate_decision(
+    results: list[dict[str, Any]],
+    candidate: str,
+    expected_classes: set[str],
+) -> dict[str, Any]:
+    """Apply the M7 replacement gate without changing the M6 absolute gate."""
+    current = {row["class"]: row for row in results if row["adapter"] == "current"}
+    proposed = {row["class"]: row for row in results if row["adapter"] == candidate}
+    missing_cases = sorted(expected_classes - proposed.keys())
+    improved = sorted(
+        name
+        for name, row in proposed.items()
+        if row["status"] == "passed"
+        and name in current
+        and current[name]["status"] == "failed"
+    )
+    def extraction_metrics(row: dict[str, Any]) -> dict[str, Any]:
+        quality = row["quality"]
+        return quality.get("extractionMetrics", quality)
+
+    marker_failures = sorted(
+        name
+        for name, row in proposed.items()
+        if extraction_metrics(row)["requiredMarkerRetention"]["retained"]
+        != extraction_metrics(row)["requiredMarkerRetention"]["total"]
+    )
+    boilerplate_leaks = sorted(
+        name
+        for name, row in proposed.items()
+        if extraction_metrics(row)["forbiddenBoilerplateLeakage"]["leaked"]
+    )
+    structure_failures = sorted(
+        name
+        for name, row in proposed.items()
+        if not all(
+            item["pass"] for item in extraction_metrics(row)["preservation"].values()
+        )
+    )
+    paragraph_failures = sorted(
+        name
+        for name, row in proposed.items()
+        if not extraction_metrics(row).get(
+            "paragraphBoundaryPreservation", {"pass": False}
+        )["pass"]
+    )
+    resource_failures = sorted(
+        name
+        for name, row in proposed.items()
+        if (row["quality"].get("error") or "").startswith("LimitError")
+    )
+    failures = []
+    if missing_cases:
+        failures.append("candidate cases are missing")
+    if len(improved) < 2:
+        failures.append("fewer than two weak classes improved")
+    if marker_failures:
+        failures.append("required markers were lost")
+    if boilerplate_leaks:
+        failures.append("forbidden boilerplate leaked")
+    if structure_failures:
+        failures.append("required structure was not retained")
+    if paragraph_failures:
+        failures.append("paragraph boundaries were not retained")
+    if resource_failures:
+        failures.append("a reviewed resource limit was crossed")
+    return {
+        "candidate": candidate,
+        "adopt": not failures,
+        "improvedWeakClasses": improved,
+        "missingCases": missing_cases,
+        "markerFailures": marker_failures,
+        "boilerplateLeaks": boilerplate_leaks,
+        "structureFailures": structure_failures,
+        "paragraphBoundaryFailures": paragraph_failures,
+        "resourceFailures": resource_failures,
+        "failures": failures,
+    }
+
+
+def absolute_eligibility(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Apply fixed marker and representative-class requirements to production output."""
+    current = {row["class"]: row for row in results if row["adapter"] == "current"}
+    classes = ABSOLUTE_QUALITY_POLICY["representativeClasses"]
+    missing = [name for name in classes if name not in current]
+    marker_failures = []
+    passed = 0
+    for name in classes:
+        row = current.get(name)
+        if row is None:
+            continue
+        if row["status"] == "passed":
+            passed += 1
+        retention = row["quality"].get("requiredMarkerRetention", {})
+        if retention.get("retained") != retention.get("total") or not retention.get("total"):
+            marker_failures.append(name)
+    failures = []
+    if missing:
+        failures.append("representative classes are missing")
+    if ABSOLUTE_QUALITY_POLICY["requireAllMarkers"] and marker_failures:
+        failures.append("required markers were lost")
+    if passed < ABSOLUTE_QUALITY_POLICY["minimumPassedCases"]:
+        failures.append("too few representative cases passed")
+    return {
+        "eligible": not failures,
+        "representativeClasses": list(classes),
+        "minimumPassedCases": ABSOLUTE_QUALITY_POLICY["minimumPassedCases"],
+        "passedCases": passed,
+        "requireAllMarkers": ABSOLUTE_QUALITY_POLICY["requireAllMarkers"],
+        "markerFailures": marker_failures,
+        "missingClasses": missing,
+        "failures": failures,
+    }
+
+
 def encode_report(report: dict[str, Any], limit: int) -> bytes:
     encoded = (json.dumps(report, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     if len(encoded) > limit:
@@ -540,7 +715,7 @@ def run_case(
         return {"id": case["id"], "class": case["class"], "adapter": adapter, "status": "skipped", "quality": quality, "runtime": {"wallMilliseconds": 0, "peakRssBytes": 0, "temporaryDiskHighWaterBytes": 0, "descendantProcessHighWater": 0}}
     else:
         monitored = run_isolated(
-            {"case": case, "limits": limits, "adapter": adapter, "adapterKey": adapter_key},
+            {"case": execution_case(case), "limits": limits, "adapter": adapter, "adapterKey": adapter_key},
             limits,
             deadline,
         )
@@ -578,6 +753,14 @@ def main() -> int:
     deadline = time.monotonic() + limits["totalSeconds"]
     run_environment = environment()
     results = [run_case(case, limits, deadline) for case in manifest["cases"]]
+    html_cases = [
+        case
+        for case in manifest["cases"]
+        if case["mediaType"] == "text/html"
+        and case.get("caseKind") != "acquisition-contract"
+    ]
+    for adapter in (REVISED_HTML_ADAPTER, *NODE_HTML_ADAPTERS):
+        results.extend(run_case(case, limits, deadline, adapter) for case in html_cases)
     for adapter, variable in OPTIONAL_ENV.items():
         configured = os.getenv(variable)
         if not configured or resolve_optional_adapter(configured) is None:
@@ -590,20 +773,65 @@ def main() -> int:
         raise LimitError("total time limit exceeded")
     quality_rows = stable_quality(results)
     regressions = [] if args.no_compare or args.write_baseline else compare_baseline(args.baseline, quality_rows)
+    eligibility = absolute_eligibility(results)
+    expected_html_classes = {case["class"] for case in html_cases}
+    extraction_decisions = [
+        candidate_decision(results, adapter, expected_html_classes)
+        for adapter in (REVISED_HTML_ADAPTER, *NODE_HTML_ADAPTERS)
+    ]
+    current_results = [row for row in results if row["adapter"] == "current"]
+    candidate_results = [
+        row for row in results if row["adapter"] in {REVISED_HTML_ADAPTER, *NODE_HTML_ADAPTERS}
+    ]
+    reported_results = [
+        {key: value for key, value in row.items() if key != "runtime"}
+        if row["adapter"] == "current"
+        else row
+        for row in results
+    ]
     report = {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "manifestSha256": hashlib.sha256(manifest_bytes).hexdigest(),
         "environment": run_environment,
         "limits": limits,
         "summary": {
-            "extractionPassed": sum(row["status"] == "passed" for row in results),
-            "extractionFailed": sum(row["status"] == "failed" for row in results),
-            "acquisitionContractsPassed": sum(row["status"] == "contract-passed" for row in results),
-            "acquisitionContractsFailed": sum(row["status"] == "contract-failed" for row in results),
-            "skipped": sum(row["status"] == "skipped" for row in results),
+            "extractionPassed": sum(row["status"] == "passed" for row in current_results),
+            "extractionFailed": sum(row["status"] == "failed" for row in current_results),
+            "acquisitionContractsPassed": sum(row["status"] == "contract-passed" for row in current_results),
+            "acquisitionContractsFailed": sum(row["status"] == "contract-failed" for row in current_results),
+            "skipped": sum(row["status"] == "skipped" for row in current_results)
+            + sum(
+                row["status"] == "skipped"
+                for row in results
+                if row["adapter"] in OPTIONAL_ENV
+            ),
             "qualityRegressions": regressions,
+            "absoluteEligible": eligibility["eligible"],
         },
-        "results": results,
+        "candidateSummary": {
+            adapter: {
+                "extractionPassed": sum(
+                    row["status"] == "passed" for row in candidate_results if row["adapter"] == adapter
+                ),
+                "extractionFailed": sum(
+                    row["status"] == "failed" for row in candidate_results if row["adapter"] == adapter
+                ),
+                "acquisitionContractsPassed": sum(
+                    row["status"] == "contract-passed" for row in candidate_results if row["adapter"] == adapter
+                ),
+                "acquisitionContractsFailed": sum(
+                    row["status"] == "contract-failed" for row in candidate_results if row["adapter"] == adapter
+                ),
+            }
+            for adapter in (REVISED_HTML_ADAPTER, *NODE_HTML_ADAPTERS)
+        },
+        "absoluteEligibility": eligibility,
+        "candidateDecisions": extraction_decisions,
+        "adoptedHtmlExtractor": next(
+            (decision["candidate"] for decision in extraction_decisions if decision["adopt"]),
+            None,
+        ),
+        "results": reported_results,
     }
     encoded = encode_report(report, limits["reportBytes"])
     args.report.parent.mkdir(parents=True, exist_ok=True)
@@ -611,14 +839,16 @@ def main() -> int:
     if args.write_baseline:
         args.baseline.write_text(json.dumps({"schemaVersion": 2, "environment": report["environment"], "quality": quality_rows}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(
-        f"Extraction corpus: {report['summary']['extractionPassed']} extraction passed, "
+        f"Current extraction corpus: {report['summary']['extractionPassed']} extraction passed, "
         f"{report['summary']['extractionFailed']} extraction failed, "
         f"{report['summary']['acquisitionContractsPassed']} acquisition contracts passed, "
         f"{report['summary']['skipped']} skipped"
     )
     if regressions:
         print("Baseline comparison: " + "; ".join(regressions), file=sys.stderr)
-    return 1 if regressions else 0
+    if not eligibility["eligible"]:
+        print("Absolute quality gate: " + "; ".join(eligibility["failures"]), file=sys.stderr)
+    return 1 if regressions or not eligibility["eligible"] else 0
 
 
 if __name__ == "__main__":

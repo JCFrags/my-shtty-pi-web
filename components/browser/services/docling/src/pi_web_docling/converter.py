@@ -12,7 +12,24 @@ from pathlib import Path
 from typing import Any, Iterator
 from urllib.parse import urlparse
 
-MAX_DOCUMENT_BYTES = 256 * 1024 * 1024
+HARD_MAX_DOCUMENT_BYTES = 256 * 1024 * 1024
+HARD_MAX_OUTPUT_BYTES = 16 * 1024 * 1024
+MAX_DOCUMENT_BYTES = int(os.getenv("PI_WEB_DOCLING_MAX_INPUT_BYTES", str(HARD_MAX_DOCUMENT_BYTES)))
+MAX_OUTPUT_BYTES = int(os.getenv("PI_WEB_DOCLING_MAX_OUTPUT_BYTES", str(HARD_MAX_OUTPUT_BYTES)))
+if not 1 <= MAX_DOCUMENT_BYTES <= HARD_MAX_DOCUMENT_BYTES or not 1 <= MAX_OUTPUT_BYTES <= HARD_MAX_OUTPUT_BYTES:
+    raise RuntimeError("Docling input or output bounds are invalid")
+MAX_ASSET_MANIFEST_BYTES = 64 * 1024
+MAX_ASSET_FILES = 256
+# Add an asset set only after its files pass an Office or scanned-PDF acceptance run.
+VALIDATED_MODEL_ASSET_SETS: dict[str, dict[str, Any]] = {}
+OFFICE_MEDIA_TYPES = {
+    "application/msword",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
 
 
 @dataclass(slots=True)
@@ -39,6 +56,69 @@ def document_staging_root() -> Path:
         return Path(configured)
     runtime = os.getenv("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
     return Path(runtime) / "pi-web-documents"
+
+
+def model_asset_readiness(root: Path | None = None) -> dict[str, Any]:
+    """Report only capabilities backed by a reviewed digest manifest."""
+    configured_root = os.getenv("DOCLING_ARTIFACTS_PATH")
+    asset_root = root if root is not None else Path(configured_root) if configured_root else None
+    report: dict[str, Any] = {
+        "manifestValidated": False,
+        "office": False,
+        "scannedPdf": False,
+        "detail": "model asset manifest is absent",
+    }
+    if asset_root is None:
+        return report
+    manifest = asset_root / "model-assets.json"
+    try:
+        if manifest.is_symlink() or not manifest.is_file() or manifest.stat().st_size > MAX_ASSET_MANIFEST_BYTES:
+            return report
+        value = json.loads(manifest.read_text(encoding="utf-8"))
+        files = value.get("files")
+        capabilities = value.get("capabilities")
+        asset_set_id = value.get("assetSetId")
+        approved = VALIDATED_MODEL_ASSET_SETS.get(asset_set_id) if isinstance(asset_set_id, str) else None
+        if value.get("schemaVersion") != 1 or not isinstance(files, list) or not 1 <= len(files) <= MAX_ASSET_FILES:
+            raise ValueError("invalid model asset manifest")
+        if not isinstance(capabilities, list) or not all(item in {"office", "scanned-pdf"} for item in capabilities):
+            raise ValueError("invalid model asset capabilities")
+        if approved is None or approved.get("capabilities") != capabilities or approved.get("files") != files:
+            raise ValueError("model asset set has no validated acceptance record in this release")
+        resolved_root = asset_root.resolve(strict=True)
+        for item in files:
+            relative = item.get("path") if isinstance(item, dict) else None
+            expected = item.get("sha256") if isinstance(item, dict) else None
+            if not isinstance(relative, str) or not relative or Path(relative).is_absolute() or ".." in Path(relative).parts:
+                raise ValueError("invalid model asset path")
+            if not isinstance(expected, str) or len(expected) != 64 or any(character not in "0123456789abcdef" for character in expected):
+                raise ValueError("invalid model asset digest")
+            path = resolved_root / relative
+            if path.is_symlink() or not path.is_file() or not path.resolve(strict=True).is_relative_to(resolved_root):
+                raise ValueError("model asset is missing or unsafe")
+            digest = hashlib.sha256()
+            with path.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            if digest.hexdigest() != expected:
+                raise ValueError("model asset digest mismatch")
+        report.update({
+            "manifestValidated": True,
+            "office": "office" in capabilities,
+            "scannedPdf": "scanned-pdf" in capabilities,
+            "detail": f"validated {len(files)} declared model asset file(s)",
+        })
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+        report["detail"] = str(error)
+    return report
+
+
+def required_model_capability(media_type: str) -> str | None:
+    if media_type == "application/pdf":
+        return "scannedPdf"
+    if media_type in OFFICE_MEDIA_TYPES:
+        return "office"
+    return None
 
 
 def validate_private_directory(path: Path) -> Path:
@@ -108,11 +188,17 @@ def validated_document(request: ConvertRequest) -> Iterator[Path]:
 
 
 def convert_document(request: ConvertRequest) -> dict[str, Any]:
+    capability = required_model_capability(request.media_type)
+    readiness = model_asset_readiness()
+    if capability and readiness[capability] is not True:
+        name = "Office" if capability == "office" else "scanned PDF"
+        raise RuntimeError(f"{name} conversion is unavailable: {readiness['detail']}")
+
     with validated_document(request) as path:
         try:
             from docling.document_converter import DocumentConverter
         except ImportError as error:  # pragma: no cover
-            raise RuntimeError("Docling is not installed; run `uv sync --all-packages`") from error
+            raise RuntimeError("Docling is not installed; select the documents profile") from error
 
         result = DocumentConverter().convert(path)
         document = result.document
@@ -127,24 +213,11 @@ def convert_document(request: ConvertRequest) -> dict[str, Any]:
         pages: list[dict[str, Any]] = []
         for page_number, page in sorted(getattr(document, "pages", {}).items()):
             size = getattr(page, "size", None)
-            pages.append(
-                {
-                    "page": page_number,
-                    "width": getattr(size, "width", None),
-                    "height": getattr(size, "height", None),
-                }
-            )
-        tables = [
-            {
-                "index": index,
-                "rows": getattr(table.data, "num_rows", None),
-                "columns": getattr(table.data, "num_cols", None),
-            }
-            for index, table in enumerate(getattr(document, "tables", []))
-        ]
+            pages.append({"page": page_number, "width": getattr(size, "width", None), "height": getattr(size, "height", None)})
+        tables = [{"index": index, "rows": getattr(table.data, "num_rows", None), "columns": getattr(table.data, "num_cols", None)} for index, table in enumerate(getattr(document, "tables", []))]
         images = [{"index": index} for index, _ in enumerate(getattr(document, "pictures", []))]
         title = Path(urlparse(request.url).path).name if request.url else path.name
-        return {
+        response = {
             "title": title,
             "markdown": markdown,
             "structured": structured,
@@ -154,3 +227,6 @@ def convert_document(request: ConvertRequest) -> dict[str, Any]:
             "originalSha256": request.sha256,
             "mediaType": request.media_type,
         }
+        if len(json.dumps(response, ensure_ascii=False).encode("utf-8")) > MAX_OUTPUT_BYTES:
+            raise RuntimeError(f"document output exceeds {MAX_OUTPUT_BYTES} bytes")
+        return response

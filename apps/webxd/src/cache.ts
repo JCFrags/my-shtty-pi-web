@@ -2,14 +2,16 @@ import { createHash, randomBytes } from "node:crypto";
 import { chmod, mkdir, open, opendir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
+import { CACHE_POLICY } from "../../../packages/policy/storage.mjs";
 
-export const DEFAULT_CACHE_MEMORY_ENTRIES = 256;
-export const DEFAULT_CACHE_MEMORY_BYTES = 32 * 1024 * 1024;
-export const DEFAULT_CACHE_DISK_ENTRIES = 2_048;
-export const DEFAULT_CACHE_DISK_BYTES = 512 * 1024 * 1024;
-export const DEFAULT_CACHE_MAX_ENTRY_BYTES = 4_300_000;
+export const DEFAULT_CACHE_MEMORY_ENTRIES = CACHE_POLICY.memoryEntries;
+export const DEFAULT_CACHE_MEMORY_BYTES = CACHE_POLICY.memoryBytes;
+export const DEFAULT_CACHE_DISK_ENTRIES = CACHE_POLICY.diskEntries;
+export const DEFAULT_CACHE_DISK_BYTES = CACHE_POLICY.diskBytes;
+export const DEFAULT_CACHE_MAX_ENTRY_BYTES = CACHE_POLICY.maxEntryBytes;
 
 interface CacheEnvelope<T> { readonly expiresAt: number; readonly value: T }
+export interface WebCacheEntry<T> { readonly value: T; readonly expiresAt: number; readonly fresh: boolean }
 interface MemoryEntry { readonly envelope: CacheEnvelope<unknown>; readonly bytes: number }
 interface DiskEntry { readonly path: string; readonly size: number; readonly modified: number }
 
@@ -47,15 +49,23 @@ export class WebCache {
   }
 
   async get<T>(namespace: string, input: unknown): Promise<T | undefined> {
+    return (await this.getEntry<T>(namespace, input))?.value;
+  }
+
+  /** Return a bounded stale entry only when canonical revalidation needs it. */
+  async getEntry<T>(namespace: string, input: unknown, retainStale = false): Promise<WebCacheEntry<T> | undefined> {
     const key = cacheKey(namespace, input);
     const memory = this.#memory.get(key);
     if (memory !== undefined) {
-      if (memory.envelope.expiresAt > Date.now()) {
-        this.#memory.delete(key);
-        this.#memory.set(key, memory);
-        return memory.envelope.value as T;
+      const entry = cacheEntry(memory.envelope as CacheEnvelope<T>);
+      if (!entry.fresh && !retainStale) {
+        this.#forget(key);
+        if (this.#directory !== undefined) await unlink(join(this.#directory, `${key}.json`)).catch(() => undefined);
+        return undefined;
       }
-      this.#forget(key);
+      this.#memory.delete(key);
+      this.#memory.set(key, memory);
+      return entry;
     }
     if (this.#directory === undefined) return undefined;
     const path = join(this.#directory, `${key}.json`);
@@ -71,12 +81,14 @@ export class WebCache {
         text = bytes.toString("utf8");
       } finally { await handle.close(); }
       const envelope = JSON.parse(text) as CacheEnvelope<T>;
-      if (!Number.isFinite(envelope.expiresAt) || envelope.expiresAt <= Date.now()) {
+      if (!Number.isFinite(envelope.expiresAt)) throw new Error("cache entry has an invalid expiry");
+      const entry = cacheEntry(envelope);
+      if (!entry.fresh && !retainStale) {
         await unlink(path).catch(() => undefined);
         return undefined;
       }
       this.#remember(key, envelope, info.size);
-      return envelope.value;
+      return entry;
     } catch (error) {
       if ((error as { code?: string }).code !== "ENOENT") await unlink(path).catch(() => undefined);
       return undefined;
@@ -172,6 +184,9 @@ export class WebCache {
 function positive(value: number, name: string): number {
   if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError(`${name} must be a positive finite integer`);
   return value;
+}
+function cacheEntry<T>(envelope: CacheEnvelope<T>): WebCacheEntry<T> {
+  return { value: envelope.value, expiresAt: envelope.expiresAt, fresh: envelope.expiresAt > Date.now() };
 }
 function cacheKey(namespace: string, input: unknown): string { return createHash("sha256").update(`${namespace}\0${stable(input)}`).digest("hex"); }
 function stable(value: unknown): string {

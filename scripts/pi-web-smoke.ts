@@ -19,7 +19,8 @@ const live = args.has("--live");
 const candidateArg = process.argv[process.argv.indexOf("--candidate") + 1];
 if (!candidateArg || candidateArg.startsWith("--")) throw new Error("usage: pi-web-smoke --candidate PATH [--live]");
 const candidate = resolve(candidateArg);
-const candidateManifest = JSON.parse(await readFile(join(candidate, "candidate-manifest.json"), "utf8")) as { commit: string; candidateTreeSha256: string };
+const candidateManifest = JSON.parse(await readFile(join(candidate, "candidate-manifest.json"), "utf8")) as { commit: string; candidateTreeSha256: string; profile: { resolvedProfiles: string[] } };
+const documentsEnabled = candidateManifest.profile.resolvedProfiles.includes("documents");
 const runId = `m7-${new Date().toISOString().replace(/[-:.TZ]/gu, "")}-${process.pid}-${randomBytes(4).toString("hex")}`;
 const runtimeBase = process.env.XDG_RUNTIME_DIR ?? `/run/user/${typeof process.getuid === "function" ? process.getuid() : 0}`;
 const stateBase = process.env.XDG_STATE_HOME ?? join(process.env.HOME ?? ".", ".local/state");
@@ -48,6 +49,21 @@ totalDeadline.unref();
 function record(name: string, ok: boolean, details: Record<string, unknown> = {}) {
   checks.push({ name, ok, ...details });
   if (!ok) throw new Error(`${name} failed`);
+}
+function textPdf(text: string): Buffer {
+  const stream = Buffer.from(`BT /F1 12 Tf 72 740 Td (${text.replace(/[()\\]/gu, "")}) Tj ET`);
+  const objects = [
+    Buffer.from("<< /Type /Catalog /Pages 2 0 R >>"),
+    Buffer.from("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+    Buffer.from("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"),
+    Buffer.concat([Buffer.from(`<< /Length ${stream.length} >>\nstream\n`), stream, Buffer.from("\nendstream")]),
+    Buffer.from("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+  ];
+  const chunks = [Buffer.from("%PDF-1.4\n")]; const offsets = [0]; let length = chunks[0].length;
+  objects.forEach((object, index) => { offsets.push(length); const chunk = Buffer.concat([Buffer.from(`${index + 1} 0 obj\n`), object, Buffer.from("\nendobj\n")]); chunks.push(chunk); length += chunk.length; });
+  const xref = length;
+  chunks.push(Buffer.from(`xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")}trailer << /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`));
+  return Buffer.concat(chunks);
 }
 function deadlineSignal() { return AbortSignal.timeout(REQUEST_MS); }
 function options(ownerId: string, key: string) { return { ownerId, cwd: candidate, idempotencyKey: `${runId}-${key}`, signal: deadlineSignal() }; }
@@ -148,6 +164,22 @@ async function captureStorage(label: string) {
 }
 
 async function deterministic() {
+  const extractionReport = JSON.parse(await readFile(join(candidate, "components/browser/benchmarks/extraction/reports/current-run.json"), "utf8")) as {
+    absoluteEligibility: { eligible: boolean };
+    candidateDecisions: Array<{ candidate: string; adopt: boolean; failures: string[] }>;
+    adoptedHtmlExtractor: string | null;
+  };
+  const adoptedDecision = extractionReport.candidateDecisions.find((decision) => decision.adopt);
+  record(
+    "reviewed extraction corpus evidence is present",
+    extractionReport.absoluteEligibility.eligible
+      && extractionReport.candidateDecisions.length >= 3
+      && extractionReport.adoptedHtmlExtractor === (adoptedDecision?.candidate ?? null),
+    {
+      candidateDecisions: extractionReport.candidateDecisions,
+      adoptedHtmlExtractor: extractionReport.adoptedHtmlExtractor,
+    },
+  );
   let fixturePort = 0;
   let origin = "";
   fixture = createServer((request, response) => {
@@ -156,6 +188,7 @@ async function deterministic() {
     const url = new URL(request.url ?? "/", `http://127.0.0.1:${fixturePort}`);
     const send = (status: number, type: string, body: string | Buffer) => { response.writeHead(status, { "content-type": type, "content-length": Buffer.byteLength(body) }); response.end(body); };
     if (url.pathname === "/health") return send(200, "application/json", JSON.stringify({ ok: true }));
+    if (url.pathname === "/config") return send(200, "application/json", JSON.stringify({ engines: ["deterministic"] }));
     if (url.pathname === "/search") return send(200, "application/json", JSON.stringify({ results: [{ url: `${origin}/static`, title: "Deterministic WebX fixture", content: "stable fixture article seed", score: 1 }] }));
     if (url.pathname === "/static") return send(200, "text/html; charset=utf-8", "<!doctype html><title>Fixture article</title><main><h1>Stable article</h1><p>The deterministic candidate reader boundary is healthy. Focus token ALPHA-OMEGA.</p></main>");
     if (url.pathname === "/api") return send(200, "application/json", JSON.stringify([{ id: 1, name: "alpha", secret: "not-selected" }, { id: 2, name: "beta", secret: "not-selected" }]));
@@ -164,14 +197,15 @@ async function deterministic() {
       activeFixtureRequests += 1; peakFixtureRequests = Math.max(peakFixtureRequests, activeFixtureRequests);
       return setTimeout(() => { activeFixtureRequests -= 1; send(200, "text/plain", `delayed ${url.pathname}`); }, 250);
     }
+    if (url.pathname === "/valid-text.pdf") return send(200, "application/pdf", textPdf("STAGED TEXT PDF SMOKE"));
     if (url.pathname === "/document.pdf") return send(200, "application/pdf", Buffer.from("%PDF-1.4\nsmall deterministic invalid document\n"));
     if (url.pathname === "/slow") return setTimeout(() => send(200, "text/plain", "late response"), 15_000);
     return send(404, "text/plain", "missing");
   });
   fixture.listen(0, "127.0.0.1"); await once(fixture, "listening");
   const fixtureAddress = fixture.address(); assert(fixtureAddress && typeof fixtureAddress !== "string"); fixturePort = fixtureAddress.port; origin = `http://fixture.invalid:${fixturePort}`;
-  const common = { ...process.env, PYTHONDONTWRITEBYTECODE: "1", XDG_RUNTIME_DIR: runtime, XDG_CACHE_HOME: cache, XDG_STATE_HOME: stateBase, WEBXD_SOCKET: socket, WEBX_CACHE_DIR: cache, WEBX_CONTENT_DIR: content };
-  const { port: readerPort } = await startReader(common, { PI_WEB_TEST_LOOPBACK_ORIGIN: origin, PI_WEB_DOCLING_URL: "http://127.0.0.1:1/", PI_WEB_HTTP_TIMEOUT_SECONDS: "5" });
+  const common = { ...process.env, PATH: documentsEnabled ? process.env.PATH : join(candidate, ".venv/bin"), PYTHONDONTWRITEBYTECODE: "1", XDG_RUNTIME_DIR: runtime, XDG_CACHE_HOME: cache, XDG_STATE_HOME: stateBase, WEBXD_SOCKET: socket, WEBX_CACHE_DIR: cache, WEBX_CONTENT_DIR: content };
+  const { port: readerPort } = await startReader(common, { PI_WEB_TEST_LOOPBACK_ORIGIN: origin, PI_WEB_DOCUMENTS_ENABLED: documentsEnabled ? "1" : "0", PI_WEB_DOCLING_URL: "http://127.0.0.1:1/", PI_WEB_HTTP_TIMEOUT_SECONDS: "5" });
   launch(process.execPath, [join(candidate, "apps/webxd/dist/apps/webxd/src/main.js")], { ...common, WEBX_SEARX_URL: `http://127.0.0.1:${fixturePort}`, WEBX_READER_URL: `http://127.0.0.1:${readerPort}`, WEBX_CRAWL_URL: "http://127.0.0.1:1/", BROWSERD_SOCKET: join(runtime, "absent-browser.sock") });
   for (let attempt = 0; attempt < 100; attempt += 1) { try { await stat(socket); break; } catch { await new Promise((done) => setTimeout(done, 100)); } }
   const owner = `m7-${process.pid}`; const client = new WebxFacadeClient(socket);
@@ -206,7 +240,15 @@ async function deterministic() {
     record("reader timeout is bounded", Date.now() - timeoutStarted < 10_000, { elapsedMs: Date.now() - timeoutStarted, configuredSeconds: 5 });
     await assert.rejects(client.request("browser.open", { url: `${origin}/static` }, options(owner, "browser-fail")));
     await assert.rejects(client.request("web.read", { url: `${origin}/static`, maxPages: 2 }, options(owner, "crawl-fail")));
+    if (documentsEnabled) {
+      const pdf = await client.request("web.read", { url: `${origin}/valid-text.pdf`, maxChars: 2_000 }, options(owner, "valid-text-pdf"));
+      record("valid text PDF passes the staged candidate", JSON.stringify(pdf).includes("STAGED TEXT PDF SMOKE"), { ...resultEvidence(pdf), converter: "pdftotext", fixture: "synthetic text PDF" });
+    } else {
+      await assert.rejects(client.request("web.read", { url: `${origin}/valid-text.pdf` }, options(owner, "valid-pdf-components-absent")), /documents profile/iu);
+      record("web-core keeps document components explicitly absent", true, { resolvedProfiles: candidateManifest.profile.resolvedProfiles, pdftotextPathExcluded: true });
+    }
     await assert.rejects(client.request("web.read", { url: `${origin}/document.pdf` }, options(owner, "document-fail")));
+    record("invalid PDF failure evidence contains no private bytes", true, { mediaType: "application/pdf", fixtureBytes: 46, evidence: "status only; document bytes and digest are not recorded" });
     const laterSearch = await client.request("web.search", { query: "stable fixture" }, options(owner, "search-2"));
     record("later search remains formatted and bounded", JSON.stringify(laterSearch).includes("fixture.invalid"), resultEvidence(laterSearch));
     const laterRead = await client.request("web.read", { url: `${origin}/static`, maxChars: 500 }, options(owner, "read-2"));

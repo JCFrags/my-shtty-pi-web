@@ -17,6 +17,8 @@ import sys
 import time
 from typing import Any
 
+from pi_web_profiles import resolve_profiles
+
 UNITS = ["webxd.service", "pi-web-reader.service", "pi-web-searxng.service", "pi-browserd.service", "pi-web-crawl.service", "pi-web-docling.service", "pi-web-egress-proxy.service"]
 RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
@@ -178,29 +180,56 @@ def restore_services(command: str, state: dict[str, dict[str, Any]]) -> None:
         fail(f"service restoration failed after all attempts: {'; '.join(errors)}")
 
 
-def generated(prefix: Path, config: Path, candidate: Path) -> dict[Path, dict[str, Any]]:
+def activate_profile(command: str, selected: list[str]) -> None:
+    """Apply the selected service set after all profile paths are in place."""
+    errors: list[str] = []
+    selected_set = set(selected)
+    for unit in UNITS:
+        try:
+            if unit in selected_set:
+                if unit != "pi-web-searxng.service":
+                    run_systemctl(command, ["enable", unit])
+                run_systemctl(command, ["start", unit])
+            else:
+                run_systemctl(command, ["disable", unit], check=False)
+                run_systemctl(command, ["stop", unit], check=False)
+        except (OSError, RuntimeError) as error:
+            errors.append(str(error))
+    if errors:
+        fail(f"profile activation failed after all attempts: {'; '.join(errors)}")
+
+
+def generated(prefix: Path, config: Path, candidate: Path, profile: dict[str, Any]) -> dict[Path, dict[str, Any]]:
     stable = prefix / "lib/pi-web-tools"
     bin_dir = prefix / "bin"
     unit_dir = config / "systemd/user"
     cache = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "pi-web"
+    browser_enabled = "browser" in profile["resolvedProfiles"]
+    documents_enabled = "documents" in profile["resolvedProfiles"]
+    browser_path = f"{stable}/.agent-browser/node_modules/.bin:" if browser_enabled else ""
     units = {
         "webxd.service": f"""[Unit]\nDescription=Pi Web authority\nAfter=pi-web-reader.service pi-web-searxng.service\nWants=pi-web-reader.service pi-web-searxng.service\n[Service]\nWorkingDirectory={stable}\nExecStart=/usr/bin/node {stable}/apps/webxd/dist/apps/webxd/src/main.js\nEnvironment=PATH={bin_dir}:/usr/local/bin:/usr/bin\nEnvironment=WEBX_CACHE_DIR={cache}/responses\nEnvironment=WEBX_CRAWL_URL=http://127.0.0.1:8793/\nEnvironment=WEBX_EGRESS_PROXY=http://127.0.0.1:8877/\nRestart=on-failure\n[Install]\nWantedBy=default.target\n""",
-        "pi-web-reader.service": f"""[Unit]\nDescription=Pi Web direct reader\nAfter=network-online.target\n[Service]\nWorkingDirectory={stable}/components/browser\nExecStart={stable}/.venv/bin/pi-web-reader\nEnvironment=PI_WEB_READER_HOST=127.0.0.1\nEnvironment=PI_WEB_READER_PORT=8787\nEnvironment=PI_WEB_DOCLING_URL=http://127.0.0.1:8792/\nEnvironment=PYTHONDONTWRITEBYTECODE=1\nRestart=on-failure\n[Install]\nWantedBy=default.target\n""",
-        "pi-browserd.service": f"""[Unit]\nDescription=Pi Web visual browser coordinator\nAfter=network-online.target\n[Service]\nExecStart={stable}/bin/pi-browserd\nEnvironment=PATH={bin_dir}:/usr/local/bin:/usr/bin\nEnvironment=RUST_LOG=pi_browserd=info,pi_web=info\nRestart=on-failure\n[Install]\nWantedBy=default.target\n""",
-        "pi-web-docling.service": f"""[Unit]\nDescription=Pi Web document converter\nAfter=network-online.target\n[Service]\nWorkingDirectory={stable}/components/browser\nExecStart={stable}/.venv/bin/pi-web-docling\nEnvironment=PI_WEB_DOCLING_HOST=127.0.0.1\nEnvironment=PI_WEB_DOCLING_PORT=8792\nEnvironment=DOCLING_ARTIFACTS_PATH={cache}/document-models\nEnvironment=PYTHONDONTWRITEBYTECODE=1\nRestart=on-failure\n[Install]\nWantedBy=default.target\n""",
+        "pi-web-reader.service": f"""[Unit]\nDescription=Pi Web direct reader\nAfter=network-online.target\n[Service]\nWorkingDirectory={stable}/components/browser\nExecStart={stable}/.venv/bin/pi-web-reader\nEnvironment=PI_WEB_READER_HOST=127.0.0.1\nEnvironment=PI_WEB_READER_PORT=8787\nEnvironment=PI_WEB_DOCLING_URL=http://127.0.0.1:8792/\nEnvironment=PI_WEB_DOCUMENTS_ENABLED={'1' if documents_enabled else '0'}\nEnvironment=PYTHONDONTWRITEBYTECODE=1\nMemoryMax={profile['resourceLimits']['pi-web-reader.service']['MemoryMax']}\nTasksMax={profile['resourceLimits']['pi-web-reader.service']['TasksMax']}\nRestart=on-failure\n[Install]\nWantedBy=default.target\n""",
+        "pi-browserd.service": f"""[Unit]\nDescription=Pi Web visual browser coordinator\nAfter=network-online.target\n[Service]\nExecStart={stable}/bin/pi-browserd\nEnvironment=PATH={browser_path}{bin_dir}:/usr/local/bin:/usr/bin\nEnvironment=RUST_LOG=pi_browserd=info,pi_web=info\nRestart=on-failure\n[Install]\nWantedBy=default.target\n""",
+        "pi-web-docling.service": f"""[Unit]\nDescription=Pi Web document converter\nAfter=network-online.target\n[Service]\nWorkingDirectory={stable}/components/browser\nExecStart={stable}/.venv/bin/pi-web-docling\nEnvironment=PI_WEB_DOCLING_HOST=127.0.0.1\nEnvironment=PI_WEB_DOCLING_PORT=8792\nEnvironment=DOCLING_ARTIFACTS_PATH={cache}/document-models\nEnvironment=HF_HUB_OFFLINE=1\nEnvironment=TRANSFORMERS_OFFLINE=1\nEnvironment=PI_WEB_DOCLING_CONCURRENCY={profile['resourceLimits']['pi-web-docling.service']['Concurrency']}\nEnvironment=PI_WEB_DOCLING_QUEUE_SIZE={profile['resourceLimits']['pi-web-docling.service']['QueueSize']}\nEnvironment=PI_WEB_DOCLING_TIMEOUT_SECONDS={profile['resourceLimits']['pi-web-docling.service']['TimeoutSeconds']}\nEnvironment=PI_WEB_DOCLING_MAX_INPUT_BYTES={profile['resourceLimits']['pi-web-docling.service']['MaxInputBytes']}\nEnvironment=PI_WEB_DOCLING_MAX_OUTPUT_BYTES={profile['resourceLimits']['pi-web-docling.service']['MaxOutputBytes']}\nEnvironment=TMPDIR=/tmp\nEnvironment=PYTHONDONTWRITEBYTECODE=1\nMemoryMax={profile['resourceLimits']['pi-web-docling.service']['MemoryMax']}\nTasksMax={profile['resourceLimits']['pi-web-docling.service']['TasksMax']}\nTemporaryFileSystem=/tmp:rw,size={profile['resourceLimits']['pi-web-docling.service']['MaxTempBytes']},nodev,nosuid,noexec\nRestart=on-failure\n[Install]\nWantedBy=default.target\n""" if documents_enabled else "",
         "pi-web-crawl.service": f"""[Unit]\nDescription=Pi Web bounded Crawl4AI service\nAfter=network-online.target pi-web-egress-proxy.service\nRequires=pi-web-egress-proxy.service\n[Service]\nWorkingDirectory={stable}/components/browser\nExecStart={stable}/.venv/bin/pi-web-crawl\nEnvironment=PI_WEB_CRAWL_HOST=127.0.0.1\nEnvironment=PI_WEB_CRAWL_PORT=8793\nEnvironment=PI_WEB_CRAWL_PROXY=http://127.0.0.1:8877\nEnvironment=PLAYWRIGHT_BROWSERS_PATH={stable}/.playwright-browsers\nEnvironment=PYTHONDONTWRITEBYTECODE=1\nRestart=on-failure\n[Install]\nWantedBy=default.target\n""",
         "pi-web-egress-proxy.service": f"""[Unit]\nDescription=Pi Web connection-bound egress proxy\nAfter=network-online.target\n[Service]\nExecStart=/usr/bin/python3 {stable}/components/browser/scripts/secure_egress_proxy.py\nEnvironment=PI_WEB_EGRESS_HOST=127.0.0.1\nEnvironment=PI_WEB_EGRESS_PORT=8877\nEnvironment=PYTHONDONTWRITEBYTECODE=1\nRestart=on-failure\n[Install]\nWantedBy=default.target\n""",
     }
-    cli = f"""#!/usr/bin/env bash\nset -euo pipefail\ncase \"${{1:-}}\" in\n doctor) shift; exec /usr/bin/node \"{stable}/scripts/pi-web-doctor.mjs\" \"$@\" ;;\n workspace) shift; exec \"{stable}/bin/pi-browser-workspace\" \"$@\" ;;\n audit) shift; exec /usr/bin/node \"{stable}/scripts/pi-web-audit.mjs\" \"$@\" ;;\n status) exec systemctl --user status webxd pi-web-reader pi-web-searxng pi-browserd pi-web-crawl pi-web-docling pi-web-egress-proxy ;;\n *) echo 'usage: pi-web {{doctor|workspace|audit|status}}' >&2; exit 2 ;;\nesac\n"""
+    workspace = f'exec "{stable}/bin/pi-browser-workspace" "$@"' if browser_enabled else "echo 'pi-web: workspace requires the browser profile' >&2; exit 3"
+    status_units = " ".join(unit.removesuffix(".service") for unit in profile["units"])
+    cli = f"""#!/usr/bin/env bash\nset -euo pipefail\ncase \"${{1:-}}\" in\n doctor) shift; PI_WEB_INSTALL_ROOT=\"{stable}\" exec /usr/bin/node \"{stable}/scripts/pi-web-doctor.mjs\" \"$@\" ;;\n workspace) shift; {workspace} ;;\n audit) shift; exec /usr/bin/node \"{stable}/scripts/pi-web-audit.mjs\" \"$@\" ;;\n status) exec systemctl --user status {status_units} ;;\n *) echo 'usage: pi-web {{doctor|workspace|audit|status}}' >&2; exit 2 ;;\nesac\n"""
     values: dict[Path, dict[str, Any]] = {
         stable: {"kind": "symlink", "target": str(candidate)},
         Path.home() / ".pi/agent/extensions/pi-web": {"kind": "symlink", "target": str(stable / "apps/pi-webx")},
         bin_dir / "pi-web": {"kind": "file", "mode": 0o755, "dataBase64": base64.b64encode(cli.encode()).decode()},
-        bin_dir / "pi-browserd": {"kind": "symlink", "target": str(stable / "bin/pi-browserd")},
-        bin_dir / "pi-browser-workspace": {"kind": "symlink", "target": str(stable / "bin/pi-browser-workspace")},
+        bin_dir / "pi-browserd": {"kind": "symlink", "target": str(stable / "bin/pi-browserd")} if browser_enabled else {"kind": "missing"},
+        bin_dir / "pi-browser-workspace": {"kind": "symlink", "target": str(stable / "bin/pi-browser-workspace")} if browser_enabled else {"kind": "missing"},
+        config / "pi-web/installed-profile.json": {"kind": "file", "mode": 0o600, "dataBase64": base64.b64encode((json.dumps(profile, sort_keys=True, indent=2) + "\n").encode()).decode()},
+        unit_dir / "pi-web-searxng.service.d/profile-limits.conf": {"kind": "file", "mode": 0o644, "dataBase64": base64.b64encode(f"[Service]\nMemoryMax={profile['resourceLimits']['pi-web-searxng.service']['MemoryMax']}\nTasksMax={profile['resourceLimits']['pi-web-searxng.service']['TasksMax']}\n".encode()).decode()},
     }
+    active_units = set(profile["units"])
     for name, text in units.items():
-        values[unit_dir / name] = {"kind": "file", "mode": 0o644, "dataBase64": base64.b64encode(text.encode()).decode()}
+        values[unit_dir / name] = {"kind": "file", "mode": 0o644, "dataBase64": base64.b64encode(text.encode()).decode()} if name in active_units else {"kind": "missing"}
     return values
 
 
@@ -291,11 +320,14 @@ def main() -> int:
     manifest = validate_candidate(candidate, evidence, args.test_mode)
     prefix = Path(os.environ.get("PI_WEB_PREFIX", str(Path.home() / ".local"))).expanduser()
     config = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))).expanduser()
-    desired = generated(prefix, config, candidate)
+    profile = manifest.get("profile")
+    if not isinstance(profile, dict) or profile != resolve_profiles(candidate, profile.get("requestedProfiles") if isinstance(profile, dict) else None):
+        fail("candidate profile does not match its reviewed manifests")
+    desired = generated(prefix, config, candidate, profile)
     run_id = args.run_id or f"cutover-{int(time.time())}-{manifest['commit'][:12]}"
     if not RUN_ID.fullmatch(run_id):
         fail("run ID is invalid")
-    plan = {"ok": True, "mode": "apply" if args.apply else "plan", "runId": run_id, "candidate": str(candidate), "commit": manifest["commit"], "treeSha256": manifest["candidateTreeSha256"], "replacementPaths": [str(path) for path in desired], "serviceUnits": UNITS, "coreIndependentFromOptionalWorkers": True, "historicalDataDeleted": False}
+    plan = {"ok": True, "mode": "apply" if args.apply else "plan", "runId": run_id, "candidate": str(candidate), "commit": manifest["commit"], "treeSha256": manifest["candidateTreeSha256"], "profiles": profile["resolvedProfiles"], "replacementPaths": [str(path) for path in desired], "serviceUnits": profile["units"], "stoppedForTransition": UNITS, "coreIndependentFromOptionalWorkers": True, "historicalDataDeleted": False}
     if args.plan:
         print(json.dumps(plan, sort_keys=True, indent=2)); return 0
     if args.test_mode:
@@ -323,7 +355,7 @@ def main() -> int:
             if args.test_mode and os.environ.get("PI_WEB_CUTOVER_TEST_KILL_AFTER_REPLACEMENT") == str(len(journal["completedPaths"])):
                 os.kill(os.getpid(), signal.SIGKILL)
         run_systemctl(args.systemctl, ["daemon-reload"])
-        restore_services(args.systemctl, states)
+        activate_profile(args.systemctl, profile["units"])
         journal["status"] = "applied"; journal["appliedUnix"] = int(time.time())
     except BaseException:
         journal["status"] = "apply-failed"

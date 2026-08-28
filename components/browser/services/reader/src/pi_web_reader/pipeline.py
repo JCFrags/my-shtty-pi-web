@@ -8,16 +8,26 @@ import ipaddress
 import json
 import os
 import re
+import signal
 import socket
 import stat
-import subprocess
+import sys
 import tempfile
+from importlib import metadata as importlib_metadata
 from collections.abc import Awaitable, Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urljoin, urlparse, urlunparse
+
+from pi_web_reader.extractors import (
+    CURRENT_TRAF_ID,
+    REVISED_TRAF_ID,
+    EXTRACTORS,
+    HtmlExtraction,
+    extract_html as run_html_extractor,
+)
 
 try:
     import httpcore
@@ -27,11 +37,6 @@ except ImportError:  # core unit tests exercise pure functions without optional 
     httpcore = None  # type: ignore[assignment]
     httpx = None  # type: ignore[assignment]
     AutoBackend = object  # type: ignore[assignment,misc]
-
-try:
-    import trafilatura
-except ImportError:
-    trafilatura = None  # type: ignore[assignment]
 
 ReadView = Literal["main", "outline", "raw"]
 
@@ -57,6 +62,14 @@ MAX_MAX_DECOMPRESSED_BYTES = 512 * 1024 * 1024
 DEFAULT_MAX_REDIRECTS = 5
 DEFAULT_ACQUISITION_CONCURRENCY = 8
 MAX_ACQUISITION_CONCURRENCY = 32
+DEFAULT_WORKER_CONCURRENCY = 2
+MAX_WORKER_CONCURRENCY = 8
+DEFAULT_WORKER_TIMEOUT_SECONDS = 20.0
+MAX_WORKER_TIMEOUT_SECONDS = 60.0
+MAX_WORKER_OUTPUT_BYTES = 16 * 1024 * 1024
+PINNED_HTTPX_VERSION = "0.28.1"
+PINNED_HTTPCORE_VERSION = "1.0.9"
+HTML_WORKER_PATH = Path(__file__).with_name("worker.py")
 
 Resolver = Callable[[str, int], Awaitable[list[str]]]
 
@@ -73,6 +86,9 @@ class ReadRequest:
     item_offset: int = 0
     item_limit: int = 50
     content_offset: int = 0
+    etag: str | None = None
+    last_modified: str | None = None
+    validator_url: str | None = None
 
 
 @dataclass(slots=True)
@@ -173,6 +189,7 @@ class ReadResult:
     source: str
     truncated: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+    not_modified: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         # The coordinator protocol is camelCase even though Python internals use
@@ -185,6 +202,7 @@ class ReadResult:
             "source": self.source,
             "truncated": self.truncated,
             "metadata": self.metadata,
+            "notModified": self.not_modified,
         }
 
 
@@ -203,11 +221,16 @@ class ReaderPipeline:
         max_raw_bytes: int | None = None,
         max_redirects: int | None = None,
         acquisition_concurrency: int | None = None,
+        worker_concurrency: int | None = None,
+        worker_timeout_seconds: float | None = None,
         docling_url: str | None = None,
+        documents_enabled: bool | None = None,
         user_agent: str = "Pi-Web-Reader/0.1 (+local self-hosted reader)",
         resolver: Resolver | None = None,
         transport_factory: Callable[[dict[str, str]], Any] | None = None,
         test_loopback_fixture: tuple[str, int] | None = None,
+        html_extractor: str = CURRENT_TRAF_ID,
+        html_worker_command: tuple[str, ...] | None = None,
     ) -> None:
         self.timeout_seconds = bounded_number(
             timeout_seconds,
@@ -246,11 +269,39 @@ class ReaderPipeline:
             name="acquisition concurrency",
         )
         self._acquisition_slots = asyncio.Semaphore(concurrency)
+        worker_count = bounded_integer(
+            worker_concurrency,
+            os.getenv("PI_WEB_READER_WORKER_CONCURRENCY"),
+            default=DEFAULT_WORKER_CONCURRENCY,
+            maximum=MAX_WORKER_CONCURRENCY,
+            name="worker concurrency",
+        )
+        self.worker_timeout_seconds = bounded_number(
+            worker_timeout_seconds,
+            os.getenv("PI_WEB_READER_WORKER_TIMEOUT_SECONDS"),
+            default=DEFAULT_WORKER_TIMEOUT_SECONDS,
+            maximum=MAX_WORKER_TIMEOUT_SECONDS,
+            name="worker timeout",
+        )
+        self._worker_slots = asyncio.Semaphore(worker_count)
+        configured_documents = os.getenv("PI_WEB_DOCUMENTS_ENABLED")
+        self.documents_enabled = documents_enabled if documents_enabled is not None else configured_documents == "1"
         self.docling_url = docling_url or os.getenv("PI_WEB_DOCLING_URL", "http://127.0.0.1:8792/")
         self.user_agent = user_agent
         self.resolver = resolver or resolve_public_addresses
         self.transport_factory = transport_factory or pinned_transport
         self.test_loopback_fixture = test_loopback_fixture
+        if html_worker_command is None:
+            if html_extractor not in EXTRACTORS:
+                raise ValueError(f"unknown HTML extractor: {html_extractor}")
+            html_worker_command = (
+                sys.executable,
+                str(HTML_WORKER_PATH),
+                html_extractor,
+            )
+        if not html_worker_command:
+            raise ValueError("HTML worker command must not be empty")
+        self._html_worker_command = html_worker_command
 
     def _validated_pin(self, host: str, port: int, addresses: list[str]) -> str:
         if self.test_loopback_fixture == (host, port) and addresses == ["127.0.0.1"]:
@@ -258,8 +309,8 @@ class ReaderPipeline:
         return validate_public_addresses(host, addresses)
 
     async def read_range(self, request: RangeReadRequest) -> RangeReadResult:
-        async with self._acquisition_slots:
-            async with asyncio.timeout(self.timeout_seconds):
+        async with asyncio.timeout(self.timeout_seconds):
+            async with self._acquisition_slots:
                 return await self._read_range(request)
 
     async def _read_range(self, request: RangeReadRequest) -> RangeReadResult:
@@ -342,8 +393,8 @@ class ReaderPipeline:
         raise ValueError("too many redirects")
 
     async def read(self, request: ReadRequest) -> ReadResult:
-        async with self._acquisition_slots:
-            async with asyncio.timeout(self.timeout_seconds):
+        async with asyncio.timeout(self.timeout_seconds):
+            async with self._acquisition_slots:
                 return await self._read(request)
 
     async def _read(self, request: ReadRequest) -> ReadResult:
@@ -351,7 +402,12 @@ class ReaderPipeline:
         original = await self._fetch(
             request.url,
             accept="text/markdown, text/plain;q=0.95, application/json;q=0.9, text/html;q=0.8, */*;q=0.2",
+            etag=request.etag,
+            last_modified=request.last_modified,
+            validator_url=request.validator_url,
         )
+        if original.status == 304:
+            return not_modified_result(original)
 
         if original.media_type == "application/json" or original.media_type.endswith("+json"):
             return finalize_json_result(original, request)
@@ -366,15 +422,27 @@ class ReaderPipeline:
 
         # 3. Explicit .md and index.md fallback.
         for candidate in markdown_candidates(original.url):
-            fetched = await self._try_fetch(candidate, accept="text/markdown, text/plain;q=0.9")
+            fetched = await self._try_fetch(
+                candidate,
+                accept="text/markdown, text/plain;q=0.9",
+                etag=request.etag,
+                last_modified=request.last_modified,
+                validator_url=request.validator_url,
+            )
+            if fetched and fetched.status == 304:
+                return not_modified_result(fetched)
             if fetched and fetched.media_type in TEXT_TYPES and useful_text(fetched.text):
                 return finalize_text_result(fetched, fetched.text, request, "markdown-fallback")
 
         # 4. Preserve the requested page when static extraction yields useful content.
-        extracted, title, extraction_meta = extract_html(original.text, request)
-        if useful_text(extracted) and not looks_like_javascript_shell(original.text, extracted):
-            focused = select_query_context(extracted, request.query) if request.query else extracted
-            result = finalize_text_result(original, focused, request, "trafilatura", title=title)
+        extraction = await self._extract_html(original.text, request)
+        extracted = extraction.content
+        title = extraction.title
+        extraction_meta = extraction.metadata
+        static_quality = content_quality(extracted)
+        extraction_meta["contentQuality"] = static_quality.to_dict()
+        if static_quality.acceptable and not looks_like_javascript_shell(original.text, extracted):
+            result = finalize_text_result(original, extracted, request, "trafilatura", title=title)
             result.metadata.update(extraction_meta)
             return result
 
@@ -382,7 +450,15 @@ class ReaderPipeline:
         # The result metadata makes this substitution explicit.
         llms_names = ["llms-full.txt", "llms.txt"] if request.allow_llms_full else ["llms.txt"]
         for candidate in llms_candidates(original.url, llms_names):
-            fetched = await self._try_fetch(candidate, accept="text/plain, text/markdown;q=0.9")
+            fetched = await self._try_fetch(
+                candidate,
+                accept="text/plain, text/markdown;q=0.9",
+                etag=request.etag,
+                last_modified=request.last_modified,
+                validator_url=request.validator_url,
+            )
+            if fetched and fetched.status == 304:
+                return not_modified_result(fetched)
             if fetched and fetched.media_type in TEXT_TYPES and useful_text(fetched.text):
                 selected = (
                     select_query_context(fetched.text, request.query)
@@ -407,13 +483,15 @@ class ReaderPipeline:
         return result
 
     async def _read_document(self, fetched: FetchResult, request: ReadRequest) -> ReadResult:
+        if not self.documents_enabled:
+            raise RuntimeError("document reading requires the explicit documents profile")
         converted: dict[str, Any] = {}
         converter = "docling"
         if fetched.media_type == "application/pdf" and request.view != "raw":
             try:
-                markdown = await asyncio.to_thread(extract_pdf_text, fetched.content)
+                markdown = await self._extract_pdf_text(fetched.content)
                 converter = "pdftotext"
-            except (OSError, RuntimeError, subprocess.SubprocessError):
+            except (OSError, RuntimeError):
                 pass
         if converter == "docling":
             if httpx is None:
@@ -460,18 +538,93 @@ class ReaderPipeline:
         )
         return result
 
-    async def _try_fetch(self, url: str, *, accept: str) -> FetchResult | None:
+    async def _extract_pdf_text(self, content: bytes) -> str:
+        output = await self._run_worker_process(
+            ("pdftotext", "-layout", "-", "-"),
+            content,
+            output_limit=MAX_WORKER_OUTPUT_BYTES,
+        )
+        text = output.decode("utf-8", errors="replace")
+        if not any(character.isalnum() for character in text):
+            raise RuntimeError("PDF extraction returned no text")
+        return text
+
+    async def _extract_html(self, document: str, request: ReadRequest) -> HtmlExtraction:
+        worker_input = json.dumps(
+            {
+                "html": document,
+                "url": request.url,
+                "view": request.view,
+                "query": request.query,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        output = await self._run_worker_process(
+            self._html_worker_command,
+            worker_input,
+            output_limit=MAX_WORKER_OUTPUT_BYTES,
+        )
         try:
-            response = await self._fetch(url, accept=accept)
+            payload = json.loads(output)
+            return HtmlExtraction(
+                content=str(payload["content"]),
+                title=str(payload["title"]),
+                extractor=str(payload["extractor"]),
+                metadata=dict(payload["metadata"]),
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            raise RuntimeError("HTML extraction worker returned invalid output") from None
+
+    async def _run_worker_process(
+        self,
+        command: tuple[str, ...],
+        input_bytes: bytes,
+        *,
+        output_limit: int,
+    ) -> bytes:
+        async with asyncio.timeout(self.worker_timeout_seconds):
+            async with self._worker_slots:
+                return await run_bounded_process(command, input_bytes, output_limit=output_limit)
+
+    async def _try_fetch(
+        self,
+        url: str,
+        *,
+        accept: str,
+        etag: str | None = None,
+        last_modified: str | None = None,
+        validator_url: str | None = None,
+    ) -> FetchResult | None:
+        try:
+            response = await self._fetch(
+                url,
+                accept=accept,
+                etag=etag,
+                last_modified=last_modified,
+                validator_url=validator_url,
+            )
         except (ValueError, OSError, httpx.HTTPError):
             return None
-        return response if 200 <= response.status < 300 else None
+        return response if response.status == 304 or 200 <= response.status < 300 else None
 
-    async def _fetch(self, url: str, *, accept: str) -> FetchResult:
+    async def _fetch(
+        self,
+        url: str,
+        *,
+        accept: str,
+        etag: str | None = None,
+        last_modified: str | None = None,
+        validator_url: str | None = None,
+    ) -> FetchResult:
         if httpx is None:
             raise RuntimeError(
                 "reader runtime dependencies are not installed; run `uv sync --all-packages`"
             )
+        validate_origin_validator(etag, "ETag", 1_024)
+        validate_origin_validator(last_modified, "Last-Modified", 128)
+        if validator_url is not None:
+            validate_public_url_syntax(validator_url)
         headers = {"Accept": accept, "User-Agent": self.user_agent}
         timeout = httpx_timeout(self.timeout_seconds)
         current = url
@@ -483,11 +636,18 @@ class ReaderPipeline:
             addresses = await self.resolver(host, port)
             pinned = self._validated_pin(host, port, addresses)
             transport = self.transport_factory({host.lower().rstrip("."): pinned})
+            request_headers = dict(headers)
+            conditional = validator_url is not None and current == validator_url
+            if conditional:
+                if etag is not None:
+                    request_headers["If-None-Match"] = etag
+                if last_modified is not None:
+                    request_headers["If-Modified-Since"] = last_modified
             async with (
                 httpx.AsyncClient(
                     follow_redirects=False,
                     timeout=timeout,
-                    headers=headers,
+                    headers=request_headers,
                     transport=transport,
                     trust_env=False,
                 ) as client,
@@ -502,6 +662,17 @@ class ReaderPipeline:
                     current = urljoin(current, location)
                     validate_public_url_syntax(current)
                     continue
+                if response.status_code == 304:
+                    if not conditional or (etag is None and last_modified is None):
+                        raise ValueError("origin returned unsolicited HTTP 304")
+                    return FetchResult(
+                        url=str(response.url),
+                        status=304,
+                        media_type=content_type(response.headers.get("content-type")),
+                        text="",
+                        content=b"",
+                        headers={key.lower(): value for key, value in response.headers.items()},
+                    )
                 response.raise_for_status()
                 content = await read_bounded_response(
                     response,
@@ -522,26 +693,57 @@ class ReaderPipeline:
         raise ValueError("too many redirects")
 
 
-def extract_pdf_text(content: bytes) -> str:
-    """Extract PDF text with the bounded local Poppler utility."""
-    with tempfile.TemporaryDirectory(prefix="pi-web-pdf-") as directory:
-        source = os.path.join(directory, "input.pdf")
-        output = os.path.join(directory, "output.txt")
-        with open(source, "wb") as handle:
-            handle.write(content)
-        completed = subprocess.run(
-            ["pdftotext", "-layout", source, output],
-            check=False,
-            capture_output=True,
-            timeout=60,
-        )
-        if completed.returncode != 0:
-            raise RuntimeError("PDF extraction failed")
-        with open(output, encoding="utf-8", errors="replace") as handle:
-            text = handle.read()
-    if not any(character.isalnum() for character in text):
-        raise RuntimeError("PDF extraction returned no text")
-    return text
+async def run_bounded_process(
+    command: tuple[str, ...], input_bytes: bytes, *, output_limit: int
+) -> bytes:
+    """Run one worker with bounded output and guaranteed cancellation cleanup."""
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    assert process.stdin is not None and process.stdout is not None
+
+    async def write_input() -> None:
+        process.stdin.write(input_bytes)
+        await process.stdin.drain()
+        process.stdin.close()
+        await process.stdin.wait_closed()
+
+    async def read_output() -> bytes:
+        chunks: list[bytes] = []
+        size = 0
+        while chunk := await process.stdout.read(65_536):
+            size += len(chunk)
+            if size > output_limit:
+                raise RuntimeError(f"worker output exceeds {output_limit} bytes")
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+    input_task = asyncio.create_task(write_input())
+    output_task = asyncio.create_task(read_output())
+    try:
+        output = await output_task
+        await input_task
+        returncode = await process.wait()
+        if returncode != 0:
+            raise RuntimeError("reader worker failed")
+        return output
+    except BaseException:
+        input_task.cancel()
+        output_task.cancel()
+        if process.returncode is None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except OSError:
+                process.kill()
+        await asyncio.gather(input_task, output_task, return_exceptions=True)
+        await process.wait()
+        raise
 
 
 def validate_range_request(request: RangeReadRequest) -> None:
@@ -785,13 +987,47 @@ class PinnedNetworkBackend(AutoBackend):
         )
 
 
+def assert_runtime_compatibility(
+    version_getter: Callable[[str], str] = importlib_metadata.version,
+) -> None:
+    """Fail startup when the pinned private HTTP hooks are not compatible."""
+    if httpx is None or httpcore is None:
+        raise RuntimeError("httpx and httpcore are required for public fetch")
+    expected = {"httpx": PINNED_HTTPX_VERSION, "httpcore": PINNED_HTTPCORE_VERSION}
+    for package, required in expected.items():
+        try:
+            installed = version_getter(package)
+        except importlib_metadata.PackageNotFoundError as error:
+            raise RuntimeError(f"required reader package is missing: {package}") from error
+        if installed != required:
+            raise RuntimeError(
+                f"incompatible {package} version {installed}; reader requires {required}"
+            )
+
+    transport = httpx.AsyncHTTPTransport(retries=0, trust_env=False)
+    pool = getattr(transport, "_pool", None)
+    if pool is None or not hasattr(pool, "_network_backend"):
+        raise RuntimeError("HTTPX transport does not expose the required DNS-pinning hook")
+    decoder_factory = getattr(httpx.Response, "_get_content_decoder", None)
+    if not callable(decoder_factory):
+        raise RuntimeError("HTTPX response does not expose the required decompression hook")
+    decoder = httpx.Response(200, headers={"content-encoding": "gzip"})._get_content_decoder()
+    if not callable(getattr(decoder, "decode", None)) or not callable(
+        getattr(decoder, "flush", None)
+    ):
+        raise RuntimeError("HTTPX decompression hook has an incompatible decoder contract")
+
+
 def pinned_transport(pins: dict[str, str]):
     if httpx is None or httpcore is None:
         raise RuntimeError("httpx and httpcore are required for public fetch")
     transport = httpx.AsyncHTTPTransport(retries=0, trust_env=False)
+    pool = getattr(transport, "_pool", None)
+    if pool is None or not hasattr(pool, "_network_backend"):
+        raise RuntimeError("HTTPX transport does not expose the required DNS-pinning hook")
     # HTTPX does not expose the network backend in its public constructor. The
     # pinned backend is installed into its owned pool before the first request.
-    transport._pool._network_backend = PinnedNetworkBackend(pins)  # type: ignore[attr-defined]
+    pool._network_backend = PinnedNetworkBackend(pins)
     return transport
 
 
@@ -832,39 +1068,9 @@ def dedupe(values: Iterable[str]) -> list[str]:
 
 
 def extract_html(document: str, request: ReadRequest) -> tuple[str, str, dict[str, Any]]:
-    title = extract_title(document)
-    if request.view == "raw":
-        return document, title, {"extractor": "raw-html"}
-    if request.view == "outline":
-        outline = outline_from_html(document)
-        if outline:
-            return outline, title, {"extractor": "html-headings"}
-    if trafilatura is not None:
-        # Keep Markdown headings for both main and outline views. Outline rendering
-        # removes body text after extraction.
-        output_format = "markdown"
-        extracted = trafilatura.extract(
-            document,
-            output_format=output_format,
-            include_links=True,
-            include_images=False,
-            include_tables=True,
-            include_comments=False,
-            favor_precision=True,
-            deduplicate=True,
-        )
-        if extracted:
-            if request.view == "outline":
-                extracted = outline_from_markdown(extracted)
-            elif request.query:
-                extracted = select_query_context(extracted, request.query)
-            return extracted, title, {"extractor": "trafilatura"}
-    fallback = html_to_text(document)
-    if request.view == "outline":
-        fallback = outline_from_html(document)
-    elif request.query:
-        fallback = select_query_context(fallback, request.query)
-    return fallback, title, {"extractor": "stdlib-fallback"}
+    """Compatibility wrapper for pure extraction tests and local callers."""
+    result = run_html_extractor(document, request.url, request.view, request.query)
+    return result.content, result.title, result.metadata
 
 
 def finalize_json_result(fetched: FetchResult, request: ReadRequest) -> ReadResult:
@@ -958,6 +1164,18 @@ def json_path_value(value: Any, segments: list[str]) -> Any:
     return json_path_value(value.get(head), tail)
 
 
+def not_modified_result(fetched: FetchResult) -> ReadResult:
+    return ReadResult(
+        url=fetched.url,
+        title="Not modified",
+        media_type=fetched.media_type,
+        content="",
+        source="conditional-request",
+        metadata=origin_validator_metadata(fetched.headers),
+        not_modified=True,
+    )
+
+
 def finalize_text_result(
     fetched: FetchResult,
     text: str,
@@ -991,6 +1209,7 @@ def finalize_text_result(
         truncated=truncated,
         metadata={
             "originalMediaType": fetched.media_type,
+            **origin_validator_metadata(fetched.headers),
             "responseBytes": len(fetched.content),
             "contentSha256": hashlib.sha256(normalized.encode("utf-8")).hexdigest(),
             "resolvedVia": source,
@@ -1008,9 +1227,95 @@ def finalize_text_result(
     )
 
 
+@dataclass(slots=True, frozen=True)
+class ContentQuality:
+    score: int
+    acceptable: bool
+    characters: int
+    words: int
+    alphanumeric: int
+    paragraphs: int
+    unique_line_ratio: float
+    boilerplate_hits: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "score": self.score,
+            "acceptable": self.acceptable,
+            "characters": self.characters,
+            "words": self.words,
+            "alphanumeric": self.alphanumeric,
+            "paragraphs": self.paragraphs,
+            "uniqueLineRatio": self.unique_line_ratio,
+            "boilerplateHits": list(self.boilerplate_hits),
+        }
+
+
+def content_quality(value: str) -> ContentQuality:
+    """Score text with deterministic content, shape, repetition, and noise signals."""
+    normalized = normalize_text(value)
+    compact = re.sub(r"\s+", " ", normalized).strip()
+    words = re.findall(r"[\w][\w'’-]*", compact, flags=re.UNICODE)
+    alphanumeric = sum(character.isalnum() for character in compact)
+    paragraphs = len([part for part in re.split(r"\n\s*\n", normalized) if part.strip()])
+    lines = [line.casefold() for line in normalized.splitlines() if line.strip()]
+    unique_line_ratio = len(set(lines)) / len(lines) if lines else 0.0
+    lowered = compact.casefold()
+    boilerplate_hits = tuple(
+        marker
+        for marker in (
+            "enable javascript", "access denied", "verify you are human",
+            "accept all cookies", "subscribe to continue",
+        )
+        if marker in lowered
+    )
+    score = 0
+    score += 20 if alphanumeric >= 24 else 0
+    score += 20 if len(words) >= 8 else 0
+    score += 10 if len(words) >= 20 else 0
+    score += 10 if len(compact) >= 80 else 0
+    score += 10 if paragraphs >= 2 else 0
+    score += 10 if compact and alphanumeric / len(compact) >= 0.45 else 0
+    score += 10 if unique_line_ratio >= 0.6 else 0
+    score -= 30 * len(boilerplate_hits)
+    score = max(0, min(100, score))
+    acceptable = alphanumeric >= 24 and len(words) >= 8 and score >= 60
+    return ContentQuality(
+        score=score,
+        acceptable=acceptable,
+        characters=len(compact),
+        words=len(words),
+        alphanumeric=alphanumeric,
+        paragraphs=paragraphs,
+        unique_line_ratio=round(unique_line_ratio, 4),
+        boilerplate_hits=boilerplate_hits,
+    )
+
+
+def origin_validator_metadata(headers: dict[str, str]) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    etag = bounded_origin_validator(headers.get("etag"), 1_024)
+    last_modified = bounded_origin_validator(headers.get("last-modified"), 128)
+    if etag is not None:
+        metadata["etag"] = etag
+    if last_modified is not None:
+        metadata["lastModified"] = last_modified
+    return metadata
+
+
+def bounded_origin_validator(value: str | None, maximum: int) -> str | None:
+    if value is None or not 1 <= len(value) <= maximum or "\r" in value or "\n" in value:
+        return None
+    return value
+
+
+def validate_origin_validator(value: str | None, name: str, maximum: int) -> None:
+    if value is not None and bounded_origin_validator(value, maximum) is None:
+        raise ValueError(f"{name} validator is invalid")
+
+
 def useful_text(value: str) -> bool:
-    compact = re.sub(r"\s+", " ", value).strip()
-    return len(compact) >= 80
+    return content_quality(value).acceptable
 
 
 def looks_like_javascript_shell(source: str, extracted: str) -> bool:

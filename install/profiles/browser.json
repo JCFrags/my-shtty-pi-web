@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "browser",
+  "description": "Visual browser control and the desktop workspace.",
+  "includes": ["web-core"],
+  "capabilities": ["browser"],
+  "fedoraPackages": ["chromium", "rust", "cargo", "webkit2gtk4.1-devel", "libappindicator-gtk3-devel", "librsvg2-devel", "libxdo-devel", "gtk3-devel", "glib2-devel", "cairo-devel", "pango-devel", "gdk-pixbuf2-devel"],
+  "commands": ["cargo", "chromium"],
+  "nodeFilters": ["@pi-web/workspace..."],
+  "pythonPackages": [],
+  "npmPackages": ["agent-browser@0.33.1"],
+  "cargoPackages": ["pi-browserd", "pi-browser-workspace"],
+  "units": ["pi-browserd.service"]
+}

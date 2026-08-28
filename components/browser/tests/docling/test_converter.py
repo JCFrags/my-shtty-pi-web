@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import os
 import sys
 from pathlib import Path
@@ -109,3 +110,39 @@ def test_handoff_rejects_non_private_root_and_file(
     with pytest.raises(ValueError, match="other users"):
         with module.validated_document(request(source, content)):
             pass
+
+
+def test_model_assets_are_unready_without_a_valid_digest_manifest(tmp_path: Path) -> None:
+    assert module.model_asset_readiness(tmp_path) == {
+        "manifestValidated": False,
+        "office": False,
+        "scannedPdf": False,
+        "detail": "model asset manifest is absent",
+    }
+    asset = tmp_path / "model.bin"
+    asset.write_bytes(b"reviewed model bytes")
+    (tmp_path / "model-assets.json").write_text(json.dumps({
+        "schemaVersion": 1,
+        "capabilities": ["office", "scanned-pdf"],
+        "files": [{"path": "model.bin", "sha256": "0" * 64}],
+    }), encoding="utf-8")
+    mismatched = module.model_asset_readiness(tmp_path)
+    assert mismatched["manifestValidated"] is False
+    assert mismatched["office"] is False
+    assert mismatched["scannedPdf"] is False
+
+
+def test_digest_manifest_does_not_claim_unvalidated_model_capabilities(tmp_path: Path) -> None:
+    asset = tmp_path / "model.bin"
+    asset.write_bytes(b"reviewed model bytes")
+    (tmp_path / "model-assets.json").write_text(json.dumps({
+        "schemaVersion": 1,
+        "assetSetId": "unvalidated-local-set",
+        "capabilities": ["office"],
+        "files": [{"path": "model.bin", "sha256": hashlib.sha256(asset.read_bytes()).hexdigest()}],
+    }), encoding="utf-8")
+    readiness = module.model_asset_readiness(tmp_path)
+    assert readiness["manifestValidated"] is False
+    assert readiness["office"] is False
+    assert readiness["scannedPdf"] is False
+    assert "no validated acceptance record" in readiness["detail"]

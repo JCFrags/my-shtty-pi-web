@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createServer } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebxAuthority } from "../src/authority.js";
 import { NormalizedContentStore } from "../src/content-store.js";
@@ -126,6 +127,15 @@ describe("WebxAuthority", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("rejects a SearXNG body above 2 MiB before it can become a search result", async () => {
+    const oversized = JSON.stringify({ results: [{ title: "Oversized", url: "https://example.test/", content: "x".repeat(2 * 1024 * 1024) }] });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(oversized, { status: 200, headers: { "content-type": "application/json" } })));
+    const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
+    const result = await call(instance, actor(), "POST", "/v1/search", { query: "oversized response" }, "oversized-search");
+    expect(result).toMatchObject({ status: 502, body: { code: "backend-failure", retryable: true } });
+    expect((result.body as { message: string }).message).toContain("exceeded 2097152 bytes");
+  });
+
   it("reports unavailable providers instead of a false successful empty search", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ results: [], unresponsive_engines: [["bing news", "too many requests"], ["brave.news", "CAPTCHA"]] }), { status: 200, headers: { "content-type": "application/json" } })));
     const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
@@ -148,7 +158,7 @@ describe("WebxAuthority", () => {
       }
       const body = JSON.parse(String(init?.body)) as { url: string; query?: string; maxChars: number };
       expect(body.query).toBeUndefined();
-      expect(body.maxChars).toBe(30_000);
+      expect(body.maxChars).toBe(1_000_000);
       activeReaders += 1;
       maximumReaders = Math.max(maximumReaders, activeReaders);
       await new Promise((resolve) => setTimeout(resolve, 5));
@@ -163,9 +173,13 @@ describe("WebxAuthority", () => {
     const contentStore = new NormalizedContentStore();
     const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888", readerUrl: "http://127.0.0.1:8787", contentStore });
     const result = await call(instance, actor(), "POST", "/v1/search", { query: "Product feature support", output: "extracts", domains: ["docs.example.org"] }, "extract-search");
-    const body = result.body as { hits: Array<{ snippet: string }>; metadata: { searches: number; pagesRead: number; readAttempts: number; partial: boolean } };
+    const body = result.body as { hits: Array<{ snippet: string }>; metadata: { searches: number; pagesRead: number; readAttempts: number; partial: boolean; warning: string; migration: string } };
     expect(result.status).toBe(200);
-    expect(body.metadata).toMatchObject({ searches: 1, fallbackUsed: false, partial: true, pagesRead: 5, readAttempts: 6 });
+    expect(body.metadata).toMatchObject({
+      searches: 1, fallbackUsed: false, partial: true, pagesRead: 5, readAttempts: 6,
+      warning: expect.stringContaining("deprecated"),
+      migration: expect.stringContaining("web_read_batch"),
+    });
     expect(body.hits).toHaveLength(4);
     expect(body.hits.every((hit) => hit.snippet.includes("verified page passage") && !hit.snippet.includes("Unverified search snippet") && hit.snippet.length <= 700)).toBe(true);
     expect(requests.filter((item) => item.url.includes("/search"))).toHaveLength(1);
@@ -353,12 +367,13 @@ describe("WebxAuthority", () => {
   it("negotiates search, static read, and optional browser health independently", async () => {
     const failedBrowser = browser();
     vi.mocked(failedBrowser.capabilities).mockRejectedValue(new Error("browser offline"));
-    vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
+    const healthFetch = vi.fn(async (input: unknown) => {
       const url = new URL(String(input));
-      if (url.port === "8888" && url.pathname === "/search") return new Response(JSON.stringify({ results: [] }), { status: 200 });
+      if (url.port === "8888" && url.pathname === "/config") return new Response(JSON.stringify({ engines: [] }), { status: 200 });
       if (url.port === "8787" && url.pathname === "/health") return new Response(JSON.stringify({ ok: true }), { status: 200 });
       throw new Error(`unexpected probe: ${url}`);
-    }));
+    });
+    vi.stubGlobal("fetch", healthFetch);
     const instance = new WebxAuthority({
       browser: failedBrowser, sources: PUBLIC_SOURCES,
       clock: { now: () => "2026-08-27T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` },
@@ -374,12 +389,71 @@ describe("WebxAuthority", () => {
       browserPaths: [],
     } });
     expect(JSON.stringify(response.body)).not.toContain("crawl");
+    expect(healthFetch).toHaveBeenCalledTimes(2);
+    const probePaths = healthFetch.mock.calls.map((call) => new URL(String(call[0])).pathname);
+    expect(probePaths).toEqual(expect.arrayContaining(["/config", "/health"]));
+    expect(probePaths).not.toContain("/search");
+  });
+
+  it.each([
+    ["non-2xx response", async () => new Response(JSON.stringify({ error: "offline" }), { status: 503 }), "search backend returned HTTP 503"],
+    ["malformed JSON", async () => new Response("not JSON", { status: 200 }), "local service returned invalid JSON"],
+    ["timeout", async () => { throw new DOMException("probe timed out", "TimeoutError"); }, "probe timed out"],
+    ["oversized response", async () => new Response(JSON.stringify({ value: "x".repeat(2 * 1024 * 1024) }), { status: 200 }), "exceeded 2097152 bytes"],
+  ])("reports SearXNG %s as unhealthy", async (_case, fetchResult, reason) => {
+    const healthFetch = vi.fn(fetchResult);
+    vi.stubGlobal("fetch", healthFetch);
+    const instance = new WebxAuthority({
+      browser: browser(), sources: PUBLIC_SOURCES,
+      clock: { now: () => "2026-08-27T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` },
+      searxUrl: "http://127.0.0.1:8888",
+    });
+    const response = await call(instance, actor(), "GET", "/v1/capabilities");
+    expect(response.status).toBe(200);
+    expect((response.body as { capabilities: unknown[] }).capabilities[0]).toMatchObject({ id: "search", enabled: true, healthy: false, reason: expect.stringContaining(reason) });
+    expect(new URL(String(healthFetch.mock.calls[0]?.[0])).pathname).toBe("/config");
+  });
+
+  it("reports a dead local SearXNG process as unhealthy", async () => {
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("test server did not bind TCP");
+    await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
+    const instance = new WebxAuthority({
+      browser: browser(), sources: PUBLIC_SOURCES,
+      clock: { now: () => "2026-08-27T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` },
+      searxUrl: `http://127.0.0.1:${address.port}`,
+    });
+    const response = await call(instance, actor(), "GET", "/v1/capabilities");
+    expect(response.status).toBe(200);
+    expect((response.body as { capabilities: unknown[] }).capabilities[0]).toMatchObject({ id: "search", enabled: true, healthy: false, reason: expect.stringContaining("search backend is unavailable") });
+  });
+
+  it("propagates caller cancellation from the SearXNG health probe", async () => {
+    let probeSignal: AbortSignal | undefined;
+    const healthFetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+      expect(new URL(String(input)).pathname).toBe("/config");
+      probeSignal = init?.signal ?? undefined;
+      return await new Promise<Response>((_resolve, reject) => probeSignal?.addEventListener("abort", () => reject(probeSignal?.reason), { once: true }));
+    });
+    vi.stubGlobal("fetch", healthFetch);
+    const instance = new WebxAuthority({
+      browser: browser(), sources: PUBLIC_SOURCES,
+      clock: { now: () => "2026-08-27T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` },
+      searxUrl: "http://127.0.0.1:8888",
+    });
+    const caller = new AbortController();
+    const pending = instance.handle(actor(), { method: "GET", path: "/v1/capabilities", maxResponseBytes: 1_048_576, signal: caller.signal });
+    await vi.waitFor(() => expect(probeSignal).toBeDefined());
+    caller.abort(new DOMException("caller stopped", "AbortError"));
+    await expect(pending).resolves.toMatchObject({ status: 499, body: { code: "cancelled", retryable: false } });
   });
 
   it("does not let reader health remove healthy search", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
       const url = new URL(String(input));
-      if (url.port === "8888") return new Response(JSON.stringify({ results: [] }), { status: 200 });
+      if (url.port === "8888" && url.pathname === "/config") return new Response(JSON.stringify({ engines: [] }), { status: 200 });
       throw new Error("reader offline");
     }));
     const instance = new WebxAuthority({
@@ -391,6 +465,97 @@ describe("WebxAuthority", () => {
     expect(response).toMatchObject({ status: 200, body: { capabilities: [
       { id: "search", healthy: true }, { id: "read", healthy: false }, { id: "browser", healthy: true },
     ] } });
+  });
+
+  it("observes cache freshness and reuses canonical content after conditional 304 validation", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    let clockIndex = 0;
+    const times = ["2026-08-28T10:00:00.000Z", "2026-08-28T11:00:00.000Z"];
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      requests.push(body);
+      if (requests.length === 1) return new Response(JSON.stringify({
+        url: body.url, title: "Canonical", content: "stable canonical body", source: "raw", truncated: false,
+        metadata: { etag: '"stable-v1"', lastModified: "Fri, 28 Aug 2026 10:00:00 GMT", complete: true },
+      }), { status: 200 });
+      return new Response(JSON.stringify({
+        url: body.url, notModified: true,
+        metadata: { etag: '"stable-v1"', lastModified: "Fri, 28 Aug 2026 10:00:00 GMT" },
+      }), { status: 200 });
+    }));
+    const instance = new WebxAuthority({
+      browser: browser(), sources: PUBLIC_SOURCES, readerUrl: "http://127.0.0.1:8787",
+      clock: { now: () => times[Math.min(clockIndex++, times.length - 1)] ?? times[0] ?? "2026-08-28T00:00:00.000Z" },
+      ids: { next: (prefix) => `${prefix}-1` },
+    });
+    const first = await call(instance, actor(), "POST", "/v1/read", { url: "https://fresh.example/page" }, "freshness-first");
+    const cached = await call(instance, actor(), "POST", "/v1/read", { url: "https://fresh.example/page" }, "freshness-cached");
+    const refreshed = await call(instance, actor(), "POST", "/v1/read", { url: "https://fresh.example/page", refresh: true }, "freshness-refresh");
+    const firstBody = first.body as { untrustedContent: string; metadata: { contentId: string; freshness: Record<string, unknown> } };
+    const refreshedBody = refreshed.body as typeof firstBody;
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toMatchObject({ etag: '"stable-v1"', lastModified: "Fri, 28 Aug 2026 10:00:00 GMT", validatorUrl: "https://fresh.example/page" });
+    expect(cached).toMatchObject({ body: { metadata: { delivery: { cache: "hit", freshness: "cached" } } } });
+    expect(refreshedBody.untrustedContent).toBe(firstBody.untrustedContent);
+    expect(refreshedBody.metadata.contentId).toBe(firstBody.metadata.contentId);
+    expect(refreshed).toMatchObject({ body: { metadata: {
+      freshness: { fetchedAt: times[0], validatedAt: times[1], validation: "not-modified", etag: '"stable-v1"' },
+      delivery: { cache: "miss", freshness: "revalidated" },
+    } } });
+    const replay = await call(instance, actor(), "POST", "/v1/read", { url: "https://fresh.example/page", refresh: true }, "freshness-refresh");
+    expect(replay.body).toEqual(refreshed.body);
+    const mixed = await call(instance, actor(), "POST", "/v1/read", { url: "https://fresh.example/page" }, "freshness-refresh");
+    expect(mixed).toMatchObject({ status: 409, body: { code: "idempotency-conflict" } });
+    expect(requests).toHaveLength(2);
+  });
+
+  it("conditionally validates a stale six-hour read without changing the TTL", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-28T00:00:00.000Z"));
+      const requests: Array<Record<string, unknown>> = [];
+      vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        requests.push(body);
+        return new Response(JSON.stringify(requests.length === 1 ? {
+          url: body.url, title: "Stale", content: "six-hour canonical body", source: "raw", truncated: false,
+          metadata: { etag: '"six-hour"', complete: true },
+        } : { url: body.url, notModified: true, metadata: { etag: '"six-hour"' } }), { status: 200 });
+      }));
+      const instance = new WebxAuthority({
+        browser: browser(), sources: PUBLIC_SOURCES, readerUrl: "http://127.0.0.1:8787",
+        clock: { now: () => new Date(Date.now()).toISOString() }, ids: { next: (prefix) => `${prefix}-1` },
+      });
+      const first = await call(instance, actor(), "POST", "/v1/read", { url: "https://stale.example/page" }, "stale-first");
+      vi.setSystemTime(new Date("2026-08-28T06:00:00.001Z"));
+      const stale = await call(instance, actor(), "POST", "/v1/read", { url: "https://stale.example/page" }, "stale-second");
+      expect(requests).toHaveLength(2);
+      expect(requests[1]).toMatchObject({ etag: '"six-hour"', validatorUrl: "https://stale.example/page" });
+      expect(stale).toMatchObject({ body: { metadata: { contentId: (first.body as { metadata: { contentId: string } }).metadata.contentId, freshness: { validatedAt: "2026-08-28T06:00:00.001Z", cacheAgeMs: 21_600_001, cache: "revalidated", validation: "not-modified" }, delivery: { freshness: "revalidated" } } } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps refresh and ordinary coalescing keys separate", async () => {
+    const started = Promise.withResolvers<undefined>();
+    const release = Promise.withResolvers<undefined>();
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      calls += 1;
+      const body = JSON.parse(String(init?.body)) as { url: string };
+      if (calls > 1) { started.resolve(undefined); await release.promise; }
+      return new Response(JSON.stringify({ url: body.url, title: "Page", content: `canonical ${calls}`, source: "raw", truncated: false, metadata: { etag: `"v${calls}"`, complete: true } }), { status: 200 });
+    }));
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    await call(instance, actor(), "POST", "/v1/read", { url: "https://keys.example/page" }, "keys-first");
+    const refresh = call(instance, actor(), "POST", "/v1/read", { url: "https://keys.example/page", refresh: true }, "keys-refresh");
+    await started.promise;
+    const ordinary = await call(instance, actor(), "POST", "/v1/read", { url: "https://keys.example/page" }, "keys-ordinary");
+    expect(ordinary).toMatchObject({ body: { untrustedContent: "canonical 1", metadata: { delivery: { cache: "hit" } } } });
+    release.resolve(undefined);
+    expect(await refresh).toMatchObject({ body: { untrustedContent: "canonical 2", metadata: { delivery: { cache: "miss" } } } });
+    expect(calls).toBe(2);
   });
 
   it("stores normalized read content and retrieves exact or focused passages without refetching", async () => {
@@ -408,6 +573,76 @@ describe("WebxAuthority", () => {
     const queried = await call(instance, actor(), "POST", "/v1/content", { contentId: readBody.metadata.contentId, query: "unique needle", limit: 200 }, "stored-query-001");
     expect(queried).toMatchObject({ status: 200, body: { untrustedContent: expect.stringContaining("UNIQUE NEEDLE"), metadata: { mode: "query" } } });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores canonical content before query selection and exposes complete provenance", async () => {
+    const canonical = `# Heading\n\nThis paragraph contains the selected needle for the query.\n\n${"canonical context ".repeat(3_000)}CANONICAL-TAIL`;
+    let readerBody: Record<string, unknown> = {};
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      readerBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        url: "https://final.example/page", title: "Canonical", content: canonical, mediaType: "text/markdown", source: "trafilatura", truncated: false,
+        metadata: { complete: true, contentOffset: 0, originalMediaType: "text/html" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const response = await call(instance, actor(), "POST", "/v1/read", { url: "https://requested.example/page", query: "selected needle" }, "canonical-query");
+    expect(readerBody).toMatchObject({ url: "https://requested.example/page", view: "main", fields: [], itemOffset: 0, itemLimit: 500 });
+    expect(readerBody.query).toBeUndefined();
+    const body = response.body as { untrustedContent: string; metadata: { contentId: string; representation: string; reader: Record<string, unknown> } };
+    expect(body.untrustedContent).toContain("selected needle");
+    expect(body.untrustedContent).not.toContain("CANONICAL-TAIL");
+    expect(body.metadata).toMatchObject({
+      representation: "canonical-normalized", requestedUrl: "https://requested.example/page", finalUrl: "https://final.example/page",
+      sourceOffset: 0, sourceComplete: true, nextSourceOffset: null, extractor: "trafilatura", mediaType: "text/markdown",
+      contentSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      reader: { createdAt: expect.any(String), expiresAt: expect.any(String), selectionApplied: true },
+    });
+    const repeated = await call(instance, actor(), "POST", "/v1/content", { contentId: body.metadata.contentId, query: "selected needle", limit: 30_000 }, "canonical-repeat-query");
+    expect((repeated.body as { untrustedContent: string }).untrustedContent).toBe(body.untrustedContent);
+    const stored = await call(instance, actor(), "POST", "/v1/content", { contentId: body.metadata.contentId, findText: "CANONICAL-TAIL", limit: 200 }, "canonical-tail");
+    expect(stored).toMatchObject({ status: 200, body: { untrustedContent: expect.stringContaining("CANONICAL-TAIL"), metadata: { representation: "canonical-normalized" } } });
+  });
+
+  it("prefers every local chunk and reveals a proven next source segment only at local EOF", async () => {
+    const firstSegment = `${"segment-one ".repeat(3_000)}FIRST-END`;
+    const secondSegment = "SECOND-SEGMENT";
+    const readerBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      readerBodies.push(request);
+      const continued = request.contentOffset === firstSegment.length;
+      return new Response(JSON.stringify(continued ? {
+        url: request.url, title: "Segment two", content: secondSegment, source: "trafilatura", truncated: false,
+        metadata: { contentOffset: firstSegment.length, complete: true, nextContentOffset: null },
+      } : {
+        url: request.url, title: "Segment one", content: firstSegment, source: "trafilatura", truncated: true,
+        metadata: { contentOffset: 0, complete: false, nextContentOffset: firstSegment.length },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const first = await call(instance, actor(), "POST", "/v1/read", { url: "https://segments.example/page" }, "segment-first");
+    const contentId = (first.body as { metadata: { contentId: string } }).metadata.contentId;
+    let offset = 0;
+    let reconstructed = "";
+    let nextSource: number | null = null;
+    for (let index = 0; index < 10; index += 1) {
+      const part = await call(instance, actor(), "POST", "/v1/content", { contentId, offset, limit: 10_000 }, `segment-local-${index}`);
+      const value = part.body as { untrustedContent: string; metadata: { nextOffset: number | null; nextContentOffset: number | null } };
+      reconstructed += value.untrustedContent;
+      if (value.metadata.nextOffset !== null) {
+        expect(value.metadata.nextContentOffset).toBeNull();
+        offset = value.metadata.nextOffset;
+        continue;
+      }
+      nextSource = value.metadata.nextContentOffset;
+      break;
+    }
+    expect(reconstructed).toBe(firstSegment);
+    expect(nextSource).toBe(firstSegment.length);
+    const continued = await call(instance, actor(), "POST", "/v1/read", { url: "https://segments.example/page", contentOffset: nextSource }, "segment-second");
+    expect(continued).toMatchObject({ status: 200, body: { untrustedContent: secondSegment, metadata: { sourceOffset: firstSegment.length, sourceComplete: true, nextSourceOffset: null } } });
+    expect(readerBodies.at(-1)).toMatchObject({ contentOffset: firstSegment.length });
   });
 
   it("replaces a cached read whose owned stored content was evicted", async () => {
@@ -438,6 +673,7 @@ describe("WebxAuthority", () => {
     const read = await call(instance, actor(), "POST", "/v1/read", { url: "https://api.example/rows", fields: ["id", "value"], itemLimit: 1 }, "structured-complete");
     expect(readerRequest).toMatchObject({ maxChars: 1_000_000, fields: ["id", "value"], itemLimit: 1 });
     const contentId = (read.body as { metadata: { contentId: string } }).metadata.contentId;
+    expect(read).toMatchObject({ body: { metadata: { representation: "structured-projection" } } });
     const tail = await call(instance, actor(), "POST", "/v1/content", { contentId, offset: 30_000, limit: 20_000 }, "structured-tail");
     expect((tail.body as { untrustedContent: string }).untrustedContent).toContain("ROW-END");
   });

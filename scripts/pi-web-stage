@@ -14,6 +14,8 @@ import sys
 import tempfile
 import time
 
+from pi_web_profiles import PROFILE_IDS, resolve_profiles
+
 SOURCE_EXCLUDES = {".git", "node_modules", "target", "dist", ".venv", ".pytest_cache", "__pycache__"}
 
 
@@ -67,7 +69,7 @@ def output(command: list[str], cwd: Path) -> str:
     return result.stdout.strip()
 
 
-def relocate_python_environment(environment: Path, staging_root: Path, candidate: Path) -> None:
+def relocate_python_environment(environment: Path, staging_root: Path, candidate: Path, packages: list[str]) -> None:
     """Replace temporary paths in text launchers after a non-editable locked install."""
     old = str(staging_root).encode()
     new = str(candidate).encode()
@@ -78,7 +80,7 @@ def relocate_python_environment(environment: Path, staging_root: Path, candidate
         if old not in data or b"\0" in data:
             continue
         path.write_bytes(data.replace(old, new))
-    for name in ("pi-web-reader", "pi-web-docling", "pi-web-crawl"):
+    for name in packages:
         launcher = environment / "bin" / name
         if not launcher.is_file() or not launcher.read_bytes().startswith(f"#!{candidate}/.venv/bin/python".encode()):
             fail(f"Python launcher is not relocatable: {name}")
@@ -89,10 +91,23 @@ def main() -> int:
     parser.add_argument("--source", type=Path, default=Path(__file__).resolve().parent.parent)
     parser.add_argument("--release-root", type=Path)
     parser.add_argument("--test-no-build", action="store_true", help="Copy and validate only. For isolated contract tests.")
+    parser.add_argument("--profile", action="append", choices=PROFILE_IDS, dest="profiles")
     args = parser.parse_args()
 
     source = args.source.resolve(strict=True)
-    lock_files = ["pnpm-lock.yaml", "components/browser/uv.lock", "components/browser/Cargo.lock"]
+    profile = resolve_profiles(source, args.profiles)
+    if not args.test_no_build:
+        required_commands = ["git", "tar", "pnpm", "uv", "node"]
+        if profile["npmPackages"]:
+            required_commands.append("npm")
+        if profile["cargoPackages"]:
+            required_commands.append("cargo")
+        missing_commands = [command for command in required_commands if shutil.which(command) is None]
+        if missing_commands:
+            fail(f"selected profile lacks build commands: {', '.join(missing_commands)}")
+    lock_files = ["pnpm-lock.yaml", "components/browser/uv.lock"]
+    if profile["cargoPackages"]:
+        lock_files.append("components/browser/Cargo.lock")
     if not all((source / path).is_file() for path in lock_files):
         fail("candidate source lacks a required dependency lock file")
     commit = output(["git", "rev-parse", "HEAD"], source)
@@ -138,24 +153,40 @@ def main() -> int:
         })
         commands: list[list[str]] = []
         if not args.test_no_build:
-            commands = [
-                ["pnpm", "install", "--frozen-lockfile", "--ignore-scripts"],
-                ["uv", "sync", "--all-packages", "--frozen", "--no-editable"],
-                [str(temporary / ".venv/bin/python"), "-m", "playwright", "install", "chromium"],
-                ["pnpm", "-r", "--if-present", "build"],
-                ["cargo", "build", "--locked", "--release", "-p", "pi-browserd", "-p", "pi-browser-workspace"],
-            ]
+            pnpm_command = ["pnpm", "install", "--frozen-lockfile", "--ignore-scripts"]
+            for package_filter in profile["nodeFilters"]:
+                pnpm_command.extend(["--filter", package_filter])
+            commands.append(pnpm_command)
+            python_command = ["uv", "sync", "--frozen", "--no-dev", "--no-editable"]
+            for package in profile["pythonPackages"]:
+                python_command.extend(["--package", package])
+            commands.append(python_command)
+            commands.append(["pnpm", "--filter", "@webx/webxd", "build"])
+            if profile["playwrightBrowsers"]:
+                commands.append([str(temporary / ".venv/bin/python"), "-m", "playwright", "install", *profile["playwrightBrowsers"]])
+            if profile["npmPackages"]:
+                commands.append(["npm", "install", "--prefix", str(temporary / ".agent-browser"), *profile["npmPackages"]])
+            if profile["cargoPackages"]:
+                cargo_command = ["cargo", "build", "--locked", "--release"]
+                for package in profile["cargoPackages"]:
+                    cargo_command.extend(["-p", package])
+                commands.append(cargo_command)
             run(commands[0], cwd=temporary, env=env)
             run(commands[1], cwd=temporary / "components/browser", env=env)
-            run(commands[2], cwd=temporary / "components/browser", env=env)
-            run(commands[3], cwd=temporary, env=env)
-            run(commands[4], cwd=temporary / "components/browser", env=env)
-            bin_dir = temporary / "bin"
-            bin_dir.mkdir(mode=0o700)
-            for name in ("pi-browserd", "pi-browser-workspace"):
-                shutil.copy2(isolated / "cargo-target/release" / name, bin_dir / name)
-                os.chmod(bin_dir / name, 0o755)
-            relocate_python_environment(temporary / ".venv", temporary, candidate)
+            run(commands[2], cwd=temporary, env=env)
+            next_command = 3
+            if profile["playwrightBrowsers"]:
+                run(commands[next_command], cwd=temporary / "components/browser", env=env); next_command += 1
+            if profile["npmPackages"]:
+                run(commands[next_command], cwd=temporary, env=env); next_command += 1
+            if profile["cargoPackages"]:
+                run(commands[next_command], cwd=temporary / "components/browser", env=env)
+                bin_dir = temporary / "bin"
+                bin_dir.mkdir(mode=0o700)
+                for name in profile["cargoPackages"]:
+                    shutil.copy2(isolated / "cargo-target/release" / name, bin_dir / name)
+                    os.chmod(bin_dir / name, 0o755)
+            relocate_python_environment(temporary / ".venv", temporary, candidate, profile["pythonPackages"])
         shutil.rmtree(isolated, ignore_errors=True)
         candidate_digest = digest_tree(temporary, {"candidate-manifest.json"})
         manifest = {
@@ -165,6 +196,7 @@ def main() -> int:
             "candidateTreeSha256": candidate_digest,
             "createdUnix": int(time.time()),
             "lockedDependencies": lock_files,
+            "profile": profile,
             "buildCommands": commands,
             "testNoBuild": args.test_no_build,
             "liveChanged": False,

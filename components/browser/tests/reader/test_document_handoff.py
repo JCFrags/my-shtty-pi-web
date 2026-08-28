@@ -62,6 +62,22 @@ def test_staged_document_is_private_and_always_cleaned(
 
 
 @pytest.mark.asyncio
+async def test_documents_are_explicitly_disabled_for_web_core() -> None:
+    fetched = module.FetchResult(
+        url="https://public.example/document.pdf",
+        status=200,
+        media_type="application/pdf",
+        text="",
+        content=short_text_pdf("must stay unavailable"),
+        headers={},
+    )
+    with pytest.raises(RuntimeError, match="explicit documents profile"):
+        await module.ReaderPipeline(documents_enabled=False)._read_document(
+            fetched, module.ReadRequest(url=fetched.url)
+        )
+
+
+@pytest.mark.asyncio
 async def test_valid_short_text_pdf_uses_pdftotext_without_docling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -70,7 +86,11 @@ async def test_valid_short_text_pdf_uses_pdftotext_without_docling(
             raise AssertionError("Docling must not run for a text PDF")
 
     monkeypatch.setattr(module.httpx, "AsyncClient", UnexpectedClient)
-    monkeypatch.setattr(module, "extract_pdf_text", lambda _content: "Dummy PDF file")
+
+    async def extract_pdf_text(_self: Any, _content: bytes) -> str:
+        return "Dummy PDF file"
+
+    monkeypatch.setattr(module.ReaderPipeline, "_extract_pdf_text", extract_pdf_text)
     content = short_text_pdf("Dummy PDF file")
     fetched = module.FetchResult(
         url="https://www.w3.org/dummy.pdf",
@@ -81,7 +101,7 @@ async def test_valid_short_text_pdf_uses_pdftotext_without_docling(
         headers={},
     )
 
-    result = await module.ReaderPipeline()._read_document(
+    result = await module.ReaderPipeline(documents_enabled=True)._read_document(
         fetched, module.ReadRequest(url=fetched.url)
     )
 
@@ -94,11 +114,11 @@ async def test_pdf_without_local_text_escalates_to_docling(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("PI_WEB_DOCUMENT_STAGING_DIR", str(tmp_path / "handoff"))
-    monkeypatch.setattr(
-        module,
-        "extract_pdf_text",
-        lambda _content: (_ for _ in ()).throw(RuntimeError("no local text")),
-    )
+
+    async def no_local_text(_self: Any, _content: bytes) -> str:
+        raise RuntimeError("no local text")
+
+    monkeypatch.setattr(module.ReaderPipeline, "_extract_pdf_text", no_local_text)
     observed: dict[str, Any] = {}
 
     class Response:
@@ -137,7 +157,7 @@ async def test_pdf_without_local_text_escalates_to_docling(
         headers={},
     )
 
-    result = await module.ReaderPipeline()._read_document(
+    result = await module.ReaderPipeline(documents_enabled=True)._read_document(
         fetched, module.ReadRequest(url=fetched.url)
     )
 
@@ -150,11 +170,11 @@ async def test_pdf_fails_cleanly_when_local_text_and_docling_are_unavailable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("PI_WEB_DOCUMENT_STAGING_DIR", str(tmp_path / "handoff"))
-    monkeypatch.setattr(
-        module,
-        "extract_pdf_text",
-        lambda _content: (_ for _ in ()).throw(RuntimeError("no local text")),
-    )
+
+    async def no_local_text(_self: Any, _content: bytes) -> str:
+        raise RuntimeError("no local text")
+
+    monkeypatch.setattr(module.ReaderPipeline, "_extract_pdf_text", no_local_text)
 
     class Client:
         def __init__(self, **_options: Any) -> None:
@@ -180,7 +200,7 @@ async def test_pdf_fails_cleanly_when_local_text_and_docling_are_unavailable(
     )
 
     with pytest.raises(RuntimeError, match="document conversion failed"):
-        await module.ReaderPipeline()._read_document(
+        await module.ReaderPipeline(documents_enabled=True)._read_document(
             fetched, module.ReadRequest(url=fetched.url)
         )
 
@@ -191,13 +211,11 @@ async def test_docling_handoff_uses_file_metadata_and_removes_source(
 ) -> None:
     root = tmp_path / "handoff"
     monkeypatch.setenv("PI_WEB_DOCUMENT_STAGING_DIR", str(root))
-    monkeypatch.setattr(
-        module,
-        "extract_pdf_text",
-        lambda _content: (_ for _ in ()).throw(
-            AssertionError("raw PDF view must use Docling")
-        ),
-    )
+
+    async def unexpected_local_text(_self: Any, _content: bytes) -> str:
+        raise AssertionError("raw PDF view must use Docling")
+
+    monkeypatch.setattr(module.ReaderPipeline, "_extract_pdf_text", unexpected_local_text)
     observed: dict[str, Any] = {}
 
     class Response:
@@ -229,7 +247,7 @@ async def test_docling_handoff_uses_file_metadata_and_removes_source(
             return Response()
 
     monkeypatch.setattr(module.httpx, "AsyncClient", Client)
-    pipeline = module.ReaderPipeline(docling_url="http://127.0.0.1:8792/")
+    pipeline = module.ReaderPipeline(docling_url="http://127.0.0.1:8792/", documents_enabled=True)
     fetched = module.FetchResult(
         url="https://public.example/document.pdf",
         status=200,

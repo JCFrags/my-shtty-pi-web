@@ -12,7 +12,9 @@ From the repository root, run:
 pnpm benchmark:extraction
 ```
 
-The command uses `uv --offline`. It writes `reports/current-run.json`. It returns zero when deterministic quality matches `current-baseline.json`. A reviewed loss can remain in the baseline. Drift or a missing baseline makes the command fail.
+The command uses `uv --offline`. It writes `reports/current-run.json`. It keeps reviewed baseline equality as the production drift check. Drift or a missing baseline makes the command fail.
+
+The command also applies a separate absolute quality gate. `ABSOLUTE_QUALITY_POLICY` in `run.py` names the representative classes. The gate requires all required markers in those classes and at least seven representative extraction passes. A baseline rewrite cannot change this gate or make an ineligible run eligible. The report makes absolute eligibility explicit.
 
 The offline benchmark does not start the Docling service. It does not declare or package the RapidOCR model assets. Office cases are visible environment skips for this reason. Normal PDF cases use the bounded local `pdftotext` path first. Raw PDF view and a PDF with no local text still require Docling. The report does not claim cache-dependent Docling or OCR success.
 
@@ -53,9 +55,15 @@ The report keeps these metrics separate:
 
 Representative fixture requirements come from reviewed fixture semantics. A source heading, code block, table, or link has a nonzero requirement. If current extraction flattens it, the baseline records a visible failure.
 
-## Optional adapters
+## HTML candidate adapters
 
-Environment variables cannot contain commands. They can only name an adapter in the fixed `OPTIONAL_ADAPTERS` module registry in `run.py`. The registry is empty because this repository has no reviewed candidate. Any missing or unknown value is a visible skip. A future reviewed module runs inside the same isolated worker and receives the same limits.
+The corpus always benchmarks current Trafilatura first. It then benchmarks recall-oriented Trafilatura, Defuddle, and Mozilla Readability with Turndown. Each candidate receives the same JSON object with only HTML, URL, view, and query. `ReaderPipeline` starts each extractor through the same bounded worker route. Expected outcomes, paths, markers, structure requirements, allowed loss, and acquisition expectations remain in the parent process.
+
+Defuddle 0.19.3 is MIT. Mozilla Readability 0.6.0 is Apache-2.0. Turndown 7.2.4 is MIT. LinkeDOM 0.18.13 is ISC. These exact development dependency versions and their transitive dependencies are in `pnpm-lock.yaml`. They are not Python reader dependencies and no candidate is in production routing.
+
+The report keeps current production totals in `summary`. It keeps expanded candidate totals in `candidateSummary`. `candidateDecisions` contains one full M7 decision for each candidate. Current rows omit volatile runtime samples. Candidate rows retain runtime and memory evidence for resource review.
+
+The alternate PDF environment variable cannot contain a command. It can only name an adapter in the fixed `OPTIONAL_ADAPTERS` module registry in `run.py`. A missing or unknown value is a visible skip.
 
 ## Add a fixture
 
