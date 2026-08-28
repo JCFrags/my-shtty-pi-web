@@ -80,9 +80,14 @@ def relocate_python_environment(environment: Path, staging_root: Path, candidate
         if old not in data or b"\0" in data:
             continue
         path.write_bytes(data.replace(old, new))
+    allowed_shebangs = {
+        f"#!{candidate}/.venv/bin/python".encode(),
+        f"#!{candidate}/.venv/bin/python3".encode(),
+    }
     for name in packages:
         launcher = environment / "bin" / name
-        if not launcher.is_file() or not launcher.read_bytes().startswith(f"#!{candidate}/.venv/bin/python".encode()):
+        first_line = launcher.read_bytes().splitlines()[0] if launcher.is_file() else b""
+        if first_line not in allowed_shebangs:
             fail(f"Python launcher is not relocatable: {name}")
 
 

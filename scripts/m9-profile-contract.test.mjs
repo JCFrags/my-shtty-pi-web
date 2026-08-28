@@ -50,6 +50,28 @@ test("core staging uses selected package installs and never uv all-packages", as
   assert.match(stage, /profile\["playwrightBrowsers"\]/);
 });
 
+test("stage relocation accepts the uv python3 console launcher", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "webx-m9-python-launcher-"));
+  const staging = join(temporary, "staging");
+  const environment = join(staging, ".venv");
+  const candidate = join(temporary, "candidate");
+  await mkdir(join(environment, "bin"), { recursive: true });
+  const launcher = join(environment, "bin", "pi-web-reader");
+  await writeFile(launcher, `#!${staging}/.venv/bin/python3\nprint('ok')\n`);
+  const code = `
+import importlib.machinery, importlib.util, pathlib, sys
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]).parent))
+loader = importlib.machinery.SourceFileLoader("pi_web_stage", sys.argv[1])
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+module.relocate_python_environment(pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3]), pathlib.Path(sys.argv[4]), ["pi-web-reader"])
+`;
+  const result = spawnSync("python3", ["-c", code, stageCommand, environment, staging, candidate], { cwd: root, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal((await readFile(launcher, "utf8")).split("\n")[0], `#!${candidate}/.venv/bin/python3`);
+});
+
 test("the installer provisions pinned core build tools without optional packages", async () => {
   const installer = await readFile(installerCommand, "utf8");
   assert.match(installer, /pnpm@10\.13\.1/);
