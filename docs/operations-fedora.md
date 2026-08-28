@@ -14,6 +14,8 @@ The command writes one candidate to `~/.local/lib/pi-web-tools-releases/COMMIT`.
 
 Review `candidate-manifest.json`. Confirm the commit and both SHA-256 tree digests. The candidate digest covers file bytes, executable bits, and symbolic-link targets, including locked dependency output.
 
+Treat the candidate as immutable. Smoke tests and installed Python units set `PYTHONDONTWRITEBYTECODE=1` so Python does not add cache files below the candidate. If a later plan reports a digest mismatch, do not weaken the check or delete unknown files. Stage a new candidate from a clean reviewed commit.
+
 ## 2. Run the deterministic gate
 
 ```bash
@@ -63,11 +65,13 @@ The plan lists every replaced path and service unit. Core `webxd` has only soft 
 
 The tool writes a private journal below `${XDG_STATE_HOME:-~/.local/state}/pi-web/cutovers/RUN_ID`. Before replacement, it records the exact prior file bytes, file modes, symbolic-link targets, missing paths, and active and enabled state for all managed units. It moves a compatible legacy install directory to the private journal backup instead of deleting it. It then stops managed units, uses atomic file or link replacement where the filesystem permits it, reloads user units, and restores the prior service state. Signal traps and error handling restore the saved paths and service state after an interrupted or failed apply.
 
+Unit-file state is not always `enabled` or `disabled`. For example, the Podman-generated SearXNG unit reports `generated`. Restore logic preserves this state, skips invalid enable or disable commands for generated or static units, attempts every prior active-state restoration, and reports all restoration failures together.
+
 The cutover does not delete cache, stored content, audit events, exports, or old releases.
 
 ## 6. Verify and roll back
 
-Start a new Pi session or use `/reload` after the owner reviews the cutover result.
+Start a new Pi session or use `/reload` after the owner reviews the cutover result. The `pi-web` launcher uses the stable installation symbolic link. `pi-web doctor --json` must print JSON and exit successfully. An empty successful-looking response is a failed check.
 
 ```bash
 pi-web status
@@ -83,3 +87,27 @@ pi-web doctor --json
 ```
 
 Rollback restores the recorded paths and service state. It does not uninstall Pi Web Tools. It does not delete historical data. Use `uninstall-fedora.sh` only when you intend to remove the installed code and service registration.
+
+## 7. Verify optional-worker isolation
+
+Record the current state before this test. Stop `pi-browserd.service`, `pi-web-crawl.service`, `pi-web-docling.service`, and `pi-web-egress-proxy.service` under a shell exit trap that restores the prior state. Leave `webxd.service`, `pi-web-reader.service`, and `pi-web-searxng.service` running.
+
+While the optional units are stopped:
+
+- `pi-web doctor --json` must report overall success, healthy search and read checks, and an optional browser failure;
+- run one strict-domain search, one static read, one stored-content continuation, and one batch read;
+- confirm one browser operation fails without stopping a later static read.
+
+Restore the exact prior optional-unit state before you leave the shell. Confirm all previously active units are active again. Do not use a blanket restart if one of the units was inactive before the test.
+
+## 8. Accepted installation from 2026-08-28
+
+The accepted code candidate is `99335f10aa6ba3c4a1a914a9582497cc247d3707`. Its tree SHA-256 is `7ea995dfe5eef4303066c3e290309b9df46de16173bbaa0c1b1702fd842b3f9a`. The applied journal is `cutover-1787908439-99335f10aa6b`. If this installation must be restored before a later accepted cutover replaces it, run:
+
+```bash
+cd /home/mainpc/Projects/webx
+./install-fedora.sh --cutover-rollback cutover-1787908439-99335f10aa6b
+pi-web doctor --json
+```
+
+This command is rollback for that applied journal. It is not uninstall. Keep the journal directory and candidate release until a later accepted installation has its own tested rollback.
