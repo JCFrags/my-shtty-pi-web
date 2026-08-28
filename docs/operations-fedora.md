@@ -88,7 +88,7 @@ If verification fails, use the exact run ID from the apply result:
 pi-web doctor --json
 ```
 
-Rollback restores the recorded paths and service state. It does not uninstall Pi Web Tools. It does not delete historical data. Use `uninstall-fedora.sh` only when you intend to remove the installed code and service registration.
+Rollback restores the recorded paths and service state. It stops only units that are active in the current profile before it restores paths. This permits rollback from a reduced profile when optional unit files are absent. Failure to stop an active unit still blocks all path restoration. Rollback does not uninstall Pi Web Tools or delete historical data. Use `uninstall-fedora.sh` only when you intend to remove the installed code and service registration.
 
 ## 7. Verify optional-worker isolation
 
@@ -104,12 +104,12 @@ Restore the exact prior optional-unit state before you leave the shell. Confirm 
 
 ## 8. Accepted installation from 2026-08-28
 
-The accepted code candidate is `401f4488f9303b754d02c38132ca5f45a19f6fa8`. Its tree SHA-256 is `e8b8d54153ca996abfa4e74ac5d1b81dd66c598b7f78310eebf227d4e7ae1a72`. The applied journal is `cutover-1787910337-401f4488f930`. If this installation must be restored before a later accepted cutover replaces it, run:
+The accepted `web-core` candidate is `7f986081b4e8a03729620777248ba1484c9bc4d7`. Its tree SHA-256 is `63e7d2493b86df33539fa34a3f754a59e8388c75b5bb67689065c40c079686e6`. The applied journal is `cutover-1787960108-7f986081b4e8`. To restore the prior full-profile installation, run:
 
 ```bash
 cd /home/mainpc/Projects/webx
-./install-fedora.sh --cutover-rollback cutover-1787910337-401f4488f930
+./install-fedora.sh --cutover-rollback cutover-1787960108-7f986081b4e8
 pi-web doctor --json
 ```
 
-This command is rollback for that applied journal. It is not uninstall. Keep the journal directory and candidate release until a later accepted installation has its own tested rollback.
+The rollback rehearsal restored prior candidate `401f4488f9303b754d02c38132ca5f45a19f6fa8` and all seven prior active services. The final `web-core` apply then restored the three required core services and left the four optional services inactive. This command is rollback, not uninstall. Keep both candidate releases and the final journal until a later accepted installation has its own tested rollback.
