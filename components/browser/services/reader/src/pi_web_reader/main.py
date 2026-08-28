@@ -10,6 +10,7 @@ from .pipeline import (
     RangeReadRequest,
     ReaderPipeline,
     ReadRequest,
+    assert_runtime_compatibility,
 )
 
 try:
@@ -77,6 +78,7 @@ def _pipeline() -> ReaderPipeline:
     )
 
 
+assert_runtime_compatibility()
 pipeline = _pipeline()
 app = FastAPI(title="Pi Web Reader", version="0.1.0")
 

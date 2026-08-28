@@ -8,10 +8,12 @@ import ipaddress
 import json
 import os
 import re
+import signal
 import socket
 import stat
-import subprocess
+import sys
 import tempfile
+from importlib import metadata as importlib_metadata
 from collections.abc import Awaitable, Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -57,6 +59,14 @@ MAX_MAX_DECOMPRESSED_BYTES = 512 * 1024 * 1024
 DEFAULT_MAX_REDIRECTS = 5
 DEFAULT_ACQUISITION_CONCURRENCY = 8
 MAX_ACQUISITION_CONCURRENCY = 32
+DEFAULT_WORKER_CONCURRENCY = 2
+MAX_WORKER_CONCURRENCY = 8
+DEFAULT_WORKER_TIMEOUT_SECONDS = 20.0
+MAX_WORKER_TIMEOUT_SECONDS = 60.0
+MAX_WORKER_OUTPUT_BYTES = 16 * 1024 * 1024
+PINNED_HTTPX_VERSION = "0.28.1"
+PINNED_HTTPCORE_VERSION = "1.0.9"
+HTML_WORKER_PATH = Path(__file__).with_name("worker.py")
 
 Resolver = Callable[[str, int], Awaitable[list[str]]]
 
@@ -203,6 +213,8 @@ class ReaderPipeline:
         max_raw_bytes: int | None = None,
         max_redirects: int | None = None,
         acquisition_concurrency: int | None = None,
+        worker_concurrency: int | None = None,
+        worker_timeout_seconds: float | None = None,
         docling_url: str | None = None,
         user_agent: str = "Pi-Web-Reader/0.1 (+local self-hosted reader)",
         resolver: Resolver | None = None,
@@ -246,6 +258,21 @@ class ReaderPipeline:
             name="acquisition concurrency",
         )
         self._acquisition_slots = asyncio.Semaphore(concurrency)
+        worker_count = bounded_integer(
+            worker_concurrency,
+            os.getenv("PI_WEB_READER_WORKER_CONCURRENCY"),
+            default=DEFAULT_WORKER_CONCURRENCY,
+            maximum=MAX_WORKER_CONCURRENCY,
+            name="worker concurrency",
+        )
+        self.worker_timeout_seconds = bounded_number(
+            worker_timeout_seconds,
+            os.getenv("PI_WEB_READER_WORKER_TIMEOUT_SECONDS"),
+            default=DEFAULT_WORKER_TIMEOUT_SECONDS,
+            maximum=MAX_WORKER_TIMEOUT_SECONDS,
+            name="worker timeout",
+        )
+        self._worker_slots = asyncio.Semaphore(worker_count)
         self.docling_url = docling_url or os.getenv("PI_WEB_DOCLING_URL", "http://127.0.0.1:8792/")
         self.user_agent = user_agent
         self.resolver = resolver or resolve_public_addresses
@@ -258,8 +285,8 @@ class ReaderPipeline:
         return validate_public_addresses(host, addresses)
 
     async def read_range(self, request: RangeReadRequest) -> RangeReadResult:
-        async with self._acquisition_slots:
-            async with asyncio.timeout(self.timeout_seconds):
+        async with asyncio.timeout(self.timeout_seconds):
+            async with self._acquisition_slots:
                 return await self._read_range(request)
 
     async def _read_range(self, request: RangeReadRequest) -> RangeReadResult:
@@ -342,8 +369,8 @@ class ReaderPipeline:
         raise ValueError("too many redirects")
 
     async def read(self, request: ReadRequest) -> ReadResult:
-        async with self._acquisition_slots:
-            async with asyncio.timeout(self.timeout_seconds):
+        async with asyncio.timeout(self.timeout_seconds):
+            async with self._acquisition_slots:
                 return await self._read(request)
 
     async def _read(self, request: ReadRequest) -> ReadResult:
@@ -371,7 +398,7 @@ class ReaderPipeline:
                 return finalize_text_result(fetched, fetched.text, request, "markdown-fallback")
 
         # 4. Preserve the requested page when static extraction yields useful content.
-        extracted, title, extraction_meta = extract_html(original.text, request)
+        extracted, title, extraction_meta = await self._extract_html(original.text, request)
         if useful_text(extracted) and not looks_like_javascript_shell(original.text, extracted):
             focused = select_query_context(extracted, request.query) if request.query else extracted
             result = finalize_text_result(original, focused, request, "trafilatura", title=title)
@@ -411,9 +438,9 @@ class ReaderPipeline:
         converter = "docling"
         if fetched.media_type == "application/pdf" and request.view != "raw":
             try:
-                markdown = await asyncio.to_thread(extract_pdf_text, fetched.content)
+                markdown = await self._extract_pdf_text(fetched.content)
                 converter = "pdftotext"
-            except (OSError, RuntimeError, subprocess.SubprocessError):
+            except (OSError, RuntimeError):
                 pass
         if converter == "docling":
             if httpx is None:
@@ -459,6 +486,47 @@ class ReaderPipeline:
             }
         )
         return result
+
+    async def _extract_pdf_text(self, content: bytes) -> str:
+        output = await self._run_worker_process(
+            ("pdftotext", "-layout", "-", "-"),
+            content,
+            output_limit=MAX_WORKER_OUTPUT_BYTES,
+        )
+        text = output.decode("utf-8", errors="replace")
+        if not any(character.isalnum() for character in text):
+            raise RuntimeError("PDF extraction returned no text")
+        return text
+
+    async def _extract_html(
+        self, document: str, request: ReadRequest
+    ) -> tuple[str, str, dict[str, Any]]:
+        output = await self._run_worker_process(
+            (sys.executable, str(HTML_WORKER_PATH), request.view),
+            document.encode("utf-8"),
+            output_limit=MAX_WORKER_OUTPUT_BYTES,
+        )
+        try:
+            payload = json.loads(output)
+            extracted = str(payload["content"])
+            title = str(payload["title"])
+            extraction_meta = dict(payload["metadata"])
+        except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            raise RuntimeError("HTML extraction worker returned invalid output") from None
+        if request.query:
+            extracted = select_query_context(extracted, request.query)
+        return extracted, title, extraction_meta
+
+    async def _run_worker_process(
+        self,
+        command: tuple[str, ...],
+        input_bytes: bytes,
+        *,
+        output_limit: int,
+    ) -> bytes:
+        async with asyncio.timeout(self.worker_timeout_seconds):
+            async with self._worker_slots:
+                return await run_bounded_process(command, input_bytes, output_limit=output_limit)
 
     async def _try_fetch(self, url: str, *, accept: str) -> FetchResult | None:
         try:
@@ -522,26 +590,57 @@ class ReaderPipeline:
         raise ValueError("too many redirects")
 
 
-def extract_pdf_text(content: bytes) -> str:
-    """Extract PDF text with the bounded local Poppler utility."""
-    with tempfile.TemporaryDirectory(prefix="pi-web-pdf-") as directory:
-        source = os.path.join(directory, "input.pdf")
-        output = os.path.join(directory, "output.txt")
-        with open(source, "wb") as handle:
-            handle.write(content)
-        completed = subprocess.run(
-            ["pdftotext", "-layout", source, output],
-            check=False,
-            capture_output=True,
-            timeout=60,
-        )
-        if completed.returncode != 0:
-            raise RuntimeError("PDF extraction failed")
-        with open(output, encoding="utf-8", errors="replace") as handle:
-            text = handle.read()
-    if not any(character.isalnum() for character in text):
-        raise RuntimeError("PDF extraction returned no text")
-    return text
+async def run_bounded_process(
+    command: tuple[str, ...], input_bytes: bytes, *, output_limit: int
+) -> bytes:
+    """Run one worker with bounded output and guaranteed cancellation cleanup."""
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    assert process.stdin is not None and process.stdout is not None
+
+    async def write_input() -> None:
+        process.stdin.write(input_bytes)
+        await process.stdin.drain()
+        process.stdin.close()
+        await process.stdin.wait_closed()
+
+    async def read_output() -> bytes:
+        chunks: list[bytes] = []
+        size = 0
+        while chunk := await process.stdout.read(65_536):
+            size += len(chunk)
+            if size > output_limit:
+                raise RuntimeError(f"worker output exceeds {output_limit} bytes")
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+    input_task = asyncio.create_task(write_input())
+    output_task = asyncio.create_task(read_output())
+    try:
+        output = await output_task
+        await input_task
+        returncode = await process.wait()
+        if returncode != 0:
+            raise RuntimeError("reader worker failed")
+        return output
+    except BaseException:
+        input_task.cancel()
+        output_task.cancel()
+        if process.returncode is None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except OSError:
+                process.kill()
+        await asyncio.gather(input_task, output_task, return_exceptions=True)
+        await process.wait()
+        raise
 
 
 def validate_range_request(request: RangeReadRequest) -> None:
@@ -785,13 +884,47 @@ class PinnedNetworkBackend(AutoBackend):
         )
 
 
+def assert_runtime_compatibility(
+    version_getter: Callable[[str], str] = importlib_metadata.version,
+) -> None:
+    """Fail startup when the pinned private HTTP hooks are not compatible."""
+    if httpx is None or httpcore is None:
+        raise RuntimeError("httpx and httpcore are required for public fetch")
+    expected = {"httpx": PINNED_HTTPX_VERSION, "httpcore": PINNED_HTTPCORE_VERSION}
+    for package, required in expected.items():
+        try:
+            installed = version_getter(package)
+        except importlib_metadata.PackageNotFoundError as error:
+            raise RuntimeError(f"required reader package is missing: {package}") from error
+        if installed != required:
+            raise RuntimeError(
+                f"incompatible {package} version {installed}; reader requires {required}"
+            )
+
+    transport = httpx.AsyncHTTPTransport(retries=0, trust_env=False)
+    pool = getattr(transport, "_pool", None)
+    if pool is None or not hasattr(pool, "_network_backend"):
+        raise RuntimeError("HTTPX transport does not expose the required DNS-pinning hook")
+    decoder_factory = getattr(httpx.Response, "_get_content_decoder", None)
+    if not callable(decoder_factory):
+        raise RuntimeError("HTTPX response does not expose the required decompression hook")
+    decoder = httpx.Response(200, headers={"content-encoding": "gzip"})._get_content_decoder()
+    if not callable(getattr(decoder, "decode", None)) or not callable(
+        getattr(decoder, "flush", None)
+    ):
+        raise RuntimeError("HTTPX decompression hook has an incompatible decoder contract")
+
+
 def pinned_transport(pins: dict[str, str]):
     if httpx is None or httpcore is None:
         raise RuntimeError("httpx and httpcore are required for public fetch")
     transport = httpx.AsyncHTTPTransport(retries=0, trust_env=False)
+    pool = getattr(transport, "_pool", None)
+    if pool is None or not hasattr(pool, "_network_backend"):
+        raise RuntimeError("HTTPX transport does not expose the required DNS-pinning hook")
     # HTTPX does not expose the network backend in its public constructor. The
     # pinned backend is installed into its owned pool before the first request.
-    transport._pool._network_backend = PinnedNetworkBackend(pins)  # type: ignore[attr-defined]
+    pool._network_backend = PinnedNetworkBackend(pins)
     return transport
 
 
