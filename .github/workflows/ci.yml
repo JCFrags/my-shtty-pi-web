@@ -52,6 +52,8 @@ jobs:
           cache-dependency-glob: components/browser/uv.lock
       - run: corepack enable
       - run: corepack prepare pnpm@10.13.1 --activate
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
+      - run: pnpm install --frozen-lockfile
       - run: uv python install 3.13
         working-directory: components/browser
       - run: uv sync --all-packages --locked
