@@ -81,11 +81,15 @@ def restore_path(path: Path, value: dict[str, Any]) -> None:
             fail(f"directory backup is missing: {backup}")
         remove_managed(path)
         os.replace(backup, path)
+        fsync_directory(path.parent)
+        if backup.parent != path.parent:
+            fsync_directory(backup.parent)
         return
     temporary = path.parent / f".{path.name}.m7-{os.getpid()}"
     remove_managed(temporary)
     if kind == "missing":
         remove_managed(path)
+        fsync_directory(path.parent)
         return
     if kind == "symlink":
         os.symlink(value["target"], temporary)
@@ -95,6 +99,7 @@ def restore_path(path: Path, value: dict[str, Any]) -> None:
     else:
         fail("journal contains an invalid path kind")
     os.replace(temporary, path)
+    fsync_directory(path.parent)
 
 
 def install_path(path: Path, value: dict[str, Any], before: dict[str, Any]) -> None:
@@ -105,14 +110,28 @@ def install_path(path: Path, value: dict[str, Any], before: dict[str, Any]) -> N
         if backup.exists():
             fail(f"directory backup already exists: {backup}")
         os.replace(path, backup)
+        fsync_directory(path.parent)
+        fsync_directory(backup.parent)
     restore_path(path, value)
+
+
+def fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def write_json(path: Path, value: dict[str, Any]) -> None:
     temporary = path.parent / f".{path.name}.tmp-{os.getpid()}"
-    temporary.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    with temporary.open("w", encoding="utf-8") as stream:
+        stream.write(json.dumps(value, sort_keys=True, indent=2) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
     os.chmod(temporary, 0o600)
     os.replace(temporary, path)
+    fsync_directory(path.parent)
 
 
 def run_systemctl(command: str, args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -128,9 +147,9 @@ def service_state(command: str) -> dict[str, dict[str, bool]]:
 
 def restore_services(command: str, state: dict[str, dict[str, bool]]) -> None:
     for unit in UNITS:
-        run_systemctl(command, ["enable" if state[unit]["enabled"] else "disable", unit], check=state[unit]["enabled"])
+        run_systemctl(command, ["enable" if state[unit]["enabled"] else "disable", unit])
     for unit in UNITS:
-        run_systemctl(command, ["start" if state[unit]["active"] else "stop", unit], check=state[unit]["active"])
+        run_systemctl(command, ["start" if state[unit]["active"] else "stop", unit])
 
 
 def generated(prefix: Path, config: Path, candidate: Path) -> dict[Path, dict[str, Any]]:
@@ -210,20 +229,29 @@ def main() -> int:
             fail("rollback run ID is invalid")
         journal_path = state_root / args.rollback / "journal.json"
         journal = json.loads(journal_path.read_text(encoding="utf-8"))
-        if journal.get("status") not in ("applied", "apply-failed"):
+        if journal.get("status") == "rolled-back":
+            print(json.dumps({"ok": True, "mode": "rollback", "runId": args.rollback, "historicalDataDeleted": False, "alreadyRolledBack": True}, sort_keys=True))
+            return 0
+        if journal.get("status") not in ("prepared", "applied", "apply-failed", "rollback-failed"):
             fail("cutover journal is not rollback eligible")
         if journal.get("testMode"):
             test_safety([Path(raw) for raw in journal["before"]], args.systemctl)
         install_signal_traps()
         current_state = service_state(args.systemctl)
         try:
-            run_systemctl(args.systemctl, ["stop", *UNITS], check=False)
+            run_systemctl(args.systemctl, ["stop", *UNITS])
+            affected = set(journal.get("completedPaths", []))
+            if journal.get("inProgressPath"):
+                affected.add(journal["inProgressPath"])
             for raw, value in journal["before"].items():
-                restore_path(Path(raw), value)
+                if raw in affected:
+                    restore_path(Path(raw), value)
             run_systemctl(args.systemctl, ["daemon-reload"])
             restore_services(args.systemctl, journal["servicesBefore"])
             journal["status"] = "rolled-back"; journal["rolledBackUnix"] = int(time.time())
+            journal["inProgressPath"] = None
         except BaseException:
+            journal["status"] = "rollback-failed"
             restore_services(args.systemctl, current_state)
             raise
         finally:
@@ -250,23 +278,42 @@ def main() -> int:
     run_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
     before = {str(path): snapshot(path, run_dir / "directory-backups" / hashlib.sha256(str(path).encode()).hexdigest()) for path in desired}
     states = service_state(args.systemctl)
-    journal: dict[str, Any] = {**plan, "status": "prepared", "before": before, "servicesBefore": states, "createdUnix": int(time.time()), "testMode": args.test_mode}
+    journal: dict[str, Any] = {**plan, "status": "prepared", "before": before, "servicesBefore": states, "completedPaths": [], "inProgressPath": None, "createdUnix": int(time.time()), "testMode": args.test_mode}
     journal_path = run_dir / "journal.json"; write_json(journal_path, journal)
     install_signal_traps()
     try:
-        run_systemctl(args.systemctl, ["stop", *UNITS], check=False)
+        # No managed path can change until the aggregate stop succeeds.
+        run_systemctl(args.systemctl, ["stop", *UNITS])
+        journal["servicesStoppedUnix"] = int(time.time())
+        write_json(journal_path, journal)
         for path, value in desired.items():
-            install_path(path, value, before[str(path)])
+            raw = str(path)
+            journal["inProgressPath"] = raw
+            write_json(journal_path, journal)
+            install_path(path, value, before[raw])
+            journal["completedPaths"].append(raw)
+            journal["inProgressPath"] = None
+            write_json(journal_path, journal)
+            if args.test_mode and os.environ.get("PI_WEB_CUTOVER_TEST_KILL_AFTER_REPLACEMENT") == str(len(journal["completedPaths"])):
+                os.kill(os.getpid(), signal.SIGKILL)
         run_systemctl(args.systemctl, ["daemon-reload"])
         restore_services(args.systemctl, states)
         journal["status"] = "applied"; journal["appliedUnix"] = int(time.time())
     except BaseException:
         journal["status"] = "apply-failed"
+        affected = set(journal["completedPaths"])
+        if journal.get("inProgressPath"):
+            affected.add(journal["inProgressPath"])
+        unrestored: list[str] = []
         for raw, value in before.items():
+            if raw not in affected:
+                continue
             try:
                 restore_path(Path(raw), value)
             except (OSError, RuntimeError, ValueError):
-                pass
+                unrestored.append(raw)
+        journal["completedPaths"] = unrestored
+        journal["inProgressPath"] = None
         run_systemctl(args.systemctl, ["daemon-reload"], check=False)
         restore_services(args.systemctl, states)
         raise

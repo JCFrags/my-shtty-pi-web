@@ -10,10 +10,22 @@ const stageScript = join(root, "scripts/pi-web-stage");
 const cutoverScript = join(root, "scripts/pi-web-cutover");
 const smokeScript = join(root, "scripts/pi-web-smoke.ts");
 
+function runResult(command, args, env) {
+  return spawnSync(command, args, { cwd: root, env: { ...process.env, ...env }, encoding: "utf8" });
+}
+
 function run(command, args, env) {
-  const result = spawnSync(command, args, { cwd: root, env: { ...process.env, ...env }, encoding: "utf8" });
+  const result = runResult(command, args, env);
   assert.equal(result.status, 0, `${command}: ${result.stderr || result.stdout}`);
   return result.stdout;
+}
+
+async function fakeSystemctl(temporary, body = "exit 0") {
+  const fake = join(temporary, "systemctl");
+  const log = join(temporary, "systemctl.log");
+  await writeFile(fake, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${log}"\ncase "$*" in *is-active*|*is-enabled*) exit 0;; esac\n${body}\n`);
+  await chmod(fake, 0o755);
+  return { fake, log };
 }
 
 test("stage is versioned and isolated from live paths", async () => {
@@ -36,7 +48,12 @@ test("smoke contract has unique candidate paths, finite ports, and evidence boun
   assert.match(smoke, /MAX_VISIBLE_CHARS = 40_000/);
   assert.match(smoke, /REQUEST_MS = 45_000/);
   assert.match(smoke, /TOTAL_MS = 180_000/);
-  assert.match(smoke, /maxConcurrency <= 3/);
+  assert.match(smoke, /length: 5/);
+  assert.match(smoke, /peakFixtureRequests <= 3 && peakFixtureRequests > 1/);
+  assert.match(smoke, /PI_WEB_SMOKE_TEST_COLLIDE_READER_ONCE/);
+  assert.match(smoke, /attempt <= 5/);
+  assert.match(smoke, /cgroupIsolation: "unproven"/);
+  assert.match(smoke, /deterministic-high-water-before-cleanup/);
   assert.match(smoke, /fixtureNonLoopback === 0/);
   assert.match(smoke, /web\.readBatch/);
   assert.match(smoke, /web\.content/);
@@ -49,8 +66,7 @@ test("cutover plan, apply, and rollback stay inside isolated HOME and restore by
   const releases = join(temporary, "releases"); await mkdir(home);
   const staged = JSON.parse(run(stageScript, ["--source", root, "--release-root", releases, "--test-no-build"], { HOME: home }));
   const evidence = join(temporary, "evidence.json"); await writeFile(evidence, JSON.stringify({ ok: true, mode: "deterministic" }));
-  const fake = join(temporary, "systemctl"); const log = join(temporary, "systemctl.log");
-  await writeFile(fake, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${log}"\ncase "$*" in *is-active*|*is-enabled*) exit 0;; esac\nexit 0\n`); await chmod(fake, 0o755);
+  const { fake, log } = await fakeSystemctl(temporary);
   const env = { HOME: home, PI_WEB_PREFIX: prefix, XDG_CONFIG_HOME: config, XDG_STATE_HOME: state };
   const plan = JSON.parse(run(cutoverScript, ["--plan", "--candidate", staged.candidate, "--evidence", evidence, "--test-mode", "--run-id", "contract-run"], env));
   assert.equal(plan.coreIndependentFromOptionalWorkers, true);
@@ -68,6 +84,48 @@ test("cutover plan, apply, and rollback stay inside isolated HOME and restore by
   assert.equal((await lstat(oldInstall)).isDirectory(), true);
   assert.equal(await readFile(join(oldInstall, "legacy-marker"), "utf8"), "exact old bytes\n");
   assert.match(await readFile(log, "utf8"), /daemon-reload/);
+});
+
+test("failed aggregate stop changes no path and restores service state", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "webx-m7-stop-failure-"));
+  const home = join(temporary, "home"); const prefix = join(home, ".local"); const state = join(home, ".state");
+  await mkdir(home);
+  const staged = JSON.parse(run(stageScript, ["--source", root, "--release-root", join(temporary, "releases"), "--test-no-build"], { HOME: home }));
+  const evidence = join(temporary, "evidence.json"); await writeFile(evidence, JSON.stringify({ ok: true, mode: "deterministic" }));
+  const oldInstall = join(prefix, "lib/pi-web-tools"); await mkdir(oldInstall, { recursive: true }); await writeFile(join(oldInstall, "marker"), "unchanged bytes\n");
+  const { fake, log } = await fakeSystemctl(temporary, `if [[ "$*" == "--user stop webxd.service pi-web-reader.service pi-web-searxng.service pi-browserd.service pi-web-crawl.service pi-web-docling.service pi-web-egress-proxy.service" ]]; then exit 9; fi\nexit 0`);
+  const env = { HOME: home, PI_WEB_PREFIX: prefix, XDG_CONFIG_HOME: join(home, ".config"), XDG_STATE_HOME: state };
+  const result = runResult(cutoverScript, ["--apply", "--candidate", staged.candidate, "--evidence", evidence, "--test-mode", "--run-id", "stop-failure", "--systemctl", fake], env);
+  assert.notEqual(result.status, 0);
+  assert.equal((await lstat(oldInstall)).isDirectory(), true);
+  assert.equal(await readFile(join(oldInstall, "marker"), "utf8"), "unchanged bytes\n");
+  const journal = JSON.parse(await readFile(join(state, "pi-web/cutovers/stop-failure/journal.json"), "utf8"));
+  assert.equal(journal.status, "apply-failed");
+  assert.deepEqual(journal.completedPaths, []);
+  assert.match(await readFile(log, "utf8"), /--user start webxd\.service/);
+});
+
+test("prepared interruption rolls back exact bytes and retry is idempotent", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "webx-m7-prepared-"));
+  const home = join(temporary, "home"); const prefix = join(home, ".local"); const state = join(home, ".state");
+  await mkdir(home);
+  const staged = JSON.parse(run(stageScript, ["--source", root, "--release-root", join(temporary, "releases"), "--test-no-build"], { HOME: home }));
+  const evidence = join(temporary, "evidence.json"); await writeFile(evidence, JSON.stringify({ ok: true, mode: "deterministic" }));
+  const oldInstall = join(prefix, "lib/pi-web-tools"); await mkdir(oldInstall, { recursive: true });
+  const original = Buffer.from([0, 255, 13, 10, 65, 0, 90]); await writeFile(join(oldInstall, "marker.bin"), original);
+  const { fake } = await fakeSystemctl(temporary);
+  const env = { HOME: home, PI_WEB_PREFIX: prefix, XDG_CONFIG_HOME: join(home, ".config"), XDG_STATE_HOME: state, PI_WEB_CUTOVER_TEST_KILL_AFTER_REPLACEMENT: "1" };
+  const killed = runResult(cutoverScript, ["--apply", "--candidate", staged.candidate, "--evidence", evidence, "--test-mode", "--run-id", "prepared-kill", "--systemctl", fake], env);
+  assert.equal(killed.signal, "SIGKILL");
+  const journalPath = join(state, "pi-web/cutovers/prepared-kill/journal.json");
+  const prepared = JSON.parse(await readFile(journalPath, "utf8"));
+  assert.equal(prepared.status, "prepared");
+  assert.deepEqual(prepared.completedPaths, [oldInstall]);
+  run(cutoverScript, ["--rollback", "prepared-kill", "--systemctl", fake], env);
+  assert.deepEqual(await readFile(join(oldInstall, "marker.bin")), original);
+  const second = JSON.parse(run(cutoverScript, ["--rollback", "prepared-kill", "--systemctl", fake], env));
+  assert.equal(second.alreadyRolledBack, true);
+  assert.deepEqual(await readFile(join(oldInstall, "marker.bin")), original);
 });
 
 test("cutover refuses traversal-shaped rollback IDs", () => {

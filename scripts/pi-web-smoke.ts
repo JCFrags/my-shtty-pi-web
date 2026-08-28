@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { createServer as createNetServer } from "node:net";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { join, resolve } from "node:path";
@@ -34,8 +33,11 @@ const checks: Array<Record<string, unknown>> = [];
 const journal: Array<Record<string, unknown>> = [];
 let fixtureRequests = 0;
 let fixtureNonLoopback = 0;
+let activeFixtureRequests = 0;
+let peakFixtureRequests = 0;
 let fixture: ReturnType<typeof createServer> | undefined;
-const resourceSnapshot: Array<Record<string, unknown>> = [];
+const resourceHighWater = new Map<number, { rssBytes: number; peakRssBytes: number; tasks: number; measuredUnixMs: number }>();
+const storageSnapshots: Array<Record<string, unknown>> = [];
 const started = Date.now();
 const totalDeadline = setTimeout(() => {
   journal.push({ event: "total-timeout", elapsedMs: Date.now() - started });
@@ -49,15 +51,34 @@ function record(name: string, ok: boolean, details: Record<string, unknown> = {}
 }
 function deadlineSignal() { return AbortSignal.timeout(REQUEST_MS); }
 function options(ownerId: string, key: string) { return { ownerId, cwd: candidate, idempotencyKey: `${runId}-${key}`, signal: deadlineSignal() }; }
-async function freePort(): Promise<number> {
-  const server = createNetServer();
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const address = server.address();
-  assert(address && typeof address !== "string");
-  const port = address.port;
-  await new Promise<void>((done, reject) => server.close((error) => error ? reject(error) : done()));
-  return port;
+async function startReader(common: NodeJS.ProcessEnv, extra: NodeJS.ProcessEnv = {}): Promise<{ child: ChildProcess; port: number }> {
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const reservation = createServer();
+    reservation.listen(0, "127.0.0.1");
+    await once(reservation, "listening");
+    const address = reservation.address();
+    assert(address && typeof address !== "string");
+    const port = address.port;
+    await new Promise<void>((done, reject) => reservation.close((error) => error ? reject(error) : done()));
+    let collision: ReturnType<typeof createServer> | undefined;
+    if (attempt === 1 && process.env.PI_WEB_SMOKE_TEST_COLLIDE_READER_ONCE === "1") {
+      collision = createServer(); collision.listen(port, "127.0.0.1"); await once(collision, "listening");
+    }
+    const child = launch(join(candidate, ".venv/bin/pi-web-reader"), [], { ...common, ...extra, PI_WEB_READER_PORT: String(port), PI_WEB_READER_HOST: "127.0.0.1" });
+    try {
+      await waitFor(`http://127.0.0.1:${port}/health`, child);
+      if (collision?.listening) await new Promise<void>((done) => collision?.close(() => done()));
+      return { child, port };
+    } catch (error) {
+      if (collision?.listening) await new Promise<void>((done) => collision?.close(() => done()));
+      if (child.exitCode === null) child.kill("SIGTERM");
+      const stderr = (child as ChildProcess & { capturedStderr?: string }).capturedStderr ?? "";
+      const addressCollision = /EADDRINUSE|address already in use|Errno 98/iu.test(stderr);
+      if (!addressCollision || attempt === 5) throw error;
+      journal.push({ event: "loopback-port-collision-retry", attempt });
+    }
+  }
+  throw new Error("reader port allocation retries exhausted");
 }
 async function waitFor(url: string, child: ChildProcess) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -69,8 +90,9 @@ async function waitFor(url: string, child: ChildProcess) {
 }
 function launch(command: string, commandArgs: string[], env: NodeJS.ProcessEnv): ChildProcess {
   const child = spawn(command, commandArgs, { cwd: candidate, env, stdio: ["ignore", "ignore", "pipe"] });
-  let stderrBytes = 0;
-  child.stderr?.on("data", (chunk) => { stderrBytes += chunk.length; });
+  let stderrBytes = 0; let capturedStderr = "";
+  const diagnosticChild = child as ChildProcess & { capturedStderr?: string }; diagnosticChild.capturedStderr = "";
+  child.stderr?.on("data", (chunk) => { stderrBytes += chunk.length; if (capturedStderr.length < 4096) capturedStderr += chunk.toString("utf8").slice(0, 4096 - capturedStderr.length); diagnosticChild.capturedStderr = capturedStderr; });
   child.on("exit", () => journal.push({ event: "exit", pid: child.pid, stderrBytes }));
   children.push(child);
   journal.push({ event: "start", command: command.split("/").pop(), pid: child.pid });
@@ -85,32 +107,49 @@ async function directoryMeasure(path: string) {
   async function walk(root: string) { for (const name of await readdir(root).catch(() => [])) { const item = join(root, name); const info = await stat(item); if (info.isDirectory()) await walk(item); else { files += 1; bytes += info.size; } } }
   await walk(path); return { files, bytes };
 }
-async function resources() {
-  const result: Array<Record<string, unknown>> = [];
-  for (const child of children) {
-    if (!child.pid) continue;
-    const status = await readFile(`/proc/${child.pid}/status`, "utf8").catch(() => "");
-    const rss = Number(status.match(/^VmRSS:\s+(\d+)/mu)?.[1] ?? 0) * 1024;
-    const cgroup = (await readFile(`/proc/${child.pid}/cgroup`, "utf8").catch(() => "")).split("\n").find((line) => line.startsWith("0::"))?.slice(3);
-    const values: Record<string, unknown> = { pid: child.pid, rssBytes: rss };
-    if (cgroup) for (const [name, key] of [["memory.current", "memoryCurrent"], ["memory.peak", "memoryPeak"], ["pids.current", "tasksCurrent"]] as const) {
-      const value = await readFile(join("/sys/fs/cgroup", cgroup, name), "utf8").catch(() => "");
-      if (/^\d+\s*$/u.test(value)) values[key] = Number(value.trim());
-    }
-    result.push(values);
+async function sampleResources() {
+  const processes = new Map<number, { ppid: number; rss: number; peak: number }>();
+  for (const name of await readdir("/proc").catch(() => [])) {
+    if (!/^\d+$/u.test(name)) continue;
+    const status = await readFile(`/proc/${name}/status`, "utf8").catch(() => "");
+    if (!status) continue;
+    processes.set(Number(name), {
+      ppid: Number(status.match(/^PPid:\s+(\d+)/mu)?.[1] ?? 0),
+      rss: Number(status.match(/^VmRSS:\s+(\d+)/mu)?.[1] ?? 0) * 1024,
+      peak: Number(status.match(/^VmHWM:\s+(\d+)/mu)?.[1] ?? 0) * 1024,
+    });
   }
-  return result;
+  for (const child of children) {
+    if (!child.pid || !processes.has(child.pid)) continue;
+    const tree = new Set([child.pid]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const [pid, value] of processes) if (!tree.has(pid) && tree.has(value.ppid)) { tree.add(pid); changed = true; }
+    }
+    let rssBytes = 0; let peakRssBytes = 0;
+    for (const pid of tree) { const value = processes.get(pid); if (value) { rssBytes += value.rss; peakRssBytes += value.peak; } }
+    const previous = resourceHighWater.get(child.pid);
+    resourceHighWater.set(child.pid, { rssBytes: Math.max(previous?.rssBytes ?? 0, rssBytes), peakRssBytes: Math.max(previous?.peakRssBytes ?? 0, peakRssBytes), tasks: Math.max(previous?.tasks ?? 0, tree.size), measuredUnixMs: Date.now() });
+  }
+}
+async function resources() {
+  await sampleResources();
+  return [...resourceHighWater].map(([pid, value]) => ({ pid, processTreeRssHighWaterBytes: value.rssBytes, processTreePeakRssHighWaterBytes: value.peakRssBytes, processTreeTasksHighWater: value.tasks, measuredUnixMs: value.measuredUnixMs, cgroupIsolation: "unproven", cgroupMemoryCurrent: "unavailable", cgroupMemoryPeak: "unavailable", cgroupTasksCurrent: "unavailable" }));
 }
 function visibleCharacters(result: unknown): number {
   const count = presentResult(result as never).content.reduce((sum, item) => sum + (item.type === "text" ? item.text.length : 0), 0);
   assert(count <= MAX_VISIBLE_CHARS, `Pi-visible output exceeded ${MAX_VISIBLE_CHARS} characters`);
   return count;
 }
+function resultEvidence(result: unknown) { return { structuredSdkBytes: Buffer.byteLength(JSON.stringify(result)), piVisibleCharacters: visibleCharacters(result) }; }
+async function captureStorage(label: string) {
+  storageSnapshots.push({ label, measuredUnixMs: Date.now(), cache: await directoryMeasure(cache), content: await directoryMeasure(content), audit: await directoryMeasure(join(stateBase, "pi-web/audit/events")) });
+}
 
 async function deterministic() {
-  const fixturePort = await freePort();
-  const readerPort = await freePort();
-  const origin = `http://fixture.invalid:${fixturePort}`;
+  let fixturePort = 0;
+  let origin = "";
   fixture = createServer((request, response) => {
     fixtureRequests += 1;
     if (request.socket.localAddress !== "127.0.0.1" && request.socket.localAddress !== "::ffff:127.0.0.1") fixtureNonLoopback += 1;
@@ -120,15 +159,19 @@ async function deterministic() {
     if (url.pathname === "/search") return send(200, "application/json", JSON.stringify({ results: [{ url: `${origin}/static`, title: "Deterministic WebX fixture", content: "stable fixture article seed", score: 1 }] }));
     if (url.pathname === "/static") return send(200, "text/html; charset=utf-8", "<!doctype html><title>Fixture article</title><main><h1>Stable article</h1><p>The deterministic candidate reader boundary is healthy. Focus token ALPHA-OMEGA.</p></main>");
     if (url.pathname === "/api") return send(200, "application/json", JSON.stringify([{ id: 1, name: "alpha", secret: "not-selected" }, { id: 2, name: "beta", secret: "not-selected" }]));
+    if (url.pathname === "/near-limit") return send(200, "text/plain", `NEAR-LIMIT-BEGIN ${"x".repeat(29_000)} NEAR-LIMIT-END`);
+    if (/^\/batch\/\d+$/u.test(url.pathname)) {
+      activeFixtureRequests += 1; peakFixtureRequests = Math.max(peakFixtureRequests, activeFixtureRequests);
+      return setTimeout(() => { activeFixtureRequests -= 1; send(200, "text/plain", `delayed ${url.pathname}`); }, 250);
+    }
     if (url.pathname === "/document.pdf") return send(200, "application/pdf", Buffer.from("%PDF-1.4\nsmall deterministic invalid document\n"));
     if (url.pathname === "/slow") return setTimeout(() => send(200, "text/plain", "late response"), 15_000);
     return send(404, "text/plain", "missing");
   });
-  fixture.listen(fixturePort, "127.0.0.1"); await once(fixture, "listening");
-  const common = { ...process.env, XDG_RUNTIME_DIR: runtime, XDG_CACHE_HOME: cache, WEBXD_SOCKET: socket, WEBX_CACHE_DIR: cache, WEBX_CONTENT_DIR: content };
-  const readerBin = join(candidate, ".venv/bin/pi-web-reader");
-  const reader = launch(readerBin, [], { ...common, PI_WEB_READER_PORT: String(readerPort), PI_WEB_READER_HOST: "127.0.0.1", PI_WEB_TEST_LOOPBACK_ORIGIN: origin, PI_WEB_DOCLING_URL: "http://127.0.0.1:1/", PI_WEB_HTTP_TIMEOUT_SECONDS: "5" });
-  await waitFor(`http://127.0.0.1:${readerPort}/health`, reader);
+  fixture.listen(0, "127.0.0.1"); await once(fixture, "listening");
+  const fixtureAddress = fixture.address(); assert(fixtureAddress && typeof fixtureAddress !== "string"); fixturePort = fixtureAddress.port; origin = `http://fixture.invalid:${fixturePort}`;
+  const common = { ...process.env, XDG_RUNTIME_DIR: runtime, XDG_CACHE_HOME: cache, XDG_STATE_HOME: stateBase, WEBXD_SOCKET: socket, WEBX_CACHE_DIR: cache, WEBX_CONTENT_DIR: content };
+  const { port: readerPort } = await startReader(common, { PI_WEB_TEST_LOOPBACK_ORIGIN: origin, PI_WEB_DOCLING_URL: "http://127.0.0.1:1/", PI_WEB_HTTP_TIMEOUT_SECONDS: "5" });
   launch(process.execPath, [join(candidate, "apps/webxd/dist/apps/webxd/src/main.js")], { ...common, WEBX_SEARX_URL: `http://127.0.0.1:${fixturePort}`, WEBX_READER_URL: `http://127.0.0.1:${readerPort}`, WEBX_CRAWL_URL: "http://127.0.0.1:1/", BROWSERD_SOCKET: join(runtime, "absent-browser.sock") });
   for (let attempt = 0; attempt < 100; attempt += 1) { try { await stat(socket); break; } catch { await new Promise((done) => setTimeout(done, 100)); } }
   const owner = `m7-${process.pid}`; const client = new WebxFacadeClient(socket);
@@ -146,13 +189,18 @@ async function deterministic() {
     const continued = await client.request("web.read", { url: `${origin}/static`, contentOffset: continuationOffset, maxChars: 500 }, options(owner, "read-continuation"));
     record("reader continuation uses the reported offset", JSON.stringify(continued).includes("ALPHA-OMEGA"), { structuredSdkBytes: Buffer.byteLength(JSON.stringify(continued)), piVisibleCharacters: visibleCharacters(continued), contentOffset: continuationOffset });
     const exact = await client.request("web.content", { contentId: readData.metadata.contentId, offset: 0, limit: 30_000 }, options(owner, "content-exact"));
+    record("exact stored content is formatted and bounded", JSON.stringify(exact).includes("ALPHA-OMEGA"), resultEvidence(exact));
     const focused = await client.request("web.content", { contentId: readData.metadata.contentId, query: "ALPHA-OMEGA" }, options(owner, "content-focus"));
-    record("exact and focused stored content", JSON.stringify(exact).includes("ALPHA-OMEGA") && JSON.stringify(focused).includes("ALPHA-OMEGA"));
+    record("focused stored content is formatted and bounded", JSON.stringify(focused).includes("ALPHA-OMEGA"), resultEvidence(focused));
     const structured = await client.request("web.read", { url: `${origin}/api`, fields: ["id", "name"], itemLimit: 1 }, options(owner, "structured"));
     const structuredRows = JSON.parse((structured.data as { untrustedContent: string }).untrustedContent) as unknown;
-    record("structured rows remain complete", JSON.stringify(structuredRows) === JSON.stringify([{ id: 1, name: "alpha" }]));
-    const batch = await client.request("web.readBatch", { items: [{ url: `${origin}/static`, maxChars: 200 }, { url: `${origin}/api`, fields: ["id", "name"], itemLimit: 2 }] }, options(owner, "batch"));
-    record("web_read_batch uses bounded concurrency", (batch.data as { metadata: { maxConcurrency: number } }).metadata.maxConcurrency <= 3, { structuredSdkBytes: Buffer.byteLength(JSON.stringify(batch)), piVisibleCharacters: visibleCharacters(batch), itemCount: 2, maxConcurrency: (batch.data as { metadata: { maxConcurrency: number } }).metadata.maxConcurrency });
+    record("structured rows remain complete, formatted, and bounded", JSON.stringify(structuredRows) === JSON.stringify([{ id: 1, name: "alpha" }]), resultEvidence(structured));
+    const nearLimit = await client.request("web.read", { url: `${origin}/near-limit`, maxChars: 30_000 }, options(owner, "near-limit"));
+    const nearLimitEvidence = resultEvidence(nearLimit);
+    record("near-limit result is formatted and bounded", JSON.stringify(nearLimit).includes("NEAR-LIMIT-END") && nearLimitEvidence.piVisibleCharacters > 28_000, nearLimitEvidence);
+    const batch = await client.request("web.readBatch", { items: Array.from({ length: 5 }, (_, index) => ({ url: `${origin}/batch/${index + 1}`, maxChars: 200 })) }, options(owner, "batch"));
+    const batchMetadata = (batch.data as { metadata: { maxConcurrency: number } }).metadata;
+    record("web_read_batch observed bounded parallel requests", peakFixtureRequests <= 3 && peakFixtureRequests > 1, { ...resultEvidence(batch), itemCount: 5, authorityMaxConcurrency: batchMetadata.maxConcurrency, observedFixturePeak: peakFixtureRequests });
     const timeoutStarted = Date.now();
     await assert.rejects(client.request("web.read", { url: `${origin}/slow`, maxChars: 100 }, options(owner, "timeout")));
     record("reader timeout is bounded", Date.now() - timeoutStarted < 10_000, { elapsedMs: Date.now() - timeoutStarted, configuredSeconds: 5 });
@@ -160,8 +208,9 @@ async function deterministic() {
     await assert.rejects(client.request("web.read", { url: `${origin}/static`, maxPages: 2 }, options(owner, "crawl-fail")));
     await assert.rejects(client.request("web.read", { url: `${origin}/document.pdf` }, options(owner, "document-fail")));
     const laterSearch = await client.request("web.search", { query: "stable fixture" }, options(owner, "search-2"));
+    record("later search remains formatted and bounded", JSON.stringify(laterSearch).includes("fixture.invalid"), resultEvidence(laterSearch));
     const laterRead = await client.request("web.read", { url: `${origin}/static`, maxChars: 500 }, options(owner, "read-2"));
-    record("optional failures do not disable later core work", JSON.stringify(laterSearch).includes("fixture.invalid") && JSON.stringify(laterRead).includes("healthy"));
+    record("later read remains healthy, formatted, and bounded", JSON.stringify(laterRead).includes("healthy"), resultEvidence(laterRead));
     record("fixture traffic stayed on loopback", fixtureRequests > 0 && fixtureNonLoopback === 0, { fixtureRequests, nonLoopbackRequests: fixtureNonLoopback });
   } finally { await client.stop({ ownerId: owner }).catch(() => undefined); }
 }
@@ -169,10 +218,8 @@ async function deterministic() {
 async function liveCore() {
   const deterministicOk = checks.every((check) => check.ok === true);
   record("deterministic gate before live mode", deterministicOk);
-  const readerPort = await freePort();
-  const common = { ...process.env, XDG_RUNTIME_DIR: runtime, XDG_CACHE_HOME: cache, WEBXD_SOCKET: socket, WEBX_CACHE_DIR: cache, WEBX_CONTENT_DIR: content };
-  const reader = launch(join(candidate, ".venv/bin/pi-web-reader"), [], { ...common, PI_WEB_READER_PORT: String(readerPort), PI_WEB_READER_HOST: "127.0.0.1", PI_WEB_HTTP_TIMEOUT_SECONDS: "45" });
-  await waitFor(`http://127.0.0.1:${readerPort}/health`, reader);
+  const common = { ...process.env, XDG_RUNTIME_DIR: runtime, XDG_CACHE_HOME: cache, XDG_STATE_HOME: stateBase, WEBXD_SOCKET: socket, WEBX_CACHE_DIR: cache, WEBX_CONTENT_DIR: content };
+  const { port: readerPort } = await startReader(common, { PI_WEB_HTTP_TIMEOUT_SECONDS: "45" });
   launch(process.execPath, [join(candidate, "apps/webxd/dist/apps/webxd/src/main.js")], { ...common, WEBX_SEARX_URL: process.env.WEBX_LIVE_SEARX_URL ?? "http://127.0.0.1:8888", WEBX_READER_URL: `http://127.0.0.1:${readerPort}`, BROWSERD_SOCKET: join(runtime, "absent-browser.sock") });
   for (let attempt = 0; attempt < 100; attempt += 1) { try { await stat(socket); break; } catch { await new Promise((done) => setTimeout(done, 100)); } }
   const owner = `m7-live-${process.pid}`; const client = new WebxFacadeClient(socket); await client.start({ ownerId: owner, cwd: candidate, signal: deadlineSignal() });
@@ -185,23 +232,24 @@ async function liveCore() {
 }
 
 let failure: string | undefined;
-let storageBefore: Record<string, { files: number; bytes: number }> = {};
+const resourceTimer = setInterval(() => { void sampleResources(); }, 250); resourceTimer.unref();
 try {
   await mkdir(runtime, { recursive: true, mode: 0o700 }); await mkdir(state, { recursive: true, mode: 0o700 });
-  storageBefore = { cache: await directoryMeasure(cache), content: await directoryMeasure(content), audit: await directoryMeasure(join(stateBase, "pi-web/audit/events")) };
+  await captureStorage("before-candidate");
   await deterministic();
-  resourceSnapshot.push(...await resources());
+  await sampleResources(); await captureStorage("deterministic-high-water-before-cleanup");
   await stopChildren(); if (fixture?.listening) { const activeFixture = fixture; await new Promise<void>((done) => activeFixture.close(() => done())); } fixture = undefined;
   await rm(runtime, { recursive: true, force: true }); await mkdir(runtime, { recursive: true, mode: 0o700 });
-  if (live) { await liveCore(); resourceSnapshot.push(...await resources()); }
+  if (live) { await liveCore(); await sampleResources(); await captureStorage("live-high-water-before-cleanup"); }
   record("total smoke timeout", Date.now() - started <= TOTAL_MS, { elapsedMs: Date.now() - started });
 } catch (error) { failure = error instanceof Error ? error.message : String(error); }
 finally {
+  await sampleResources(); await captureStorage("final-before-cleanup");
   await stopChildren(); if (fixture?.listening) { const activeFixture = fixture; await new Promise<void>((done) => activeFixture.close(() => done())); }
-  clearTimeout(totalDeadline);
-  const storageAfter = { cache: await directoryMeasure(cache), content: await directoryMeasure(content), audit: await directoryMeasure(join(stateBase, "pi-web/audit/events")) };
-  const storage = Object.fromEntries(Object.entries(storageAfter).map(([name, after]) => [name, { before: storageBefore[name] ?? { files: 0, bytes: 0 }, after, deltaFiles: after.files - (storageBefore[name]?.files ?? 0), deltaBytes: after.bytes - (storageBefore[name]?.bytes ?? 0) }]));
-  const evidence = { schemaVersion: 1, runId, candidateCommit: candidateManifest.commit, candidateTreeSha256: candidateManifest.candidateTreeSha256, mode: live ? "live" : "deterministic", ok: failure === undefined, failure, elapsedMs: Date.now() - started, limits: { requestMs: REQUEST_MS, totalMs: TOTAL_MS, evidenceBytes: MAX_EVIDENCE_BYTES, piVisibleCharacters: MAX_VISIBLE_CHARS, batchConcurrency: 3 }, checks, resources: resourceSnapshot, storage, auditEvidence: "Metadata-only counts and byte deltas. No response or audit bodies are present.", journal };
+  clearInterval(resourceTimer); clearTimeout(totalDeadline);
+  const names = ["cache", "content", "audit"] as const;
+  const storageHighWater = Object.fromEntries(names.map((name) => [name, storageSnapshots.reduce<{ files: number; bytes: number; measuredUnixMs: number }>((maximum, snapshot) => { const value = snapshot[name] as { files: number; bytes: number }; return value.bytes >= maximum.bytes ? { ...value, measuredUnixMs: snapshot.measuredUnixMs as number } : maximum; }, { files: 0, bytes: 0, measuredUnixMs: 0 })]));
+  const evidence = { schemaVersion: 1, runId, candidateCommit: candidateManifest.commit, candidateTreeSha256: candidateManifest.candidateTreeSha256, mode: live ? "live" : "deterministic", ok: failure === undefined, failure, elapsedMs: Date.now() - started, limits: { requestMs: REQUEST_MS, totalMs: TOTAL_MS, evidenceBytes: MAX_EVIDENCE_BYTES, piVisibleCharacters: MAX_VISIBLE_CHARS, batchConcurrency: 3 }, checks, resources: await resources(), storage: { snapshots: storageSnapshots, highWater: storageHighWater }, auditEvidence: "Metadata-only counts and byte high-water measurements. No response, audit body, or secret is present.", journal };
   const encoded = JSON.stringify(evidence, null, 2) + "\n";
   if (Buffer.byteLength(encoded) > MAX_EVIDENCE_BYTES) failure ??= "evidence exceeded 262144 bytes"; else await writeFile(join(state, "evidence.json"), encoded, { mode: 0o600 });
   await rm(runtime, { recursive: true, force: true });
