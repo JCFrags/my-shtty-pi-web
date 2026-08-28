@@ -38,6 +38,26 @@ jobs:
       - run: uv sync --all-packages --locked
       - run: uv run pytest tests/reader tests/docling
 
+  extraction-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.10.0'
+          enable-cache: true
+          cache-dependency-glob: components/browser/uv.lock
+      - run: corepack enable
+      - run: corepack prepare pnpm@10.13.1 --activate
+      - run: uv python install 3.13
+        working-directory: components/browser
+      - run: uv sync --all-packages --locked
+        working-directory: components/browser
+      - run: pnpm test:extraction
+
   browser-rust:
     runs-on: ubuntu-latest
     defaults:

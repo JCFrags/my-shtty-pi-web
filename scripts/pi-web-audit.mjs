@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 import { readdir, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { AUDIT_POLICY } from "../packages/policy/storage.mjs";
 
-const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1_000;
-const MAX_BYTES = 10 * 1024 * 1024 * 1024;
 const state = process.env.XDG_STATE_HOME ?? join(process.env.HOME ?? ".", ".local", "state");
 const root = process.env.PI_WEB_AUDIT_DIR ?? join(state, "pi-web", "audit");
 const events = join(root, "events");
@@ -52,12 +51,12 @@ if (command === "path") {
   let total = found.reduce((sum, file) => sum + file.size, 0);
   let removed = 0;
   for (const file of found) {
-    if (file.mtimeMs >= Date.now() - MAX_AGE_MS && total <= MAX_BYTES) continue;
+    if (file.mtimeMs >= Date.now() - AUDIT_POLICY.maxAgeMs && total <= AUDIT_POLICY.maxBytes) continue;
     await rm(file.path, { force: true });
     total -= file.size;
     removed += 1;
   }
-  console.log(JSON.stringify({ directory: root, removed, remainingBytes: total, maxBytes: MAX_BYTES, maxAgeDays: 90 }, null, 2));
+  console.log(JSON.stringify({ directory: root, removed, remainingBytes: total, maxBytes: AUDIT_POLICY.maxBytes, maxAgeDays: AUDIT_POLICY.maxAgeDays }, null, 2));
 } else {
   throw new Error("usage: pi-web audit [list [--limit N]|show ID|path|prune]");
 }

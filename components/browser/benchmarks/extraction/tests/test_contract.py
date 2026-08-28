@@ -193,6 +193,32 @@ def test_memory_process_and_disk_limits_are_parent_enforced() -> None:
     assert disk.error and "limit exceeded" in disk.error
 
 
+def test_candidate_adapters_cannot_receive_expected_annotations() -> None:
+    case = next(case for case in manifest()["cases"] if case["id"] == "news-article")
+    adapter_input = runner.execution_case(case)
+    assert runner.EXPECTED_ANNOTATIONS.isdisjoint(adapter_input)
+    assert adapter_input["id"] == case["id"]
+    assert adapter_input["sha256"] == case["sha256"]
+
+
+def test_absolute_gate_names_classes_and_cannot_pass_by_baseline_rewrite() -> None:
+    report = json.loads((ROOT / "reports/current-run.json").read_text())
+    gate = runner.absolute_eligibility(report["results"])
+    assert gate["eligible"]
+    assert gate["representativeClasses"] == list(runner.ABSOLUTE_QUALITY_POLICY["representativeClasses"])
+    assert gate["passedCases"] >= gate["minimumPassedCases"]
+
+    changed = json.loads(json.dumps(report["results"]))
+    row = next(item for item in changed if item["class"] == "news-article")
+    row["quality"]["requiredMarkerRetention"]["retained"] -= 1
+    assert not runner.absolute_eligibility(changed)["eligible"]
+
+    baseline = json.loads((ROOT / "current-baseline.json").read_text())
+    baseline["quality"] = runner.stable_quality(changed)
+    assert baseline["quality"] == runner.stable_quality(changed)
+    assert not runner.absolute_eligibility(changed)["eligible"]
+
+
 def test_optional_adapter_value_cannot_execute_a_command(tmp_path: Path) -> None:
     marker = tmp_path / "executed"
     configured = f"sh -c 'touch {marker}'"
@@ -234,3 +260,5 @@ def test_quality_snapshot_and_command_exit_semantics() -> None:
     report = json.loads((ROOT / "reports/current-run.json").read_text())
     assert runner.stable_quality(report["results"]) == baseline["quality"]
     assert runner.compare_baseline(ROOT / "current-baseline.json", runner.stable_quality(report["results"])) == []
+    assert report["summary"]["absoluteEligible"] is True
+    assert report["absoluteEligibility"]["eligible"] is True

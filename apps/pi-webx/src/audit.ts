@@ -2,11 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, opendir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { FacadeResult } from "../../../packages/sdk/src/facade.js";
+import { AUDIT_POLICY } from "../../../packages/policy/storage.mjs";
 
-const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1_000;
-const MAX_BYTES = 100 * 1024 * 1024;
-const MAX_RECORD_BYTES = 64 * 1024;
-const MAX_PRUNE_FILES = 8_192;
 const MAX_INPUT_STRING = 2_048;
 const SECRET_KEY = /(?:authorization|cookie|password|passwd|secret|token|api[-_]?key|credential)/iu;
 const SECRET_QUERY_KEY = /^(?:access_token|api[-_]?key|auth|authorization|code|credential|key|password|secret|signature|sig|token)$/iu;
@@ -58,7 +55,7 @@ export class WebAuditLog {
       ...(error === undefined ? {} : { error: { name: error.name, messageDigest: digest(error.message) } }),
     };
     const serialized = `${JSON.stringify(record, null, 2)}\n`;
-    if (new TextEncoder().encode(serialized).byteLength > MAX_RECORD_BYTES) throw new Error("audit metadata record exceeds its bound");
+    if (new TextEncoder().encode(serialized).byteLength > AUDIT_POLICY.maxRecordBytes) throw new Error("audit metadata record exceeds its bound");
     const target = join(directory, `${id}.json`);
     const temporary = `${target}.tmp-${process.pid}`;
     try {
@@ -66,18 +63,18 @@ export class WebAuditLog {
       await rename(temporary, target);
     } finally { await unlink(temporary).catch(() => undefined); }
     const now = Date.now();
-    if (now - this.#lastAutomaticPrune >= 60 * 60 * 1_000) {
+    if (now - this.#lastAutomaticPrune >= AUDIT_POLICY.automaticPruneIntervalMs) {
       this.#lastAutomaticPrune = now;
       await this.prune(now);
     }
   }
 
   async prune(now = Date.now()): Promise<void> {
-    const { files, overflow } = await collectJsonFiles(join(this.directory, "events", "metadata-v2"), MAX_PRUNE_FILES);
+    const { files, overflow } = await collectJsonFiles(join(this.directory, "events", "metadata-v2"), AUDIT_POLICY.maxPruneFiles);
     files.sort((left, right) => left.mtimeMs - right.mtimeMs || left.path.localeCompare(right.path));
     let total = files.reduce((sum, file) => sum + file.size, 0);
     for (const file of files) {
-      if (file.mtimeMs >= now - MAX_AGE_MS && total <= MAX_BYTES) continue;
+      if (file.mtimeMs >= now - AUDIT_POLICY.maxAgeMs && total <= AUDIT_POLICY.maxBytes) continue;
       await rm(file.path, { force: true });
       total -= file.size;
     }

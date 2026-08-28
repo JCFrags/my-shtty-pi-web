@@ -61,6 +61,22 @@ OPTIONAL_ENV = {
     "alternate-pdf": "WEBX_BENCH_PDF_ADAPTER",
 }
 
+# This fixed gate is independent of the reviewed baseline. A baseline rewrite cannot
+# make an ineligible extraction run eligible.
+ABSOLUTE_QUALITY_POLICY = {
+    "representativeClasses": (
+        "news-article", "blog", "product", "github-repository", "hacker-news-like",
+        "reddit-forum-like", "static-html", "javascript-shell", "json-api", "rss",
+        "atom", "plain-text", "negotiated-markdown", "pdf-text", "pdf-table",
+    ),
+    "minimumPassedCases": 7,
+    "requireAllMarkers": True,
+}
+EXPECTED_ANNOTATIONS = {
+    "expectedOutcome", "expectedPath", "requiredMarkers", "forbiddenMarkers",
+    "structure", "allowedLoss", "acquisitionExpected", "caseKind",
+}
+
 
 def resolve_optional_adapter(configured: str | None) -> str | None:
     """Resolve only a reviewed in-repository module name."""
@@ -326,8 +342,13 @@ def validate_output_size(content: str, limit: int) -> None:
         raise LimitError(f"output exceeds {limit} bytes")
 
 
+def execution_case(case: dict[str, Any]) -> dict[str, Any]:
+    """Return adapter input without expected quality annotations."""
+    return {key: value for key, value in case.items() if key not in EXPECTED_ANNOTATIONS}
+
+
 def worker_case(job: dict[str, Any]) -> dict[str, Any]:
-    case = job["case"]
+    case = execution_case(job["case"])
     fixture = ROOT / "fixtures" / case["file"]
     data = fixture.read_bytes()
     if hashlib.sha256(data).hexdigest() != case["sha256"]:
@@ -340,7 +361,7 @@ def worker_case(job: dict[str, Any]) -> dict[str, Any]:
         module_name = resolve_optional_adapter(job.get("adapterKey"))
         if module_name is None:
             raise RuntimeError("optional adapter is not in the reviewed allowlist")
-        value = importlib.import_module(module_name).extract(case, fixture)
+        value = importlib.import_module(module_name).extract(execution_case(case), fixture)
         extracted = Extracted(str(value["content"]), str(value["path"]), dict(value.get("metadata", {})))
         acquisition = {}
     validate_output_size(extracted.content, job["limits"]["outputBytes"])
@@ -515,6 +536,41 @@ def compare_baseline(path: Path, quality_rows: list[dict[str, Any]]) -> list[str
     return [] if old == quality_rows else ["deterministic quality differs from the reviewed baseline"]
 
 
+def absolute_eligibility(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Apply fixed marker and representative-class requirements to production output."""
+    current = {row["class"]: row for row in results if row["adapter"] == "current"}
+    classes = ABSOLUTE_QUALITY_POLICY["representativeClasses"]
+    missing = [name for name in classes if name not in current]
+    marker_failures = []
+    passed = 0
+    for name in classes:
+        row = current.get(name)
+        if row is None:
+            continue
+        if row["status"] == "passed":
+            passed += 1
+        retention = row["quality"].get("requiredMarkerRetention", {})
+        if retention.get("retained") != retention.get("total") or not retention.get("total"):
+            marker_failures.append(name)
+    failures = []
+    if missing:
+        failures.append("representative classes are missing")
+    if ABSOLUTE_QUALITY_POLICY["requireAllMarkers"] and marker_failures:
+        failures.append("required markers were lost")
+    if passed < ABSOLUTE_QUALITY_POLICY["minimumPassedCases"]:
+        failures.append("too few representative cases passed")
+    return {
+        "eligible": not failures,
+        "representativeClasses": list(classes),
+        "minimumPassedCases": ABSOLUTE_QUALITY_POLICY["minimumPassedCases"],
+        "passedCases": passed,
+        "requireAllMarkers": ABSOLUTE_QUALITY_POLICY["requireAllMarkers"],
+        "markerFailures": marker_failures,
+        "missingClasses": missing,
+        "failures": failures,
+    }
+
+
 def encode_report(report: dict[str, Any], limit: int) -> bytes:
     encoded = (json.dumps(report, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     if len(encoded) > limit:
@@ -540,7 +596,7 @@ def run_case(
         return {"id": case["id"], "class": case["class"], "adapter": adapter, "status": "skipped", "quality": quality, "runtime": {"wallMilliseconds": 0, "peakRssBytes": 0, "temporaryDiskHighWaterBytes": 0, "descendantProcessHighWater": 0}}
     else:
         monitored = run_isolated(
-            {"case": case, "limits": limits, "adapter": adapter, "adapterKey": adapter_key},
+            {"case": execution_case(case), "limits": limits, "adapter": adapter, "adapterKey": adapter_key},
             limits,
             deadline,
         )
@@ -590,6 +646,7 @@ def main() -> int:
         raise LimitError("total time limit exceeded")
     quality_rows = stable_quality(results)
     regressions = [] if args.no_compare or args.write_baseline else compare_baseline(args.baseline, quality_rows)
+    eligibility = absolute_eligibility(results)
     report = {
         "schemaVersion": 2,
         "manifestSha256": hashlib.sha256(manifest_bytes).hexdigest(),
@@ -602,7 +659,9 @@ def main() -> int:
             "acquisitionContractsFailed": sum(row["status"] == "contract-failed" for row in results),
             "skipped": sum(row["status"] == "skipped" for row in results),
             "qualityRegressions": regressions,
+            "absoluteEligible": eligibility["eligible"],
         },
+        "absoluteEligibility": eligibility,
         "results": results,
     }
     encoded = encode_report(report, limits["reportBytes"])
@@ -618,7 +677,9 @@ def main() -> int:
     )
     if regressions:
         print("Baseline comparison: " + "; ".join(regressions), file=sys.stderr)
-    return 1 if regressions else 0
+    if not eligibility["eligible"]:
+        print("Absolute quality gate: " + "; ".join(eligibility["failures"]), file=sys.stderr)
+    return 1 if regressions or not eligibility["eligible"] else 0
 
 
 if __name__ == "__main__":

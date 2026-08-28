@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { createConnection } from "node:net";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
+import { storagePolicyReport } from "../packages/policy/storage.mjs";
 
 const MAX_RESPONSE_BYTES = 1_048_576;
 const DEFAULT_PROBE_TIMEOUT_MS = 5_000;
@@ -89,7 +90,7 @@ export function doctorReport(catalog) {
     check("read", true),
     check("browser", false),
   ];
-  return { ok: checks.filter((item) => item.required).every((item) => item.ok), apiVersion: catalog.apiVersion, checks };
+  return { ok: checks.filter((item) => item.required).every((item) => item.ok), apiVersion: catalog.apiVersion, policy: storagePolicyReport(), checks };
 }
 
 export async function runDoctor(socketPath, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS) {
@@ -98,6 +99,7 @@ export async function runDoctor(socketPath, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS
   } catch (error) {
     return {
       ok: false,
+      policy: storagePolicyReport(),
       checks: [{ name: "webxd", required: true, ok: false, detail: error instanceof Error ? error.message : String(error) }],
     };
   }

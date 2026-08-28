@@ -29,7 +29,34 @@
     "acquisitionContractsPassed": 3,
     "acquisitionContractsFailed": 0,
     "skipped": 5,
-    "qualityRegressions": []
+    "qualityRegressions": [],
+    "absoluteEligible": true
+  },
+  "absoluteEligibility": {
+    "eligible": true,
+    "representativeClasses": [
+      "news-article",
+      "blog",
+      "product",
+      "github-repository",
+      "hacker-news-like",
+      "reddit-forum-like",
+      "static-html",
+      "javascript-shell",
+      "json-api",
+      "rss",
+      "atom",
+      "plain-text",
+      "negotiated-markdown",
+      "pdf-text",
+      "pdf-table"
+    ],
+    "minimumPassedCases": 7,
+    "passedCases": 7,
+    "requireAllMarkers": true,
+    "markerFailures": [],
+    "missingClasses": [],
+    "failures": []
   },
   "results": [
     {
@@ -95,9 +122,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 388.329,
-        "peakRssBytes": 90947584,
-        "temporaryDiskHighWaterBytes": 1913,
+        "wallMilliseconds": 392.664,
+        "peakRssBytes": 91107328,
+        "temporaryDiskHighWaterBytes": 1509,
         "descendantProcessHighWater": 1
       }
     },
@@ -163,9 +190,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 311.312,
-        "peakRssBytes": 60493824,
-        "temporaryDiskHighWaterBytes": 1993,
+        "wallMilliseconds": 322.112,
+        "peakRssBytes": 60715008,
+        "temporaryDiskHighWaterBytes": 1606,
         "descendantProcessHighWater": 1
       }
     },
@@ -231,9 +258,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 312.208,
-        "peakRssBytes": 60485632,
-        "temporaryDiskHighWaterBytes": 1981,
+        "wallMilliseconds": 322.715,
+        "peakRssBytes": 60862464,
+        "temporaryDiskHighWaterBytes": 1570,
         "descendantProcessHighWater": 1
       }
     },
@@ -300,9 +327,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 311.487,
-        "peakRssBytes": 60432384,
-        "temporaryDiskHighWaterBytes": 1933,
+        "wallMilliseconds": 321.655,
+        "peakRssBytes": 60616704,
+        "temporaryDiskHighWaterBytes": 1543,
         "descendantProcessHighWater": 1
       }
     },
@@ -369,9 +396,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 309.081,
-        "peakRssBytes": 60555264,
-        "temporaryDiskHighWaterBytes": 2055,
+        "wallMilliseconds": 320.64,
+        "peakRssBytes": 60649472,
+        "temporaryDiskHighWaterBytes": 1660,
         "descendantProcessHighWater": 1
       }
     },
@@ -438,9 +465,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 309.037,
-        "peakRssBytes": 60612608,
-        "temporaryDiskHighWaterBytes": 1989,
+        "wallMilliseconds": 320.588,
+        "peakRssBytes": 60727296,
+        "temporaryDiskHighWaterBytes": 1574,
         "descendantProcessHighWater": 1
       }
     },
@@ -507,9 +534,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 308.741,
-        "peakRssBytes": 60448768,
-        "temporaryDiskHighWaterBytes": 2061,
+        "wallMilliseconds": 315.671,
+        "peakRssBytes": 60596224,
+        "temporaryDiskHighWaterBytes": 1665,
         "descendantProcessHighWater": 1
       }
     },
@@ -575,9 +602,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 309.432,
-        "peakRssBytes": 60567552,
-        "temporaryDiskHighWaterBytes": 1951,
+        "wallMilliseconds": 309.241,
+        "peakRssBytes": 60702720,
+        "temporaryDiskHighWaterBytes": 1609,
         "descendantProcessHighWater": 1
       }
     },
@@ -643,9 +670,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 309.023,
-        "peakRssBytes": 60698624,
-        "temporaryDiskHighWaterBytes": 2007,
+        "wallMilliseconds": 320.226,
+        "peakRssBytes": 60727296,
+        "temporaryDiskHighWaterBytes": 1642,
         "descendantProcessHighWater": 1
       }
     },
@@ -712,9 +739,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 308.671,
-        "peakRssBytes": 60510208,
-        "temporaryDiskHighWaterBytes": 1958,
+        "wallMilliseconds": 313.829,
+        "peakRssBytes": 60739584,
+        "temporaryDiskHighWaterBytes": 1546,
         "descendantProcessHighWater": 1
       }
     },
@@ -775,9 +802,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 310.031,
-        "peakRssBytes": 60116992,
-        "temporaryDiskHighWaterBytes": 1998,
+        "wallMilliseconds": 309.554,
+        "peakRssBytes": 60370944,
+        "temporaryDiskHighWaterBytes": 1648,
         "descendantProcessHighWater": 1
       }
     },
@@ -838,9 +865,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 385.464,
-        "peakRssBytes": 90951680,
-        "temporaryDiskHighWaterBytes": 1927,
+        "wallMilliseconds": 390.838,
+        "peakRssBytes": 91193344,
+        "temporaryDiskHighWaterBytes": 1597,
         "descendantProcessHighWater": 1
       }
     },
@@ -901,9 +928,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 390.545,
-        "peakRssBytes": 90869760,
-        "temporaryDiskHighWaterBytes": 1934,
+        "wallMilliseconds": 390.385,
+        "peakRssBytes": 91078656,
+        "temporaryDiskHighWaterBytes": 1602,
         "descendantProcessHighWater": 1
       }
     },
@@ -966,9 +993,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 308.685,
-        "peakRssBytes": 60252160,
-        "temporaryDiskHighWaterBytes": 1909,
+        "wallMilliseconds": 314.045,
+        "peakRssBytes": 60506112,
+        "temporaryDiskHighWaterBytes": 1607,
         "descendantProcessHighWater": 1
       }
     },
@@ -1031,9 +1058,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 309.812,
-        "peakRssBytes": 60518400,
-        "temporaryDiskHighWaterBytes": 1916,
+        "wallMilliseconds": 329.386,
+        "peakRssBytes": 60592128,
+        "temporaryDiskHighWaterBytes": 1547,
         "descendantProcessHighWater": 1
       }
     },
@@ -1096,9 +1123,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 385.39,
-        "peakRssBytes": 91017216,
-        "temporaryDiskHighWaterBytes": 1903,
+        "wallMilliseconds": 397.332,
+        "peakRssBytes": 91074560,
+        "temporaryDiskHighWaterBytes": 1521,
         "descendantProcessHighWater": 1
       }
     },
@@ -1157,9 +1184,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 308.279,
-        "peakRssBytes": 60149760,
-        "temporaryDiskHighWaterBytes": 1691,
+        "wallMilliseconds": 324.813,
+        "peakRssBytes": 60485632,
+        "temporaryDiskHighWaterBytes": 1356,
         "descendantProcessHighWater": 1
       }
     },
@@ -1219,9 +1246,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 308.464,
-        "peakRssBytes": 60219392,
-        "temporaryDiskHighWaterBytes": 1850,
+        "wallMilliseconds": 309.104,
+        "peakRssBytes": 60493824,
+        "temporaryDiskHighWaterBytes": 1478,
         "descendantProcessHighWater": 1
       }
     },
@@ -1378,9 +1405,9 @@
         }
       },
       "runtime": {
-        "wallMilliseconds": 314.329,
-        "peakRssBytes": 60588032,
-        "temporaryDiskHighWaterBytes": 2094,
+        "wallMilliseconds": 314.008,
+        "peakRssBytes": 60723200,
+        "temporaryDiskHighWaterBytes": 1586,
         "descendantProcessHighWater": 1
       }
     },
@@ -1481,9 +1508,9 @@
         }
       },
       "runtime": {
-        "wallMilliseconds": 308.568,
-        "peakRssBytes": 60579840,
-        "temporaryDiskHighWaterBytes": 2306,
+        "wallMilliseconds": 309.442,
+        "peakRssBytes": 60608512,
+        "temporaryDiskHighWaterBytes": 1738,
         "descendantProcessHighWater": 1
       }
     },
@@ -1581,9 +1608,9 @@
         }
       },
       "runtime": {
-        "wallMilliseconds": 313.299,
-        "peakRssBytes": 60657664,
-        "temporaryDiskHighWaterBytes": 2082,
+        "wallMilliseconds": 309.398,
+        "peakRssBytes": 60940288,
+        "temporaryDiskHighWaterBytes": 1565,
         "descendantProcessHighWater": 1
       }
     },
@@ -1643,9 +1670,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 314.432,
-        "peakRssBytes": 60354560,
-        "temporaryDiskHighWaterBytes": 1842,
+        "wallMilliseconds": 324.158,
+        "peakRssBytes": 60751872,
+        "temporaryDiskHighWaterBytes": 1525,
         "descendantProcessHighWater": 1
       }
     },
@@ -1708,9 +1735,9 @@
         "error": null
       },
       "runtime": {
-        "wallMilliseconds": 319.717,
-        "peakRssBytes": 60538880,
-        "temporaryDiskHighWaterBytes": 1813,
+        "wallMilliseconds": 324.1,
+        "peakRssBytes": 60661760,
+        "temporaryDiskHighWaterBytes": 1513,
         "descendantProcessHighWater": 1
       }
     },
@@ -1765,9 +1792,9 @@
         "error": "RuntimeError: document conversion failed"
       },
       "runtime": {
-        "wallMilliseconds": 329.084,
-        "peakRssBytes": 60653568,
-        "temporaryDiskHighWaterBytes": 807,
+        "wallMilliseconds": 319.909,
+        "peakRssBytes": 60706816,
+        "temporaryDiskHighWaterBytes": 481,
         "descendantProcessHighWater": 1
       }
     },

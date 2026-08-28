@@ -2,12 +2,13 @@ import { createHash, randomBytes } from "node:crypto";
 import { chmod, mkdir, open, opendir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
+import { CACHE_POLICY } from "../../../packages/policy/storage.mjs";
 
-export const DEFAULT_CACHE_MEMORY_ENTRIES = 256;
-export const DEFAULT_CACHE_MEMORY_BYTES = 32 * 1024 * 1024;
-export const DEFAULT_CACHE_DISK_ENTRIES = 2_048;
-export const DEFAULT_CACHE_DISK_BYTES = 512 * 1024 * 1024;
-export const DEFAULT_CACHE_MAX_ENTRY_BYTES = 4_300_000;
+export const DEFAULT_CACHE_MEMORY_ENTRIES = CACHE_POLICY.memoryEntries;
+export const DEFAULT_CACHE_MEMORY_BYTES = CACHE_POLICY.memoryBytes;
+export const DEFAULT_CACHE_DISK_ENTRIES = CACHE_POLICY.diskEntries;
+export const DEFAULT_CACHE_DISK_BYTES = CACHE_POLICY.diskBytes;
+export const DEFAULT_CACHE_MAX_ENTRY_BYTES = CACHE_POLICY.maxEntryBytes;
 
 interface CacheEnvelope<T> { readonly expiresAt: number; readonly value: T }
 interface MemoryEntry { readonly envelope: CacheEnvelope<unknown>; readonly bytes: number }

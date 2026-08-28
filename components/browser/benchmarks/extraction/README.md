@@ -12,7 +12,9 @@ From the repository root, run:
 pnpm benchmark:extraction
 ```
 
-The command uses `uv --offline`. It writes `reports/current-run.json`. It returns zero when deterministic quality matches `current-baseline.json`. A reviewed loss can remain in the baseline. Drift or a missing baseline makes the command fail.
+The command uses `uv --offline`. It writes `reports/current-run.json`. It keeps reviewed baseline equality as the production drift check. Drift or a missing baseline makes the command fail.
+
+The command also applies a separate absolute quality gate. `ABSOLUTE_QUALITY_POLICY` in `run.py` names the representative classes. The gate requires all required markers in those classes and at least seven representative extraction passes. A baseline rewrite cannot change this gate or make an ineligible run eligible. The report makes absolute eligibility explicit.
 
 The offline benchmark does not start the Docling service. It does not declare or package the RapidOCR model assets. Office cases are visible environment skips for this reason. Normal PDF cases use the bounded local `pdftotext` path first. Raw PDF view and a PDF with no local text still require Docling. The report does not claim cache-dependent Docling or OCR success.
 
@@ -55,7 +57,7 @@ Representative fixture requirements come from reviewed fixture semantics. A sour
 
 ## Optional adapters
 
-Environment variables cannot contain commands. They can only name an adapter in the fixed `OPTIONAL_ADAPTERS` module registry in `run.py`. The registry is empty because this repository has no reviewed candidate. Any missing or unknown value is a visible skip. A future reviewed module runs inside the same isolated worker and receives the same limits.
+Environment variables cannot contain commands. They can only name an adapter in the fixed `OPTIONAL_ADAPTERS` module registry in `run.py`. The registry is empty because this repository has no reviewed candidate. Any missing or unknown value is a visible skip. A future reviewed module runs inside the same isolated worker and receives the same limits. Candidate input excludes expected outcomes, paths, markers, structure requirements, allowed loss, and acquisition expectations. The parent applies those annotations only after the candidate returns its result.
 
 ## Add a fixture
 
