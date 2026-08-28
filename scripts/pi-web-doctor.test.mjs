@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { doctorReport, probeWebx, runDoctor } from "./pi-web-doctor.mjs";
 
 async function fixture(catalog) {
@@ -39,6 +41,40 @@ async function fixture(catalog) {
     },
   };
 }
+
+async function runCli(scriptPath, env) {
+  const child = spawn(process.execPath, [scriptPath, "--json"], { env: { ...process.env, ...env } });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
+  child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+  const status = await new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", resolve);
+  });
+  return { status, stdout, stderr };
+}
+
+test("doctor CLI runs once through direct and stable symlink paths", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pi-web-doctor-cli-"));
+  const projectRoot = fileURLToPath(new URL("..", import.meta.url));
+  const direct = fileURLToPath(new URL("./pi-web-doctor.mjs", import.meta.url));
+  const stable = join(directory, "pi-web-tools");
+  await symlink(projectRoot, stable, "dir");
+  try {
+    for (const scriptPath of [direct, join(stable, "scripts/pi-web-doctor.mjs")]) {
+      const result = await runCli(scriptPath, { WEBXD_SOCKET: join(directory, "missing.sock") });
+      assert.equal(result.status, 1);
+      assert.equal(result.stderr, "");
+      const report = JSON.parse(result.stdout);
+      assert.equal(report.ok, false);
+      assert.equal(report.checks.length, 1);
+      assert.equal(report.checks[0]?.name, "webxd");
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("doctor keeps optional browser failure nonfatal", async () => {
   const catalog = {
