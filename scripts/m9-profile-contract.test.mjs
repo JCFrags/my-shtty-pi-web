@@ -9,6 +9,7 @@ const root = resolve(new URL("..", import.meta.url).pathname);
 const profileCommand = join(root, "scripts/pi-web-profile");
 const stageCommand = join(root, "scripts/pi-web-stage");
 const cutoverCommand = join(root, "scripts/pi-web-cutover");
+const installerCommand = join(root, "install-fedora.sh");
 
 function run(command, args, env = {}) {
   const result = spawnSync(command, args, { cwd: root, env: { ...process.env, ...env }, encoding: "utf8" });
@@ -47,6 +48,19 @@ test("core staging uses selected package installs and never uv all-packages", as
   assert.match(stage, /"--package", package/);
   assert.match(stage, /profile\["cargoPackages"\]/);
   assert.match(stage, /profile\["playwrightBrowsers"\]/);
+});
+
+test("the installer provisions pinned core build tools without optional packages", async () => {
+  const installer = await readFile(installerCommand, "utf8");
+  assert.match(installer, /pnpm@10\.13\.1/);
+  assert.match(installer, /astral\.sh\/uv\/0\.12\.0\/install\.sh/);
+  assert.doesNotMatch(installer, /agent-browser@|playwright install|cargo build|uv sync --all-packages/);
+});
+
+test("the browser service can find the profile-local Agent Browser binary", async () => {
+  const cutover = await readFile(cutoverCommand, "utf8");
+  assert.match(cutover, /\.agent-browser\/node_modules\/\.bin:/);
+  assert.match(cutover, /if browser_enabled else ""/);
 });
 
 test("candidate and cutover plans record generated core units and reviewed limits", async () => {

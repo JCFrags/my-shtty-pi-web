@@ -51,8 +51,22 @@ command -v node >/dev/null || { echo "error: Node.js 24 or newer is required." >
 command -v npm >/dev/null || { echo "error: npm is required." >&2; exit 1; }
 (( $(node -p 'Number(process.versions.node.split(".")[0])') >= 24 )) || { echo "error: Node.js 24 or newer is required." >&2; exit 1; }
 command -v pi >/dev/null || { echo "error: Pi must be installed before Pi Web Tools." >&2; exit 1; }
-command -v pnpm >/dev/null || { echo "error: pnpm 10.13.1 is required." >&2; exit 1; }
-[[ "$(pnpm --version)" == "10.13.1" ]] || { echo "error: pnpm 10.13.1 is required." >&2; exit 1; }
+PREFIX="${PI_WEB_PREFIX:-$HOME/.local}"
+BIN_DIR="$PREFIX/bin"
+mkdir -p "$BIN_DIR"
+export PATH="$BIN_DIR:$HOME/.local/bin:$PATH"
+if ! command -v pnpm >/dev/null || [[ "$(pnpm --version)" != "10.13.1" ]]; then
+  npm install --global --prefix "$PREFIX" pnpm@10.13.1
+fi
+if ! command -v uv >/dev/null; then
+  temporary_installer="$(mktemp)"
+  trap 'rm -f "$temporary_installer"' EXIT
+  curl --fail --location https://astral.sh/uv/0.12.0/install.sh -o "$temporary_installer"
+  sh "$temporary_installer"
+  rm -f "$temporary_installer"
+  trap - EXIT
+  export PATH="$BIN_DIR:$HOME/.local/bin:$PATH"
+fi
 command -v uv >/dev/null || { echo "error: uv 0.12.0 or newer is required." >&2; exit 1; }
 
 candidate_json="$($SOURCE_ROOT/scripts/pi-web-stage --source "$SOURCE_ROOT" "${profiles[@]}")"
