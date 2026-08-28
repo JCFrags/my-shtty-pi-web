@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, stat, utimes } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -71,6 +71,24 @@ test("batch audit keeps source counts, IDs, and cache state but no source bodies
     assert.equal(value.result.sources[1].status, "read-failed");
     assert.doesNotMatch(JSON.stringify(value), /source body must not persist|body-like failure detail|final visible body|input body must not persist|input snippet must not persist|c2VjcmV0/);
     assert.equal(value.input.body, "[omitted content]");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a new metadata record preserves historical version-1 records", async () => {
+  const root = await mkdtemp(join(tmpdir(), "webx-audit-"));
+  try {
+    const historicalDirectory = join(root, "events", "2025-01-01");
+    const historicalPath = join(historicalDirectory, "historical-v1.json");
+    await mkdir(historicalDirectory, { recursive: true });
+    await writeFile(historicalPath, `${JSON.stringify({ version: 1, id: "historical-v1" })}\n`);
+    const old = new Date("2025-01-01T00:00:00Z");
+    await utimes(historicalPath, old, old);
+
+    const audit = new WebAuditLog(root);
+    await audit.record({ operation: "web.search", ownerId: "session", toolCallId: "new-call", startedAt: new Date("2026-08-24T12:00:00Z"), durationMs: 1, input: { query: "new" } });
+
+    assert.equal(JSON.parse(await readFile(historicalPath, "utf8")).version, 1);
+    assert.equal((await records(root)).length, 2);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

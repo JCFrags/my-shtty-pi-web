@@ -174,6 +174,45 @@ describe("WebxAuthority", () => {
     expect(await contentStore.stats()).toEqual({ entries: 0, bytes: 0 });
   });
 
+  it("does not coalesce concurrent identical searches from different owners", async () => {
+    const release = Promise.withResolvers<undefined>();
+    const fetchMock = vi.fn(async () => {
+      await release.promise;
+      return new Response(JSON.stringify({ results: [{ title: "Shared", url: "https://shared.test/", content: "shared result" }] }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
+    const first = call(instance, actor("principal-a"), "POST", "/v1/search", { query: "same query" }, "owner-a-search");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const second = call(instance, actor("principal-b"), "POST", "/v1/search", { query: "same query" }, "owner-b-search");
+    try { await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2)); }
+    finally { release.resolve(undefined); }
+    const responses = await Promise.all([first, second]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    expect(responses.map((response) => (response.body as { metadata: { delivery: { coalesced: boolean } } }).metadata.delivery.coalesced)).toEqual([false, false]);
+  });
+
+  it("coalesces concurrent identical searches from the same owner", async () => {
+    const started = Promise.withResolvers<undefined>();
+    const release = Promise.withResolvers<undefined>();
+    const fetchMock = vi.fn(async () => {
+      started.resolve(undefined);
+      await release.promise;
+      return new Response(JSON.stringify({ results: [{ title: "Shared", url: "https://shared.test/", content: "shared result" }] }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
+    const first = call(instance, actor("principal-a"), "POST", "/v1/search", { query: "same query" }, "same-owner-search-one");
+    await started.promise;
+    const second = call(instance, actor("principal-a"), "POST", "/v1/search", { query: "same query" }, "same-owner-search-two");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    release.resolve(undefined);
+    const responses = await Promise.all([first, second]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    expect((responses[1]?.body as { metadata: { delivery: { coalesced: boolean } } }).metadata.delivery.coalesced).toBe(true);
+  });
+
   it("reads a bounded byte range into an integrity-checked owner artifact", async () => {
     const bytes = new TextEncoder().encode("abcde");
     const digest = createHash("sha256").update(bytes).digest("hex");

@@ -258,6 +258,16 @@ test("tool calls use only the SDK seam with owner, idempotency, cancellation, an
   await fx.events.get("session_shutdown")?.();
 });
 
+test("web_read_batch sends web.readBatch to the SDK when read capability is healthy", async () => {
+  const sdk = new MockSdk();
+  const fx = harness(sdk);
+  await fx.events.get("session_start")?.({}, fx.ctx);
+  await fx.execute("web_read_batch", { urls: ["https://one.test", "https://two.test"] });
+  assert.equal(sdk.calls.length, 1);
+  assert.equal(sdk.calls[0]?.operation, "web.readBatch");
+  await fx.events.get("session_shutdown")?.();
+});
+
 test("real search and read calls send structured and agent-visible evidence to the audit boundary", async () => {
   const sdk = new MockSdk();
   sdk.result = { summary: "search", data: { output: "links", hits: [], metadata: { searches: 1, fallbackUsed: false, partial: false, pagesRead: 0, readAttempts: 0 } }, trust: "untrusted-external" };

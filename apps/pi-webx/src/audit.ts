@@ -36,9 +36,10 @@ export class WebAuditLog {
     const timestamp = input.startedAt.toISOString();
     const id = `${timestamp.replace(/[-:.TZ]/gu, "")}-${randomUUID()}`;
     const events = join(this.directory, "events");
-    const directory = join(events, timestamp.slice(0, 10));
+    const metadataEvents = join(events, "metadata-v2");
+    const directory = join(metadataEvents, timestamp.slice(0, 10));
     await mkdir(directory, { recursive: true, mode: 0o700 });
-    await Promise.all([chmod(this.directory, 0o700), chmod(events, 0o700), chmod(directory, 0o700)]);
+    await Promise.all([chmod(this.directory, 0o700), chmod(events, 0o700), chmod(metadataEvents, 0o700), chmod(directory, 0o700)]);
     const error = input.error === undefined ? undefined : errorValue(input.error);
     const record = {
       version: 2,
@@ -72,7 +73,7 @@ export class WebAuditLog {
   }
 
   async prune(now = Date.now()): Promise<void> {
-    const { files, overflow } = await collectJsonFiles(join(this.directory, "events"), MAX_PRUNE_FILES);
+    const { files, overflow } = await collectJsonFiles(join(this.directory, "events", "metadata-v2"), MAX_PRUNE_FILES);
     files.sort((left, right) => left.mtimeMs - right.mtimeMs || left.path.localeCompare(right.path));
     let total = files.reduce((sum, file) => sum + file.size, 0);
     for (const file of files) {

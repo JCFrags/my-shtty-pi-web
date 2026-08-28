@@ -232,7 +232,7 @@ export class WebxAuthority {
     const key = { formatVersion: 21, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
     const cached = await this.#cache.get<SearchResponse>("search", key);
     if (cached !== undefined) return withSearchDelivery(cached, "hit", false);
-    const flightKey = `search\0${createHash("sha256").update(stableStringify(key)).digest("hex")}`;
+    const flightKey = `search\0${createHash("sha256").update(stableStringify({ principalId: actor.principalId, key })).digest("hex")}`;
     const shared = await this.#inFlight.run(flightKey, signal, (sharedSignal) => this.uncachedSearch(actor, request, scope, sharedSignal));
     await this.#cache.set("search", key, shared.value, SEARCH_CACHE_TTL_MS).catch(() => undefined);
     return withSearchDelivery(shared.value, "miss", shared.coalesced);

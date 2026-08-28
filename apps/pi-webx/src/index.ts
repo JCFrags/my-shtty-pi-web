@@ -65,7 +65,7 @@ function capabilityError(capabilities: WebxCapabilities): string | undefined {
 
 function operationAvailable(operation: string, capabilities: WebxCapabilities): boolean {
   if (operation === "web.search") return capabilities.groups.search;
-  if (operation === "web.read" || operation === "web.content") return capabilities.groups.read;
+  if (operation === "web.read" || operation === "web.readBatch" || operation === "web.content") return capabilities.groups.read;
   if (operation === "browser.debug") return capabilities.groups.browserDebug;
   if (operation.startsWith("browser.")) return capabilities.groups.browser;
   return false;
