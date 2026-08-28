@@ -32,6 +32,7 @@ import { WebCache, type WebCacheOptions } from "./cache.js";
 import { ContentEntryTooLargeError, NormalizedContentStore, type ContentRepresentation, type NormalizedContentRecord } from "./content-store.js";
 import { BrowserPortError, isBrowserPathId } from "./ports.js";
 import { BoundedLocalJsonClient, LOCAL_JSON_LIMITS } from "./local-json-client.js";
+import { selectCanonicalPassage } from "./passage-selector.js";
 
 const DEFAULT_CONTENT_CHARS = 16_384;
 const MAX_CONTENT_CHARS = 100_000;
@@ -226,7 +227,7 @@ export class WebxAuthority {
 
   private async search(actor: AuthorityActor, request: SearchRequest, scope: string, signal?: AbortSignal): Promise<SearchResponse> {
     requireScope(actor, scope);
-    const key = { formatVersion: 21, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
+    const key = { formatVersion: 22, request, searxUrl: this.options.searxUrl, readerUrl: this.options.readerUrl };
     const cached = await this.#cache.get<SearchResponse>("search", key);
     if (cached !== undefined) return withSearchDelivery(cached, "hit", false);
     const flightKey = `search\0${createHash("sha256").update(stableStringify({ principalId: actor.principalId, key })).digest("hex")}`;
@@ -292,6 +293,10 @@ export class WebxAuthority {
         searches, fallbackUsed,
         partial: failures.length > 0 || providerWarnings.length > 0 || extractionFailures > 0,
         pagesRead, readAttempts,
+        ...(output === "extracts" ? {
+          warning: "output=extracts is deprecated and remains available through the current 0.x API line.",
+          migration: "Use web_search links, select sources, call web_read_batch, then use web_content for focus or continuation.",
+        } : {}),
       },
     };
   }
@@ -309,10 +314,10 @@ export class WebxAuthority {
       readAttempts += chunk.length;
       const outcomes = await boundedOrderedFanOut(chunk, EXTRACT_READ_CONCURRENCY, async (candidate): Promise<{ pageRead: boolean; hit?: SearchHit }> => {
         try {
-          const page = await this.uncachedRead(readerActor, { url: candidate.url, maxChars: 30_000 }, signal, false);
+          const page = await this.uncachedRead(readerActor, { url: candidate.url, query: stripSiteOperators(query), maxChars: EXTRACT_PASSAGE_CHARS }, signal, false);
           const url = normalizeSearchUrl(page.url || candidate.url);
           if (url === undefined || !urlMatchesDomains(url, domains)) return { pageRead: true };
-          const snippet = contiguousEvidenceExcerpt(page.untrustedContent, query, EXTRACT_PASSAGE_CHARS);
+          const snippet = page.untrustedContent;
           if (snippet.length < 60) return { pageRead: true };
           return {
             pageRead: true,
@@ -365,7 +370,7 @@ export class WebxAuthority {
     requireScope(actor, "retrieval.read");
     assertReadRequest(request);
     const canonicalRequest = withoutRefresh(request);
-    const key = { formatVersion: 12, principalId: actor.principalId, request: canonicalRequest, readerUrl: this.options.readerUrl };
+    const key = { formatVersion: 13, principalId: actor.principalId, request: canonicalRequest, readerUrl: this.options.readerUrl };
     const entry = await this.#cache.getEntry<ReadContent>("read", key, true);
     const prior = entry === undefined ? undefined : await this.usableCachedRead(actor, entry.value);
     if (request.refresh !== true && entry?.fresh === true && prior !== undefined) return withReadDelivery(prior, "hit", false, "cached", this.options.clock.now());
@@ -413,7 +418,7 @@ export class WebxAuthority {
       const crawled = await this.crawl(actor, { url: request.url, maxPages: crawlPages, maxDepth: crawlDepth, maxChars: sourceChars, sameDomain: request.sameDomain, query: request.query }, signal);
       const successful = crawled.pages.filter((page) => page.ok && page.content);
       const perPageLimit = Math.max(1_500, Math.floor(sourceChars / Math.max(1, successful.length)));
-      const allContent = successful.map((page, index) => `${successful.length > 1 ? `## ${page.title ?? `Page ${index + 1}`}\n\n` : ""}${request.query ? focusedReadContent(page.content ?? "", request.query, perPageLimit) : cleanMainContent(page.content ?? "")}`).join("\n\n");
+      const allContent = successful.map((page, index) => `${successful.length > 1 ? `## ${page.title ?? `Page ${index + 1}`}\n\n` : ""}${request.query ? selectCanonicalPassage(cleanMainContent(page.content ?? ""), request.query, perPageLimit) : cleanMainContent(page.content ?? "")}`).join("\n\n");
       const primary = successful[0];
       return this.storeRead(actor, {
         title: primary?.title ?? `Content from ${request.url}`, url: primary?.url ?? request.url,
@@ -428,10 +433,9 @@ export class WebxAuthority {
     const allSources = this.options.sources;
     const input = request as ReadRequest & { query?: string; view?: string; fields?: readonly string[]; itemOffset?: number; itemLimit?: number; contentOffset?: number };
     const specializedProjection = input.view === "raw" || input.fields !== undefined || input.itemOffset !== undefined || input.itemLimit !== undefined;
-    const transformed = specializedProjection || input.query !== undefined || input.contentOffset !== undefined || input.view === "outline";
-    let source = !transformed ? allSources.find((item) => item.url === request.url) : undefined;
+    let source = !specializedProjection && input.contentOffset === undefined ? allSources.find((item) => item.url === request.url) : undefined;
     const requestedChars = integer(request.maxChars ?? 1_000_000, "maxChars", 1, 1_000_000);
-    const sourceChars = !specializedProjection && retainContent ? 1_000_000 : requestedChars;
+    const sourceChars = input.query !== undefined || (!specializedProjection && retainContent) ? 1_000_000 : requestedChars;
     if (source === undefined && this.options.readerUrl !== undefined) {
       const priorFreshness = readFreshness(prior);
       const response = await this.#localJson.request<{ url?: unknown; title?: unknown; content?: unknown; mediaType?: unknown; source?: unknown; truncated?: unknown; metadata?: unknown; notModified?: unknown }>(
@@ -440,7 +444,7 @@ export class WebxAuthority {
           method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify({
             url: request.url,
-            query: specializedProjection ? input.query : undefined,
+            query: undefined,
             view: specializedProjection ? input.view ?? "main" : "main",
             fields: specializedProjection ? input.fields ?? [] : [],
             itemOffset: specializedProjection ? integer(input.itemOffset ?? 0, "itemOffset", 0, 1_000_000) : 0,
@@ -479,18 +483,21 @@ export class WebxAuthority {
         representation, sourceOffset, sourceComplete, nextSourceOffset: provenNextSourceOffset,
         extractor, mediaType, normalizedContent: source.content,
       };
-      const presented = !specializedProjection && input.query !== undefined
-        ? focusedReadContent(source.content, input.query, source.content.length)
+      const presented = input.query !== undefined
+        ? selectCanonicalPassage(source.content, input.query, Math.min(requestedChars, MAX_AGENT_READ_CONTENT_CHARS))
         : !specializedProjection && input.view === "outline" ? outlineContent(source.content) : source.content;
       const metadata = { requestedUrl: request.url, finalUrl: source.url, source: page.source, substituted: source.url !== request.url, reader: { ...readerMetadata, truncated: page.truncated === true } };
       return this.storeRead(actor, stored, presented, requestedChars, metadata, retainContent);
     }
     if (source === undefined || !canRead(actor, source.ownerPrincipalId, source.visibility)) throw problem(404, "not-found", "page was not found", false);
+    const presented = input.query !== undefined
+      ? selectCanonicalPassage(source.content, input.query, Math.min(requestedChars, MAX_AGENT_READ_CONTENT_CHARS))
+      : input.view === "outline" ? outlineContent(source.content) : source.content;
     return this.storeRead(actor, {
       title: source.title, url: source.url, requestedUrl: request.url, finalUrl: source.url,
       representation: "canonical-normalized", sourceOffset: 0, sourceComplete: true, nextSourceOffset: null,
       extractor: "indexed-source", mediaType: "text/markdown", normalizedContent: source.content,
-    }, source.content, requestedChars, {}, retainContent);
+    }, presented, requestedChars, {}, retainContent);
   }
 
   private async storeRead(
@@ -587,7 +594,7 @@ export class WebxAuthority {
       text = points.slice(offset, offset + limit).join("");
     } else if (request.query !== undefined) {
       mode = "query";
-      text = storedQueryExcerpt(record.content, request.query, limit);
+      text = selectCanonicalPassage(record.content, request.query, limit);
     } else {
       offset = integer(request.offset ?? 0, "offset", 0, points.length);
       text = points.slice(offset, offset + limit).join("");
@@ -1027,76 +1034,6 @@ function cleanMainContent(value: string): string {
     lines.push(line);
   }
   return lines.join("\n").replace(/\n{3,}/gu, "\n\n").trim();
-}
-
-function focusedReadContent(value: string, query: string, maxChars: number): string {
-  const clean = cleanMainContent(value);
-  if (/notable\s+changes/iu.test(query)) {
-    const match = clean.match(/(?:^|\n)#{2,4}\s+Notable Changes\s*\n([\s\S]*?)(?=\n#{2,4}\s+Commits|$)/iu);
-    if (match?.[1]) {
-      const introduction = clean.slice(0, Math.max(0, match.index ?? 0)).split("\n").filter((line) => /^(?:#|.*\b(?:version|release|lts)\b)/iu.test(line)).slice(0, 5).join("\n");
-      return boundText(`${introduction}\n\n## Notable Changes\n${match[1].trim()}`.trim(), maxChars).text;
-    }
-  }
-  return evidenceExcerpt(clean, query, maxChars);
-}
-
-function evidenceExcerpt(value: string, query: string, maxChars: number): string {
-  const clean = cleanMainContent(value);
-  const terms = [...new Set(query.toLocaleLowerCase().match(/[a-z0-9][a-z0-9.+-]{2,}/gu) ?? [])];
-  const blocks = clean.split(/\n+|(?<=[.!?])\s+(?=[A-Z0-9])/u).map((item) => item.trim()).filter((item) => item.length >= 20);
-  const scored = blocks.map((text, index) => ({ text, index, score: terms.reduce((sum, term) => sum + (text.toLocaleLowerCase().includes(term) ? 1 : 0), 0) }));
-  const positive = scored.filter((item) => item.score > 0);
-  const ranked = (positive.length >= 2 ? positive : scored)
-    .sort((left, right) => right.score - left.score || left.index - right.index);
-  const selected: string[] = [];
-  let length = 0;
-  for (const item of ranked) {
-    if (selected.includes(item.text)) continue;
-    if (selected.length > 0 && length + item.text.length + 2 > maxChars) continue;
-    selected.push(item.text);
-    length += item.text.length + 2;
-    if (length >= maxChars * 0.8 || selected.length >= 10) break;
-  }
-  return boundText(selected.join("\n\n") || clean, maxChars).text.trim();
-}
-
-function storedQueryExcerpt(value: string, query: string, maxChars: number): string {
-  const lower = value.toLocaleLowerCase();
-  const exact = lower.indexOf(query.trim().toLocaleLowerCase());
-  const terms = searchTerms(query);
-  const positions = terms.map((term) => lower.indexOf(term)).filter((position) => position >= 0);
-  const position = exact >= 0 ? exact : positions.length > 0 ? Math.min(...positions) : 0;
-  const pointPosition = [...value.slice(0, position)].length;
-  const points = [...value];
-  const start = Math.max(0, Math.min(pointPosition - Math.floor(maxChars / 5), points.length - maxChars));
-  return points.slice(start, start + maxChars).join("").trim();
-}
-
-function contiguousEvidenceExcerpt(value: string, query: string, maxChars: number): string {
-  const clean = cleanMainContent(value);
-  if (clean.length <= maxChars) return clean;
-  const terms = searchTerms(stripSiteOperators(query));
-  const blocks = clean.split(/\n+|(?<=[.!?])\s+(?=[A-Z0-9])/u).map((text) => text.trim()).filter((text) => text.length >= 20);
-  let best = blocks[0] ?? clean;
-  let bestScore = -1;
-  for (const block of blocks) {
-    const lower = block.toLocaleLowerCase();
-    const score = terms.filter((term) => lower.includes(term)).length;
-    if (score > bestScore) { best = block; bestScore = score; }
-  }
-  const position = Math.max(0, clean.indexOf(best));
-  let start = Math.max(0, position - Math.floor(maxChars * 0.2));
-  if (start > 0) {
-    const boundary = Math.max(clean.lastIndexOf("\n", start), clean.lastIndexOf(" ", start));
-    if (boundary >= 0) start = boundary + 1;
-  }
-  let end = Math.min(clean.length, start + maxChars);
-  if (end < clean.length) {
-    const boundary = Math.max(clean.lastIndexOf("\n", end), clean.lastIndexOf(". ", end));
-    if (boundary > start + Math.floor(maxChars * 0.6)) end = boundary + 1;
-  }
-  return clean.slice(start, end).trim();
 }
 
 function assertContentRequest(request: ContentRequest): void {

@@ -20,7 +20,7 @@ const point = {
 
 export const WebSearchSchema = Type.Object({
   query: Type.String({ minLength: 1, maxLength: 8192, description: "Complete search query. Include time terms such as latest, today, or a year when recency matters." }),
-  output: Type.Optional(StringEnum(["links", "extracts"] as const, { description: "Result form. Omit for ranked links with search snippets. Use extracts for short query-focused passages read from selected pages." })),
+  output: Type.Optional(StringEnum(["links", "extracts"] as const, { description: "Result form. Omit for ranked links. extracts is deprecated compatibility behavior; use web_search, select sources, web_read_batch, then web_content." })),
   domains: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 253, pattern: "^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$", description: "Strict allowed host name, such as docs.python.org. Do not pass a URL, path, or site: prefix." }), { maxItems: 32, description: "Optional strict allowed hosts. Every returned URL must match one of these hosts or its subdomains." })),
 }, strict);
 
@@ -36,15 +36,23 @@ const directReadProperties = {
   refresh: Type.Optional(Type.Boolean({ description: "Bypass a fresh traffic-cache hit and validate the canonical source again. Conditional validation can reuse unchanged canonical content." })),
 };
 
+const saveProperty = Type.Optional(Type.Object({
+  path: Type.String({ minLength: 3, maxLength: 4096, pattern: "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\).+\\.[mM][dD]$", description: "Relative .md path below the private WebX export directory. WebX returns the absolute saved path." }),
+  overwrite: Type.Optional(Type.Boolean({ description: "Replace an existing file atomically. Default: false. Set true only when replacement is intended." })),
+}, { ...strict, description: "Save one extracted page as UTF-8 Markdown and return compact file metadata instead of the body. Not compatible with structured JSON projection or linked crawling." }));
+
 export const WebReadSchema = Type.Object({
   ...directReadProperties,
-  maxPages: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Advanced legacy-compatible linked crawl page limit. Default: 1. Set above 1 only for an explicit crawl." })),
-  maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 3, description: "Advanced legacy-compatible linked crawl depth. Default: 0. Any positive value enables crawling." })),
-  sameDomain: Type.Optional(Type.Boolean({ description: "Advanced linked crawl control. Keep links on the starting domain by default." })),
-  save: Type.Optional(Type.Object({
-    path: Type.String({ minLength: 3, maxLength: 4096, pattern: "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\).+\\.[mM][dD]$", description: "Relative .md path below the private WebX export directory. WebX returns the absolute saved path." }),
-    overwrite: Type.Optional(Type.Boolean({ description: "Replace an existing file atomically. Default: false. Set true only when replacement is intended." })),
-  }, { ...strict, description: "Save one extracted page as UTF-8 Markdown and return compact file metadata instead of the body. Not compatible with structured JSON projection or linked crawling." })),
+  save: saveProperty,
+}, strict);
+
+/** Compatibility schema for installations that explicitly enable linked reads. */
+export const WebReadAdvancedSchema = Type.Object({
+  ...directReadProperties,
+  maxPages: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Advanced legacy-compatible linked crawl page limit. Default: 1." })),
+  maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 3, description: "Advanced linked crawl depth. Default: 0." })),
+  sameDomain: Type.Optional(Type.Boolean({ description: "Advanced linked crawl host control. Default: true." })),
+  save: saveProperty,
 }, strict);
 
 export const WebReadBatchSchema = Type.Object({

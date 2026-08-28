@@ -1,0 +1,106 @@
+{
+  "type": "object",
+  "required": [
+    "url"
+  ],
+  "properties": {
+    "url": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8192,
+      "pattern": "^https?://",
+      "description": "Exact public HTTP(S) URL to read. Use web_search first when the URL is unknown."
+    },
+    "query": {
+      "type": "string",
+      "maxLength": 8192,
+      "description": "Optional topic or section selector. Omit for the complete extracted main content."
+    },
+    "view": {
+      "type": "string",
+      "enum": [
+        "main",
+        "outline",
+        "raw"
+      ],
+      "description": "Extraction view. main is the readable default; outline returns structure; raw preserves source-oriented text."
+    },
+    "fields": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256,
+        "description": "JSON property name or dotted field path."
+      },
+      "maxItems": 32,
+      "description": "Structured JSON projection. Each returned collection item remains one complete object with these fields."
+    },
+    "itemOffset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000,
+      "description": "Zero-based item offset for a structured JSON collection. Reuse the same URL and fields."
+    },
+    "itemLimit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 500,
+      "description": "Maximum structured JSON collection items. Use with itemOffset for item pagination."
+    },
+    "maxChars": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000,
+      "description": "Explicit content bound. Omit for a full read. If it binds the result, use the reported nextContentOffset."
+    },
+    "contentOffset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000000,
+      "description": "Continuation offset reported by a prior direct read. Keep the same URL and options. Do not invent this value or combine it with linked crawling."
+    },
+    "refresh": {
+      "type": "boolean",
+      "description": "Bypass a fresh traffic-cache hit and validate the canonical source again. Conditional validation can reuse unchanged canonical content."
+    },
+    "maxPages": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20,
+      "description": "Advanced legacy-compatible linked crawl page limit. Default: 1."
+    },
+    "maxDepth": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3,
+      "description": "Advanced linked crawl depth. Default: 0."
+    },
+    "sameDomain": {
+      "type": "boolean",
+      "description": "Advanced linked crawl host control. Default: true."
+    },
+    "save": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 4096,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\).+\\.[mM][dD]$",
+          "description": "Relative .md path below the private WebX export directory. WebX returns the absolute saved path."
+        },
+        "overwrite": {
+          "type": "boolean",
+          "description": "Replace an existing file atomically. Default: false. Set true only when replacement is intended."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Save one extracted page as UTF-8 Markdown and return compact file metadata instead of the body. Not compatible with structured JSON projection or linked crawling."
+    }
+  },
+  "additionalProperties": false
+}

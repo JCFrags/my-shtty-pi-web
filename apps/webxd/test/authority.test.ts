@@ -158,7 +158,7 @@ describe("WebxAuthority", () => {
       }
       const body = JSON.parse(String(init?.body)) as { url: string; query?: string; maxChars: number };
       expect(body.query).toBeUndefined();
-      expect(body.maxChars).toBe(30_000);
+      expect(body.maxChars).toBe(1_000_000);
       activeReaders += 1;
       maximumReaders = Math.max(maximumReaders, activeReaders);
       await new Promise((resolve) => setTimeout(resolve, 5));
@@ -173,9 +173,13 @@ describe("WebxAuthority", () => {
     const contentStore = new NormalizedContentStore();
     const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-12T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888", readerUrl: "http://127.0.0.1:8787", contentStore });
     const result = await call(instance, actor(), "POST", "/v1/search", { query: "Product feature support", output: "extracts", domains: ["docs.example.org"] }, "extract-search");
-    const body = result.body as { hits: Array<{ snippet: string }>; metadata: { searches: number; pagesRead: number; readAttempts: number; partial: boolean } };
+    const body = result.body as { hits: Array<{ snippet: string }>; metadata: { searches: number; pagesRead: number; readAttempts: number; partial: boolean; warning: string; migration: string } };
     expect(result.status).toBe(200);
-    expect(body.metadata).toMatchObject({ searches: 1, fallbackUsed: false, partial: true, pagesRead: 5, readAttempts: 6 });
+    expect(body.metadata).toMatchObject({
+      searches: 1, fallbackUsed: false, partial: true, pagesRead: 5, readAttempts: 6,
+      warning: expect.stringContaining("deprecated"),
+      migration: expect.stringContaining("web_read_batch"),
+    });
     expect(body.hits).toHaveLength(4);
     expect(body.hits.every((hit) => hit.snippet.includes("verified page passage") && !hit.snippet.includes("Unverified search snippet") && hit.snippet.length <= 700)).toBe(true);
     expect(requests.filter((item) => item.url.includes("/search"))).toHaveLength(1);
@@ -481,7 +485,7 @@ describe("WebxAuthority", () => {
     }));
     const instance = new WebxAuthority({
       browser: browser(), sources: PUBLIC_SOURCES, readerUrl: "http://127.0.0.1:8787",
-      clock: { now: () => times[Math.min(clockIndex++, times.length - 1)] ?? "2026-08-28T10:00:00.000Z" },
+      clock: { now: () => times[Math.min(clockIndex++, times.length - 1)] ?? times[0] ?? "2026-08-28T00:00:00.000Z" },
       ids: { next: (prefix) => `${prefix}-1` },
     });
     const first = await call(instance, actor(), "POST", "/v1/read", { url: "https://fresh.example/page" }, "freshness-first");
@@ -594,6 +598,8 @@ describe("WebxAuthority", () => {
       contentSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
       reader: { createdAt: expect.any(String), expiresAt: expect.any(String), selectionApplied: true },
     });
+    const repeated = await call(instance, actor(), "POST", "/v1/content", { contentId: body.metadata.contentId, query: "selected needle", limit: 30_000 }, "canonical-repeat-query");
+    expect((repeated.body as { untrustedContent: string }).untrustedContent).toBe(body.untrustedContent);
     const stored = await call(instance, actor(), "POST", "/v1/content", { contentId: body.metadata.contentId, findText: "CANONICAL-TAIL", limit: 200 }, "canonical-tail");
     expect(stored).toMatchObject({ status: 200, body: { untrustedContent: expect.stringContaining("CANONICAL-TAIL"), metadata: { representation: "canonical-normalized" } } });
   });

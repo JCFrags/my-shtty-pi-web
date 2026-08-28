@@ -87,6 +87,8 @@ export interface SearchResponse {
     readonly partial: boolean;
     readonly pagesRead: number;
     readonly readAttempts: number;
+    readonly warning?: string;
+    readonly migration?: string;
     readonly delivery?: { readonly cache: "hit" | "miss"; readonly coalesced: boolean };
   };
 }
@@ -105,8 +107,11 @@ export interface ReadRequest {
   readonly itemLimit?: number;
   readonly maxChars?: number;
   readonly contentOffset?: number;
+  /** @deprecated Compatibility field. Use search, readBatch, and content. Retained through the current 0.x API line. */
   readonly maxPages?: number;
+  /** @deprecated Compatibility field. Use search, readBatch, and content. Retained through the current 0.x API line. */
   readonly maxDepth?: number;
+  /** @deprecated Compatibility field. Use search, readBatch, and content. Retained through the current 0.x API line. */
   readonly sameDomain?: boolean;
   /** Bypass a fresh traffic-cache hit and validate the canonical source again. */
   readonly refresh?: boolean;

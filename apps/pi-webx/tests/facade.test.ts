@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { Value } from "typebox/value";
-import { createPiWebxExtension } from "../src/index.js";
+import { createPiWebxExtension, type PiWebxExtensionOptions } from "../src/index.js";
 import { MAX_MODEL_CHARS, presentResult } from "../src/output.js";
 import {
   BrowserActSchema,
@@ -11,6 +11,7 @@ import {
   BrowserOpenSchema,
   BrowserTabsSchema,
   WebContentSchema,
+  WebReadAdvancedSchema,
   WebReadBatchSchema,
   WebReadSchema,
   WebSearchSchema,
@@ -45,7 +46,7 @@ class MockSdk implements WebxSdk {
   async stop(): Promise<void> { this.stops += 1; }
 }
 
-function harness(sdk: MockSdk, trusted = true, audit: { record(input: unknown): Promise<void> } = { record: async () => undefined }) {
+function harness(sdk: MockSdk, trusted = true, audit: { record(input: unknown): Promise<void> } = { record: async () => undefined }, options: PiWebxExtensionOptions = {}) {
   const tools: Array<Record<string, unknown>> = [];
   const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
   const shortcuts = new Map<string, { handler: (ctx: unknown) => Promise<void> }>();
@@ -65,7 +66,7 @@ function harness(sdk: MockSdk, trusted = true, audit: { record(input: unknown): 
     getActiveTools() { return active; },
     setActiveTools(value: string[]) { active = value; },
   };
-  createPiWebxExtension(() => sdk, audit)(pi as never);
+  createPiWebxExtension(() => sdk, audit, options)(pi as never);
   const controller = new AbortController();
   const ctx = {
     cwd: "/trusted/project",
@@ -112,7 +113,7 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   assert.ok(fx.active.includes("web_search"));
   assert.ok(fx.active.includes("browser_open"));
   const searchTool = fx.tools.find((tool) => tool.name === "web_search");
-  assert.match(String(searchTool?.promptSnippet), /Discover ranked URLs or retrieve short separate source extracts/);
+  assert.match(String(searchTool?.promptSnippet), /Discover ranked URLs with one complete query/);
   assert.ok(Array.isArray(searchTool?.promptGuidelines));
   const searchCall = (searchTool?.renderCall as Function)(
     { query: "NIST password guidance 2026", output: "extracts", domains: ["nist.gov", "csrc.nist.gov"] },
@@ -132,6 +133,7 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   assert.match(prompt.systemPrompt, /WebX is Pi's primary internet interface/);
   assert.match(prompt.systemPrompt, /Do not replace WebX with curl/);
   assert.match(prompt.systemPrompt, /web_search needs only a complete query/);
+  assert.match(prompt.systemPrompt, /web_search, select 1 to 5 sources, web_read_batch, then web_content/);
   assert.match(prompt.systemPrompt, /Do not invent a continuation offset/);
   assert.match(prompt.systemPrompt, /does not expose uploads or downloads/);
 
@@ -145,6 +147,19 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   assert.ok(fx.active.includes("other_extension_tool"));
   await fx.events.get("session_shutdown")?.();
   assert.equal(sdk.stops, 1);
+});
+
+test("default read tool hides linked crawl fields and explicit compatibility opt-in restores them", () => {
+  const normal = harness(new MockSdk());
+  const normalRead = normal.tools.find((tool) => tool.name === "web_read");
+  assert.equal(normalRead?.parameters, WebReadSchema);
+  assert.doesNotMatch(JSON.stringify(normalRead?.parameters), /maxPages|maxDepth|sameDomain/u);
+
+  const advanced = harness(new MockSdk(), true, { record: async () => undefined }, { advancedLinkedRead: true });
+  const advancedRead = advanced.tools.find((tool) => tool.name === "web_read");
+  assert.equal(advancedRead?.parameters, WebReadAdvancedSchema);
+  assert.match(JSON.stringify(advancedRead?.parameters), /maxPages/u);
+  assert.match(String(advancedRead?.description), /explicitly enables legacy/u);
 });
 
 test("one /web settings command routes modes and browser workspace actions", async () => {
@@ -177,6 +192,17 @@ test("one /web settings command routes modes and browser workspace actions", asy
   await fx.events.get("session_shutdown")?.();
 });
 
+test("read model schemas match reviewed snapshots", async () => {
+  const cases = [
+    [WebReadSchema, "./snapshots/web-read.default.json"],
+    [WebReadAdvancedSchema, "./snapshots/web-read.advanced.json"],
+  ] as const;
+  for (const [schema, path] of cases) {
+    const snapshot = await readFile(new URL(path, import.meta.url), "utf8");
+    assert.equal(`${JSON.stringify(schema, null, 2)}\n`, snapshot);
+  }
+});
+
 test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
   assert.equal(Value.Check(WebSearchSchema, { query: "ok" }), true);
   assert.equal(Value.Check(WebSearchSchema, { query: "ok", output: "links" }), true);
@@ -191,6 +217,10 @@ test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
   assert.equal(Value.Check(WebSearchSchema, { query: "ok", domains: ["https://example.com/path"] }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "not-a-url" }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", refresh: true }), true);
+  for (const hidden of [{ maxPages: 2 }, { maxDepth: 1 }, { sameDomain: false }]) {
+    assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", ...hidden }), false);
+    assert.equal(Value.Check(WebReadAdvancedSchema, { url: "https://example.test", ...hidden }), true);
+  }
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", refresh: "yes" }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "notes/page.md" } }), true);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "../page.md" } }), false);
@@ -405,9 +435,11 @@ test("output compaction and visual transfer have deterministic bounds", () => {
   assert.match(JSON.stringify(saved.content), /Complete: yes/);
   assert.doesNotMatch(JSON.stringify(saved.content), /untrustedContent/);
 
-  const extracts = presentResult({ summary: "search", data: { query: "feature", output: "extracts", hits: [{ title: "Source", url: "https://example.test/source", snippet: "Focused supporting passage." }], metadata: { searches: 1, fallbackUsed: false, partial: true, pagesRead: 1, readAttempts: 2 } } });
+  const extracts = presentResult({ summary: "search", data: { query: "feature", output: "extracts", hits: [{ title: "Source", url: "https://example.test/source", snippet: "Focused supporting passage." }], metadata: { searches: 1, fallbackUsed: false, partial: true, pagesRead: 1, readAttempts: 2, warning: "output=extracts is deprecated.", migration: "Use web_read_batch, then web_content." } } });
   assert.match(JSON.stringify(extracts.content), /extracts; 1 search\(es\); 1 successful page read\(s\) from 2 attempt\(s\)/);
   assert.match(JSON.stringify(extracts.content), /Partial result/);
+  assert.match(JSON.stringify(extracts.content), /Warning: output=extracts is deprecated/);
+  assert.match(JSON.stringify(extracts.content), /Migration: Use web_read_batch, then web_content/);
   assert.match(JSON.stringify(extracts.content), /Extract: Focused supporting passage/);
 
   const completePage = "main-content-".repeat(5_000);
