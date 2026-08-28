@@ -29,6 +29,7 @@ import type { AuthorityActor, AuthorityClock, AuthorityIdSource, BrowserDaemonPo
 import { WebCache, type WebCacheOptions } from "./cache.js";
 import { ContentEntryTooLargeError, NormalizedContentStore, type NormalizedContentRecord } from "./content-store.js";
 import { BrowserPortError, isBrowserPathId } from "./ports.js";
+import { BoundedLocalJsonClient, LOCAL_JSON_LIMITS, localHttpConfigurationError } from "./local-json-client.js";
 
 const DEFAULT_CONTENT_CHARS = 16_384;
 const MAX_CONTENT_CHARS = 100_000;
@@ -98,6 +99,7 @@ export class WebxAuthority {
   readonly #liveBinaryArtifacts = new Map<string, StoredBinaryArtifact>();
   readonly #cache: WebCache;
   readonly #content: NormalizedContentStore;
+  readonly #localJson = new BoundedLocalJsonClient();
   readonly #idempotencyMaxEntries: number;
   readonly #idempotencyMaxBytes: number;
   readonly #idempotencyTtlMs: number;
@@ -183,31 +185,20 @@ export class WebxAuthority {
   }
 
   private async searchHealth(signal?: AbortSignal): Promise<{ enabled: boolean; healthy: boolean; reason?: string }> {
+    if (signal?.aborted) throw signal.reason;
     if (this.options.searxUrl === undefined) return { enabled: this.options.sources.length > 0, healthy: this.options.sources.length > 0 };
-    const probeSignal = healthProbeSignal(signal);
-    try {
-      const endpoint = new URL("/search", this.options.searxUrl);
-      endpoint.searchParams.set("q", "webx capability probe");
-      endpoint.searchParams.set("format", "json");
-      const response = await fetch(endpoint, { signal: probeSignal, headers: { accept: "application/json" } });
-      if (!response.ok) return { enabled: true, healthy: false, reason: `search backend returned HTTP ${response.status}` };
-      const payload = await response.json() as { results?: unknown };
-      if (!Array.isArray(payload.results)) return { enabled: true, healthy: false, reason: "search backend returned an invalid health response" };
-      return { enabled: true, healthy: true };
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      return { enabled: true, healthy: false, reason: `search backend is unavailable: ${safeMessage(error)}` };
-    }
+    const configurationError = localHttpConfigurationError(this.options.searxUrl);
+    return configurationError === undefined
+      ? { enabled: true, healthy: true }
+      : { enabled: true, healthy: false, reason: `search backend configuration is invalid: ${configurationError}` };
   }
 
   private async readHealth(signal?: AbortSignal): Promise<{ enabled: boolean; healthy: boolean; reason?: string }> {
     if (this.options.readerUrl === undefined) return { enabled: this.options.sources.length > 0, healthy: this.options.sources.length > 0 };
-    const probeSignal = healthProbeSignal(signal);
     try {
-      const response = await fetch(new URL("/health", this.options.readerUrl), { signal: probeSignal, headers: { accept: "application/json" } });
+      const response = await this.#localJson.request<{ ok?: unknown }>(new URL("/health", this.options.readerUrl), {}, LOCAL_JSON_LIMITS.health, signal);
       if (!response.ok) return { enabled: true, healthy: false, reason: `reader returned HTTP ${response.status}` };
-      const payload = await response.json() as { ok?: unknown };
-      if (payload.ok !== true) return { enabled: true, healthy: false, reason: "reader returned an invalid health response" };
+      if (response.payload?.ok !== true) return { enabled: true, healthy: false, reason: "reader returned an invalid health response" };
       return { enabled: true, healthy: true };
     } catch (error) {
       if (signal?.aborted) throw error;
@@ -354,9 +345,9 @@ export class WebxAuthority {
     endpoint.searchParams.set("q", query);
     endpoint.searchParams.set("format", "json");
     endpoint.searchParams.set("safesearch", "0");
-    const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
+    const response = await this.#localJson.request<{ results?: RawSearchHit[]; unresponsive_engines?: unknown }>(endpoint, {}, LOCAL_JSON_LIMITS.searxQuery, signal);
     if (!response.ok) throw new Error(`SearXNG returned HTTP ${response.status}`);
-    const payload = await response.json() as { results?: RawSearchHit[]; unresponsive_engines?: unknown };
+    const payload = response.payload ?? {};
     const raw = Array.isArray(payload.results) ? payload.results : [];
     const eligible = raw.filter((item) => typeof item.url === "string" && typeof item.title === "string" && urlMatchesDomains(item.url, domains));
     const unavailable = searxUnavailableEngines(payload.unresponsive_engines);
@@ -423,15 +414,20 @@ export class WebxAuthority {
     const requestedChars = integer(request.maxChars ?? 1_000_000, "maxChars", 1, 1_000_000);
     const sourceChars = requestedChars;
     if (source === undefined && this.options.readerUrl !== undefined) {
-      const response = await fetch(new URL("/v1/read", this.options.readerUrl), {
-        method: "POST", signal, headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ url: request.url, query: input.query, view: input.view ?? "main", fields: input.fields ?? [], itemOffset: integer(input.itemOffset ?? 0, "itemOffset", 0, 1_000_000), itemLimit: integer(input.itemLimit ?? 50, "itemLimit", 1, 500), contentOffset: integer(input.contentOffset ?? 0, "contentOffset", 0, 100_000_000), maxChars: sourceChars }),
-      });
+      const response = await this.#localJson.request<{ url?: unknown; title?: unknown; content?: unknown; mediaType?: unknown; source?: unknown; truncated?: unknown; metadata?: unknown }>(
+        new URL("/v1/read", this.options.readerUrl),
+        {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ url: request.url, query: input.query, view: input.view ?? "main", fields: input.fields ?? [], itemOffset: integer(input.itemOffset ?? 0, "itemOffset", 0, 1_000_000), itemLimit: integer(input.itemLimit ?? 50, "itemLimit", 1, 500), contentOffset: integer(input.contentOffset ?? 0, "contentOffset", 0, 100_000_000), maxChars: sourceChars }),
+        },
+        LOCAL_JSON_LIMITS.reader,
+        signal,
+      );
       if (!response.ok) {
-        const failure = parseReaderFailure(response.status, await response.text());
+        const failure = parseReaderFailure(response.status, response.bodyText);
         throw problem(failure.toolStatus, "read-failed", failure.message, failure.retryable);
       }
-      const page = await response.json() as { url?: unknown; title?: unknown; content?: unknown; mediaType?: unknown; source?: unknown; truncated?: unknown; metadata?: unknown };
+      const page = response.payload ?? {};
       if (typeof page.content !== "string") throw new Error("reader returned no text content");
       const digest = createHash("sha256").update(`${request.url}\0${page.content}`).digest("hex");
       source = { hitId: `hit-${digest.slice(0, 20)}`, ownerPrincipalId: actor.principalId, title: typeof page.title === "string" ? page.title : request.url, url: typeof page.url === "string" ? page.url : request.url, content: page.content, visibility: "public" };
@@ -555,17 +551,21 @@ export class WebxAuthority {
     const length = integer(request.length, "length", 1, MAX_RANGE_BYTES);
     if (offset > Number.MAX_SAFE_INTEGER - length) throw problem(400, "invalid-request", "range end exceeds the safe integer bound", false);
     const maxRedirects = integer(request.maxRedirects ?? 4, "maxRedirects", 0, MAX_RANGE_REDIRECTS);
-    const response = await fetch(new URL("/v1/read-range", this.options.readerUrl), {
-      method: "POST",
+    const response = await this.#localJson.request<Record<string, unknown>>(
+      new URL("/v1/read-range", this.options.readerUrl),
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: request.url, offset, length, maxRedirects }),
+      },
+      LOCAL_JSON_LIMITS.reader,
       signal,
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ url: request.url, offset, length, maxRedirects }),
-    });
+    );
     if (!response.ok) {
-      const failure = parseReaderFailure(response.status, await response.text());
+      const failure = parseReaderFailure(response.status, response.bodyText);
       throw problem(failure.toolStatus, "range-read-failed", failure.message, failure.retryable);
     }
-    const value = await response.json() as Record<string, unknown>;
+    const value = response.payload ?? {};
     const requestedUrl = requiredString(value.requestedUrl, "requestedUrl");
     const finalUrl = requiredString(value.finalUrl, "finalUrl");
     if (requestedUrl !== request.url) throw new Error("range reader changed the requested URL");

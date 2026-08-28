@@ -126,6 +126,15 @@ describe("WebxAuthority", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("rejects a SearXNG body above 2 MiB before it can become a search result", async () => {
+    const oversized = JSON.stringify({ results: [{ title: "Oversized", url: "https://example.test/", content: "x".repeat(2 * 1024 * 1024) }] });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(oversized, { status: 200, headers: { "content-type": "application/json" } })));
+    const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
+    const result = await call(instance, actor(), "POST", "/v1/search", { query: "oversized response" }, "oversized-search");
+    expect(result).toMatchObject({ status: 502, body: { code: "backend-failure", retryable: true } });
+    expect((result.body as { message: string }).message).toContain("exceeded 2097152 bytes");
+  });
+
   it("reports unavailable providers instead of a false successful empty search", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ results: [], unresponsive_engines: [["bing news", "too many requests"], ["brave.news", "CAPTCHA"]] }), { status: 200, headers: { "content-type": "application/json" } })));
     const instance = new WebxAuthority({ browser: browser(), sources: PUBLIC_SOURCES, clock: { now: () => "2026-08-24T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` }, searxUrl: "http://127.0.0.1:8888" });
@@ -353,12 +362,12 @@ describe("WebxAuthority", () => {
   it("negotiates search, static read, and optional browser health independently", async () => {
     const failedBrowser = browser();
     vi.mocked(failedBrowser.capabilities).mockRejectedValue(new Error("browser offline"));
-    vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
+    const healthFetch = vi.fn(async (input: unknown) => {
       const url = new URL(String(input));
-      if (url.port === "8888" && url.pathname === "/search") return new Response(JSON.stringify({ results: [] }), { status: 200 });
       if (url.port === "8787" && url.pathname === "/health") return new Response(JSON.stringify({ ok: true }), { status: 200 });
       throw new Error(`unexpected probe: ${url}`);
-    }));
+    });
+    vi.stubGlobal("fetch", healthFetch);
     const instance = new WebxAuthority({
       browser: failedBrowser, sources: PUBLIC_SOURCES,
       clock: { now: () => "2026-08-27T00:00:00Z" }, ids: { next: (prefix) => `${prefix}-1` },
@@ -374,6 +383,8 @@ describe("WebxAuthority", () => {
       browserPaths: [],
     } });
     expect(JSON.stringify(response.body)).not.toContain("crawl");
+    expect(healthFetch).toHaveBeenCalledTimes(1);
+    expect(new URL(String(healthFetch.mock.calls[0]?.[0])).pathname).toBe("/health");
   });
 
   it("does not let reader health remove healthy search", async () => {
