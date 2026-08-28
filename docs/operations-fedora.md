@@ -102,11 +102,11 @@ Restore the exact prior optional-unit state before you leave the shell. Confirm 
 
 ## 8. Accepted installation from 2026-08-28
 
-The accepted code candidate is `99335f10aa6ba3c4a1a914a9582497cc247d3707`. Its tree SHA-256 is `7ea995dfe5eef4303066c3e290309b9df46de16173bbaa0c1b1702fd842b3f9a`. The applied journal is `cutover-1787908439-99335f10aa6b`. If this installation must be restored before a later accepted cutover replaces it, run:
+The accepted code candidate is `401f4488f9303b754d02c38132ca5f45a19f6fa8`. Its tree SHA-256 is `e8b8d54153ca996abfa4e74ac5d1b81dd66c598b7f78310eebf227d4e7ae1a72`. The applied journal is `cutover-1787910337-401f4488f930`. If this installation must be restored before a later accepted cutover replaces it, run:
 
 ```bash
 cd /home/mainpc/Projects/webx
-./install-fedora.sh --cutover-rollback cutover-1787908439-99335f10aa6b
+./install-fedora.sh --cutover-rollback cutover-1787910337-401f4488f930
 pi-web doctor --json
 ```
 
