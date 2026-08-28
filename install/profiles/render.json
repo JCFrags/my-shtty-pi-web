@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "render",
+  "description": "Bounded Crawl4AI rendering through the egress proxy.",
+  "includes": ["web-core"],
+  "capabilities": ["render"],
+  "fedoraPackages": [],
+  "commands": ["uv"],
+  "nodeFilters": [],
+  "pythonPackages": ["pi-web-crawl"],
+  "playwrightBrowsers": ["chromium"],
+  "units": ["pi-web-egress-proxy.service", "pi-web-crawl.service"]
+}

@@ -31,13 +31,18 @@ The separate research archive concept is recorded in [`FUTURE_FEATURES.md`](FUTU
 
 ## Install on Fedora
 
-Pi must already be installed. The original compatible install command remains available:
+Pi must already be installed. The default `web-core` profile includes search, direct read, stored content, and WebX. It does not include browser, render, or document dependencies. `documents`, `render`, and `browser` are composable optional profiles. `full` keeps the explicit compatibility behavior.
 
 ```bash
-./install-fedora.sh
+./install-fedora.sh --stage
+./install-fedora.sh --stage --profile documents
+./install-fedora.sh --stage --profile render --profile browser
+./install-fedora.sh --stage --profile full
 ```
 
-For a reviewed update, use the staged procedure instead:
+See [`docs/installation-profiles.md`](docs/installation-profiles.md) for the dependency, unit, resource-limit, transition, and doctor contracts.
+
+For a reviewed update, use the staged procedure:
 
 ```bash
 ./install-fedora.sh --stage
@@ -48,7 +53,7 @@ For a reviewed update, use the staged procedure instead:
 
 See [`docs/operations-fedora.md`](docs/operations-fedora.md) for exact smoke, resource, verification, and `--rollback RUN_ID` commands. Do not apply cutover until the deterministic gate passes.
 
-The compatible installer stages the source at `~/.local/lib/pi-web-tools`, installs locked dependencies, builds the services and Tauri app, links the Pi extension, and starts user services. The install fails if the authority, search backend, or static reader is unhealthy. Optional browser, crawl, and document-converter failures remain visible in status output but do not fail the core install. `pi-web doctor` checks the WebX authority capability catalog rather than only the browser daemon.
+The Fedora command installs only the selected Fedora package set and stages an immutable candidate. It does not change the live installation. The cutover plan generates the selected service units and records removed optional units. `pi-web doctor` checks the WebX authority capability catalog, installed profile, selected artifacts, and reviewed core resource limits.
 
 Useful commands:
 

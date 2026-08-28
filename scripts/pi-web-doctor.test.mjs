@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { doctorReport, probeWebx, runDoctor } from "./pi-web-doctor.mjs";
+import { doctorReport, probeWebx, profileDoctorChecks, runDoctor } from "./pi-web-doctor.mjs";
 
 async function fixture(catalog) {
   const directory = await mkdtemp(join(tmpdir(), "pi-web-doctor-"));
@@ -109,6 +109,30 @@ test("doctor makes search or static reader failure fatal", () => {
     assert.equal(report.ok, false);
     assert.equal(report.checks.find((item) => item.name === failed)?.required, true);
   }
+});
+
+test("doctor checks the installed profile and reviewed core limits", () => {
+  const profile = {
+    schemaVersion: 1,
+    resolvedProfiles: ["web-core", "browser"],
+    resourceLimits: {
+      "pi-web-reader.service": { MemoryMax: "2G", TasksMax: 512 },
+      "pi-web-searxng.service": { MemoryMax: "2G", TasksMax: 512 },
+    },
+  };
+  const checks = profileDoctorChecks(profile);
+  assert.equal(checks.find((item) => item.name === "installed-profile")?.ok, true);
+  assert.equal(checks.find((item) => item.name === "core-resource-limits")?.ok, true);
+  const report = doctorReport({
+    apiVersion: "2.0.0",
+    capabilities: [
+      { id: "search", enabled: true, healthy: true },
+      { id: "read", enabled: true, healthy: true },
+      { id: "browser", enabled: true, healthy: false },
+    ],
+  }, profile);
+  assert.equal(report.checks.find((item) => item.name === "browser")?.required, true);
+  assert.equal(report.ok, false);
 });
 
 test("doctor reports an unavailable authority as fatal", async () => {

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "web-core",
+  "description": "Search, direct reading, stored content, and the WebX authority.",
+  "includes": [],
+  "capabilities": ["search", "read", "content"],
+  "fedoraPackages": ["git", "jq", "openssl", "podman", "python3"],
+  "commands": ["node", "npm", "pnpm", "uv", "pi", "podman", "systemctl"],
+  "nodeFilters": ["@webx/webxd...", "@webx/pi-webx..."],
+  "pythonPackages": ["pi-web-reader"],
+  "units": ["webxd.service", "pi-web-reader.service", "pi-web-searxng.service"],
+  "resourceLimits": {
+    "pi-web-reader.service": {"MemoryMax": "2G", "TasksMax": 512},
+    "pi-web-searxng.service": {"MemoryMax": "2G", "TasksMax": 512}
+  }
+}

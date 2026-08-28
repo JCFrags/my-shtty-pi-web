@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "documents",
+  "description": "Local PDF and office-document conversion.",
+  "includes": ["web-core"],
+  "capabilities": ["documents"],
+  "fedoraPackages": [],
+  "commands": ["uv"],
+  "nodeFilters": [],
+  "pythonPackages": ["pi-web-docling"],
+  "units": ["pi-web-docling.service"]
+}

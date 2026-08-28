@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "full",
+  "description": "Compatibility profile with every Pi Web capability.",
+  "includes": ["web-core", "documents", "render", "browser"],
+  "capabilities": [],
+  "fedoraPackages": [],
+  "commands": [],
+  "nodeFilters": [],
+  "pythonPackages": [],
+  "units": []
+}

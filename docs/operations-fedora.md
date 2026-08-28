@@ -7,10 +7,12 @@ Use this procedure for a reviewed Pi Web Tools update. Do not run cutover before
 Start from a clean reviewed commit.
 
 ```bash
-./install-fedora.sh --stage
+./install-fedora.sh --stage                         # web-core, the default
+./install-fedora.sh --stage --profile documents     # web-core plus documents
+./install-fedora.sh --stage --profile full          # explicit compatibility profile
 ```
 
-The command writes one candidate to `~/.local/lib/pi-web-tools-releases/COMMIT`. Set `PI_WEB_RELEASE_ROOT` to use another private release root. The stage command uses `pnpm install --frozen-lockfile`, `uv sync --frozen`, and `cargo build --locked`. It puts the Python environment, Node dependencies, Rust output, runtime files, and build cache below the candidate. It does not use `sudo`. It does not change live links, binaries, units, service state, or sockets.
+Optional `documents`, `render`, and `browser` profiles are composable. See [`installation-profiles.md`](installation-profiles.md). The command writes one candidate to `~/.local/lib/pi-web-tools-releases/COMMIT`. Set `PI_WEB_RELEASE_ROOT` to use another private release root. The stage command uses a filtered `pnpm install --frozen-lockfile` and selected `uv sync --package` arguments. It uses `cargo build --locked` only for the `browser` profile. It puts selected dependency output and build cache below the candidate. It does not use `sudo`. It does not change live links, binaries, units, service state, or sockets.
 
 Review `candidate-manifest.json`. Confirm the commit and both SHA-256 tree digests. The candidate digest covers file bytes, executable bits, and symbolic-link targets, including locked dependency output.
 
@@ -67,7 +69,7 @@ The tool writes a private journal below `${XDG_STATE_HOME:-~/.local/state}/pi-we
 
 Unit-file state is not always `enabled` or `disabled`. For example, the Podman-generated SearXNG unit reports `generated`. Restore logic preserves this state, skips invalid enable or disable commands for generated or static units, attempts every prior active-state restoration, and reports all restoration failures together.
 
-The cutover does not delete cache, stored content, audit events, exports, or old releases.
+The cutover does not delete cache, stored content, audit events, exports, or old releases. A profile reduction removes only managed optional launchers and units. The journal records those paths and all prior service states. Rollback restores them.
 
 ## 6. Verify and roll back
 
