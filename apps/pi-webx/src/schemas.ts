@@ -50,6 +50,20 @@ export const WebReadBatchSchema = Type.Object({
   items: Type.Array(Type.Object(directReadProperties, strict), { minItems: 1, maxItems: 5, description: "Directly read 1 to 5 separate sources in input order with fixed maximum concurrency 3." }),
 }, strict);
 
+export const ContentProvenanceSchema = Type.Object({
+  requestedUrl: Type.String({ minLength: 1, maxLength: 8192 }),
+  finalUrl: Type.String({ minLength: 1, maxLength: 8192 }),
+  representation: StringEnum(["canonical-normalized", "raw-projection", "structured-projection", "crawl-aggregate"] as const),
+  sourceOffset: Type.Integer({ minimum: 0, maximum: 100_000_000 }),
+  sourceComplete: Type.Boolean(),
+  nextSourceOffset: Type.Union([Type.Integer({ minimum: 1, maximum: 100_000_000 }), Type.Null()]),
+  extractor: Type.String({ minLength: 1, maxLength: 256 }),
+  mediaType: Type.String({ minLength: 1, maxLength: 256 }),
+  contentSha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+  createdAt: Type.String({ format: "date-time" }),
+  expiresAt: Type.String({ format: "date-time" }),
+}, strict);
+
 const contentBase = {
   contentId: Type.String({ minLength: 36, maxLength: 36, pattern: "^cnt_[A-Za-z0-9_-]{32}$", description: "Opaque content ID returned by web_read or web_content." }),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 30_000, description: "Maximum normalized-content characters to return. Default: 30000." })),

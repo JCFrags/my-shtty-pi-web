@@ -480,6 +480,74 @@ describe("WebxAuthority", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("stores canonical content before query selection and exposes complete provenance", async () => {
+    const canonical = `# Heading\n\nThis paragraph contains the selected needle for the query.\n\n${"canonical context ".repeat(3_000)}CANONICAL-TAIL`;
+    let readerBody: Record<string, unknown> = {};
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      readerBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        url: "https://final.example/page", title: "Canonical", content: canonical, mediaType: "text/markdown", source: "trafilatura", truncated: false,
+        metadata: { complete: true, contentOffset: 0, originalMediaType: "text/html" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const response = await call(instance, actor(), "POST", "/v1/read", { url: "https://requested.example/page", query: "selected needle" }, "canonical-query");
+    expect(readerBody).toMatchObject({ url: "https://requested.example/page", view: "main", fields: [], itemOffset: 0, itemLimit: 500 });
+    expect(readerBody.query).toBeUndefined();
+    const body = response.body as { untrustedContent: string; metadata: { contentId: string; representation: string; reader: Record<string, unknown> } };
+    expect(body.untrustedContent).toContain("selected needle");
+    expect(body.untrustedContent).not.toContain("CANONICAL-TAIL");
+    expect(body.metadata).toMatchObject({
+      representation: "canonical-normalized", requestedUrl: "https://requested.example/page", finalUrl: "https://final.example/page",
+      sourceOffset: 0, sourceComplete: true, nextSourceOffset: null, extractor: "trafilatura", mediaType: "text/markdown",
+      contentSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      reader: { createdAt: expect.any(String), expiresAt: expect.any(String), selectionApplied: true },
+    });
+    const stored = await call(instance, actor(), "POST", "/v1/content", { contentId: body.metadata.contentId, findText: "CANONICAL-TAIL", limit: 200 }, "canonical-tail");
+    expect(stored).toMatchObject({ status: 200, body: { untrustedContent: expect.stringContaining("CANONICAL-TAIL"), metadata: { representation: "canonical-normalized" } } });
+  });
+
+  it("prefers every local chunk and reveals a proven next source segment only at local EOF", async () => {
+    const firstSegment = `${"segment-one ".repeat(3_000)}FIRST-END`;
+    const secondSegment = "SECOND-SEGMENT";
+    const readerBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      readerBodies.push(request);
+      const continued = request.contentOffset === firstSegment.length;
+      return new Response(JSON.stringify(continued ? {
+        url: request.url, title: "Segment two", content: secondSegment, source: "trafilatura", truncated: false,
+        metadata: { contentOffset: firstSegment.length, complete: true, nextContentOffset: null },
+      } : {
+        url: request.url, title: "Segment one", content: firstSegment, source: "trafilatura", truncated: true,
+        metadata: { contentOffset: 0, complete: false, nextContentOffset: firstSegment.length },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    const first = await call(instance, actor(), "POST", "/v1/read", { url: "https://segments.example/page" }, "segment-first");
+    const contentId = (first.body as { metadata: { contentId: string } }).metadata.contentId;
+    let offset = 0;
+    let reconstructed = "";
+    let nextSource: number | null = null;
+    for (let index = 0; index < 10; index += 1) {
+      const part = await call(instance, actor(), "POST", "/v1/content", { contentId, offset, limit: 10_000 }, `segment-local-${index}`);
+      const value = part.body as { untrustedContent: string; metadata: { nextOffset: number | null; nextContentOffset: number | null } };
+      reconstructed += value.untrustedContent;
+      if (value.metadata.nextOffset !== null) {
+        expect(value.metadata.nextContentOffset).toBeNull();
+        offset = value.metadata.nextOffset;
+        continue;
+      }
+      nextSource = value.metadata.nextContentOffset;
+      break;
+    }
+    expect(reconstructed).toBe(firstSegment);
+    expect(nextSource).toBe(firstSegment.length);
+    const continued = await call(instance, actor(), "POST", "/v1/read", { url: "https://segments.example/page", contentOffset: nextSource }, "segment-second");
+    expect(continued).toMatchObject({ status: 200, body: { untrustedContent: secondSegment, metadata: { sourceOffset: firstSegment.length, sourceComplete: true, nextSourceOffset: null } } });
+    expect(readerBodies.at(-1)).toMatchObject({ contentOffset: firstSegment.length });
+  });
+
   it("replaces a cached read whose owned stored content was evicted", async () => {
     let sequence = 0;
     const contentStore = new NormalizedContentStore({ maxEntries: 1, nextId: () => `cnt_${(++sequence).toString(36).padStart(32, "a")}` });
@@ -508,6 +576,7 @@ describe("WebxAuthority", () => {
     const read = await call(instance, actor(), "POST", "/v1/read", { url: "https://api.example/rows", fields: ["id", "value"], itemLimit: 1 }, "structured-complete");
     expect(readerRequest).toMatchObject({ maxChars: 1_000_000, fields: ["id", "value"], itemLimit: 1 });
     const contentId = (read.body as { metadata: { contentId: string } }).metadata.contentId;
+    expect(read).toMatchObject({ body: { metadata: { representation: "structured-projection" } } });
     const tail = await call(instance, actor(), "POST", "/v1/content", { contentId, offset: 30_000, limit: 20_000 }, "structured-tail");
     expect((tail.body as { untrustedContent: string }).untrustedContent).toContain("ROW-END");
   });

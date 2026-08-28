@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -12,7 +13,12 @@ function ids() {
   return () => `cnt_${(++sequence).toString(36).padStart(32, "a")}`;
 }
 
-const input = (content: string) => ({ ownerPrincipalId: "owner", title: "Title", url: "https://example.test/page", content });
+const input = (content: string) => ({
+  ownerPrincipalId: "owner", title: "Title", url: "https://example.test/page",
+  requestedUrl: "https://example.test/page", finalUrl: "https://example.test/page",
+  representation: "canonical-normalized" as const, sourceOffset: 0, sourceComplete: true, nextSourceOffset: null,
+  extractor: "test", mediaType: "text/markdown", content,
+});
 
 describe("NormalizedContentStore", () => {
   it("enforces entry and UTF-8 byte bounds with oldest insertion eviction", async () => {
@@ -55,7 +61,12 @@ describe("NormalizedContentStore", () => {
     directories.push(directory);
     const oldId = `cnt_${"a".repeat(32)}`;
     const newId = `cnt_${"b".repeat(32)}`;
-    const record = (contentId: string, content: string, createdAt: number) => ({ contentId, ownerPrincipalId: "owner", title: "Title", url: "https://example.test/page", content, createdAt, expiresAt: 1_000, sizeBytes: Buffer.byteLength(content) });
+    const record = (contentId: string, content: string, createdAt: number) => ({
+      recordVersion: 2, contentId, ownerPrincipalId: "owner", title: "Title", url: "https://example.test/page",
+      requestedUrl: "https://example.test/page", finalUrl: "https://example.test/page", representation: "canonical-normalized",
+      sourceOffset: 0, sourceComplete: true, nextSourceOffset: null, extractor: "test", mediaType: "text/markdown",
+      contentSha256: createHash("sha256").update(content).digest("hex"), content, createdAt, expiresAt: 1_000, sizeBytes: Buffer.byteLength(content),
+    });
     await writeFile(join(directory, `${oldId}.json`), JSON.stringify(record(oldId, "old", 10)));
     await writeFile(join(directory, `${newId}.json`), JSON.stringify(record(newId, "new", 20)));
     await writeFile(join(directory, `cnt_${"c".repeat(32)}.json`), "{");
@@ -65,6 +76,19 @@ describe("NormalizedContentStore", () => {
     expect(await store.stats()).toEqual({ entries: 1, bytes: 3 });
     expect(await store.get(newId, "owner")).toMatchObject({ content: "new" });
     expect(await readdir(directory)).toEqual([`${newId}.json`]);
+  });
+
+  it("invalidates legacy records that do not contain canonical provenance", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "webx-content-legacy-"));
+    directories.push(directory);
+    const contentId = `cnt_${"l".repeat(32)}`;
+    await writeFile(join(directory, `${contentId}.json`), JSON.stringify({
+      contentId, ownerPrincipalId: "owner", title: "Legacy", url: "https://example.test/legacy",
+      content: "legacy projection", createdAt: 10, expiresAt: 1_000, sizeBytes: 17,
+    }));
+    const store = new NormalizedContentStore({ directory, now: () => 100, nextId: ids() });
+    expect(await store.stats()).toEqual({ entries: 0, bytes: 0 });
+    expect(await readdir(directory)).toEqual([]);
   });
 
   it("rejects non-positive and non-finite limits", () => {

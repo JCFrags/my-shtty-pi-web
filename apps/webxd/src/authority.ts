@@ -14,6 +14,7 @@ import type {
   RangeReadRequest,
   RangeReadResponse,
   ReadRequest,
+  ReadContent,
   ReadBatchRequest,
   ReadBatchResponse,
   SearchHit,
@@ -27,7 +28,7 @@ import type {
 import { BROWSER_PROTOCOL_VERSION, WEBX_API_VERSION } from "../../../packages/sdk/src/index.js";
 import type { AuthorityActor, AuthorityClock, AuthorityIdSource, BrowserDaemonPort, IndexedSource } from "./ports.js";
 import { WebCache, type WebCacheOptions } from "./cache.js";
-import { ContentEntryTooLargeError, NormalizedContentStore, type NormalizedContentRecord } from "./content-store.js";
+import { ContentEntryTooLargeError, NormalizedContentStore, type ContentRepresentation, type NormalizedContentRecord } from "./content-store.js";
 import { BrowserPortError, isBrowserPathId } from "./ports.js";
 import { BoundedLocalJsonClient, LOCAL_JSON_LIMITS } from "./local-json-client.js";
 
@@ -359,17 +360,17 @@ export class WebxAuthority {
     return { hits: eligible, unavailable };
   }
 
-  private async read(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<BoundedContent> {
+  private async read(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<ReadContent> {
     requireScope(actor, "retrieval.read");
-    const key = { formatVersion: 10, principalId: actor.principalId, request, readerUrl: this.options.readerUrl };
-    const cached = await this.#cache.get<BoundedContent>("read", key);
+    const key = { formatVersion: 11, principalId: actor.principalId, request, readerUrl: this.options.readerUrl };
+    const cached = await this.#cache.get<ReadContent>("read", key);
     if (cached !== undefined) {
       const metadata = typeof cached.metadata === "object" && cached.metadata !== null ? cached.metadata as Record<string, unknown> : {};
       const contentId = typeof metadata.contentId === "string" ? metadata.contentId : undefined;
       if (contentId !== undefined && await this.#content.get(contentId, actor.principalId) !== undefined) return withReadDelivery(cached, "hit", false);
     }
     const flightKey = `read\0${createHash("sha256").update(stableStringify(key)).digest("hex")}`;
-    const shared = await this.#inFlight.run(flightKey, signal, (sharedSignal) => this.uncachedRead(actor, request, sharedSignal));
+    const shared = await this.#inFlight.run(flightKey, signal, (sharedSignal) => this.uncachedRead(actor, request, sharedSignal) as Promise<ReadContent>);
     await this.#cache.set("read", key, shared.value, READ_CACHE_TTL_MS).catch(() => undefined);
     return withReadDelivery(shared.value, "miss", shared.coalesced);
   }
@@ -406,23 +407,38 @@ export class WebxAuthority {
       const perPageLimit = Math.max(1_500, Math.floor(sourceChars / Math.max(1, successful.length)));
       const allContent = successful.map((page, index) => `${successful.length > 1 ? `## ${page.title ?? `Page ${index + 1}`}\n\n` : ""}${request.query ? focusedReadContent(page.content ?? "", request.query, perPageLimit) : cleanMainContent(page.content ?? "")}`).join("\n\n");
       const primary = successful[0];
-      return this.storeRead(actor, primary?.title ?? `Content from ${request.url}`, primary?.url ?? request.url, allContent, requestedChars, crawled.truncated, {
+      return this.storeRead(actor, {
+        title: primary?.title ?? `Content from ${request.url}`, url: primary?.url ?? request.url,
+        requestedUrl: request.url, finalUrl: primary?.url ?? request.url, representation: "crawl-aggregate",
+        sourceOffset: 0, sourceComplete: !crawled.truncated, nextSourceOffset: null,
+        extractor: "crawl4ai", mediaType: "text/markdown", normalizedContent: allContent,
+      }, allContent, requestedChars, {
         engine: "crawl4ai", pageCount: crawled.pageCount,
         pages: crawled.pages.map((page) => ({ title: page.title, url: page.url, depth: page.depth, ok: page.ok })),
-      }, 0, retainContent);
+      }, retainContent);
     }
     const allSources = this.options.sources;
     const input = request as ReadRequest & { query?: string; view?: string; fields?: readonly string[]; itemOffset?: number; itemLimit?: number; contentOffset?: number };
-    const transformed = input.query !== undefined || input.fields !== undefined || input.itemOffset !== undefined || input.itemLimit !== undefined || input.contentOffset !== undefined || (input.view !== undefined && input.view !== "main");
+    const specializedProjection = input.view === "raw" || input.fields !== undefined || input.itemOffset !== undefined || input.itemLimit !== undefined;
+    const transformed = specializedProjection || input.query !== undefined || input.contentOffset !== undefined || input.view === "outline";
     let source = !transformed ? allSources.find((item) => item.url === request.url) : undefined;
     const requestedChars = integer(request.maxChars ?? 1_000_000, "maxChars", 1, 1_000_000);
-    const sourceChars = requestedChars;
+    const sourceChars = !specializedProjection && retainContent ? 1_000_000 : requestedChars;
     if (source === undefined && this.options.readerUrl !== undefined) {
       const response = await this.#localJson.request<{ url?: unknown; title?: unknown; content?: unknown; mediaType?: unknown; source?: unknown; truncated?: unknown; metadata?: unknown }>(
         new URL("/v1/read", this.options.readerUrl),
         {
           method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ url: request.url, query: input.query, view: input.view ?? "main", fields: input.fields ?? [], itemOffset: integer(input.itemOffset ?? 0, "itemOffset", 0, 1_000_000), itemLimit: integer(input.itemLimit ?? 50, "itemLimit", 1, 500), contentOffset: integer(input.contentOffset ?? 0, "contentOffset", 0, 100_000_000), maxChars: sourceChars }),
+          body: JSON.stringify({
+            url: request.url,
+            query: specializedProjection ? input.query : undefined,
+            view: specializedProjection ? input.view ?? "main" : "main",
+            fields: specializedProjection ? input.fields ?? [] : [],
+            itemOffset: specializedProjection ? integer(input.itemOffset ?? 0, "itemOffset", 0, 1_000_000) : 0,
+            itemLimit: specializedProjection ? integer(input.itemLimit ?? 50, "itemLimit", 1, 500) : 500,
+            contentOffset: integer(input.contentOffset ?? 0, "contentOffset", 0, 100_000_000),
+            maxChars: sourceChars,
+          }),
         },
         LOCAL_JSON_LIMITS.reader,
         signal,
@@ -436,49 +452,93 @@ export class WebxAuthority {
       const digest = createHash("sha256").update(`${request.url}\0${page.content}`).digest("hex");
       source = { hitId: `hit-${digest.slice(0, 20)}`, ownerPrincipalId: actor.principalId, title: typeof page.title === "string" ? page.title : request.url, url: typeof page.url === "string" ? page.url : request.url, content: page.content, visibility: "public" };
       const readerMetadata = typeof page.metadata === "object" && page.metadata !== null ? page.metadata as Record<string, unknown> : {};
+      const sourceOffset = integer(input.contentOffset ?? 0, "contentOffset", 0, 100_000_000);
+      const provenNextSourceOffset = safeNextSourceOffset(readerMetadata.nextContentOffset, sourceOffset);
+      const sourceComplete = readerMetadata.complete === true || (page.truncated !== true && provenNextSourceOffset === null);
+      const representation: ContentRepresentation = page.source === "structured-json" ? "structured-projection" : specializedProjection ? input.view === "raw" ? "raw-projection" : "structured-projection" : "canonical-normalized";
+      const extractor = typeof page.source === "string" ? page.source : typeof readerMetadata.resolvedVia === "string" ? readerMetadata.resolvedVia : "reader";
+      const mediaType = typeof page.mediaType === "string" ? page.mediaType : typeof readerMetadata.originalMediaType === "string" ? readerMetadata.originalMediaType : "text/markdown";
+      const stored = {
+        title: source.title, url: source.url, requestedUrl: request.url, finalUrl: source.url,
+        representation, sourceOffset, sourceComplete, nextSourceOffset: provenNextSourceOffset,
+        extractor, mediaType, normalizedContent: source.content,
+      };
+      const presented = !specializedProjection && input.query !== undefined
+        ? focusedReadContent(source.content, input.query, source.content.length)
+        : !specializedProjection && input.view === "outline" ? outlineContent(source.content) : source.content;
       const metadata = { requestedUrl: request.url, finalUrl: source.url, source: page.source, substituted: source.url !== request.url, reader: { ...readerMetadata, truncated: page.truncated === true } };
-      return this.storeRead(actor, source.title, source.url, source.content, requestedChars, page.truncated === true, metadata, integer(input.contentOffset ?? 0, "contentOffset", 0, 100_000_000), retainContent);
+      return this.storeRead(actor, stored, presented, requestedChars, metadata, retainContent);
     }
     if (source === undefined || !canRead(actor, source.ownerPrincipalId, source.visibility)) throw problem(404, "not-found", "page was not found", false);
-    return this.storeRead(actor, source.title, source.url, source.content, requestedChars, false, {}, 0, retainContent);
+    return this.storeRead(actor, {
+      title: source.title, url: source.url, requestedUrl: request.url, finalUrl: source.url,
+      representation: "canonical-normalized", sourceOffset: 0, sourceComplete: true, nextSourceOffset: null,
+      extractor: "indexed-source", mediaType: "text/markdown", normalizedContent: source.content,
+    }, source.content, requestedChars, {}, retainContent);
   }
 
-  private async storeRead(actor: AuthorityActor, title: string, url: string, normalizedContent: string, requestedChars: number, sourceTruncated: boolean, metadata: Readonly<Record<string, unknown>> = {}, sourceOffset = 0, retainContent = true): Promise<BoundedContent> {
+  private async storeRead(
+    actor: AuthorityActor,
+    source: {
+      readonly title: string; readonly url: string; readonly requestedUrl: string; readonly finalUrl: string;
+      readonly representation: ContentRepresentation; readonly sourceOffset: number; readonly sourceComplete: boolean;
+      readonly nextSourceOffset: number | null; readonly extractor: string; readonly mediaType: string; readonly normalizedContent: string;
+    },
+    presentedContent: string,
+    requestedChars: number,
+    metadata: Readonly<Record<string, unknown>> = {},
+    retainContent = true,
+  ): Promise<BoundedContent> {
     let record: NormalizedContentRecord | undefined;
     if (retainContent) {
       try {
-        record = await this.#content.put({ ownerPrincipalId: actor.principalId, title, url, content: normalizedContent });
+        record = await this.#content.put({
+          ownerPrincipalId: actor.principalId, title: source.title, url: source.url,
+          requestedUrl: source.requestedUrl, finalUrl: source.finalUrl, representation: source.representation,
+          sourceOffset: source.sourceOffset, sourceComplete: source.sourceComplete, nextSourceOffset: source.nextSourceOffset,
+          extractor: source.extractor, mediaType: source.mediaType, content: source.normalizedContent,
+        });
       } catch (error) {
         if (error instanceof ContentEntryTooLargeError) throw problem(413, error.code, error.message, false);
         throw error;
       }
     }
-    const totalCharacters = [...normalizedContent].length;
+    const storedCharacters = [...source.normalizedContent].length;
+    const presentedCharacters = [...presentedContent].length;
     const passageLimit = Math.min(requestedChars, MAX_AGENT_READ_CONTENT_CHARS);
-    const bounded = boundText(normalizedContent, passageLimit);
+    const bounded = boundText(presentedContent, passageLimit);
     const returnedCharacters = [...bounded.text].length;
-    const locallyTruncated = returnedCharacters < totalCharacters;
-    const reader = typeof metadata.reader === "object" && metadata.reader !== null ? metadata.reader as Record<string, unknown> : undefined;
-    const continuation = locallyTruncated ? sourceOffset + returnedCharacters : reader?.nextContentOffset;
+    const locallyTruncated = returnedCharacters < presentedCharacters;
+    const selectionApplied = presentedContent !== source.normalizedContent;
+    const provenance = record === undefined ? {
+      requestedUrl: source.requestedUrl, finalUrl: source.finalUrl, representation: source.representation,
+      sourceOffset: source.sourceOffset, sourceComplete: source.sourceComplete, nextSourceOffset: source.nextSourceOffset,
+      extractor: source.extractor, mediaType: source.mediaType,
+      contentSha256: createHash("sha256").update(source.normalizedContent).digest("hex"),
+    } : recordProvenance(record);
     const contentMetadata = {
       ...(record === undefined ? {} : {
-        contentId: record.contentId,
-        storedCharacters: totalCharacters,
-        storedBytes: record.sizeBytes,
-        expiresAt: new Date(record.expiresAt).toISOString(),
+        contentId: record.contentId, storedCharacters, storedBytes: record.sizeBytes,
+        createdAt: new Date(record.createdAt).toISOString(), expiresAt: new Date(record.expiresAt).toISOString(),
       }),
-      returnedCharacters,
-      totalCharacters,
-      complete: !locallyTruncated && !sourceTruncated,
-      sourceComplete: !sourceTruncated,
-      nextStoredOffset: record !== undefined && locallyTruncated ? returnedCharacters : null,
-      nextContentOffset: locallyTruncated ? continuation : continuation ?? (sourceTruncated ? sourceOffset + totalCharacters : null),
+      ...provenance,
+      returnedCharacters, totalCharacters: storedCharacters,
+      complete: !locallyTruncated && source.sourceComplete,
+      sourceComplete: source.sourceComplete,
+      nextStoredOffset: record !== undefined && !selectionApplied && locallyTruncated ? returnedCharacters : null,
+      nextContentOffset: !locallyTruncated && source.nextSourceOffset !== null ? source.nextSourceOffset : null,
+      selectionApplied,
     };
-    const identity = record === undefined ? {} : { contentId: record.contentId };
+    const identity = record === undefined ? {} : {
+      contentId: record.contentId,
+      createdAt: new Date(record.createdAt).toISOString(),
+      expiresAt: new Date(record.expiresAt).toISOString(),
+    };
+    const reader = typeof metadata.reader === "object" && metadata.reader !== null ? metadata.reader as Record<string, unknown> : undefined;
     const mergedMetadata = reader === undefined
-      ? { ...metadata, ...identity, reader: contentMetadata }
-      : { ...metadata, ...identity, reader: { ...reader, ...contentMetadata } };
-    return { title, url, untrustedContent: bounded.text, truncated: locallyTruncated || sourceTruncated, visibility: "public", metadata: mergedMetadata };
+      ? { ...metadata, ...identity, ...provenance, reader: contentMetadata }
+      : { ...metadata, ...identity, ...provenance, reader: { ...reader, ...contentMetadata } };
+    return { title: source.title, url: source.url, untrustedContent: bounded.text, truncated: locallyTruncated || !source.sourceComplete, visibility: "public", metadata: mergedMetadata };
   }
 
   private async content(actor: AuthorityActor, request: ContentRequest): Promise<StoredContent> {
@@ -509,17 +569,22 @@ export class WebxAuthority {
       nextOffset = offset + [...text].length < points.length ? offset + [...text].length : null;
     }
     const returnedCharacters = [...text].length;
+    const atLocalEof = mode === "exact" && nextOffset === null;
+    const nextContentOffset = atLocalEof && !record.sourceComplete ? record.nextSourceOffset : null;
     return {
       title: record.title,
       url: record.url,
       untrustedContent: text,
-      truncated: mode === "exact" ? nextOffset !== null : returnedCharacters < points.length,
+      truncated: mode === "exact" ? nextOffset !== null || nextContentOffset !== null : returnedCharacters < points.length,
       visibility: "public",
       metadata: {
         contentId: record.contentId, mode, totalCharacters: points.length, returnedCharacters,
+        ...recordProvenance(record),
         ...(offset === undefined ? {} : { offset }),
         ...(nextOffset === undefined ? {} : { nextOffset }),
+        ...(mode === "exact" ? { nextContentOffset } : {}),
         ...(matchOffset === undefined ? {} : { matchOffset }),
+        createdAt: new Date(record.createdAt).toISOString(),
         expiresAt: new Date(record.expiresAt).toISOString(),
       },
     };
@@ -762,12 +827,27 @@ function waitForFlight<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T>
   });
 }
 
+function safeNextSourceOffset(value: unknown, sourceOffset: number): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > sourceOffset && value <= 100_000_000 ? value : null;
+}
+function recordProvenance(record: NormalizedContentRecord) {
+  return {
+    requestedUrl: record.requestedUrl, finalUrl: record.finalUrl, representation: record.representation,
+    sourceOffset: record.sourceOffset, sourceComplete: record.sourceComplete, nextSourceOffset: record.nextSourceOffset,
+    extractor: record.extractor, mediaType: record.mediaType, contentSha256: record.contentSha256,
+  };
+}
+function outlineContent(content: string): string {
+  const headings = content.split(/\r?\n/u).filter((line) => /^#{1,6}\s+\S/u.test(line.trim()));
+  return headings.length > 0 ? headings.join("\n") : content.split(/\r?\n{2,}/u).map((part) => part.trim().split(/\r?\n/u)[0] ?? "").filter(Boolean).slice(0, 200).join("\n");
+}
+
 function withSearchDelivery(value: SearchResponse, cache: "hit" | "miss", coalesced: boolean): SearchResponse {
   return { ...value, metadata: { ...value.metadata, delivery: { cache, coalesced } } };
 }
-function withReadDelivery(value: BoundedContent, cache: "hit" | "miss", coalesced: boolean): BoundedContent {
+function withReadDelivery<T extends BoundedContent>(value: T, cache: "hit" | "miss", coalesced: boolean): T {
   const metadata = typeof value.metadata === "object" && value.metadata !== null ? value.metadata : {};
-  return { ...value, metadata: { ...metadata, delivery: { cache, coalesced } } };
+  return { ...value, metadata: { ...metadata, delivery: { cache, coalesced } } } as T;
 }
 async function boundedOrderedFanOut<T, R>(items: readonly T[], concurrency: number, run: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);

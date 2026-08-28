@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { chmod, mkdir, open, opendir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
@@ -14,11 +14,24 @@ const MAX_JSON_ESCAPE_EXPANSION = 6;
 
 const CONTENT_ID = /^cnt_[A-Za-z0-9_-]{32}$/u;
 
+export const CONTENT_RECORD_VERSION = 2 as const;
+export type ContentRepresentation = "canonical-normalized" | "raw-projection" | "structured-projection" | "crawl-aggregate";
+
 export interface NormalizedContentRecord {
+  readonly recordVersion: typeof CONTENT_RECORD_VERSION;
   readonly contentId: string;
   readonly ownerPrincipalId: string;
   readonly title: string;
   readonly url: string;
+  readonly requestedUrl: string;
+  readonly finalUrl: string;
+  readonly representation: ContentRepresentation;
+  readonly sourceOffset: number;
+  readonly sourceComplete: boolean;
+  readonly nextSourceOffset: number | null;
+  readonly extractor: string;
+  readonly mediaType: string;
+  readonly contentSha256: string;
   readonly content: string;
   readonly createdAt: number;
   readonly expiresAt: number;
@@ -29,6 +42,14 @@ export interface NormalizedContentInput {
   readonly ownerPrincipalId: string;
   readonly title: string;
   readonly url: string;
+  readonly requestedUrl: string;
+  readonly finalUrl: string;
+  readonly representation: ContentRepresentation;
+  readonly sourceOffset: number;
+  readonly sourceComplete: boolean;
+  readonly nextSourceOffset: number | null;
+  readonly extractor: string;
+  readonly mediaType: string;
   /** Normalized extracted text only. Do not pass source response bytes or document base64. */
   readonly content: string;
 }
@@ -98,10 +119,20 @@ export class NormalizedContentStore {
       if (contentId.length === 0) throw new Error("content ID source did not return a unique ID");
       const createdAt = this.#now();
       const record: NormalizedContentRecord = {
+        recordVersion: CONTENT_RECORD_VERSION,
         contentId,
         ownerPrincipalId: input.ownerPrincipalId,
         title: input.title,
         url: input.url,
+        requestedUrl: input.requestedUrl,
+        finalUrl: input.finalUrl,
+        representation: input.representation,
+        sourceOffset: input.sourceOffset,
+        sourceComplete: input.sourceComplete,
+        nextSourceOffset: input.nextSourceOffset,
+        extractor: input.extractor,
+        mediaType: input.mediaType,
+        contentSha256: createHash("sha256").update(input.content).digest("hex"),
         content: input.content,
         createdAt,
         expiresAt: createdAt + this.#retentionMs,
@@ -246,10 +277,16 @@ function positiveInteger(value: number, name: string): number {
 function parseRecord(value: unknown): NormalizedContentRecord {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError("content record must be an object");
   const record = value as Record<string, unknown>;
+  if (record.recordVersion !== CONTENT_RECORD_VERSION) throw new TypeError("unsupported content record version");
   if (typeof record.contentId !== "string" || !CONTENT_ID.test(record.contentId)) throw new TypeError("invalid content ID");
-  if (typeof record.ownerPrincipalId !== "string" || typeof record.title !== "string" || typeof record.url !== "string" || typeof record.content !== "string") throw new TypeError("invalid content record text");
+  const textFields = ["ownerPrincipalId", "title", "url", "requestedUrl", "finalUrl", "extractor", "mediaType", "content"] as const;
+  if (textFields.some((field) => typeof record[field] !== "string")) throw new TypeError("invalid content record text");
+  if (record.representation !== "canonical-normalized" && record.representation !== "raw-projection" && record.representation !== "structured-projection" && record.representation !== "crawl-aggregate") throw new TypeError("invalid content representation");
+  if (!Number.isSafeInteger(record.sourceOffset) || (record.sourceOffset as number) < 0 || typeof record.sourceComplete !== "boolean") throw new TypeError("invalid source bounds");
+  if (record.nextSourceOffset !== null && (!Number.isSafeInteger(record.nextSourceOffset) || (record.nextSourceOffset as number) <= (record.sourceOffset as number))) throw new TypeError("invalid next source offset");
   if (!Number.isSafeInteger(record.createdAt) || !Number.isSafeInteger(record.expiresAt) || !Number.isSafeInteger(record.sizeBytes)) throw new TypeError("invalid content record bounds");
-  const sizeBytes = new TextEncoder().encode(record.content).byteLength;
-  if (sizeBytes !== record.sizeBytes || (record.expiresAt as number) <= (record.createdAt as number)) throw new TypeError("invalid content record size or retention");
+  const sizeBytes = new TextEncoder().encode(record.content as string).byteLength;
+  const digest = createHash("sha256").update(record.content as string).digest("hex");
+  if (record.contentSha256 !== digest || sizeBytes !== record.sizeBytes || (record.expiresAt as number) <= (record.createdAt as number)) throw new TypeError("invalid content record integrity or retention");
   return record as unknown as NormalizedContentRecord;
 }

@@ -26,7 +26,12 @@ test("audit stores bounded metadata only with secret redaction and user-only fil
     await audit.record({
       operation: "web.read", ownerId: "session-one", toolCallId: "call-one", startedAt: new Date("2026-08-24T12:00:00Z"), durationMs: 42.4,
       input: { url: "https://example.test/page?token=private&part=1", query: "topic", apiKey: "private" },
-      result: { summary: "Read result", data: { untrustedContent: "complete public content" }, trust: "untrusted-external" },
+      result: { summary: "Read result", data: { untrustedContent: "complete public content", metadata: {
+        contentId: `cnt_${"a".repeat(32)}`, requestedUrl: "https://example.test/page?token=private", finalUrl: "https://final.test/page",
+        representation: "canonical-normalized", sourceOffset: 0, sourceComplete: false, nextSourceOffset: 10_000,
+        extractor: "trafilatura", mediaType: "text/markdown", contentSha256: "b".repeat(64),
+        reader: { createdAt: "2026-08-24T12:00:00.000Z", expiresAt: "2026-08-25T12:00:00.000Z" },
+      } }, trust: "untrusted-external" },
       presentation: { content: [{ type: "text", text: "agent-visible output" }], details: { complete: true } },
     });
     const files = await records(root);
@@ -35,13 +40,17 @@ test("audit stores bounded metadata only with secret redaction and user-only fil
     assert(file);
     const value = JSON.parse(await readFile(file, "utf8"));
     assert.equal(value.operation, "web.read");
-    assert.equal(value.version, 2);
+    assert.equal(value.version, 3);
     assert.equal(value.outcome, "succeeded");
     assert.equal(value.status, "ok");
     assert.equal(value.durationMs, 42);
     assert.equal(value.input.apiKey, "[redacted]");
     assert.match(value.input.url, /token=\[redacted\]/);
     assert.equal(value.result.trust, "untrusted-external");
+    assert.equal(value.result.representation, "canonical-normalized");
+    assert.equal(value.result.sourceComplete, false);
+    assert.equal(value.result.nextSourceOffset, 10_000);
+    assert.match(value.result.requestedUrl, /token=%5Bredacted%5D/);
     assert.doesNotMatch(JSON.stringify(value), /complete public content|agent-visible output|structuredResult|agentVisibleOutput/);
     assert.equal((await stat(file)).mode & 0o777, 0o600);
   } finally { await rm(root, { recursive: true, force: true }); }

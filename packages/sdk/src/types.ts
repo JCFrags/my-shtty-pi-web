@@ -118,7 +118,7 @@ export interface ReadBatchRequest {
 }
 
 export type ReadBatchEnvelope =
-  | { readonly index: number; readonly url: string; readonly ok: true; readonly result: BoundedContent }
+  | { readonly index: number; readonly url: string; readonly ok: true; readonly result: ReadContent }
   | { readonly index: number; readonly url: string; readonly ok: false; readonly error: WebxProblem };
 
 export interface ReadBatchResponse {
@@ -134,15 +134,41 @@ export interface ContentRequest {
   readonly query?: string;
 }
 
+export type ContentRepresentation = "canonical-normalized" | "raw-projection" | "structured-projection" | "crawl-aggregate";
+
+export interface ContentProvenance extends Readonly<Record<string, unknown>> {
+  readonly requestedUrl: string;
+  readonly finalUrl: string;
+  readonly representation: ContentRepresentation;
+  readonly sourceOffset: number;
+  readonly sourceComplete: boolean;
+  readonly nextSourceOffset: number | null;
+  readonly extractor: string;
+  readonly mediaType: string;
+  readonly contentSha256: string;
+}
+
+export interface ReadContent extends BoundedContent {
+  readonly metadata: ContentProvenance & {
+    readonly contentId: string;
+    readonly createdAt: string;
+    readonly expiresAt: string;
+    readonly reader: Readonly<Record<string, unknown>> & ContentProvenance;
+    readonly delivery?: { readonly cache: "hit" | "miss"; readonly coalesced: boolean };
+  };
+}
+
 export interface StoredContent extends BoundedContent {
-  readonly metadata: {
+  readonly metadata: ContentProvenance & {
     readonly contentId: string;
     readonly mode: "exact" | "findText" | "query";
     readonly totalCharacters: number;
     readonly returnedCharacters: number;
     readonly offset?: number;
     readonly nextOffset?: number | null;
+    readonly nextContentOffset?: number | null;
     readonly matchOffset?: number;
+    readonly createdAt: string;
     readonly expiresAt: string;
   };
 }
