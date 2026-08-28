@@ -407,33 +407,40 @@ class ReaderPipeline:
         return result
 
     async def _read_document(self, fetched: FetchResult, request: ReadRequest) -> ReadResult:
-        if httpx is None:
-            raise RuntimeError("httpx is required to invoke the Docling worker")
+        converted: dict[str, Any] = {}
         converter = "docling"
-        converted: dict[str, Any]
-        try:
-            with staged_document(fetched.content) as handoff:
-                payload = {
-                    "url": fetched.url,
-                    "mediaType": fetched.media_type,
-                    "filePath": str(handoff.path),
-                    "size": handoff.size,
-                    "sha256": handoff.sha256,
-                    "includeStructured": request.view == "raw",
-                }
-                async with httpx.AsyncClient(timeout=httpx_timeout(self.timeout_seconds), trust_env=False) as client:
-                    response = await client.post(urljoin(self.docling_url, "v1/convert"), json=payload)
-                    response.raise_for_status()
-                    converted = response.json()
-            markdown = str(converted.get("markdown") or "")
-            if not useful_text(markdown):
-                raise ValueError("document converter returned no useful text")
-        except (httpx.HTTPError, ValueError, KeyError, TypeError, json.JSONDecodeError):
-            if fetched.media_type != "application/pdf":
+        if fetched.media_type == "application/pdf" and request.view != "raw":
+            try:
+                markdown = await asyncio.to_thread(extract_pdf_text, fetched.content)
+                converter = "pdftotext"
+            except (OSError, RuntimeError, subprocess.SubprocessError):
+                pass
+        if converter == "docling":
+            if httpx is None:
+                raise RuntimeError("httpx is required to invoke the Docling worker")
+            try:
+                with staged_document(fetched.content) as handoff:
+                    payload = {
+                        "url": fetched.url,
+                        "mediaType": fetched.media_type,
+                        "filePath": str(handoff.path),
+                        "size": handoff.size,
+                        "sha256": handoff.sha256,
+                        "includeStructured": request.view == "raw",
+                    }
+                    async with httpx.AsyncClient(
+                        timeout=httpx_timeout(self.timeout_seconds), trust_env=False
+                    ) as client:
+                        response = await client.post(
+                            urljoin(self.docling_url, "v1/convert"), json=payload
+                        )
+                        response.raise_for_status()
+                        converted = response.json()
+                markdown = str(converted.get("markdown") or "")
+                if not useful_text(markdown):
+                    raise ValueError("document converter returned no useful text")
+            except (httpx.HTTPError, ValueError, KeyError, TypeError, json.JSONDecodeError):
                 raise RuntimeError("document conversion failed") from None
-            markdown = await asyncio.to_thread(extract_pdf_text, fetched.content)
-            converted = {}
-            converter = "pdftotext-fallback"
         title = str(converted.get("title") or infer_title(markdown, fetched.url))
         focused = select_query_context(markdown, request.query) if request.query else markdown
         result = finalize_text_result(fetched, focused, request, "document", title=title)
@@ -516,7 +523,7 @@ class ReaderPipeline:
 
 
 def extract_pdf_text(content: bytes) -> str:
-    """Extract PDF text with the local Poppler utility as a bounded fallback."""
+    """Extract PDF text with the bounded local Poppler utility."""
     with tempfile.TemporaryDirectory(prefix="pi-web-pdf-") as directory:
         source = os.path.join(directory, "input.pdf")
         output = os.path.join(directory, "output.txt")
@@ -532,8 +539,8 @@ def extract_pdf_text(content: bytes) -> str:
             raise RuntimeError("PDF extraction failed")
         with open(output, encoding="utf-8", errors="replace") as handle:
             text = handle.read()
-    if not useful_text(text):
-        raise RuntimeError("PDF extraction returned no useful text")
+    if not any(character.isalnum() for character in text):
+        raise RuntimeError("PDF extraction returned no text")
     return text
 
 
