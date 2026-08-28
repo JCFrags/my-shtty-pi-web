@@ -70,6 +70,7 @@ async def test_valid_short_text_pdf_uses_pdftotext_without_docling(
             raise AssertionError("Docling must not run for a text PDF")
 
     monkeypatch.setattr(module.httpx, "AsyncClient", UnexpectedClient)
+    monkeypatch.setattr(module, "extract_pdf_text", lambda _content: "Dummy PDF file")
     content = short_text_pdf("Dummy PDF file")
     fetched = module.FetchResult(
         url="https://www.w3.org/dummy.pdf",

@@ -70,8 +70,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.88.0
           export PATH="$HOME/.cargo/bin:$PATH"
-          corepack enable
-          corepack prepare pnpm@10.13.1 --activate
+          npm install --global pnpm@10.13.1
           pnpm install --frozen-lockfile
           pnpm --filter @pi-web/workspace build
           cd components/browser
