@@ -149,7 +149,8 @@ async function deterministic() {
     const focused = await client.request("web.content", { contentId: readData.metadata.contentId, query: "ALPHA-OMEGA" }, options(owner, "content-focus"));
     record("exact and focused stored content", JSON.stringify(exact).includes("ALPHA-OMEGA") && JSON.stringify(focused).includes("ALPHA-OMEGA"));
     const structured = await client.request("web.read", { url: `${origin}/api`, fields: ["id", "name"], itemLimit: 1 }, options(owner, "structured"));
-    record("structured rows remain complete", JSON.stringify(structured).includes('"id":1') && !JSON.stringify(structured).includes("not-selected"));
+    const structuredRows = JSON.parse((structured.data as { untrustedContent: string }).untrustedContent) as unknown;
+    record("structured rows remain complete", JSON.stringify(structuredRows) === JSON.stringify([{ id: 1, name: "alpha" }]));
     const batch = await client.request("web.readBatch", { items: [{ url: `${origin}/static`, maxChars: 200 }, { url: `${origin}/api`, fields: ["id", "name"], itemLimit: 2 }] }, options(owner, "batch"));
     record("web_read_batch uses bounded concurrency", (batch.data as { metadata: { maxConcurrency: number } }).metadata.maxConcurrency <= 3, { structuredSdkBytes: Buffer.byteLength(JSON.stringify(batch)), piVisibleCharacters: visibleCharacters(batch), itemCount: 2, maxConcurrency: (batch.data as { metadata: { maxConcurrency: number } }).metadata.maxConcurrency });
     const timeoutStarted = Date.now();
