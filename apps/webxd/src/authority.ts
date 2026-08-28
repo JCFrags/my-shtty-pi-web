@@ -15,6 +15,7 @@ import type {
   RangeReadResponse,
   ReadRequest,
   ReadContent,
+  ReadFreshness,
   ReadBatchRequest,
   ReadBatchResponse,
   SearchHit,
@@ -362,17 +363,24 @@ export class WebxAuthority {
 
   private async read(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal): Promise<ReadContent> {
     requireScope(actor, "retrieval.read");
-    const key = { formatVersion: 11, principalId: actor.principalId, request, readerUrl: this.options.readerUrl };
-    const cached = await this.#cache.get<ReadContent>("read", key);
-    if (cached !== undefined) {
-      const metadata = typeof cached.metadata === "object" && cached.metadata !== null ? cached.metadata as Record<string, unknown> : {};
-      const contentId = typeof metadata.contentId === "string" ? metadata.contentId : undefined;
-      if (contentId !== undefined && await this.#content.get(contentId, actor.principalId) !== undefined) return withReadDelivery(cached, "hit", false);
-    }
-    const flightKey = `read\0${createHash("sha256").update(stableStringify(key)).digest("hex")}`;
-    const shared = await this.#inFlight.run(flightKey, signal, (sharedSignal) => this.uncachedRead(actor, request, sharedSignal) as Promise<ReadContent>);
+    assertReadRequest(request);
+    const canonicalRequest = withoutRefresh(request);
+    const key = { formatVersion: 12, principalId: actor.principalId, request: canonicalRequest, readerUrl: this.options.readerUrl };
+    const entry = await this.#cache.getEntry<ReadContent>("read", key, true);
+    const prior = entry === undefined ? undefined : await this.usableCachedRead(actor, entry.value);
+    if (request.refresh !== true && entry?.fresh === true && prior !== undefined) return withReadDelivery(prior, "hit", false, "cached");
+    const mode = request.refresh === true ? "refresh" : prior === undefined ? "miss" : "stale";
+    const flightKey = `read\0${mode}\0${createHash("sha256").update(stableStringify(key)).digest("hex")}`;
+    const shared = await this.#inFlight.run(flightKey, signal, (sharedSignal) => this.uncachedRead(actor, canonicalRequest, sharedSignal, true, prior) as Promise<ReadContent>);
     await this.#cache.set("read", key, shared.value, READ_CACHE_TTL_MS).catch(() => undefined);
-    return withReadDelivery(shared.value, "miss", shared.coalesced);
+    const freshness = readValidation(shared.value) === "not-modified" ? "revalidated" : "fetched";
+    return withReadDelivery(shared.value, "miss", shared.coalesced, freshness);
+  }
+
+  private async usableCachedRead(actor: AuthorityActor, cached: ReadContent): Promise<ReadContent | undefined> {
+    const metadata = typeof cached.metadata === "object" && cached.metadata !== null ? cached.metadata as Record<string, unknown> : {};
+    const contentId = typeof metadata.contentId === "string" ? metadata.contentId : undefined;
+    return contentId !== undefined && await this.#content.get(contentId, actor.principalId) !== undefined ? cached : undefined;
   }
 
   private async readBatch(actor: AuthorityActor, request: ReadBatchRequest, signal?: AbortSignal): Promise<ReadBatchResponse> {
@@ -391,7 +399,7 @@ export class WebxAuthority {
     return { results, metadata: { requested: results.length, succeeded, failed: results.length - succeeded, maxConcurrency: 3 } };
   }
 
-  private async uncachedRead(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal, retainContent = true): Promise<BoundedContent> {
+  private async uncachedRead(actor: AuthorityActor, request: ReadRequest, signal?: AbortSignal, retainContent = true, prior?: ReadContent): Promise<BoundedContent> {
     requireScope(actor, "retrieval.read");
     if (typeof request.url !== "string" || request.url.length === 0) throw problem(400, "invalid-request", "url is required", false);
     const crawlPages = integer(request.maxPages ?? 1, "maxPages", 1, 20);
@@ -425,7 +433,8 @@ export class WebxAuthority {
     const requestedChars = integer(request.maxChars ?? 1_000_000, "maxChars", 1, 1_000_000);
     const sourceChars = !specializedProjection && retainContent ? 1_000_000 : requestedChars;
     if (source === undefined && this.options.readerUrl !== undefined) {
-      const response = await this.#localJson.request<{ url?: unknown; title?: unknown; content?: unknown; mediaType?: unknown; source?: unknown; truncated?: unknown; metadata?: unknown }>(
+      const priorFreshness = readFreshness(prior);
+      const response = await this.#localJson.request<{ url?: unknown; title?: unknown; content?: unknown; mediaType?: unknown; source?: unknown; truncated?: unknown; metadata?: unknown; notModified?: unknown }>(
         new URL("/v1/read", this.options.readerUrl),
         {
           method: "POST", headers: { "content-type": "application/json" },
@@ -438,6 +447,9 @@ export class WebxAuthority {
             itemLimit: specializedProjection ? integer(input.itemLimit ?? 50, "itemLimit", 1, 500) : 500,
             contentOffset: integer(input.contentOffset ?? 0, "contentOffset", 0, 100_000_000),
             maxChars: sourceChars,
+            etag: priorFreshness?.etag,
+            lastModified: priorFreshness?.lastModified,
+            validatorUrl: prior === undefined ? undefined : prior.metadata.finalUrl,
           }),
         },
         LOCAL_JSON_LIMITS.reader,
@@ -448,10 +460,14 @@ export class WebxAuthority {
         throw problem(failure.toolStatus, "read-failed", failure.message, failure.retryable);
       }
       const page = response.payload ?? {};
+      const readerMetadata = typeof page.metadata === "object" && page.metadata !== null ? page.metadata as Record<string, unknown> : {};
+      if (page.notModified === true) {
+        if (prior === undefined) throw new Error("reader returned not-modified without reusable canonical content");
+        return revalidatedRead(prior, readerMetadata, this.options.clock.now());
+      }
       if (typeof page.content !== "string") throw new Error("reader returned no text content");
       const digest = createHash("sha256").update(`${request.url}\0${page.content}`).digest("hex");
       source = { hitId: `hit-${digest.slice(0, 20)}`, ownerPrincipalId: actor.principalId, title: typeof page.title === "string" ? page.title : request.url, url: typeof page.url === "string" ? page.url : request.url, content: page.content, visibility: "public" };
-      const readerMetadata = typeof page.metadata === "object" && page.metadata !== null ? page.metadata as Record<string, unknown> : {};
       const sourceOffset = integer(input.contentOffset ?? 0, "contentOffset", 0, 100_000_000);
       const provenNextSourceOffset = safeNextSourceOffset(readerMetadata.nextContentOffset, sourceOffset);
       const sourceComplete = readerMetadata.complete === true || (page.truncated !== true && provenNextSourceOffset === null);
@@ -535,9 +551,16 @@ export class WebxAuthority {
       expiresAt: new Date(record.expiresAt).toISOString(),
     };
     const reader = typeof metadata.reader === "object" && metadata.reader !== null ? metadata.reader as Record<string, unknown> : undefined;
+    const timestamp = this.options.clock.now();
+    const freshness = {
+      fetchedAt: timestamp,
+      validatedAt: timestamp,
+      validation: "fetched" as const,
+      ...boundedValidators(reader),
+    };
     const mergedMetadata = reader === undefined
-      ? { ...metadata, ...identity, ...provenance, reader: contentMetadata }
-      : { ...metadata, ...identity, ...provenance, reader: { ...reader, ...contentMetadata } };
+      ? { ...metadata, ...identity, ...provenance, freshness, reader: contentMetadata }
+      : { ...metadata, ...identity, ...provenance, freshness, reader: { ...reader, ...contentMetadata } };
     return { title: source.title, url: source.url, untrustedContent: bounded.text, truncated: locallyTruncated || !source.sourceComplete, visibility: "public", metadata: mergedMetadata };
   }
 
@@ -845,9 +868,39 @@ function outlineContent(content: string): string {
 function withSearchDelivery(value: SearchResponse, cache: "hit" | "miss", coalesced: boolean): SearchResponse {
   return { ...value, metadata: { ...value.metadata, delivery: { cache, coalesced } } };
 }
-function withReadDelivery<T extends BoundedContent>(value: T, cache: "hit" | "miss", coalesced: boolean): T {
+function withReadDelivery<T extends BoundedContent>(value: T, cache: "hit" | "miss", coalesced: boolean, freshness: "cached" | "fetched" | "revalidated"): T {
   const metadata = typeof value.metadata === "object" && value.metadata !== null ? value.metadata : {};
-  return { ...value, metadata: { ...metadata, delivery: { cache, coalesced } } } as T;
+  return { ...value, metadata: { ...metadata, delivery: { cache, coalesced, freshness } } } as T;
+}
+function readFreshness(value: ReadContent | undefined): ReadFreshness | undefined {
+  const freshness = value?.metadata.freshness;
+  return typeof freshness === "object" && freshness !== null ? freshness : undefined;
+}
+function readValidation(value: ReadContent): ReadFreshness["validation"] | undefined { return readFreshness(value)?.validation; }
+function boundedValidators(value: Readonly<Record<string, unknown>> | undefined): Pick<ReadFreshness, "etag" | "lastModified"> {
+  const etag = boundedValidator(value?.etag, 1_024);
+  const lastModified = boundedValidator(value?.lastModified, 128);
+  return { ...(etag === undefined ? {} : { etag }), ...(lastModified === undefined ? {} : { lastModified }) };
+}
+function boundedValidator(value: unknown, maximum: number): string | undefined {
+  return typeof value === "string" && value.length >= 1 && value.length <= maximum && !/[\r\n]/u.test(value) ? value : undefined;
+}
+function revalidatedRead(prior: ReadContent, readerMetadata: Readonly<Record<string, unknown>>, validatedAt: string): ReadContent {
+  const previous = readFreshness(prior);
+  if (previous === undefined) throw new Error("cached read has no freshness metadata");
+  const responseValidators = boundedValidators(readerMetadata);
+  const freshness: ReadFreshness = {
+    fetchedAt: previous.fetchedAt,
+    validatedAt,
+    validation: "not-modified",
+    etag: responseValidators.etag ?? previous.etag,
+    lastModified: responseValidators.lastModified ?? previous.lastModified,
+  };
+  return { ...prior, metadata: { ...prior.metadata, freshness } };
+}
+function withoutRefresh(request: ReadRequest): ReadRequest {
+  const { refresh: _refresh, ...canonical } = request;
+  return canonical;
 }
 async function boundedOrderedFanOut<T, R>(items: readonly T[], concurrency: number, run: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
@@ -863,6 +916,14 @@ async function boundedOrderedFanOut<T, R>(items: readonly T[], concurrency: numb
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
   return results;
 }
+function assertReadRequest(request: ReadRequest): void {
+  assertDirectReadRequest(request, new Set(["maxPages", "maxDepth", "sameDomain", "visibility"]));
+  const value = request as unknown as Record<string, unknown>;
+  if (value.maxPages !== undefined) integer(value.maxPages as number, "maxPages", 1, 20);
+  if (value.maxDepth !== undefined) integer(value.maxDepth as number, "maxDepth", 0, 3);
+  if (value.sameDomain !== undefined && typeof value.sameDomain !== "boolean") throw problem(400, "invalid-request", "sameDomain must be a boolean", false);
+  if (value.visibility !== undefined && !["public", "internal", "private", "secret"].includes(String(value.visibility))) throw problem(400, "invalid-request", "visibility is invalid", false);
+}
 function assertReadBatchRequest(request: ReadBatchRequest): void {
   const value = request as unknown as Record<string, unknown>;
   const unknown = Object.keys(value).filter((key) => key !== "items");
@@ -870,10 +931,10 @@ function assertReadBatchRequest(request: ReadBatchRequest): void {
   if (!Array.isArray(value.items) || value.items.length < 1 || value.items.length > 5) throw problem(400, "invalid-request", "items must contain 1 to 5 direct read requests", false);
   for (const item of value.items) assertDirectReadRequest(item);
 }
-function assertDirectReadRequest(input: unknown): void {
-  if (typeof input !== "object" || input === null || Array.isArray(input)) throw problem(400, "invalid-request", "each read batch item must be an object", false);
+function assertDirectReadRequest(input: unknown, additionalAllowed = new Set<string>()): void {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) throw problem(400, "invalid-request", "each read request must be an object", false);
   const value = input as Record<string, unknown>;
-  const allowed = new Set(["url", "query", "view", "fields", "itemOffset", "itemLimit", "maxChars", "contentOffset"]);
+  const allowed = new Set(["url", "query", "view", "fields", "itemOffset", "itemLimit", "maxChars", "contentOffset", "refresh", ...additionalAllowed]);
   const unknown = Object.keys(value).filter((key) => !allowed.has(key));
   if (unknown.length > 0) throw problem(400, "invalid-request", `unsupported read batch item field: ${unknown[0]}`, false);
   if (typeof value.url !== "string" || value.url.length < 1 || value.url.length > 8_192) throw problem(400, "invalid-request", "read batch item url is required", false);
@@ -885,6 +946,7 @@ function assertDirectReadRequest(input: unknown): void {
   if (value.itemLimit !== undefined) integer(value.itemLimit as number, "itemLimit", 1, 500);
   if (value.maxChars !== undefined) integer(value.maxChars as number, "maxChars", 1, 1_000_000);
   if (value.contentOffset !== undefined) integer(value.contentOffset as number, "contentOffset", 0, 100_000_000);
+  if (value.refresh !== undefined && typeof value.refresh !== "boolean") throw problem(400, "invalid-request", "refresh must be a boolean", false);
 }
 function publicProblem(error: unknown): WebxProblem {
   if (isAuthorityFailure(error)) return error.body;

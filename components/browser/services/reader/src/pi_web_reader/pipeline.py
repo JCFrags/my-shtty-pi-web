@@ -86,6 +86,9 @@ class ReadRequest:
     item_offset: int = 0
     item_limit: int = 50
     content_offset: int = 0
+    etag: str | None = None
+    last_modified: str | None = None
+    validator_url: str | None = None
 
 
 @dataclass(slots=True)
@@ -186,6 +189,7 @@ class ReadResult:
     source: str
     truncated: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+    not_modified: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         # The coordinator protocol is camelCase even though Python internals use
@@ -198,6 +202,7 @@ class ReadResult:
             "source": self.source,
             "truncated": self.truncated,
             "metadata": self.metadata,
+            "notModified": self.not_modified,
         }
 
 
@@ -394,7 +399,12 @@ class ReaderPipeline:
         original = await self._fetch(
             request.url,
             accept="text/markdown, text/plain;q=0.95, application/json;q=0.9, text/html;q=0.8, */*;q=0.2",
+            etag=request.etag,
+            last_modified=request.last_modified,
+            validator_url=request.validator_url,
         )
+        if original.status == 304:
+            return not_modified_result(original)
 
         if original.media_type == "application/json" or original.media_type.endswith("+json"):
             return finalize_json_result(original, request)
@@ -409,7 +419,15 @@ class ReaderPipeline:
 
         # 3. Explicit .md and index.md fallback.
         for candidate in markdown_candidates(original.url):
-            fetched = await self._try_fetch(candidate, accept="text/markdown, text/plain;q=0.9")
+            fetched = await self._try_fetch(
+                candidate,
+                accept="text/markdown, text/plain;q=0.9",
+                etag=request.etag,
+                last_modified=request.last_modified,
+                validator_url=request.validator_url,
+            )
+            if fetched and fetched.status == 304:
+                return not_modified_result(fetched)
             if fetched and fetched.media_type in TEXT_TYPES and useful_text(fetched.text):
                 return finalize_text_result(fetched, fetched.text, request, "markdown-fallback")
 
@@ -429,7 +447,15 @@ class ReaderPipeline:
         # The result metadata makes this substitution explicit.
         llms_names = ["llms-full.txt", "llms.txt"] if request.allow_llms_full else ["llms.txt"]
         for candidate in llms_candidates(original.url, llms_names):
-            fetched = await self._try_fetch(candidate, accept="text/plain, text/markdown;q=0.9")
+            fetched = await self._try_fetch(
+                candidate,
+                accept="text/plain, text/markdown;q=0.9",
+                etag=request.etag,
+                last_modified=request.last_modified,
+                validator_url=request.validator_url,
+            )
+            if fetched and fetched.status == 304:
+                return not_modified_result(fetched)
             if fetched and fetched.media_type in TEXT_TYPES and useful_text(fetched.text):
                 selected = (
                     select_query_context(fetched.text, request.query)
@@ -556,18 +582,44 @@ class ReaderPipeline:
             async with self._worker_slots:
                 return await run_bounded_process(command, input_bytes, output_limit=output_limit)
 
-    async def _try_fetch(self, url: str, *, accept: str) -> FetchResult | None:
+    async def _try_fetch(
+        self,
+        url: str,
+        *,
+        accept: str,
+        etag: str | None = None,
+        last_modified: str | None = None,
+        validator_url: str | None = None,
+    ) -> FetchResult | None:
         try:
-            response = await self._fetch(url, accept=accept)
+            response = await self._fetch(
+                url,
+                accept=accept,
+                etag=etag,
+                last_modified=last_modified,
+                validator_url=validator_url,
+            )
         except (ValueError, OSError, httpx.HTTPError):
             return None
-        return response if 200 <= response.status < 300 else None
+        return response if response.status == 304 or 200 <= response.status < 300 else None
 
-    async def _fetch(self, url: str, *, accept: str) -> FetchResult:
+    async def _fetch(
+        self,
+        url: str,
+        *,
+        accept: str,
+        etag: str | None = None,
+        last_modified: str | None = None,
+        validator_url: str | None = None,
+    ) -> FetchResult:
         if httpx is None:
             raise RuntimeError(
                 "reader runtime dependencies are not installed; run `uv sync --all-packages`"
             )
+        validate_origin_validator(etag, "ETag", 1_024)
+        validate_origin_validator(last_modified, "Last-Modified", 128)
+        if validator_url is not None:
+            validate_public_url_syntax(validator_url)
         headers = {"Accept": accept, "User-Agent": self.user_agent}
         timeout = httpx_timeout(self.timeout_seconds)
         current = url
@@ -579,11 +631,18 @@ class ReaderPipeline:
             addresses = await self.resolver(host, port)
             pinned = self._validated_pin(host, port, addresses)
             transport = self.transport_factory({host.lower().rstrip("."): pinned})
+            request_headers = dict(headers)
+            conditional = validator_url is not None and current == validator_url
+            if conditional:
+                if etag is not None:
+                    request_headers["If-None-Match"] = etag
+                if last_modified is not None:
+                    request_headers["If-Modified-Since"] = last_modified
             async with (
                 httpx.AsyncClient(
                     follow_redirects=False,
                     timeout=timeout,
-                    headers=headers,
+                    headers=request_headers,
                     transport=transport,
                     trust_env=False,
                 ) as client,
@@ -598,6 +657,17 @@ class ReaderPipeline:
                     current = urljoin(current, location)
                     validate_public_url_syntax(current)
                     continue
+                if response.status_code == 304:
+                    if not conditional or (etag is None and last_modified is None):
+                        raise ValueError("origin returned unsolicited HTTP 304")
+                    return FetchResult(
+                        url=str(response.url),
+                        status=304,
+                        media_type=content_type(response.headers.get("content-type")),
+                        text="",
+                        content=b"",
+                        headers={key.lower(): value for key, value in response.headers.items()},
+                    )
                 response.raise_for_status()
                 content = await read_bounded_response(
                     response,
@@ -1089,6 +1159,18 @@ def json_path_value(value: Any, segments: list[str]) -> Any:
     return json_path_value(value.get(head), tail)
 
 
+def not_modified_result(fetched: FetchResult) -> ReadResult:
+    return ReadResult(
+        url=fetched.url,
+        title="Not modified",
+        media_type=fetched.media_type,
+        content="",
+        source="conditional-request",
+        metadata=origin_validator_metadata(fetched.headers),
+        not_modified=True,
+    )
+
+
 def finalize_text_result(
     fetched: FetchResult,
     text: str,
@@ -1122,6 +1204,7 @@ def finalize_text_result(
         truncated=truncated,
         metadata={
             "originalMediaType": fetched.media_type,
+            **origin_validator_metadata(fetched.headers),
             "responseBytes": len(fetched.content),
             "contentSha256": hashlib.sha256(normalized.encode("utf-8")).hexdigest(),
             "resolvedVia": source,
@@ -1202,6 +1285,28 @@ def content_quality(value: str) -> ContentQuality:
         unique_line_ratio=round(unique_line_ratio, 4),
         boilerplate_hits=boilerplate_hits,
     )
+
+
+def origin_validator_metadata(headers: dict[str, str]) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    etag = bounded_origin_validator(headers.get("etag"), 1_024)
+    last_modified = bounded_origin_validator(headers.get("last-modified"), 128)
+    if etag is not None:
+        metadata["etag"] = etag
+    if last_modified is not None:
+        metadata["lastModified"] = last_modified
+    return metadata
+
+
+def bounded_origin_validator(value: str | None, maximum: int) -> str | None:
+    if value is None or not 1 <= len(value) <= maximum or "\r" in value or "\n" in value:
+        return None
+    return value
+
+
+def validate_origin_validator(value: str | None, name: str, maximum: int) -> None:
+    if value is not None and bounded_origin_validator(value, maximum) is None:
+        raise ValueError(f"{name} validator is invalid")
 
 
 def useful_text(value: str) -> bool:

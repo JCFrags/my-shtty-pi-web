@@ -46,7 +46,9 @@ The `/v1/content` route supports exact offset retrieval and focused `findText` o
 
 ## Short-lived cache
 
-Search responses, including extract output, use a 15-minute cache. Direct `web_read` results use a six-hour cache. The cache keeps up to 256 entries and 32 MiB in RAM. It keeps up to 2,048 entries and 512 MiB on SSD. One serialized response can use at most 4.3 MB. Oversized entries are not cached. Disk scans and pruning keep bounded in-memory state. Files default to `$XDG_CACHE_HOME/pi-web/responses` with user-only permissions. `WEBX_CACHE_DIR` can select another directory. Cache failures never block a live request.
+Search responses, including extract output, use a 15-minute cache. Direct `web_read` results use a six-hour cache. Read metadata reports when the source was fetched and validated. `refresh: true` bypasses a fresh read-cache hit. Stale or refreshed reads use bounded ETag and Last-Modified validators when the canonical record is still available. An HTTP 304 result reuses the same canonical content and content ID, then updates validation metadata. Refresh work has separate idempotency and coalescing identity from ordinary reads.
+
+The cache keeps up to 256 entries and 32 MiB in RAM. It keeps up to 2,048 entries and 512 MiB on SSD. One serialized response can use at most 4.3 MB. Oversized entries are not cached. Disk scans and pruning keep bounded in-memory state. Files default to `$XDG_CACHE_HOME/pi-web/responses` with user-only permissions. `WEBX_CACHE_DIR` can select another directory. Cache failures never block a live request.
 
 Identical eligible search and read work is coalesced under at most 256 in-flight keys. Each caller keeps independent cancellation. The shared operation stops only when no waiter remains.
 

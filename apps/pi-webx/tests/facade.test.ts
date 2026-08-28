@@ -190,12 +190,14 @@ test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
   assert.equal(Value.Check(WebSearchSchema, { query: "ok", crawlPages: 1 }), false);
   assert.equal(Value.Check(WebSearchSchema, { query: "ok", domains: ["https://example.com/path"] }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "not-a-url" }), false);
+  assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", refresh: true }), true);
+  assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", refresh: "yes" }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "notes/page.md" } }), true);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "../page.md" } }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "/tmp/page.md" } }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "page.txt" } }), false);
   assert.equal(Value.Check(WebReadSchema, { url: "https://example.test", save: { path: "page.md", overwrite: "yes" } }), false);
-  const directItem = { url: "https://one.test", query: "topic", view: "outline", fields: ["id"], itemOffset: 2, itemLimit: 3, maxChars: 4_000, contentOffset: 10 };
+  const directItem = { url: "https://one.test", query: "topic", view: "outline", fields: ["id"], itemOffset: 2, itemLimit: 3, maxChars: 4_000, contentOffset: 10, refresh: true };
   assert.equal(Value.Check(WebReadBatchSchema, { items: [directItem, { url: "https://two.test" }] }), true);
   assert.equal(Value.Check(WebReadBatchSchema, { items: [] }), false);
   assert.equal(Value.Check(WebReadBatchSchema, { items: Array.from({ length: 6 }, (_, index) => ({ url: `https://${index}.test` })) }), false);

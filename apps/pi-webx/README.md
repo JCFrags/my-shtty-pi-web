@@ -26,7 +26,7 @@ Browser work follows open, observe, act, observe, and close. Semantic refs are p
 
 Only the user changes modes. Run `/web` with no options to open one settings menu for capability modes and browser workspace controls. Direct forms remain under the same command: `/web mode off|read|browser|debug` and `/web workspace show|hide|list|attach|takeover|return [sessionId]`. Browser tools are available by default. There is no separate browser slash command or model-facing upgrade tool.
 
-Repeated searches and reads use a short-lived RAM and SSD traffic cache. It is not a durable research library or a recall tool.
+Repeated searches and reads use a short-lived RAM and SSD traffic cache. Read results report fetch and validation timestamps. Set `refresh: true` only when current source validation is required. Refresh bypasses a fresh read-cache hit. WebX can use bounded origin validators and reuse unchanged canonical content after an HTTP 304 response. The cache is not a durable research library or a recall tool.
 
 The extension also writes a separate user-only audit record for each real `web_search`, `web_read`, and `web_read_batch` call. New records contain sanitized bounded inputs and result metadata only. They include actor scope, timestamps, duration, outcome, error class, cache and coalescing state, content IDs, digests, counts, and sizes when available. They do not contain fetched bodies, source bytes, snippets, passages, or final agent-visible output. Existing files are not migrated. New audit history uses a 30-day and 100 MiB policy with a bounded prune scan. Inspect them with `pi-web audit list` and `pi-web audit show RECORD_ID`. Audit history is not a Pi tool and is not automatic model recall.
 

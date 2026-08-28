@@ -66,6 +66,6 @@ Never authenticate, enter credentials, purchase, publish, or perform a destructi
 
 Report the failed action, relevant limit, and supported recovery. Do not switch silently to shell HTTP clients or a manually launched browser. Use shell network access only to diagnose a specific WebX failure.
 
-Searches and reads use a short-lived internal traffic cache. It reduces repeat requests and rate-limit pressure. It is not a durable research archive or model-facing memory.
+Searches and reads use a short-lived internal traffic cache. It reduces repeat requests and rate-limit pressure. Read metadata reports fetch and validation times. Set `refresh: true` only when current source validation is required. Refresh bypasses a fresh read-cache hit and can reuse unchanged canonical content. The cache is not a durable research archive or model-facing memory.
 
 Only the user changes capability modes. The user can run `/web` to open one settings menu for capability modes and browser workspace controls. Browser tools are available by default. The model does not use the user command or change modes.

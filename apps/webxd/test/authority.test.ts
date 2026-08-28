@@ -463,6 +463,97 @@ describe("WebxAuthority", () => {
     ] } });
   });
 
+  it("observes cache freshness and reuses canonical content after conditional 304 validation", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    let clockIndex = 0;
+    const times = ["2026-08-28T10:00:00.000Z", "2026-08-28T11:00:00.000Z"];
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      requests.push(body);
+      if (requests.length === 1) return new Response(JSON.stringify({
+        url: body.url, title: "Canonical", content: "stable canonical body", source: "raw", truncated: false,
+        metadata: { etag: '"stable-v1"', lastModified: "Fri, 28 Aug 2026 10:00:00 GMT", complete: true },
+      }), { status: 200 });
+      return new Response(JSON.stringify({
+        url: body.url, notModified: true,
+        metadata: { etag: '"stable-v1"', lastModified: "Fri, 28 Aug 2026 10:00:00 GMT" },
+      }), { status: 200 });
+    }));
+    const instance = new WebxAuthority({
+      browser: browser(), sources: PUBLIC_SOURCES, readerUrl: "http://127.0.0.1:8787",
+      clock: { now: () => times[Math.min(clockIndex++, times.length - 1)] ?? times[0]! },
+      ids: { next: (prefix) => `${prefix}-1` },
+    });
+    const first = await call(instance, actor(), "POST", "/v1/read", { url: "https://fresh.example/page" }, "freshness-first");
+    const cached = await call(instance, actor(), "POST", "/v1/read", { url: "https://fresh.example/page" }, "freshness-cached");
+    const refreshed = await call(instance, actor(), "POST", "/v1/read", { url: "https://fresh.example/page", refresh: true }, "freshness-refresh");
+    const firstBody = first.body as { untrustedContent: string; metadata: { contentId: string; freshness: Record<string, unknown> } };
+    const refreshedBody = refreshed.body as typeof firstBody;
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toMatchObject({ etag: '"stable-v1"', lastModified: "Fri, 28 Aug 2026 10:00:00 GMT", validatorUrl: "https://fresh.example/page" });
+    expect(cached).toMatchObject({ body: { metadata: { delivery: { cache: "hit", freshness: "cached" } } } });
+    expect(refreshedBody.untrustedContent).toBe(firstBody.untrustedContent);
+    expect(refreshedBody.metadata.contentId).toBe(firstBody.metadata.contentId);
+    expect(refreshed).toMatchObject({ body: { metadata: {
+      freshness: { fetchedAt: times[0], validatedAt: times[1], validation: "not-modified", etag: '"stable-v1"' },
+      delivery: { cache: "miss", freshness: "revalidated" },
+    } } });
+    const replay = await call(instance, actor(), "POST", "/v1/read", { url: "https://fresh.example/page", refresh: true }, "freshness-refresh");
+    expect(replay.body).toEqual(refreshed.body);
+    const mixed = await call(instance, actor(), "POST", "/v1/read", { url: "https://fresh.example/page" }, "freshness-refresh");
+    expect(mixed).toMatchObject({ status: 409, body: { code: "idempotency-conflict" } });
+    expect(requests).toHaveLength(2);
+  });
+
+  it("conditionally validates a stale six-hour read without changing the TTL", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-28T00:00:00.000Z"));
+      const requests: Array<Record<string, unknown>> = [];
+      vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        requests.push(body);
+        return new Response(JSON.stringify(requests.length === 1 ? {
+          url: body.url, title: "Stale", content: "six-hour canonical body", source: "raw", truncated: false,
+          metadata: { etag: '"six-hour"', complete: true },
+        } : { url: body.url, notModified: true, metadata: { etag: '"six-hour"' } }), { status: 200 });
+      }));
+      const instance = new WebxAuthority({
+        browser: browser(), sources: PUBLIC_SOURCES, readerUrl: "http://127.0.0.1:8787",
+        clock: { now: () => new Date(Date.now()).toISOString() }, ids: { next: (prefix) => `${prefix}-1` },
+      });
+      const first = await call(instance, actor(), "POST", "/v1/read", { url: "https://stale.example/page" }, "stale-first");
+      vi.setSystemTime(new Date("2026-08-28T06:00:00.001Z"));
+      const stale = await call(instance, actor(), "POST", "/v1/read", { url: "https://stale.example/page" }, "stale-second");
+      expect(requests).toHaveLength(2);
+      expect(requests[1]).toMatchObject({ etag: '"six-hour"', validatorUrl: "https://stale.example/page" });
+      expect(stale).toMatchObject({ body: { metadata: { contentId: (first.body as { metadata: { contentId: string } }).metadata.contentId, freshness: { validatedAt: "2026-08-28T06:00:00.001Z", validation: "not-modified" }, delivery: { freshness: "revalidated" } } } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps refresh and ordinary coalescing keys separate", async () => {
+    const started = Promise.withResolvers<undefined>();
+    const release = Promise.withResolvers<undefined>();
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      calls += 1;
+      const body = JSON.parse(String(init?.body)) as { url: string };
+      if (calls > 1) { started.resolve(undefined); await release.promise; }
+      return new Response(JSON.stringify({ url: body.url, title: "Page", content: `canonical ${calls}`, source: "raw", truncated: false, metadata: { etag: `\"v${calls}\"`, complete: true } }), { status: 200 });
+    }));
+    const instance = authority(browser(), "http://127.0.0.1:8787");
+    await call(instance, actor(), "POST", "/v1/read", { url: "https://keys.example/page" }, "keys-first");
+    const refresh = call(instance, actor(), "POST", "/v1/read", { url: "https://keys.example/page", refresh: true }, "keys-refresh");
+    await started.promise;
+    const ordinary = await call(instance, actor(), "POST", "/v1/read", { url: "https://keys.example/page" }, "keys-ordinary");
+    expect(ordinary).toMatchObject({ body: { untrustedContent: "canonical 1", metadata: { delivery: { cache: "hit" } } } });
+    release.resolve(undefined);
+    expect(await refresh).toMatchObject({ body: { untrustedContent: "canonical 2", metadata: { delivery: { cache: "miss" } } } });
+    expect(calls).toBe(2);
+  });
+
   it("stores normalized read content and retrieves exact or focused passages without refetching", async () => {
     const normalized = `${"prefix ".repeat(5_000)}UNIQUE NEEDLE ${"suffix ".repeat(5_000)}`;
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ url: "https://docs.example/page", title: "Stored page", content: normalized, truncated: false, metadata: { totalCharacters: normalized.length } }), { status: 200, headers: { "content-type": "application/json" } }));

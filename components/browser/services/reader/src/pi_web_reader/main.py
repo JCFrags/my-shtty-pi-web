@@ -47,6 +47,9 @@ class ReadPayload(BaseModel):
     item_offset: int = Field(default=0, ge=0, alias="itemOffset")
     item_limit: int = Field(default=50, ge=1, le=500, alias="itemLimit")
     content_offset: int = Field(default=0, ge=0, le=100_000_000, alias="contentOffset")
+    etag: str | None = Field(default=None, min_length=1, max_length=1_024)
+    last_modified: str | None = Field(default=None, min_length=1, max_length=128, alias="lastModified")
+    validator_url: str | None = Field(default=None, min_length=1, max_length=8_192, alias="validatorUrl")
 
 
 def _pipeline() -> ReaderPipeline:
@@ -131,6 +134,9 @@ async def read(payload: ReadPayload) -> dict[str, Any]:
             item_offset=payload.item_offset,
             item_limit=payload.item_limit,
             content_offset=payload.content_offset,
+            etag=payload.etag,
+            last_modified=payload.last_modified,
+            validator_url=payload.validator_url,
         )
         return (await pipeline.read(request)).to_dict()
     except ValueError as error:

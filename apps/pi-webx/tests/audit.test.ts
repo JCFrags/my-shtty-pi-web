@@ -30,6 +30,8 @@ test("audit stores bounded metadata only with secret redaction and user-only fil
         contentId: `cnt_${"a".repeat(32)}`, requestedUrl: "https://example.test/page?token=private", finalUrl: "https://final.test/page",
         representation: "canonical-normalized", sourceOffset: 0, sourceComplete: false, nextSourceOffset: 10_000,
         extractor: "trafilatura", mediaType: "text/markdown", contentSha256: "b".repeat(64),
+        freshness: { fetchedAt: "2026-08-24T11:00:00.000Z", validatedAt: "2026-08-24T12:00:00.000Z", validation: "not-modified", etag: '"private-value-not-recorded"' },
+        delivery: { cache: "miss", coalesced: false, freshness: "revalidated" },
         reader: { createdAt: "2026-08-24T12:00:00.000Z", expiresAt: "2026-08-25T12:00:00.000Z" },
       } }, trust: "untrusted-external" },
       presentation: { content: [{ type: "text", text: "agent-visible output" }], details: { complete: true } },
@@ -50,6 +52,11 @@ test("audit stores bounded metadata only with secret redaction and user-only fil
     assert.equal(value.result.representation, "canonical-normalized");
     assert.equal(value.result.sourceComplete, false);
     assert.equal(value.result.nextSourceOffset, 10_000);
+    assert.equal(value.result.freshnessDelivery, "revalidated");
+    assert.equal(value.result.validation, "not-modified");
+    assert.equal(value.result.hasEtag, true);
+    assert.equal(value.result.hasLastModified, undefined);
+    assert.doesNotMatch(JSON.stringify(value), /private-value-not-recorded/);
     assert.match(value.result.requestedUrl, /token=%5Bredacted%5D/);
     assert.doesNotMatch(JSON.stringify(value), /complete public content|agent-visible output|structuredResult|agentVisibleOutput/);
     assert.equal((await stat(file)).mode & 0o777, 0o600);

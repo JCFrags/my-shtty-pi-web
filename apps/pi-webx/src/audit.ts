@@ -99,10 +99,17 @@ function resultMetadata(result: FacadeResult | undefined): unknown {
   const metadata = asObject(data?.metadata);
   const delivery = asObject(metadata?.delivery);
   const reader = asObject(metadata?.reader);
+  const freshness = asObject(metadata?.freshness);
   const output: Record<string, unknown> = {
     trust: result.trust,
     cache: delivery?.cache,
     coalesced: delivery?.coalesced,
+    freshnessDelivery: stringValue(delivery?.freshness),
+    fetchedAt: stringValue(freshness?.fetchedAt),
+    validatedAt: stringValue(freshness?.validatedAt),
+    validation: stringValue(freshness?.validation),
+    hasEtag: typeof freshness?.etag === "string" || undefined,
+    hasLastModified: typeof freshness?.lastModified === "string" || undefined,
     contentId: stringValue(metadata?.contentId),
     representation: stringValue(metadata?.representation ?? reader?.representation),
     requestedUrl: auditUrl(metadata?.requestedUrl ?? reader?.requestedUrl),
@@ -126,10 +133,14 @@ function resultMetadata(result: FacadeResult | undefined): unknown {
       const source = asObject(envelope?.result);
       const sourceMetadata = asObject(source?.metadata);
       const sourceDelivery = asObject(sourceMetadata?.delivery);
+      const sourceFreshness = asObject(sourceMetadata?.freshness);
       return {
         index: numberValue(envelope?.index), ok: envelope?.ok === true,
         status: envelope?.ok === true ? "ok" : stringValue(asObject(envelope?.error)?.code),
         contentId: stringValue(sourceMetadata?.contentId), cache: sourceDelivery?.cache, coalesced: sourceDelivery?.coalesced,
+        freshnessDelivery: stringValue(sourceDelivery?.freshness), fetchedAt: stringValue(sourceFreshness?.fetchedAt),
+        validatedAt: stringValue(sourceFreshness?.validatedAt), validation: stringValue(sourceFreshness?.validation),
+        hasEtag: typeof sourceFreshness?.etag === "string" || undefined, hasLastModified: typeof sourceFreshness?.lastModified === "string" || undefined,
         representation: stringValue(sourceMetadata?.representation), sourceOffset: numberValue(sourceMetadata?.sourceOffset),
         sourceComplete: booleanValue(sourceMetadata?.sourceComplete), nextSourceOffset: numberValue(sourceMetadata?.nextSourceOffset),
         extractor: stringValue(sourceMetadata?.extractor), mediaType: stringValue(sourceMetadata?.mediaType),

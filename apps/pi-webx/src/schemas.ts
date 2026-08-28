@@ -33,6 +33,7 @@ const directReadProperties = {
   itemLimit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500, description: "Maximum structured JSON collection items. Use with itemOffset for item pagination." })),
   maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000, description: "Explicit content bound. Omit for a full read. If it binds the result, use the reported nextContentOffset." })),
   contentOffset: Type.Optional(Type.Integer({ minimum: 0, maximum: 100_000_000, description: "Continuation offset reported by a prior direct read. Keep the same URL and options. Do not invent this value or combine it with linked crawling." })),
+  refresh: Type.Optional(Type.Boolean({ description: "Bypass a fresh traffic-cache hit and validate the canonical source again. Conditional validation can reuse unchanged canonical content." })),
 };
 
 export const WebReadSchema = Type.Object({

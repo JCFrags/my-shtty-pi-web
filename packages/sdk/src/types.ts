@@ -108,10 +108,12 @@ export interface ReadRequest {
   readonly maxPages?: number;
   readonly maxDepth?: number;
   readonly sameDomain?: boolean;
+  /** Bypass a fresh traffic-cache hit and validate the canonical source again. */
+  readonly refresh?: boolean;
   readonly visibility?: Visibility;
 }
 
-export type DirectReadRequest = Pick<ReadRequest, "url" | "query" | "view" | "fields" | "itemOffset" | "itemLimit" | "maxChars" | "contentOffset">;
+export type DirectReadRequest = Pick<ReadRequest, "url" | "query" | "view" | "fields" | "itemOffset" | "itemLimit" | "maxChars" | "contentOffset" | "refresh">;
 
 export interface ReadBatchRequest {
   readonly items: readonly DirectReadRequest[];
@@ -148,13 +150,22 @@ export interface ContentProvenance extends Readonly<Record<string, unknown>> {
   readonly contentSha256: string;
 }
 
+export interface ReadFreshness {
+  readonly fetchedAt: string;
+  readonly validatedAt: string;
+  readonly validation: "fetched" | "not-modified";
+  readonly etag?: string;
+  readonly lastModified?: string;
+}
+
 export interface ReadContent extends BoundedContent {
   readonly metadata: ContentProvenance & {
     readonly contentId: string;
     readonly createdAt: string;
     readonly expiresAt: string;
     readonly reader: Readonly<Record<string, unknown>> & ContentProvenance;
-    readonly delivery?: { readonly cache: "hit" | "miss"; readonly coalesced: boolean };
+    readonly freshness: ReadFreshness;
+    readonly delivery?: { readonly cache: "hit" | "miss"; readonly coalesced: boolean; readonly freshness: "cached" | "fetched" | "revalidated" };
   };
 }
 

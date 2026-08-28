@@ -125,6 +125,48 @@ async def test_public_fixture_succeeds_and_uses_pinned_address() -> None:
 
 
 @pytest.mark.asyncio
+async def test_conditional_request_uses_bounded_validators_only_at_the_validated_url() -> None:
+    requests: list[tuple[str, str | None, str | None]] = []
+
+    async def resolver(host: str, port: int) -> list[str]:
+        return ["93.184.216.34"]
+
+    def transport_factory(pins: dict[str, str]) -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append((str(request.url), request.headers.get("if-none-match"), request.headers.get("if-modified-since")))
+            if request.url.path == "/start":
+                return httpx.Response(302, headers={"location": "/final"})
+            return httpx.Response(304, headers={"etag": '"stable-v1"'})
+
+        return httpx.MockTransport(handler)
+
+    pipeline = module.ReaderPipeline(resolver=resolver, transport_factory=transport_factory)
+    result = await pipeline.read(module.ReadRequest(
+        url="https://public.example/start",
+        etag='"stable-v1"',
+        last_modified="Fri, 28 Aug 2026 10:00:00 GMT",
+        validator_url="https://public.example/final",
+    ))
+    assert result.not_modified is True
+    assert result.content == ""
+    assert result.metadata == {"etag": '"stable-v1"'}
+    assert requests == [
+        ("https://public.example/start", None, None),
+        ("https://public.example/final", '"stable-v1"', "Fri, 28 Aug 2026 10:00:00 GMT"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_conditional_request_rejects_unbounded_validators_before_network() -> None:
+    pipeline = module.ReaderPipeline(
+        resolver=lambda _host, _port: None,  # type: ignore[arg-type]
+        transport_factory=lambda _pins: httpx.MockTransport(lambda _request: httpx.Response(200)),
+    )
+    with pytest.raises(ValueError, match="ETag validator is invalid"):
+        await pipeline._fetch("https://public.example/page", accept="text/plain", etag="x" * 1_025)
+
+
+@pytest.mark.asyncio
 async def test_redirect_target_is_resolved_and_rejected_before_second_request() -> None:
     requests: list[str] = []
 
