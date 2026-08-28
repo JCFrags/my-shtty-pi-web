@@ -207,6 +207,7 @@ class ReaderPipeline:
         user_agent: str = "Pi-Web-Reader/0.1 (+local self-hosted reader)",
         resolver: Resolver | None = None,
         transport_factory: Callable[[dict[str, str]], Any] | None = None,
+        test_loopback_fixture: tuple[str, int] | None = None,
     ) -> None:
         self.timeout_seconds = bounded_number(
             timeout_seconds,
@@ -249,6 +250,12 @@ class ReaderPipeline:
         self.user_agent = user_agent
         self.resolver = resolver or resolve_public_addresses
         self.transport_factory = transport_factory or pinned_transport
+        self.test_loopback_fixture = test_loopback_fixture
+
+    def _validated_pin(self, host: str, port: int, addresses: list[str]) -> str:
+        if self.test_loopback_fixture == (host, port) and addresses == ["127.0.0.1"]:
+            return "127.0.0.1"
+        return validate_public_addresses(host, addresses)
 
     async def read_range(self, request: RangeReadRequest) -> RangeReadResult:
         async with self._acquisition_slots:
@@ -278,7 +285,7 @@ class ReaderPipeline:
             assert host is not None
             port = parsed.port or (443 if parsed.scheme == "https" else 80)
             addresses = await self.resolver(host, port)
-            pinned = validate_public_addresses(host, addresses)
+            pinned = self._validated_pin(host, port, addresses)
             transport = self.transport_factory({host.lower().rstrip("."): pinned})
             async with (
                 httpx.AsyncClient(
@@ -467,7 +474,7 @@ class ReaderPipeline:
             assert host is not None
             port = parsed.port or (443 if parsed.scheme == "https" else 80)
             addresses = await self.resolver(host, port)
-            pinned = validate_public_addresses(host, addresses)
+            pinned = self._validated_pin(host, port, addresses)
             transport = self.transport_factory({host.lower().rstrip("."): pinned})
             async with (
                 httpx.AsyncClient(

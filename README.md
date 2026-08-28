@@ -31,13 +31,24 @@ The separate research archive concept is recorded in [`FUTURE_FEATURES.md`](FUTU
 
 ## Install on Fedora
 
-Pi must already be installed. Then run:
+Pi must already be installed. The original compatible install command remains available:
 
 ```bash
 ./install-fedora.sh
 ```
 
-The installer stages the source at `~/.local/lib/pi-web-tools`, installs locked dependencies, builds the services and Tauri app, links the Pi extension, and starts user services. The install fails if the authority, search backend, or static reader is unhealthy. Optional browser, crawl, and document-converter failures remain visible in status output but do not fail the core install. `pi-web doctor` checks the WebX authority capability catalog rather than only the browser daemon.
+For a reviewed update, use the staged procedure instead:
+
+```bash
+./install-fedora.sh --stage
+# Run the deterministic candidate smoke test.
+./install-fedora.sh --cutover-plan CANDIDATE EVIDENCE
+./install-fedora.sh --cutover-apply CANDIDATE EVIDENCE
+```
+
+See [`docs/operations-fedora.md`](docs/operations-fedora.md) for exact smoke, resource, verification, and `--rollback RUN_ID` commands. Do not apply cutover until the deterministic gate passes.
+
+The compatible installer stages the source at `~/.local/lib/pi-web-tools`, installs locked dependencies, builds the services and Tauri app, links the Pi extension, and starts user services. The install fails if the authority, search backend, or static reader is unhealthy. Optional browser, crawl, and document-converter failures remain visible in status output but do not fail the core install. `pi-web doctor` checks the WebX authority capability catalog rather than only the browser daemon.
 
 Useful commands:
 

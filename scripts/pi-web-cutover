@@ -1,0 +1,284 @@
+#!/usr/bin/env python3
+"""Plan, apply, or roll back one journaled Pi Web Tools cutover."""
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import signal
+import stat
+import subprocess
+import sys
+import time
+from typing import Any
+
+UNITS = ["webxd.service", "pi-web-reader.service", "pi-web-searxng.service", "pi-browserd.service", "pi-web-crawl.service", "pi-web-docling.service", "pi-web-egress-proxy.service"]
+RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def fail(message: str) -> None:
+    raise RuntimeError(message)
+
+
+def digest_tree(root: Path) -> str:
+    digest = hashlib.sha256()
+    for directory, names, files in os.walk(root, topdown=True, followlinks=False):
+        base = Path(directory)
+        names[:] = sorted(name for name in names if name != "candidate-manifest.json")
+        for name in sorted([*names, *files]):
+            path = base / name
+            relative = path.relative_to(root).as_posix()
+            if relative == "candidate-manifest.json":
+                continue
+            info = path.lstat()
+            digest.update(relative.encode()); digest.update(b"\0")
+            digest.update(oct(stat.S_IMODE(info.st_mode)).encode()); digest.update(b"\0")
+            if path.is_symlink():
+                digest.update(b"L\0"); digest.update(os.readlink(path).encode())
+            elif path.is_file():
+                digest.update(b"F\0")
+                with path.open("rb") as stream:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                        digest.update(chunk)
+            elif path.is_dir():
+                digest.update(b"D")
+            else:
+                fail(f"candidate contains an unsupported filesystem entry: {relative}")
+            digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def snapshot(path: Path, directory_backup: Path) -> dict[str, Any]:
+    if path.is_symlink():
+        return {"kind": "symlink", "target": os.readlink(path)}
+    if not path.exists():
+        return {"kind": "missing"}
+    if path.is_dir():
+        return {"kind": "directory", "backup": str(directory_backup)}
+    if not path.is_file():
+        fail(f"managed path is not a file, directory, or symbolic link: {path}")
+    return {"kind": "file", "mode": path.stat().st_mode & 0o777, "dataBase64": base64.b64encode(path.read_bytes()).decode("ascii")}
+
+
+def remove_managed(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def restore_path(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    kind = value["kind"]
+    if kind == "directory":
+        backup = Path(value["backup"])
+        if not backup.is_dir():
+            fail(f"directory backup is missing: {backup}")
+        remove_managed(path)
+        os.replace(backup, path)
+        return
+    temporary = path.parent / f".{path.name}.m7-{os.getpid()}"
+    remove_managed(temporary)
+    if kind == "missing":
+        remove_managed(path)
+        return
+    if kind == "symlink":
+        os.symlink(value["target"], temporary)
+    elif kind == "file":
+        temporary.write_bytes(base64.b64decode(value["dataBase64"], validate=True))
+        os.chmod(temporary, int(value["mode"]))
+    else:
+        fail("journal contains an invalid path kind")
+    os.replace(temporary, path)
+
+
+def install_path(path: Path, value: dict[str, Any], before: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if before["kind"] == "directory" and path.is_dir() and not path.is_symlink():
+        backup = Path(before["backup"])
+        backup.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        if backup.exists():
+            fail(f"directory backup already exists: {backup}")
+        os.replace(path, backup)
+    restore_path(path, value)
+
+
+def write_json(path: Path, value: dict[str, Any]) -> None:
+    temporary = path.parent / f".{path.name}.tmp-{os.getpid()}"
+    temporary.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
+
+
+def run_systemctl(command: str, args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run([command, "--user", *args], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    if check and result.returncode != 0:
+        fail(f"systemctl {' '.join(args)} failed: {(result.stderr or result.stdout).strip()}")
+    return result
+
+
+def service_state(command: str) -> dict[str, dict[str, bool]]:
+    return {unit: {"active": run_systemctl(command, ["is-active", "--quiet", unit], check=False).returncode == 0, "enabled": run_systemctl(command, ["is-enabled", "--quiet", unit], check=False).returncode == 0} for unit in UNITS}
+
+
+def restore_services(command: str, state: dict[str, dict[str, bool]]) -> None:
+    for unit in UNITS:
+        run_systemctl(command, ["enable" if state[unit]["enabled"] else "disable", unit], check=state[unit]["enabled"])
+    for unit in UNITS:
+        run_systemctl(command, ["start" if state[unit]["active"] else "stop", unit], check=state[unit]["active"])
+
+
+def generated(prefix: Path, config: Path, candidate: Path) -> dict[Path, dict[str, Any]]:
+    stable = prefix / "lib/pi-web-tools"
+    bin_dir = prefix / "bin"
+    unit_dir = config / "systemd/user"
+    cache = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "pi-web"
+    units = {
+        "webxd.service": f"""[Unit]\nDescription=Pi Web authority\nAfter=pi-web-reader.service pi-web-searxng.service\nWants=pi-web-reader.service pi-web-searxng.service\n[Service]\nWorkingDirectory={stable}\nExecStart=/usr/bin/node {stable}/apps/webxd/dist/apps/webxd/src/main.js\nEnvironment=PATH={bin_dir}:/usr/local/bin:/usr/bin\nEnvironment=WEBX_CACHE_DIR={cache}/responses\nEnvironment=WEBX_CRAWL_URL=http://127.0.0.1:8793/\nEnvironment=WEBX_EGRESS_PROXY=http://127.0.0.1:8877/\nRestart=on-failure\n[Install]\nWantedBy=default.target\n""",
+        "pi-web-reader.service": f"""[Unit]\nDescription=Pi Web direct reader\nAfter=network-online.target\n[Service]\nWorkingDirectory={stable}/components/browser\nExecStart={stable}/.venv/bin/pi-web-reader\nEnvironment=PI_WEB_READER_HOST=127.0.0.1\nEnvironment=PI_WEB_READER_PORT=8787\nEnvironment=PI_WEB_DOCLING_URL=http://127.0.0.1:8792/\nRestart=on-failure\n[Install]\nWantedBy=default.target\n""",
+        "pi-browserd.service": f"""[Unit]\nDescription=Pi Web visual browser coordinator\nAfter=network-online.target\n[Service]\nExecStart={stable}/bin/pi-browserd\nEnvironment=PATH={bin_dir}:/usr/local/bin:/usr/bin\nEnvironment=RUST_LOG=pi_browserd=info,pi_web=info\nRestart=on-failure\n[Install]\nWantedBy=default.target\n""",
+        "pi-web-docling.service": f"""[Unit]\nDescription=Pi Web document converter\nAfter=network-online.target\n[Service]\nWorkingDirectory={stable}/components/browser\nExecStart={stable}/.venv/bin/pi-web-docling\nEnvironment=PI_WEB_DOCLING_HOST=127.0.0.1\nEnvironment=PI_WEB_DOCLING_PORT=8792\nEnvironment=DOCLING_ARTIFACTS_PATH={cache}/document-models\nRestart=on-failure\n[Install]\nWantedBy=default.target\n""",
+        "pi-web-crawl.service": f"""[Unit]\nDescription=Pi Web bounded Crawl4AI service\nAfter=network-online.target pi-web-egress-proxy.service\nRequires=pi-web-egress-proxy.service\n[Service]\nWorkingDirectory={stable}/components/browser\nExecStart={stable}/.venv/bin/pi-web-crawl\nEnvironment=PI_WEB_CRAWL_HOST=127.0.0.1\nEnvironment=PI_WEB_CRAWL_PORT=8793\nEnvironment=PI_WEB_CRAWL_PROXY=http://127.0.0.1:8877\nEnvironment=PLAYWRIGHT_BROWSERS_PATH={stable}/.playwright-browsers\nRestart=on-failure\n[Install]\nWantedBy=default.target\n""",
+        "pi-web-egress-proxy.service": f"""[Unit]\nDescription=Pi Web connection-bound egress proxy\nAfter=network-online.target\n[Service]\nExecStart=/usr/bin/python3 {stable}/components/browser/scripts/secure_egress_proxy.py\nEnvironment=PI_WEB_EGRESS_HOST=127.0.0.1\nEnvironment=PI_WEB_EGRESS_PORT=8877\nRestart=on-failure\n[Install]\nWantedBy=default.target\n""",
+    }
+    cli = f"""#!/usr/bin/env bash\nset -euo pipefail\ncase \"${{1:-}}\" in\n doctor) shift; exec /usr/bin/node \"{stable}/scripts/pi-web-doctor.mjs\" \"$@\" ;;\n workspace) shift; exec \"{stable}/bin/pi-browser-workspace\" \"$@\" ;;\n audit) shift; exec /usr/bin/node \"{stable}/scripts/pi-web-audit.mjs\" \"$@\" ;;\n status) exec systemctl --user status webxd pi-web-reader pi-web-searxng pi-browserd pi-web-crawl pi-web-docling pi-web-egress-proxy ;;\n *) echo 'usage: pi-web {{doctor|workspace|audit|status}}' >&2; exit 2 ;;\nesac\n"""
+    values: dict[Path, dict[str, Any]] = {
+        stable: {"kind": "symlink", "target": str(candidate)},
+        Path.home() / ".pi/agent/extensions/pi-web": {"kind": "symlink", "target": str(stable / "apps/pi-webx")},
+        bin_dir / "pi-web": {"kind": "file", "mode": 0o755, "dataBase64": base64.b64encode(cli.encode()).decode()},
+        bin_dir / "pi-browserd": {"kind": "symlink", "target": str(stable / "bin/pi-browserd")},
+        bin_dir / "pi-browser-workspace": {"kind": "symlink", "target": str(stable / "bin/pi-browser-workspace")},
+    }
+    for name, text in units.items():
+        values[unit_dir / name] = {"kind": "file", "mode": 0o644, "dataBase64": base64.b64encode(text.encode()).decode()}
+    return values
+
+
+def validate_candidate(candidate: Path, evidence_path: Path, test_mode: bool) -> dict[str, Any]:
+    manifest = json.loads((candidate / "candidate-manifest.json").read_text(encoding="utf-8"))
+    if manifest.get("testNoBuild") is True and not test_mode:
+        fail("a no-build test candidate cannot be applied")
+    digest = digest_tree(candidate)
+    if digest != manifest.get("candidateTreeSha256"):
+        fail("candidate tree digest does not match its stage manifest")
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    if evidence.get("ok") is not True or evidence.get("mode") not in ("deterministic", "live"):
+        fail("smoke evidence is not successful")
+    if not test_mode and (evidence.get("candidateCommit") != manifest.get("commit") or evidence.get("candidateTreeSha256") != digest):
+        fail("smoke evidence does not identify this candidate")
+    return manifest
+
+
+def install_signal_traps() -> None:
+    def interrupted(signum: int, _frame: Any) -> None:
+        raise InterruptedError(f"cutover interrupted by signal {signum}")
+    signal.signal(signal.SIGINT, interrupted)
+    signal.signal(signal.SIGTERM, interrupted)
+
+
+def test_safety(paths: list[Path], systemctl: str) -> None:
+    home = Path.home().resolve()
+    if systemctl == "systemctl" or not Path(systemctl).is_absolute():
+        fail("test mode requires an absolute fake --systemctl command")
+    for path in paths:
+        resolved_parent = path.expanduser().absolute().parent.resolve()
+        if not resolved_parent.is_relative_to(home):
+            fail(f"test-mode managed path is outside HOME: {path}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--plan", action="store_true")
+    mode.add_argument("--apply", action="store_true")
+    mode.add_argument("--rollback", metavar="RUN_ID")
+    parser.add_argument("--candidate", type=Path)
+    parser.add_argument("--evidence", type=Path)
+    parser.add_argument("--run-id")
+    parser.add_argument("--systemctl", default="systemctl")
+    parser.add_argument("--test-mode", action="store_true", help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    state_root = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state"))) / "pi-web/cutovers"
+
+    if args.rollback:
+        if not RUN_ID.fullmatch(args.rollback):
+            fail("rollback run ID is invalid")
+        journal_path = state_root / args.rollback / "journal.json"
+        journal = json.loads(journal_path.read_text(encoding="utf-8"))
+        if journal.get("status") not in ("applied", "apply-failed"):
+            fail("cutover journal is not rollback eligible")
+        if journal.get("testMode"):
+            test_safety([Path(raw) for raw in journal["before"]], args.systemctl)
+        install_signal_traps()
+        current_state = service_state(args.systemctl)
+        try:
+            run_systemctl(args.systemctl, ["stop", *UNITS], check=False)
+            for raw, value in journal["before"].items():
+                restore_path(Path(raw), value)
+            run_systemctl(args.systemctl, ["daemon-reload"])
+            restore_services(args.systemctl, journal["servicesBefore"])
+            journal["status"] = "rolled-back"; journal["rolledBackUnix"] = int(time.time())
+        except BaseException:
+            restore_services(args.systemctl, current_state)
+            raise
+        finally:
+            write_json(journal_path, journal)
+        print(json.dumps({"ok": True, "mode": "rollback", "runId": args.rollback, "historicalDataDeleted": False}, sort_keys=True))
+        return 0
+
+    if args.candidate is None or args.evidence is None:
+        fail("--candidate and --evidence are required for plan and apply")
+    candidate = args.candidate.resolve(strict=True); evidence = args.evidence.resolve(strict=True)
+    manifest = validate_candidate(candidate, evidence, args.test_mode)
+    prefix = Path(os.environ.get("PI_WEB_PREFIX", str(Path.home() / ".local"))).expanduser()
+    config = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))).expanduser()
+    desired = generated(prefix, config, candidate)
+    run_id = args.run_id or f"cutover-{int(time.time())}-{manifest['commit'][:12]}"
+    if not RUN_ID.fullmatch(run_id):
+        fail("run ID is invalid")
+    plan = {"ok": True, "mode": "apply" if args.apply else "plan", "runId": run_id, "candidate": str(candidate), "commit": manifest["commit"], "treeSha256": manifest["candidateTreeSha256"], "replacementPaths": [str(path) for path in desired], "serviceUnits": UNITS, "coreIndependentFromOptionalWorkers": True, "historicalDataDeleted": False}
+    if args.plan:
+        print(json.dumps(plan, sort_keys=True, indent=2)); return 0
+    if args.test_mode:
+        test_safety([*desired, state_root], args.systemctl)
+    run_dir = state_root / run_id
+    run_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
+    before = {str(path): snapshot(path, run_dir / "directory-backups" / hashlib.sha256(str(path).encode()).hexdigest()) for path in desired}
+    states = service_state(args.systemctl)
+    journal: dict[str, Any] = {**plan, "status": "prepared", "before": before, "servicesBefore": states, "createdUnix": int(time.time()), "testMode": args.test_mode}
+    journal_path = run_dir / "journal.json"; write_json(journal_path, journal)
+    install_signal_traps()
+    try:
+        run_systemctl(args.systemctl, ["stop", *UNITS], check=False)
+        for path, value in desired.items():
+            install_path(path, value, before[str(path)])
+        run_systemctl(args.systemctl, ["daemon-reload"])
+        restore_services(args.systemctl, states)
+        journal["status"] = "applied"; journal["appliedUnix"] = int(time.time())
+    except BaseException:
+        journal["status"] = "apply-failed"
+        for raw, value in before.items():
+            try:
+                restore_path(Path(raw), value)
+            except (OSError, RuntimeError, ValueError):
+                pass
+        run_systemctl(args.systemctl, ["daemon-reload"], check=False)
+        restore_services(args.systemctl, states)
+        raise
+    finally:
+        write_json(journal_path, journal)
+    print(json.dumps({**plan, "status": "applied", "rollback": f"{Path(__file__).resolve()} --rollback {run_id}", "journal": str(journal_path)}, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (OSError, RuntimeError, ValueError, KeyError, json.JSONDecodeError) as error:
+        print(f"pi-web-cutover: {error}", file=sys.stderr)
+        raise SystemExit(1)

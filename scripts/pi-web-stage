@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""Build one isolated, versioned Pi Web Tools candidate from committed bytes."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+
+SOURCE_EXCLUDES = {".git", "node_modules", "target", "dist", ".venv", ".pytest_cache", "__pycache__"}
+
+
+def fail(message: str) -> None:
+    raise RuntimeError(message)
+
+
+def run(command: list[str], *, cwd: Path, env: dict[str, str]) -> None:
+    result = subprocess.run(command, cwd=cwd, env=env, check=False)
+    if result.returncode != 0:
+        fail(f"command failed ({result.returncode}): {' '.join(command)}")
+
+
+def digest_tree(root: Path, ignored: set[str] | None = None) -> str:
+    """Hash paths, executable bits, link targets, and file bytes without following links."""
+    ignored = ignored or set()
+    digest = hashlib.sha256()
+    for directory, names, files in os.walk(root, topdown=True, followlinks=False):
+        base = Path(directory)
+        names[:] = sorted(name for name in names if name not in ignored)
+        for name in sorted([*names, *files]):
+            path = base / name
+            relative = path.relative_to(root).as_posix()
+            if relative in ignored or name in ignored:
+                continue
+            info = path.lstat()
+            digest.update(relative.encode())
+            digest.update(b"\0")
+            digest.update(oct(stat.S_IMODE(info.st_mode)).encode())
+            digest.update(b"\0")
+            if path.is_symlink():
+                digest.update(b"L\0")
+                digest.update(os.readlink(path).encode())
+            elif path.is_file():
+                digest.update(b"F\0")
+                with path.open("rb") as stream:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                        digest.update(chunk)
+            elif path.is_dir():
+                digest.update(b"D")
+            else:
+                fail(f"candidate contains an unsupported filesystem entry: {relative}")
+            digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def output(command: list[str], cwd: Path) -> str:
+    result = subprocess.run(command, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    if result.returncode != 0:
+        fail((result.stderr or result.stdout).strip())
+    return result.stdout.strip()
+
+
+def relocate_python_environment(environment: Path, staging_root: Path, candidate: Path) -> None:
+    """Replace temporary paths in text launchers after a non-editable locked install."""
+    old = str(staging_root).encode()
+    new = str(candidate).encode()
+    for path in environment.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        data = path.read_bytes()
+        if old not in data or b"\0" in data:
+            continue
+        path.write_bytes(data.replace(old, new))
+    for name in ("pi-web-reader", "pi-web-docling", "pi-web-crawl"):
+        launcher = environment / "bin" / name
+        if not launcher.is_file() or not launcher.read_bytes().startswith(f"#!{candidate}/.venv/bin/python".encode()):
+            fail(f"Python launcher is not relocatable: {name}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", type=Path, default=Path(__file__).resolve().parent.parent)
+    parser.add_argument("--release-root", type=Path)
+    parser.add_argument("--test-no-build", action="store_true", help="Copy and validate only. For isolated contract tests.")
+    args = parser.parse_args()
+
+    source = args.source.resolve(strict=True)
+    lock_files = ["pnpm-lock.yaml", "components/browser/uv.lock", "components/browser/Cargo.lock"]
+    if not all((source / path).is_file() for path in lock_files):
+        fail("candidate source lacks a required dependency lock file")
+    commit = output(["git", "rev-parse", "HEAD"], source)
+    if not args.test_no_build and output(["git", "status", "--porcelain", "--untracked-files=all"], source):
+        fail("source tree is not clean; commit reviewed bytes before staging")
+    if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
+        fail("git returned an invalid commit identity")
+
+    prefix = Path(os.environ.get("PI_WEB_PREFIX", str(Path.home() / ".local")))
+    release_root = (args.release_root or Path(os.environ.get("PI_WEB_RELEASE_ROOT", str(prefix / "lib/pi-web-tools-releases")))).expanduser().resolve()
+    candidate = release_root / commit
+    if candidate.exists() or candidate.is_symlink():
+        fail(f"candidate already exists: {candidate}")
+    release_root.mkdir(parents=True, mode=0o700, exist_ok=True)
+    temporary = Path(tempfile.mkdtemp(prefix=f".{commit}.stage-", dir=release_root))
+    candidate_digest = ""
+    try:
+        archive = subprocess.Popen(["git", "archive", "--format=tar", commit], cwd=source, stdout=subprocess.PIPE)
+        extract = subprocess.run(["tar", "-xf", "-", "-C", str(temporary)], stdin=archive.stdout, check=False)
+        if archive.stdout is not None:
+            archive.stdout.close()
+        if archive.wait() != 0 or extract.returncode != 0:
+            fail("git archive extraction failed")
+        source_digest = digest_tree(temporary)
+
+        isolated = temporary / ".candidate-build"
+        home = isolated / "home"
+        for path in (home, isolated / "config", isolated / "data", isolated / "state", isolated / "runtime", isolated / "cache", isolated / "cargo-home", isolated / "cargo-target"):
+            path.mkdir(parents=True, mode=0o700)
+        env = os.environ.copy()
+        env.update({
+            "HOME": str(home),
+            "XDG_CONFIG_HOME": str(isolated / "config"),
+            "XDG_DATA_HOME": str(isolated / "data"),
+            "XDG_STATE_HOME": str(isolated / "state"),
+            "XDG_RUNTIME_DIR": str(isolated / "runtime"),
+            "XDG_CACHE_HOME": str(isolated / "cache"),
+            "UV_PROJECT_ENVIRONMENT": str(temporary / ".venv"),
+            "CARGO_HOME": str(isolated / "cargo-home"),
+            "CARGO_TARGET_DIR": str(isolated / "cargo-target"),
+            "PLAYWRIGHT_BROWSERS_PATH": str(temporary / ".playwright-browsers"),
+            "NO_UPDATE_NOTIFIER": "1",
+        })
+        commands: list[list[str]] = []
+        if not args.test_no_build:
+            commands = [
+                ["pnpm", "install", "--frozen-lockfile", "--ignore-scripts"],
+                ["uv", "sync", "--all-packages", "--frozen", "--no-editable"],
+                [str(temporary / ".venv/bin/python"), "-m", "playwright", "install", "chromium"],
+                ["pnpm", "-r", "--if-present", "build"],
+                ["cargo", "build", "--locked", "--release", "-p", "pi-browserd", "-p", "pi-browser-workspace"],
+            ]
+            run(commands[0], cwd=temporary, env=env)
+            run(commands[1], cwd=temporary / "components/browser", env=env)
+            run(commands[2], cwd=temporary / "components/browser", env=env)
+            run(commands[3], cwd=temporary, env=env)
+            run(commands[4], cwd=temporary / "components/browser", env=env)
+            bin_dir = temporary / "bin"
+            bin_dir.mkdir(mode=0o700)
+            for name in ("pi-browserd", "pi-browser-workspace"):
+                shutil.copy2(isolated / "cargo-target/release" / name, bin_dir / name)
+                os.chmod(bin_dir / name, 0o755)
+            relocate_python_environment(temporary / ".venv", temporary, candidate)
+        shutil.rmtree(isolated, ignore_errors=True)
+        candidate_digest = digest_tree(temporary, {"candidate-manifest.json"})
+        manifest = {
+            "schemaVersion": 1,
+            "commit": commit,
+            "sourceTreeSha256": source_digest,
+            "candidateTreeSha256": candidate_digest,
+            "createdUnix": int(time.time()),
+            "lockedDependencies": lock_files,
+            "buildCommands": commands,
+            "testNoBuild": args.test_no_build,
+            "liveChanged": False,
+        }
+        (temporary / "candidate-manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+        os.chmod(temporary, 0o700)
+        os.replace(temporary, candidate)
+    finally:
+        if temporary.exists():
+            shutil.rmtree(temporary)
+    print(json.dumps({"ok": True, "candidate": str(candidate), "commit": commit, "treeSha256": candidate_digest, "liveChanged": False}, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
+        print(f"pi-web-stage: {error}", file=sys.stderr)
+        raise SystemExit(1)

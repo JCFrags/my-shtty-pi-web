@@ -2,6 +2,26 @@
 set -Eeuo pipefail
 
 SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+case "${1:-}" in
+  --stage)
+    shift
+    exec "$SOURCE_ROOT/scripts/pi-web-stage" --source "$SOURCE_ROOT" "$@"
+    ;;
+  --cutover-plan)
+    [[ $# -eq 3 ]] || { echo "usage: $0 --cutover-plan CANDIDATE EVIDENCE" >&2; exit 2; }
+    exec "$SOURCE_ROOT/scripts/pi-web-cutover" --plan --candidate "$2" --evidence "$3"
+    ;;
+  --cutover-apply)
+    [[ $# -eq 3 ]] || { echo "usage: $0 --cutover-apply CANDIDATE EVIDENCE" >&2; exit 2; }
+    exec "$SOURCE_ROOT/scripts/pi-web-cutover" --apply --candidate "$2" --evidence "$3"
+    ;;
+  --cutover-rollback)
+    [[ $# -eq 2 ]] || { echo "usage: $0 --cutover-rollback RUN_ID" >&2; exit 2; }
+    exec "$SOURCE_ROOT/scripts/pi-web-cutover" --rollback "$2"
+    ;;
+  "") ;;
+  *) echo "usage: $0 [--stage [OPTIONS] | --cutover-plan CANDIDATE EVIDENCE | --cutover-apply CANDIDATE EVIDENCE | --cutover-rollback RUN_ID]" >&2; exit 2 ;;
+esac
 PREFIX="${PI_WEB_PREFIX:-$HOME/.local}"
 INSTALL_ROOT="${PI_WEB_INSTALL_ROOT:-$PREFIX/lib/pi-web-tools}"
 BIN_DIR="$PREFIX/bin"
@@ -140,7 +160,7 @@ EOF
 cat > "$UNIT_DIR/pi-web-reader.service" <<EOF
 [Unit]
 Description=Pi Web direct reader
-After=network-online.target pi-web-docling.service
+After=network-online.target
 [Service]
 WorkingDirectory=$BROWSER_ROOT
 ExecStart=$DATA_HOME/pi-web/python-env/bin/pi-web-reader
@@ -154,8 +174,8 @@ EOF
 cat > "$UNIT_DIR/webxd.service" <<EOF
 [Unit]
 Description=Pi Web authority
-After=pi-web-reader.service pi-web-searxng.service pi-browserd.service pi-web-crawl.service pi-web-egress-proxy.service
-Wants=pi-web-reader.service pi-web-searxng.service pi-browserd.service pi-web-crawl.service pi-web-egress-proxy.service
+After=pi-web-reader.service pi-web-searxng.service
+Wants=pi-web-reader.service pi-web-searxng.service
 [Service]
 WorkingDirectory=$INSTALL_ROOT
 ExecStart=/usr/bin/node $INSTALL_ROOT/apps/webxd/dist/apps/webxd/src/main.js
