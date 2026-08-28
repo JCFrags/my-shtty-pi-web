@@ -914,7 +914,8 @@ function cacheAgeMilliseconds(fetchedAt: string, observedAt: string): number {
   return Number.isFinite(fetched) && Number.isFinite(observed) ? Math.max(0, observed - fetched) : 0;
 }
 function withoutRefresh(request: ReadRequest): ReadRequest {
-  const { refresh: _refresh, ...canonical } = request;
+  const { refresh, ...canonical } = request;
+  void refresh;
   return canonical;
 }
 async function boundedOrderedFanOut<T, R>(items: readonly T[], concurrency: number, run: (item: T, index: number) => Promise<R>): Promise<R[]> {

@@ -481,7 +481,7 @@ describe("WebxAuthority", () => {
     }));
     const instance = new WebxAuthority({
       browser: browser(), sources: PUBLIC_SOURCES, readerUrl: "http://127.0.0.1:8787",
-      clock: { now: () => times[Math.min(clockIndex++, times.length - 1)] ?? times[0]! },
+      clock: { now: () => times[Math.min(clockIndex++, times.length - 1)] ?? "2026-08-28T10:00:00.000Z" },
       ids: { next: (prefix) => `${prefix}-1` },
     });
     const first = await call(instance, actor(), "POST", "/v1/read", { url: "https://fresh.example/page" }, "freshness-first");
@@ -541,7 +541,7 @@ describe("WebxAuthority", () => {
       calls += 1;
       const body = JSON.parse(String(init?.body)) as { url: string };
       if (calls > 1) { started.resolve(undefined); await release.promise; }
-      return new Response(JSON.stringify({ url: body.url, title: "Page", content: `canonical ${calls}`, source: "raw", truncated: false, metadata: { etag: `\"v${calls}\"`, complete: true } }), { status: 200 });
+      return new Response(JSON.stringify({ url: body.url, title: "Page", content: `canonical ${calls}`, source: "raw", truncated: false, metadata: { etag: `"v${calls}"`, complete: true } }), { status: 200 });
     }));
     const instance = authority(browser(), "http://127.0.0.1:8787");
     await call(instance, actor(), "POST", "/v1/read", { url: "https://keys.example/page" }, "keys-first");
