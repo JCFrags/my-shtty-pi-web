@@ -191,6 +191,7 @@ async function deterministic() {
     if (url.pathname === "/config") return send(200, "application/json", JSON.stringify({ engines: ["deterministic"] }));
     if (url.pathname === "/search") return send(200, "application/json", JSON.stringify({ results: [{ url: `${origin}/static`, title: "Deterministic WebX fixture", content: "stable fixture article seed", score: 1 }] }));
     if (url.pathname === "/static") return send(200, "text/html; charset=utf-8", "<!doctype html><title>Fixture article</title><main><h1>Stable article</h1><p>The deterministic candidate reader boundary is healthy. Focus token ALPHA-OMEGA.</p></main>");
+    if (url.pathname === "/segmented") return send(200, "text/plain; charset=utf-8", `SOURCE-BEGIN ${"x".repeat(1_000_100)} SOURCE-HANDOFF ALPHA-OMEGA`);
     if (url.pathname === "/api") return send(200, "application/json", JSON.stringify([{ id: 1, name: "alpha", secret: "not-selected" }, { id: 2, name: "beta", secret: "not-selected" }]));
     if (url.pathname === "/near-limit") return send(200, "text/plain", `NEAR-LIMIT-BEGIN ${"x".repeat(29_000)} NEAR-LIMIT-END`);
     if (/^\/batch\/\d+$/u.test(url.pathname)) {
@@ -215,17 +216,34 @@ async function deterministic() {
     record("optional workers absent while core is healthy", capabilities.groups.search && capabilities.groups.read && !capabilities.groups.browser, { groups: capabilities.groups });
     const search = await client.request("web.search", { query: "stable fixture", domains: ["fixture.invalid"] }, options(owner, "search-1"));
     record("search through candidate facade", Array.isArray((search.data as { hits?: unknown[] }).hits) && (search.data as { hits: unknown[] }).hits.length === 1, { structuredSdkBytes: Buffer.byteLength(JSON.stringify(search)), piVisibleCharacters: visibleCharacters(search) });
-    const read = await client.request("web.read", { url: `${origin}/static`, maxChars: 80 }, options(owner, "read-1"));
-    const readData = read.data as { untrustedContent: string; metadata: { contentId: string; reader: { nextContentOffset: number | null } } };
-    record("bounded static read with content ID", readData.untrustedContent.includes("deterministic") && typeof readData.metadata.contentId === "string", { structuredSdkBytes: Buffer.byteLength(JSON.stringify(read)), piVisibleCharacters: visibleCharacters(read) });
-    const continuationOffset = readData.metadata.reader.nextContentOffset;
+    const read = await client.request("web.read", { url: `${origin}/segmented`, maxChars: 80 }, options(owner, "read-1"));
+    const readData = read.data as { untrustedContent: string; metadata: { contentId: string; reader: { nextStoredOffset: number | null; nextContentOffset: number | null } } };
+    record("bounded static read with content ID", readData.untrustedContent.includes("SOURCE-BEGIN") && typeof readData.metadata.contentId === "string", { structuredSdkBytes: Buffer.byteLength(JSON.stringify(read)), piVisibleCharacters: visibleCharacters(read) });
+    assert.equal(typeof readData.metadata.reader.nextStoredOffset, "number");
+    assert.equal(readData.metadata.reader.nextContentOffset, null);
+    let storedOffset = 0;
+    let continuationOffset: number | null = null;
+    let firstStored: unknown;
+    let storedChunks = 0;
+    for (; storedChunks < 40; storedChunks += 1) {
+      const part = await client.request("web.content", { contentId: readData.metadata.contentId, offset: storedOffset, limit: 30_000 }, options(owner, `content-exact-${storedChunks}`));
+      firstStored ??= part;
+      const partData = part.data as { metadata: { nextOffset: number | null; nextContentOffset: number | null } };
+      if (partData.metadata.nextOffset !== null) {
+        assert.equal(partData.metadata.nextContentOffset, null);
+        assert(partData.metadata.nextOffset > storedOffset);
+        storedOffset = partData.metadata.nextOffset;
+        continue;
+      }
+      continuationOffset = partData.metadata.nextContentOffset;
+      break;
+    }
     assert.equal(typeof continuationOffset, "number");
-    const continued = await client.request("web.read", { url: `${origin}/static`, contentOffset: continuationOffset, maxChars: 500 }, options(owner, "read-continuation"));
-    record("reader continuation uses the reported offset", JSON.stringify(continued).includes("ALPHA-OMEGA"), { structuredSdkBytes: Buffer.byteLength(JSON.stringify(continued)), piVisibleCharacters: visibleCharacters(continued), contentOffset: continuationOffset });
-    const exact = await client.request("web.content", { contentId: readData.metadata.contentId, offset: 0, limit: 30_000 }, options(owner, "content-exact"));
-    record("exact stored content is formatted and bounded", JSON.stringify(exact).includes("ALPHA-OMEGA"), resultEvidence(exact));
-    const focused = await client.request("web.content", { contentId: readData.metadata.contentId, query: "ALPHA-OMEGA" }, options(owner, "content-focus"));
-    record("focused stored content is formatted and bounded", JSON.stringify(focused).includes("ALPHA-OMEGA"), resultEvidence(focused));
+    record("exact stored content is exhausted before source continuation", JSON.stringify(firstStored).includes("SOURCE-BEGIN") && storedChunks > 1, { ...resultEvidence(firstStored), storedChunks: storedChunks + 1, contentOffset: continuationOffset });
+    const continued = await client.request("web.read", { url: `${origin}/segmented`, contentOffset: continuationOffset, maxChars: 500 }, options(owner, "read-continuation"));
+    record("reader continuation uses the final stored chunk offset", JSON.stringify(continued).includes("SOURCE-HANDOFF ALPHA-OMEGA"), { structuredSdkBytes: Buffer.byteLength(JSON.stringify(continued)), piVisibleCharacters: visibleCharacters(continued), contentOffset: continuationOffset });
+    const focused = await client.request("web.content", { contentId: readData.metadata.contentId, query: "SOURCE-BEGIN" }, options(owner, "content-focus"));
+    record("focused stored content is formatted and bounded", JSON.stringify(focused).includes("SOURCE-BEGIN"), resultEvidence(focused));
     const structured = await client.request("web.read", { url: `${origin}/api`, fields: ["id", "name"], itemLimit: 1 }, options(owner, "structured"));
     const structuredRows = JSON.parse((structured.data as { untrustedContent: string }).untrustedContent) as unknown;
     record("structured rows remain complete, formatted, and bounded", JSON.stringify(structuredRows) === JSON.stringify([{ id: 1, name: "alpha" }]), resultEvidence(structured));
