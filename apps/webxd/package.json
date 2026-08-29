@@ -8,7 +8,8 @@
     "build": "tsc -p tsconfig.build.json && mkdir -p dist/packages/policy && cp ../../packages/policy/storage.mjs dist/packages/policy/storage.mjs",
     "start": "pnpm run build && node dist/apps/webxd/src/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:live-agentcursor": "tsx tests/live-agentcursor-route.ts"
   },
   "devDependencies": {
     "@types/node": "24.12.4"
