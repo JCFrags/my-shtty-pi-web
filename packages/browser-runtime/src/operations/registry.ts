@@ -223,22 +223,34 @@ export class OperationRegistry {
   }
 
   private cancelMutable(operation: MutableOperation, code: "OPERATION_CANCELLED" | "CONTROL_EPOCH_STALE", message: string): void {
+    this.removeQueued(operation);
     operation.controller.abort(new Error(message));
     operation.state = "cancelled";
     operation.finishedAt = new Date(this.wall()).toISOString();
     operation.error = errorRecord(code, message);
   }
   private failMutable(operation: MutableOperation, code: ProtocolError["code"], message: string): void {
+    this.removeQueued(operation);
     operation.controller.abort(new Error(message));
     operation.state = "failed";
     operation.finishedAt = new Date(this.wall()).toISOString();
     operation.error = errorRecord(code, message);
   }
   private expireMutable(operation: MutableOperation): void {
+    this.removeQueued(operation);
     operation.controller.abort(new Error("Operation deadline exceeded."));
     operation.state = "expired";
     operation.finishedAt = new Date(this.wall()).toISOString();
     operation.error = errorRecord("DEADLINE_EXCEEDED", "Operation deadline exceeded.");
+  }
+
+  private removeQueued(operation: MutableOperation): void {
+    if (operation.state !== "queued") return;
+    const queue = this.queues.get(operation.laneKey);
+    if (queue === undefined) return;
+    const index = queue.indexOf(operation);
+    if (index >= 0) queue.splice(index, 1);
+    if (queue.length === 0 && !this.runningLanes.has(operation.laneKey)) this.queues.delete(operation.laneKey);
   }
 }
 

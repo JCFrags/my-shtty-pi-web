@@ -47,7 +47,7 @@ describe("bounded actor-scoped operations", () => {
   });
 
   it("cancels queued work without dispatch and hides it from another actor", async () => {
-    const registry = new OperationRegistry();
+    const registry = new OperationRegistry({ maxQueuedPerLane: 1 });
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
     registry.submit(actor, { operationId: "operation:held", laneKey: "lane", deadline: deadline() }, async () => await held);
@@ -55,8 +55,10 @@ describe("bounded actor-scoped operations", () => {
     assert.equal(registry.cancel(actor, "operation:queued").state, "cancelled");
     assert.equal(registry.status(actor, "operation:queued").dispatchState, "not-dispatched");
     assert.throws(() => registry.status(other, "operation:queued"), /not found/i);
+    registry.submit(actor, { operationId: "operation:replacement", laneKey: "lane", deadline: deadline() }, async () => "replacement");
     release();
     assert.equal((await registry.wait(actor, "operation:held")).state, "committed");
+    assert.equal((await registry.wait(actor, "operation:replacement")).state, "committed");
   });
 
   it("preserves dispatched truth after cancellation and ignores a late result", async () => {
