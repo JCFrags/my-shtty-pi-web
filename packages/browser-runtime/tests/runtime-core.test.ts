@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "vitest";
 import { BrowserArtifactStore } from "../src/artifacts/store.js";
-import { validateExtraFlags } from "../src/chrome/host.js";
+import { cleanupOrphanProfiles, validateExtraFlags } from "../src/chrome/host.js";
 import { OperationRegistry } from "../src/operations/registry.js";
 import { bindMotorTab, SessionMotor } from "../src/motor/session-motor.js";
 import type { TabRecord } from "../src/targets/registry.js";
@@ -211,5 +214,32 @@ describe("artifacts and Chrome configuration", () => {
     assert.deepEqual(validateExtraFlags(["--ozone-platform=wayland"]), ["--ozone-platform=wayland"]);
     assert.throws(() => validateExtraFlags(["--no-sandbox"]), /not allowed/i);
     assert.throws(() => validateExtraFlags(["--ignore-certificate-errors"]), /not allowed/i);
+  });
+
+  it("removes only a verified dead owned profile during orphan cleanup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "browser-runtime-orphan-test-"));
+    const dead = join(root, "session-dead");
+    const alive = join(root, "session-alive");
+    const foreign = join(root, "session-foreign");
+    const outside = await mkdtemp(join(tmpdir(), "browser-runtime-outside-test-"));
+    try {
+      await Promise.all([mkdir(dead), mkdir(alive), mkdir(foreign)]);
+      const manifest = (pid: number, processStartTicks: string): string => `${JSON.stringify({ version: 1, marker: "browserd-temporary-profile", pid, processStartTicks, createdAt: new Date(0).toISOString() })}\n`;
+      await writeFile(join(dead, "browserd-owned.json"), manifest(999_999_999, "1"), { mode: 0o600 });
+      const statText = await readFile(`/proc/${process.pid}/stat`, "utf8");
+      const processStartTicks = statText.slice(statText.lastIndexOf(")") + 2).split(" ")[19];
+      assert.ok(processStartTicks !== undefined);
+      await writeFile(join(alive, "browserd-owned.json"), manifest(process.pid, processStartTicks), { mode: 0o600 });
+      await symlink(outside, join(root, "session-link"));
+      await cleanupOrphanProfiles(root);
+      await assert.rejects(() => lstat(dead));
+      assert.equal((await lstat(alive)).isDirectory(), true);
+      assert.equal((await lstat(foreign)).isDirectory(), true);
+      assert.equal((await lstat(join(root, "session-link"))).isSymbolicLink(), true);
+      assert.equal((await lstat(outside)).isDirectory(), true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });
