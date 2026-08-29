@@ -15,12 +15,26 @@ import { BrowserdServer } from "../src/server.js";
 interface WireResponse { kind: "response"; requestId: string; ok: boolean; result?: unknown; error?: { code: string; message: string } }
 interface WireFrame { kind: "frame.available"; capturedMonotonicMs: number; publishedMonotonicMs: number; receivedMonotonicMs?: number; artifactId: string; address: { browserSessionId: string; tabId: string }; frameSequence: number }
 interface ArtifactStat { owner: string; browserSessionId: string; purpose: "agent-observation" | "workspace-frame"; count: number; bytes: number }
+interface ChromeTreeSample {
+  browserSessionId: string;
+  browserPid: number;
+  pssKiB: number;
+  privateDirtyKiB: number;
+  processCount: number;
+  rendererPssKiB: number;
+  rendererPrivateDirtyKiB: number;
+  rendererCount: number;
+  profileBytes: number;
+}
 interface ResourceSample {
   elapsedSeconds: number;
   pssKiB: number;
   privateDirtyKiB: number;
   cpuPercent: number;
   processCount: number;
+  browserdPssKiB: number;
+  browserdPrivateDirtyKiB: number;
+  chromeSessions: ChromeTreeSample[];
   browserdHeapUsedBytes: number;
   eventLoopMeanMs: number;
   eventLoopMaxMs: number;
@@ -32,6 +46,7 @@ interface ResourceSample {
   heldButtonCount: number;
   heldKeyCount: number;
   profileCount: number;
+  runtimeRootCount: number;
   targetCount: number;
   artifactStats: ArtifactStat[];
   droppedFrames: number;
@@ -130,6 +145,7 @@ async function main(): Promise<void> {
   browserd = new BrowserdServer({ runtimeDirectory: join(root, "transport"), runtime });
   const startupStarted = performance.now();
   await browserd.start();
+  const browserdSocketPath = browserd.descriptor.socketPath;
   const actorA = { principalId: "soak:owner-a", agentSessionId: "soak:agent-a" };
   const actorB = { principalId: "soak:owner-b", agentSessionId: "soak:agent-b" };
   const clientA = await BrowserClient.open(browserd.descriptor.socketPath, browserd.descriptor.bindingSecret, actorA);
@@ -268,7 +284,10 @@ async function main(): Promise<void> {
 
     const now = performance.now();
     if (now >= nextSampleAt) {
-      const memory = await processTreeMemory(roots);
+      const [memory, browserdMemory, chromeA, chromeB, profileABytes, profileBBytes, runtimeRootCount] = await Promise.all([
+        processTreeMemory(roots), processMemory(process.pid), processTreeBreakdown(internalA.host.pid), processTreeBreakdown(internalB.host.pid),
+        directoryBytes(internalA.host.profileDirectory), directoryBytes(internalB.host.profileDirectory), profileRuntimeRoots(profileRoot).then((values) => values.length),
+      ]);
       const currentCpu = await processTreeCpu(roots);
       const cpuAt = performance.now();
       const cpuPercent = ((currentCpu.ticks - priorCpu.ticks) / clkTck) / ((cpuAt - priorCpuAt) / 1_000) * 100;
@@ -292,6 +311,12 @@ async function main(): Promise<void> {
         privateDirtyKiB: memory.privateDirtyKiB,
         cpuPercent,
         processCount: memory.processCount,
+        browserdPssKiB: browserdMemory.pssKiB,
+        browserdPrivateDirtyKiB: browserdMemory.privateDirtyKiB,
+        chromeSessions: [
+          { browserSessionId: sessionAId, browserPid: internalA.host.pid, ...chromeA, profileBytes: profileABytes },
+          { browserSessionId: sessionBId, browserPid: internalB.host.pid, ...chromeB, profileBytes: profileBBytes },
+        ],
         browserdHeapUsedBytes: process.memoryUsage().heapUsed,
         eventLoopMeanMs: Number.isFinite(lag.mean) ? lag.mean / 1_000_000 : 0,
         eventLoopMaxMs: lag.max / 1_000_000,
@@ -303,6 +328,7 @@ async function main(): Promise<void> {
         heldButtonCount: internalA.motor.heldInputState.buttons.length + internalB.motor.heldInputState.buttons.length,
         heldKeyCount: internalA.motor.heldInputState.keys.length + internalB.motor.heldInputState.keys.length,
         profileCount: (await profileDirectories(profileRoot)).length,
+        runtimeRootCount,
         targetCount: countOpenTargets(internalA) + countOpenTargets(internalB),
         artifactStats,
         droppedFrames: internalA.frames.droppedFrames + internalB.frames.droppedFrames,
@@ -326,6 +352,7 @@ async function main(): Promise<void> {
   assert.ok(samples.every((sample) => sample.subscriptionCount === 3), "Frame subscription count did not return to its steady bound.");
   assert.ok(samples.every((sample) => sample.heldButtonCount === 0 && sample.heldKeyCount === 0), "Held input leaked between soak iterations.");
   assert.ok(samples.every((sample) => sample.profileCount === 2), "Profile count changed while both sessions were live.");
+  assert.ok(samples.every((sample) => sample.runtimeRootCount === 1), "Profile-manager runtime-root count changed while the service was live.");
   assert.ok(samples.every((sample) => sample.targetCount === 3), "Open target count changed outside bounded tab churn.");
 
   await Promise.all([
@@ -342,7 +369,9 @@ async function main(): Promise<void> {
   await new Promise<void>((resolvePromise) => fixture?.close(() => resolvePromise()));
   fixture = undefined;
   const remainingProfileEntries = await profileDirectories(profileRoot);
+  const remainingRuntimeRoots = await profileRuntimeRoots(profileRoot);
   assert.equal(remainingProfileEntries.length, 0, "A temporary browser profile leaked.");
+  assert.equal(remainingRuntimeRoots.length, 0, "A profile-manager runtime root leaked.");
   assert.equal(runtime.artifacts.entryCount, 0, "Artifacts remained after browserd shutdown.");
   assert.equal(runtime.operations.size, 0, "Operations remained after browserd shutdown.");
   assert.equal(runtime.subscriptionCount, 0, "Subscriptions remained after browserd shutdown.");
@@ -379,6 +408,12 @@ async function main(): Promise<void> {
     eventLoopMeanMs: distribution(samples.map((sample) => sample.eventLoopMeanMs)),
     eventLoopMaxMs: range(samples.map((sample) => sample.eventLoopMaxMs)),
     browserdHeapUsedBytes: range(samples.map((sample) => sample.browserdHeapUsedBytes)),
+    browserdPssKiB: range(samples.map((sample) => sample.browserdPssKiB)),
+    browserdPrivateDirtyKiB: range(samples.map((sample) => sample.browserdPrivateDirtyKiB)),
+    chromeSessions: [
+      { browserSessionId: sessionAId, pssKiB: range(chromeValues(samples, 0, "pssKiB")), privateDirtyKiB: range(chromeValues(samples, 0, "privateDirtyKiB")), rendererPssKiB: range(chromeValues(samples, 0, "rendererPssKiB")), rendererPrivateDirtyKiB: range(chromeValues(samples, 0, "rendererPrivateDirtyKiB")), rendererCount: range(chromeValues(samples, 0, "rendererCount")), processCount: range(chromeValues(samples, 0, "processCount")), profileBytes: range(chromeValues(samples, 0, "profileBytes")) },
+      { browserSessionId: sessionBId, pssKiB: range(chromeValues(samples, 1, "pssKiB")), privateDirtyKiB: range(chromeValues(samples, 1, "privateDirtyKiB")), rendererPssKiB: range(chromeValues(samples, 1, "rendererPssKiB")), rendererPrivateDirtyKiB: range(chromeValues(samples, 1, "rendererPrivateDirtyKiB")), rendererCount: range(chromeValues(samples, 1, "rendererCount")), processCount: range(chromeValues(samples, 1, "processCount")), profileBytes: range(chromeValues(samples, 1, "profileBytes")) },
+    ],
     profileBytes: range(samples.map((sample) => sample.profileBytes)),
     processCount: range(samples.map((sample) => sample.processCount)),
     artifactCount: range(samples.map((sample) => sample.artifactCount)),
@@ -388,18 +423,18 @@ async function main(): Promise<void> {
     heldButtonCount: range(samples.map((sample) => sample.heldButtonCount)),
     heldKeyCount: range(samples.map((sample) => sample.heldKeyCount)),
     targetCount: range(samples.map((sample) => sample.targetCount)),
+    runtimeRootCount: range(samples.map((sample) => sample.runtimeRootCount)),
     artifactStatsByActorSessionPurpose: latestArtifactStats(samples),
     droppedFrames: range(samples.map((sample) => sample.droppedFrames)),
     receivedFrameCount: framePublicationLatenciesMs.length,
-    slopesPerHour: {
-      pssKiB: slopePerHour(samples.map((sample) => [sample.elapsedSeconds, sample.pssKiB])),
-      privateDirtyKiB: slopePerHour(samples.map((sample) => [sample.elapsedSeconds, sample.privateDirtyKiB])),
-      browserdHeapBytes: slopePerHour(samples.map((sample) => [sample.elapsedSeconds, sample.browserdHeapUsedBytes])),
-      profileBytes: slopePerHour(samples.map((sample) => [sample.elapsedSeconds, sample.profileBytes])),
-      artifactBytes: slopePerHour(samples.map((sample) => [sample.elapsedSeconds, sample.artifactBytes])),
-      operationCount: slopePerHour(samples.map((sample) => [sample.elapsedSeconds, sample.operationCount])),
+    slopesPerHour: resourceTrend(samples),
+    trendWindowsPerHour: {
+      fullRun: resourceTrend(samples),
+      finalHour: resourceTrend(finalWindow(samples, 3_600)),
+      final30Minutes: resourceTrend(finalWindow(samples, 1_800)),
     },
-    cleanup: { profilesRemaining: remainingProfileEntries.length, artifactsRemaining: runtime.artifacts.entryCount, operationsRemaining: runtime.operations.size, subscriptionsRemaining: runtime.subscriptionCount, heldButtonsRemaining: internalA.motor.heldInputState.buttons.length + internalB.motor.heldInputState.buttons.length, heldKeysRemaining: internalA.motor.heldInputState.keys.length + internalB.motor.heldInputState.keys.length, browserProcessesRemaining: browserPids.filter(processIsAlive).length, descriptorRemoved: !(await exists(join(root, "transport", "browserd.json"))), socketRemoved: !(await exists(join(root, "transport", "browserd.sock"))) },
+    lifecycleEvents: { tabCycles: tabsCreatedAndClosed, epochInvalidations, explicitGcObservable: false },
+    cleanup: { profilesRemaining: remainingProfileEntries.length, runtimeRootsRemaining: remainingRuntimeRoots.length, artifactsRemaining: runtime.artifacts.entryCount, operationsRemaining: runtime.operations.size, subscriptionsRemaining: runtime.subscriptionCount, heldButtonsRemaining: internalA.motor.heldInputState.buttons.length + internalB.motor.heldInputState.buttons.length, heldKeysRemaining: internalA.motor.heldInputState.keys.length + internalB.motor.heldInputState.keys.length, browserProcessesRemaining: browserPids.filter(processIsAlive).length, descriptorRemoved: !(await exists(join(root, "transport", "browserd.json"))), socketRemoved: !(await exists(browserdSocketPath)) },
     samples,
   };
   await mkdir(dirname(outputPath), { recursive: true });
@@ -429,11 +464,33 @@ async function clockTicksPerSecond(): Promise<number> { return Number(await exec
 async function exists(path: string): Promise<boolean> { return await stat(path).then(() => true, () => false); }
 async function directoryBytes(path: string): Promise<number> { let total = 0; for (const entry of await readdir(path, { withFileTypes: true }).catch(() => [])) { const child = join(path, entry.name); if (entry.isDirectory()) total += await directoryBytes(child); else if (entry.isFile()) total += (await stat(child)).size; } return total; }
 async function profileDirectories(path: string): Promise<string[]> { const values: string[] = []; for (const entry of await readdir(path, { withFileTypes: true }).catch(() => [])) { const child = join(path, entry.name); if (!entry.isDirectory()) continue; if (entry.name.startsWith("session-")) values.push(child); else values.push(...await profileDirectories(child)); } return values; }
+async function profileRuntimeRoots(path: string): Promise<string[]> { const values: string[] = []; for (const entry of await readdir(path, { withFileTypes: true }).catch(() => [])) { if (!entry.isDirectory()) continue; const child = join(path, entry.name); if (entry.name.startsWith("runtime_")) values.push(child); else values.push(...await profileRuntimeRoots(child)); } return values; }
 async function processTree(roots: number[]): Promise<Set<number>> { const entries = (await readdir("/proc")).filter((entry) => /^\d+$/.test(entry)); const parents = new Map<number, number>(); for (const entry of entries) { const text = await readFile(`/proc/${entry}/stat`, "utf8").catch(() => ""); const end = text.lastIndexOf(")"); if (end > 0) parents.set(Number(entry), Number(text.slice(end + 2).split(" ")[1])); } const tree = new Set(roots); let changed = true; while (changed) { changed = false; for (const [pid, ppid] of parents) if (tree.has(ppid) && !tree.has(pid)) { tree.add(pid); changed = true; } } return tree; }
-async function processTreeMemory(roots: number[]): Promise<{ pssKiB: number; privateDirtyKiB: number; processCount: number }> { const tree = await processTree(roots); let pssKiB = 0, privateDirtyKiB = 0, processCount = 0; for (const pid of tree) { const rollup = await readFile(`/proc/${pid}/smaps_rollup`, "utf8").catch(() => ""); if (rollup.length === 0) continue; processCount++; pssKiB += Number(rollup.match(/^Pss:\s+(\d+)/m)?.[1] ?? 0); privateDirtyKiB += Number(rollup.match(/^Private_Dirty:\s+(\d+)/m)?.[1] ?? 0); } return { pssKiB, privateDirtyKiB, processCount }; }
+async function processMemory(pid: number): Promise<{ pssKiB: number; privateDirtyKiB: number }> { const rollup = await readFile(`/proc/${pid}/smaps_rollup`, "utf8").catch(() => ""); return { pssKiB: Number(rollup.match(/^Pss:\s+(\d+)/m)?.[1] ?? 0), privateDirtyKiB: Number(rollup.match(/^Private_Dirty:\s+(\d+)/m)?.[1] ?? 0) }; }
+async function processTreeMemory(roots: number[]): Promise<{ pssKiB: number; privateDirtyKiB: number; processCount: number }> { const tree = await processTree(roots); let pssKiB = 0, privateDirtyKiB = 0, processCount = 0; for (const pid of tree) { const memory = await processMemory(pid); if (memory.pssKiB === 0 && memory.privateDirtyKiB === 0) continue; processCount++; pssKiB += memory.pssKiB; privateDirtyKiB += memory.privateDirtyKiB; } return { pssKiB, privateDirtyKiB, processCount }; }
+async function processTreeBreakdown(rootPid: number): Promise<Omit<ChromeTreeSample, "browserSessionId" | "browserPid" | "profileBytes">> { let pssKiB = 0, privateDirtyKiB = 0, processCount = 0, rendererPssKiB = 0, rendererPrivateDirtyKiB = 0, rendererCount = 0; for (const pid of await processTree([rootPid])) { const memory = await processMemory(pid); if (memory.pssKiB === 0 && memory.privateDirtyKiB === 0) continue; processCount++; pssKiB += memory.pssKiB; privateDirtyKiB += memory.privateDirtyKiB; const command = await readFile(`/proc/${pid}/cmdline`, "utf8").catch(() => ""); if (command.includes("--type=renderer")) { rendererCount++; rendererPssKiB += memory.pssKiB; rendererPrivateDirtyKiB += memory.privateDirtyKiB; } } return { pssKiB, privateDirtyKiB, processCount, rendererPssKiB, rendererPrivateDirtyKiB, rendererCount }; }
 async function processTreeCpu(roots: number[]): Promise<{ ticks: number }> { let ticks = 0; for (const pid of await processTree(roots)) { const text = await readFile(`/proc/${pid}/stat`, "utf8").catch(() => ""); const end = text.lastIndexOf(")"); if (end <= 0) continue; const fields = text.slice(end + 2).split(" "); ticks += Number(fields[11] ?? 0) + Number(fields[12] ?? 0); } return { ticks }; }
 function distribution(values: number[]): { count: number; min: number; median: number; p95: number; max: number; mean: number } { if (values.length === 0) return { count: 0, min: 0, median: 0, p95: 0, max: 0, mean: 0 }; const sorted = [...values].sort((a, b) => a - b); const at = (fraction: number): number => sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction))] ?? 0; return { count: values.length, min: sorted[0] ?? 0, median: at(0.5), p95: at(0.95), max: sorted.at(-1) ?? 0, mean: values.reduce((sum, value) => sum + value, 0) / values.length }; }
 function range(values: number[]): { start: number; end: number; min: number; max: number } { if (values.length === 0) return { start: 0, end: 0, min: 0, max: 0 }; return { start: values[0] ?? 0, end: values.at(-1) ?? 0, min: Math.min(...values), max: Math.max(...values) }; }
+function chromeValues(samples: ResourceSample[], index: number, key: keyof ChromeTreeSample): number[] { return samples.map((sample) => { const value = sample.chromeSessions[index]?.[key]; return typeof value === "number" ? value : 0; }); }
+function finalWindow(samples: ResourceSample[], seconds: number): ResourceSample[] { const end = samples.at(-1)?.elapsedSeconds ?? 0; return samples.filter((sample) => sample.elapsedSeconds >= end - seconds); }
+function resourceTrend(samples: ResourceSample[]) {
+  const trend = (values: number[]): number => slopePerHour(samples.map((sample, index) => [sample.elapsedSeconds, values[index] ?? 0]));
+  return {
+    pssKiB: trend(samples.map((sample) => sample.pssKiB)),
+    privateDirtyKiB: trend(samples.map((sample) => sample.privateDirtyKiB)),
+    browserdPssKiB: trend(samples.map((sample) => sample.browserdPssKiB)),
+    browserdPrivateDirtyKiB: trend(samples.map((sample) => sample.browserdPrivateDirtyKiB)),
+    browserdHeapBytes: trend(samples.map((sample) => sample.browserdHeapUsedBytes)),
+    chromeSessionAPssKiB: trend(chromeValues(samples, 0, "pssKiB")),
+    chromeSessionBPssKiB: trend(chromeValues(samples, 1, "pssKiB")),
+    rendererAPssKiB: trend(chromeValues(samples, 0, "rendererPssKiB")),
+    rendererBPssKiB: trend(chromeValues(samples, 1, "rendererPssKiB")),
+    profileBytes: trend(samples.map((sample) => sample.profileBytes)),
+    artifactBytes: trend(samples.map((sample) => sample.artifactBytes)),
+    operationCount: trend(samples.map((sample) => sample.operationCount)),
+  };
+}
 function slopePerHour(points: [number, number][]): number { if (points.length < 2) return 0; const xMean = points.reduce((sum, [x]) => sum + x, 0) / points.length; const yMean = points.reduce((sum, [, y]) => sum + y, 0) / points.length; let numerator = 0, denominator = 0; for (const [x, y] of points) { numerator += (x - xMean) * (y - yMean); denominator += (x - xMean) ** 2; } return denominator === 0 ? 0 : numerator / denominator * 3_600; }
 function latestArtifactStats(samples: ResourceSample[]): ArtifactStat[] { return samples.at(-1)?.artifactStats ?? []; }
 

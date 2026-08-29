@@ -73,12 +73,14 @@ describe("browserd actor-bound Unix service", () => {
     const { server, directory } = await started();
     assert.equal((await stat(directory)).mode & 0o777, 0o700);
     assert.equal((await stat(join(directory, "browserd.json"))).mode & 0o777, 0o600);
-    assert.equal((await stat(join(directory, "browserd.sock"))).mode & 0o777, 0o600);
+    const socketPath = server.descriptor.socketPath;
+    assert.match(socketPath, /browserd-[A-Za-z0-9_-]+\.sock$/);
+    assert.equal((await stat(socketPath)).mode & 0o777, 0o600);
     assert.deepEqual(await readDescriptor(join(directory, "browserd.json")), server.descriptor);
     await server.stop();
     servers.splice(servers.indexOf(server), 1);
     await assert.rejects(() => stat(join(directory, "browserd.json")));
-    await assert.rejects(() => stat(join(directory, "browserd.sock")));
+    await assert.rejects(() => stat(socketPath));
   });
 
   it("binds one actor once and serves strict requests on the same process", async () => {

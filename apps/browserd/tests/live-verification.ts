@@ -83,12 +83,13 @@ class BrowserClient {
   }
 }
 
-const html = (label: string): string => `<!doctype html><html><head><title>${label}</title><style>@keyframes pulse{from{opacity:.92}to{opacity:1}}body{margin:0;height:2200px;background:#eef;font:20px sans-serif}h1{animation:pulse .2s infinite alternate}button,input{position:absolute;left:80px;width:220px;height:52px;font-size:18px}#increment{top:100px}#text{top:180px}#popup{top:260px}</style></head><body><h1>${label}</h1><button id="increment">${label} count 0</button><input id="text" aria-label="${label} text"><button id="popup">Open ${label} popup</button><script>let n=0;increment.onclick=()=>increment.textContent='${label} count '+(++n);popup.onclick=()=>open('/popup-${label}','popup-${label}','width=500,height=400');</script></body></html>`;
+const html = (label: string): string => `<!doctype html><html><head><title>${label}</title><style>@keyframes pulse{from{opacity:.92}to{opacity:1}}body{margin:0;width:2200px;height:2200px;background:#eef;font:20px sans-serif}h1{animation:pulse .2s infinite alternate}button,input{position:absolute;width:220px;height:52px;font-size:18px}#increment{left:80px;top:100px}#text{left:80px;top:180px}#popup{left:80px;top:260px}#deep{left:1400px;top:1400px}iframe{position:absolute;left:1300px;top:1500px;width:420px;height:180px;border:4px solid #448}</style></head><body><h1>${label}</h1><button id="increment">${label} count 0</button><input id="text" aria-label="${label} text"><button id="popup">Open ${label} popup</button><button id="deep">Deep count 0</button><script>let n=0;increment.onclick=()=>increment.textContent='${label} count '+(++n);let deepN=0;deep.onclick=()=>deep.textContent='Deep count '+(++deepN);popup.onclick=()=>open('/popup-${label}','popup-${label}','width=500,height=400');</script></body></html>`;
+const iframeHtml = (): string => `<!doctype html><html><body style="margin:0"><button id="frame" style="margin:40px;width:220px;height:60px;font-size:18px">Frame count 0</button><script>let n=0;frame.onclick=()=>frame.textContent='Frame count '+(++n)</script></body></html>`;
 
 async function main(): Promise<void> {
   const fixture = createHttpServer((request, response) => {
     const label = request.url?.includes("beta") ? "beta" : request.url?.includes("popup") ? "popup" : "alpha";
-    const send = (): void => { response.writeHead(200, { "content-type": "text/html", "cache-control": "no-store" }); response.end(html(label)); };
+    const send = (): void => { response.writeHead(200, { "content-type": "text/html", "cache-control": "no-store" }); response.end(request.url?.includes("iframe-") ? iframeHtml() : html(label)); };
     if (request.url?.includes("slow-navigation")) setTimeout(send, 2_000); else send();
   });
   activeFixture = fixture;
@@ -121,10 +122,11 @@ async function main(): Promise<void> {
   assert.notEqual(sessionA.browserSessionId, sessionB.browserSessionId);
   assert.notEqual(sessionA.personaId, sessionB.personaId);
   assert.equal(await profileCount(profileRoot), 4);
-  await Promise.all([
-    clientC.call("session.close", { browserSessionId: sessionC.browserSessionId, controlEpoch: sessionC.controlEpoch }, 60_000),
-    clientD.call("session.close", { browserSessionId: sessionD.browserSessionId, controlEpoch: sessionD.controlEpoch }, 60_000),
-  ]);
+  const closeRetryId = `operation:session-close-retry:${Date.now()}`;
+  const closeRetryPayload = { browserSessionId: sessionC.browserSessionId, controlEpoch: sessionC.controlEpoch };
+  assert.equal((await clientC.start("session.close", closeRetryId, closeRetryPayload, 60_000)).ok, true);
+  assert.equal((await clientC.start("session.close", closeRetryId, closeRetryPayload, 60_000)).ok, true, "session.close exact retry did not recover the committed result after deletion");
+  await clientD.call("session.close", { browserSessionId: sessionD.browserSessionId, controlEpoch: sessionD.controlEpoch }, 60_000);
   clientC.close(); clientD.close();
   assert.equal(await profileCount(profileRoot), 2);
   const firstTabA = sessionA.tabs[0];
@@ -135,6 +137,11 @@ async function main(): Promise<void> {
   const tabA2Descriptor = await clientA.call<TabResult>("tab.create", { browserSessionId: sessionA.browserSessionId, controlEpoch: sessionA.controlEpoch, url: `${origin}/alpha-two` });
   const tabA2 = tabA2Descriptor.address;
   assert.notEqual(tabA1.targetId, tabA2.targetId);
+  const retryCloseTab = (await clientA.call<TabResult>("tab.create", { browserSessionId: sessionA.browserSessionId, controlEpoch: sessionA.controlEpoch, url: `${origin}/retry-close` })).address;
+  const tabCloseRetryId = `operation:tab-close-retry:${Date.now()}`;
+  const tabCloseRetryPayload = { address: retryCloseTab };
+  assert.equal((await clientA.start("tab.close", tabCloseRetryId, tabCloseRetryPayload, 60_000)).ok, true);
+  assert.equal((await clientA.start("tab.close", tabCloseRetryId, tabCloseRetryPayload, 60_000)).ok, true, "tab.close exact retry did not recover after target deletion");
 
   const observationA1 = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
   const observationA2 = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA2, delivery: "artifact" });
@@ -186,18 +193,23 @@ async function main(): Promise<void> {
   await clientA.call("frames.unsubscribe", { address: tabA1, subscriptionId: "subscription_live_a1" });
   await clientA.call("frames.unsubscribe", { address: tabA1, subscriptionId: "subscription_unknown_01" });
   assert.equal(runtime.subscriptionCount, 0);
-  await clientA2.call("frames.subscribe", { address: tabA1, subscriptionId: "subscription_disconnect" });
+  const disconnectSubscriptionPayload = { address: tabA1, subscriptionId: "subscription_disconnect" };
+  await clientA2.call("frames.subscribe", disconnectSubscriptionPayload);
+  const disconnectedSubscribeOperationId = clientA2.lastOperationId;
   assert.equal(runtime.subscriptionCount, 1);
   clientA2.close();
   await waitFor(() => runtime.subscriptionCount === 0);
   clientA2 = await BrowserClient.open(browserd.descriptor.socketPath, browserd.descriptor.bindingSecret, actorA);
+  const reconnectRetry = await clientA2.start("frames.subscribe", disconnectedSubscribeOperationId, disconnectSubscriptionPayload, 60_000);
+  assert.equal(reconnectRetry.ok, false);
+  assert.equal(reconnectRetry.error?.code, "OPERATION_CONFLICT", "a new connection inherited an old connection's subscribe success");
 
   const parallelA = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
   const parallelB = await clientB.call<ScreenshotResult>("observe.screenshot", { address: tabB1, delivery: "artifact" });
   const parallelStarted = performance.now();
   await Promise.all([
-    clientA.call("action.coordinate", { address: tabA1, observationId: parallelA.observationId, action: { kind: "click", at: { x: 140, y: 125 }, button: "left" } }),
-    clientB.call("action.coordinate", { address: tabB1, observationId: parallelB.observationId, action: { kind: "click", at: { x: 140, y: 125 }, button: "left" } }),
+    clientA.call("action.coordinate", { address: tabA1, observationId: parallelA.observationId, action: { kind: "move", to: { x: 100, y: 100 } } }),
+    clientB.call("action.coordinate", { address: tabB1, observationId: parallelB.observationId, action: { kind: "move", to: { x: 700, y: 430 } } }),
   ]);
   const parallelMs = performance.now() - parallelStarted;
 
@@ -205,8 +217,8 @@ async function main(): Promise<void> {
   const serialA2 = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA2, delivery: "artifact" });
   const serialStarted = performance.now();
   await Promise.all([
-    clientA.call("action.coordinate", { address: tabA1, observationId: serialA1.observationId, action: { kind: "move", to: { x: 650, y: 390 } } }),
-    clientA2.call("action.coordinate", { address: tabA2, observationId: serialA2.observationId, action: { kind: "move", to: { x: 620, y: 360 } } }),
+    clientA.call("action.coordinate", { address: tabA1, observationId: serialA1.observationId, action: { kind: "move", to: { x: 700, y: 430 } } }),
+    clientA2.call("action.coordinate", { address: tabA2, observationId: serialA2.observationId, action: { kind: "move", to: { x: 100, y: 100 } } }),
   ]);
   const serialMs = performance.now() - serialStarted;
   assert.ok(serialMs >= parallelMs * 1.5, `same-session lane did not serialize: parallel=${parallelMs} serial=${serialMs}`);
@@ -223,8 +235,11 @@ async function main(): Promise<void> {
   await internalA.host.cdp.send("Runtime.evaluate", { expression: "document.getElementById('phase1-dialog')?.close(); document.getElementById('phase1-dialog')?.remove();", returnByValue: true }, tabA1Internal.cdpSessionId);
   await clientA.expectFailure("observe.screenshot", { address: { ...tabA1, targetId: "x".repeat(20) } }, /TAB_NOT_FOUND|not found/i);
   const old = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
+  const staleDomObservation = await clientA.call<DomResult>("observe.domFallback", { address: tabA1, maxNodes: 50 });
+  const staleDomNode = staleDomObservation.nodes.find((node) => node.role === "button"); assert.ok(staleDomNode);
   await clientA.call("navigate", { address: tabA1, url: `${origin}/alpha-new`, waitUntil: "load" });
   await clientA.expectFailure("action.coordinate", { address: tabA1, observationId: old.observationId, action: { kind: "click", at: { x: 140, y: 125 }, button: "left" } }, /OBSERVATION|Document|not found/i);
+  await clientA.expectFailure("action.domFallback", { address: tabA1, domObservationId: staleDomObservation.observationId, handle: staleDomNode.handle, action: { kind: "click" } }, /^HANDLE_STALE:/);
 
   const postPathObservation = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
   const postPathId = `post-path:${Date.now()}`;
@@ -241,7 +256,7 @@ async function main(): Promise<void> {
   await clientA.call("navigate", { address: tabA1, url: `${origin}/alpha-scroll`, waitUntil: "load" });
 
   const scrollObservation = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
-  await clientA.call("action.coordinate", { address: tabA1, observationId: scrollObservation.observationId, action: { kind: "wheel", at: { x: 400, y: 400 }, deltaX: 0, deltaY: 1_200 } });
+  await clientA.call("action.coordinate", { address: tabA1, observationId: scrollObservation.observationId, action: { kind: "wheel", at: { x: 400, y: 400 }, deltaX: 0, deltaY: 300 } }, 60_000);
   let wheelScrollY = 0;
   for (let attempt = 0; attempt < 20 && wheelScrollY <= 2; attempt++) {
     await sleep(100);
@@ -250,6 +265,20 @@ async function main(): Promise<void> {
   }
   assert.ok(wheelScrollY > 2, "public wheel dispatch did not scroll the fixture");
   await clientA.expectFailure("action.coordinate", { address: tabA1, observationId: scrollObservation.observationId, action: { kind: "click", at: { x: 140, y: 125 }, button: "left" } }, /OBSERVATION|Scroll|stale/i);
+
+  await internalA.host.cdp.send("Runtime.evaluate", { expression: `new Promise(resolve=>{const f=document.createElement('iframe');f.title='same-origin fixture';f.src='/iframe-alpha';f.onload=resolve;document.body.append(f)})`, awaitPromise: true, returnByValue: true }, tabA1Internal.cdpSessionId);
+  await internalA.host.cdp.send("Runtime.evaluate", { expression: "scrollTo(1100,1100)", returnByValue: true }, tabA1Internal.cdpSessionId);
+  await sleep(100);
+  const scrolledDom = await clientA.call<DomResult>("observe.domFallback", { address: tabA1, maxNodes: 100 });
+  const deepButton = scrolledDom.nodes.find((node) => node.role === "button" && node.name === "Deep count 0"); assert.ok(deepButton, "scrolled DOM button was not observed");
+  await clientA.call("action.domFallback", { address: tabA1, domObservationId: scrolledDom.observationId, handle: deepButton.handle, action: { kind: "click" } }, 60_000);
+  const scrolledAfter = await clientA.call<DomResult>("observe.domFallback", { address: tabA1, maxNodes: 100 });
+  assert.ok(scrolledAfter.nodes.some((node) => node.name === "Deep count 1"), "DOM fallback did not use scrolled viewport coordinates");
+  const iframeButton = scrolledAfter.nodes.find((node) => node.role === "button" && node.name === "Frame count 0"); assert.ok(iframeButton, "same-origin iframe button was not observed");
+  await clientA.call("action.domFallback", { address: tabA1, domObservationId: scrolledAfter.observationId, handle: iframeButton.handle, action: { kind: "click" } }, 60_000);
+  const iframeAfter = await clientA.call<DomResult>("observe.domFallback", { address: tabA1, maxNodes: 100 });
+  assert.ok(iframeAfter.nodes.some((node) => node.name === "Frame count 1"), "same-origin iframe coordinates did not reach the intended button");
+  await internalA.host.cdp.send("Runtime.evaluate", { expression: "scrollTo(0,0)", returnByValue: true }, tabA1Internal.cdpSessionId);
 
   const resized = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA2, delivery: "artifact" });
   const tabA2Internal = internalA.targets.getById(tabA2.tabId);
@@ -343,13 +372,14 @@ async function main(): Promise<void> {
     actorIsolation: true, sharedPersonaAcrossTabs: observationA1.cursor.personaId === observationA2.cursor.personaId,
     concurrentProfileLaunches: 4, descriptorReadyStateAtomic: true,
     frameSubscriptionIsolation: { subscribedConnectionFrames: activeFrames.length, sameActorUnsubscribedFrames: 0, otherActorFrames: 0, duplicateCount: 1, disconnectCleanup: true, epochCleanup: true },
-    operationFingerprint: { duplicateSideEffects: 1, conflictCode: fingerprintConflict.error?.code },
+    operationFingerprint: { duplicateSideEffects: 1, conflictCode: fingerprintConflict.error?.code, sessionCloseRetryAfterDeletion: true, tabCloseRetryAfterDeletion: true, reconnectSubscribeConflict: reconnectRetry.error?.code },
     inputRelease: { disconnectCleanup: true, targetTerminalCleanupCoveredByAdversarialTest: true, epochCleanup: true, heldButtons: internalA.motor.heldInputState.buttons.length, heldKeys: internalA.motor.heldInputState.keys.length },
     artifactProvenance: { mediaType: artifactRead.mediaType, crossActorReadDenied: true, crashedTabCleanup: true },
     screenshotConsistency: { animatedFixture: true, completedCaptureTimestamp: observationA1.capturedMonotonicMs },
     typedErrors: { artifact: "ARTIFACT_NOT_FOUND", operationConflict: fingerprintConflict.error?.code, targetCrash: crashStatus.state },
     overlayMutationAndTopLayerDialog: true,
     publicWheelAndScrollGuard: true,
+    domFallbackCoordinates: { verticalAndHorizontalScroll: true, sameOriginIframe: true, crossOriginIframe: "unsupported in Phase 1.2 because out-of-process iframe targets are not registered as tab DOM authority", staleCodeThroughBrowserd: "HANDLE_STALE" },
     cancellation: { state: cancelledStatus.state, dispatchState: cancelledStatus.dispatchState },
     navigationCancellation: { state: navigationStatus.state, dispatchState: navigationStatus.dispatchState },
     postPathRevalidation: { state: postPathStatus.state, dispatchState: postPathStatus.dispatchState, clickPrevented: true },
