@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawn, type ChildProcess } from "node:child_process";
 import { connect, type Socket } from "node:net";
 import { afterEach, describe, it } from "vitest";
 import { BrowserProtocolError, PROTOCOL_VERSION, type ActorIdentity, type BrowserRequest, type FrameEvent } from "@webx/browser-protocol";
 import { BrowserRuntime } from "@webx/browser-runtime";
-import { prepareDescriptor, readDescriptor } from "../src/descriptor.js";
+import { cleanupDescriptor, prepareDescriptor, publishDescriptor, readDescriptor } from "../src/descriptor.js";
 import { BrowserdServer } from "../src/server.js";
 
 const servers: BrowserdServer[] = [];
@@ -16,6 +18,26 @@ afterEach(async () => {
   await Promise.allSettled(directories.splice(0).map(async (directory) => rm(directory, { recursive: true, force: true })));
 });
 async function directory(): Promise<string> { const value = await mkdtemp(join(tmpdir(), "browserd-adversarial-")); directories.push(value); return value; }
+function deferred(): { promise: Promise<void>; resolve: () => void } { let resolve!: () => void; const promise = new Promise<void>((value) => { resolve = value; }); return { promise, resolve }; }
+interface ChildRecord { state: "ready" | "failed"; code?: string; runtimeInstanceId?: string }
+async function firstChildRecord(child: ChildProcess): Promise<ChildRecord> {
+  if (child.stdout === null) throw new Error("child stdout is unavailable");
+  return await new Promise<ChildRecord>((resolve, reject) => {
+    let buffer = "";
+    const timer = setTimeout(() => reject(new Error("child startup timeout")), 10_000);
+    child.stdout?.on("data", (chunk: Buffer) => {
+      buffer += chunk.toString("utf8");
+      const end = buffer.indexOf("\n");
+      if (end < 0) return;
+      clearTimeout(timer);
+      try { const value = JSON.parse(buffer.slice(0, end)) as { state: "ready" | "failed"; code?: string; descriptor?: { runtimeInstanceId: string } }; resolve({ state: value.state, ...(value.code ? { code: value.code } : {}), ...(value.descriptor ? { runtimeInstanceId: value.descriptor.runtimeInstanceId } : {}) }); }
+      catch (error) { reject(error); }
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => { if (!buffer.includes("\n")) { clearTimeout(timer); reject(new Error(`child exited before result: ${code}`)); } });
+  });
+}
+async function childExit(child: ChildProcess): Promise<void> { if (child.exitCode !== null || child.signalCode !== null) return; await new Promise<void>((resolve) => child.once("exit", () => resolve())); }
 
 class Client {
   private buffer = "";
@@ -51,6 +73,26 @@ async function startWith(runtime: BrowserRuntime): Promise<BrowserdServer> {
 }
 
 describe("ready-state atomic descriptor ownership", () => {
+  it("elects exactly one ready owner across two real child processes", async () => {
+    const runtimeDirectory = await directory();
+    const childFile = fileURLToPath(new URL("./startup-race-child.ts", import.meta.url));
+    const children = [spawn(process.execPath, ["--import", "tsx", childFile, runtimeDirectory], { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] }), spawn(process.execPath, ["--import", "tsx", childFile, runtimeDirectory], { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] })];
+    try {
+      const results = await Promise.all(children.map(async (child) => await firstChildRecord(child)));
+      assert.deepEqual(results.map((result) => result.state).sort(), ["failed", "ready"]);
+      assert.equal(results.find((result) => result.state === "failed")?.code, "OPERATION_CONFLICT");
+      const descriptor = await readDescriptor(join(runtimeDirectory, "browserd.json"));
+      assert.equal(descriptor.runtimeInstanceId, results.find((result) => result.state === "ready")?.runtimeInstanceId);
+      const client = await Client.open(descriptor.socketPath);
+      client.close();
+    } finally {
+      for (const child of children) child.kill("SIGTERM");
+      await Promise.all(children.map(async (child) => await childExit(child)));
+    }
+    await assert.rejects(() => stat(join(runtimeDirectory, "browserd.json")));
+    assert.equal((await readdir(runtimeDirectory)).filter((name) => name.endsWith(".sock") || name.includes(".tmp") || name === ".browserd-startup.lock").length, 0);
+  });
+
   it("does not publish a descriptor until the socket is ready and publishes required process identity", async () => {
     const runtimeDirectory = await directory();
     const server = new BrowserdServer({ runtimeDirectory });
@@ -75,9 +117,77 @@ describe("ready-state atomic descriptor ownership", () => {
     const prepared = await prepareDescriptor(runtimeDirectory);
     await writeFile(prepared.paths.descriptorPath, `${JSON.stringify(prepared.descriptor)}\n`, { mode: 0o600 });
     await assert.rejects(() => prepareDescriptor(runtimeDirectory), (error) => error instanceof BrowserProtocolError && error.code === "OPERATION_CONFLICT");
+    await prepared.lease.release();
     await writeFile(prepared.paths.descriptorPath, `${JSON.stringify({ ...prepared.descriptor, processStartTicks: "0" })}\n`, { mode: 0o600 });
     const replacement = await prepareDescriptor(runtimeDirectory);
     assert.notEqual(replacement.descriptor.runtimeInstanceId, prepared.descriptor.runtimeInstanceId);
+    await replacement.lease.release();
+  });
+
+  it("shares one readiness promise for concurrent starts on the same object", async () => {
+    const gate = deferred();
+    const server = new BrowserdServer({ runtimeDirectory: await directory(), startupHooksForTest: { afterListen: async () => await gate.promise } });
+    servers.push(server);
+    const first = server.start();
+    const second = server.start();
+    assert.equal(first, second);
+    assert.throws(() => server.descriptor, /not started/);
+    gate.resolve();
+    assert.deepEqual(await first, await second);
+  });
+
+  it("keeps a paused listener exclusive and publishes one reachable unique socket", async () => {
+    const runtimeDirectory = await directory();
+    const gate = deferred();
+    const first = new BrowserdServer({ runtimeDirectory, startupHooksForTest: { afterListen: async () => await gate.promise } });
+    const second = new BrowserdServer({ runtimeDirectory });
+    servers.push(first, second);
+    const firstStart = first.start();
+    for (let attempt = 0; attempt < 100 && !(await stat(join(runtimeDirectory, ".browserd-startup.lock")).then(() => true, () => false)); attempt++) await new Promise((resolve) => setTimeout(resolve, 2));
+    await assert.rejects(() => second.start(), (error) => error instanceof BrowserProtocolError && error.code === "OPERATION_CONFLICT");
+    await assert.rejects(() => stat(join(runtimeDirectory, "browserd.json")));
+    gate.resolve();
+    const descriptor = await firstStart;
+    assert.match(descriptor.socketPath, /browserd-runtime_.*\.sock$/);
+    const client = await Client.open(descriptor.socketPath);
+    client.close();
+    assert.equal((await readDescriptor(join(runtimeDirectory, "browserd.json"))).runtimeInstanceId, descriptor.runtimeInstanceId);
+  });
+
+  it("does not let former-owner cleanup remove a replacement descriptor", async () => {
+    const runtimeDirectory = await directory();
+    const former = await prepareDescriptor(runtimeDirectory);
+    await former.lease.release();
+    const replacement = await prepareDescriptor(runtimeDirectory);
+    await publishDescriptor(replacement.paths, replacement.descriptor);
+    await cleanupDescriptor(former.paths, former.descriptor, former.lease);
+    assert.deepEqual(await readDescriptor(replacement.paths.descriptorPath), replacement.descriptor);
+    await cleanupDescriptor(replacement.paths, replacement.descriptor, replacement.lease);
+  });
+
+  it("settles stop during startup without publishing shared paths", async () => {
+    const runtimeDirectory = await directory();
+    const gate = deferred();
+    const server = new BrowserdServer({ runtimeDirectory, startupHooksForTest: { afterOwnership: async () => await gate.promise } });
+    servers.push(server);
+    const starting = server.start();
+    const stopping = server.stop();
+    gate.resolve();
+    await assert.rejects(() => starting, (error) => error instanceof BrowserProtocolError && error.code === "OPERATION_CANCELLED");
+    await stopping;
+    await assert.rejects(() => stat(join(runtimeDirectory, "browserd.json")));
+    await assert.rejects(() => stat(join(runtimeDirectory, ".browserd-startup.lock")));
+  });
+
+  it("bounds connections and closes clients that do not bind", async () => {
+    const runtimeDirectory = await directory();
+    const server = new BrowserdServer({ runtimeDirectory, maxConnections: 1, bindTimeoutMs: 30 });
+    servers.push(server);
+    await server.start();
+    const first = await Client.open(server.descriptor.socketPath);
+    const secondSocket = connect(server.descriptor.socketPath);
+    await new Promise<void>((resolve) => { secondSocket.once("close", () => resolve()); secondSocket.once("error", () => resolve()); });
+    await new Promise<void>((resolve) => { first.socket.once("close", () => resolve()); first.socket.once("error", () => resolve()); });
   });
 
   it("removes descriptor and socket on repeated stop", async () => {

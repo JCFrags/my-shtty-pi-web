@@ -8,7 +8,7 @@ import {
   type ActorIdentity, type ErrorCode, type FrameEvent,
 } from "@webx/browser-protocol";
 import { BrowserRuntime, type BrowserRuntimeOptions } from "@webx/browser-runtime";
-import { cleanupDescriptor, prepareDescriptor, publishDescriptor, type BrowserdDescriptor, type DescriptorPaths } from "./descriptor.js";
+import { cleanupDescriptor, prepareDescriptor, publishDescriptor, type BrowserdDescriptor, type DescriptorPaths, type StartupLease } from "./descriptor.js";
 import { NdjsonReader, sendJson } from "./transport.js";
 
 interface ConnectionState {
@@ -18,25 +18,44 @@ interface ConnectionState {
   readonly pending: Map<string, AbortController>;
   actor?: ActorIdentity;
   chain: Promise<void>;
+  bindTimer: NodeJS.Timeout | undefined;
   closed: boolean;
 }
 
 export interface BrowserdServerOptions extends BrowserRuntimeOptions {
   runtimeDirectory?: string;
   runtime?: BrowserRuntime;
+  maxConnections?: number;
+  bindTimeoutMs?: number;
+  allowTemporaryRuntimeDirectoryForTest?: boolean;
+  startupHooksForTest?: { afterOwnership?: () => Promise<void>; afterListen?: () => Promise<void> };
 }
 
 export class BrowserdServer {
   private readonly runtime: BrowserRuntime;
   private readonly runtimeDirectory: string | undefined;
+  private readonly maxConnections: number;
+  private readonly bindTimeoutMs: number;
+  private readonly allowTemporaryRuntimeDirectoryForTest: boolean;
+  private readonly startupHooksForTest: BrowserdServerOptions["startupHooksForTest"];
   private server: Server | undefined;
   private descriptorValue: BrowserdDescriptor | undefined;
   private paths: DescriptorPaths | undefined;
+  private lease: StartupLease | undefined;
+  private startPromise: Promise<BrowserdDescriptor> | undefined;
+  private stopPromise: Promise<void> | undefined;
+  private stopRequested = false;
   private readonly connections = new Set<ConnectionState>();
 
   constructor(options: BrowserdServerOptions = {}) {
     this.runtime = options.runtime ?? new BrowserRuntime(options);
     this.runtimeDirectory = options.runtimeDirectory;
+    this.maxConnections = options.maxConnections ?? 128;
+    this.bindTimeoutMs = options.bindTimeoutMs ?? 5_000;
+    this.allowTemporaryRuntimeDirectoryForTest = options.allowTemporaryRuntimeDirectoryForTest ?? false;
+    this.startupHooksForTest = options.startupHooksForTest;
+    if (!Number.isInteger(this.maxConnections) || this.maxConnections < 1 || this.maxConnections > 1_024) throw new BrowserProtocolError("INVALID_REQUEST", "browserd connection limit is invalid.");
+    if (!Number.isFinite(this.bindTimeoutMs) || this.bindTimeoutMs < 10 || this.bindTimeoutMs > 60_000) throw new BrowserProtocolError("INVALID_REQUEST", "browserd bind timeout is invalid.");
     this.runtime.on("frame", this.onFrame);
   }
 
@@ -45,14 +64,36 @@ export class BrowserdServer {
     return this.descriptorValue;
   }
 
-  async start(): Promise<BrowserdDescriptor> {
-    if (this.server !== undefined) return this.descriptor;
-    const prepared = await prepareDescriptor(this.runtimeDirectory);
-    this.descriptorValue = prepared.descriptor;
-    this.paths = prepared.paths;
+  start(): Promise<BrowserdDescriptor> {
+    if (this.descriptorValue !== undefined) return Promise.resolve(this.descriptorValue);
+    if (this.startPromise !== undefined) return this.startPromise;
+    if (this.stopPromise !== undefined) return this.stopPromise.then(() => this.start());
+    this.stopRequested = false;
+    const promise = this.startInternal();
+    this.startPromise = promise;
+    const clear = (): void => { if (this.startPromise === promise) this.startPromise = undefined; };
+    void promise.then(clear, clear);
+    return promise;
+  }
+
+  async stop(): Promise<void> {
+    this.stopRequested = true;
+    if (this.stopPromise !== undefined) return await this.stopPromise;
+    const promise = this.stopInternal();
+    this.stopPromise = promise;
+    try { await promise; }
+    finally { if (this.stopPromise === promise) this.stopPromise = undefined; }
+  }
+
+  private async startInternal(): Promise<BrowserdDescriptor> {
+    const prepared = await prepareDescriptor(this.runtimeDirectory, { allowTemporaryFallback: this.allowTemporaryRuntimeDirectoryForTest });
     const server = createServer((socket) => this.accept(socket));
     this.server = server;
+    this.paths = prepared.paths;
+    this.lease = prepared.lease;
     try {
+      await this.startupHooksForTest?.afterOwnership?.();
+      this.checkStopDuringStart();
       await new Promise<void>((resolve, reject) => {
         const failed = (error: Error): void => { server.off("listening", listening); reject(error); };
         const listening = (): void => { server.off("error", failed); resolve(); };
@@ -62,27 +103,48 @@ export class BrowserdServer {
       });
       await chmod(prepared.paths.socketPath, 0o600);
       if (((await stat(prepared.paths.socketPath)).mode & 0o777) !== 0o600) throw new BrowserProtocolError("INTERNAL_ERROR", "browserd socket must have mode 0600.");
+      await this.startupHooksForTest?.afterListen?.();
+      this.checkStopDuringStart();
       await publishDescriptor(prepared.paths, prepared.descriptor);
+      this.checkStopDuringStart();
+      this.descriptorValue = prepared.descriptor;
       return prepared.descriptor;
     } catch (error) {
-      await this.stop();
+      if (this.server === server) this.server = undefined;
+      await closeNetServer(server);
+      await cleanupDescriptor(prepared.paths, prepared.descriptor, prepared.lease);
+      if (this.paths === prepared.paths) this.paths = undefined;
+      if (this.lease === prepared.lease) this.lease = undefined;
       throw error;
     }
   }
 
-  async stop(): Promise<void> {
+  private async stopInternal(): Promise<void> {
+    await this.startPromise?.catch(() => undefined);
     const server = this.server;
     this.server = undefined;
     for (const state of this.connections) this.closeConnection(state);
-    if (server !== undefined) await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (server !== undefined) await closeNetServer(server);
     await this.runtime.close();
-    if (this.paths !== undefined) await cleanupDescriptor(this.paths);
+    const paths = this.paths;
+    const descriptor = this.descriptorValue;
+    const lease = this.lease;
     this.paths = undefined;
     this.descriptorValue = undefined;
+    this.lease = undefined;
+    if (paths !== undefined && descriptor !== undefined && lease !== undefined) await cleanupDescriptor(paths, descriptor, lease);
+    else await lease?.release();
+  }
+
+  private checkStopDuringStart(): void {
+    if (this.stopRequested) throw new BrowserProtocolError("OPERATION_CANCELLED", "browserd startup was stopped.");
   }
 
   private accept(socket: Socket): void {
-    const state: ConnectionState = { connectionId: randomBytes(18).toString("base64url"), socket, reader: new NdjsonReader(), pending: new Map(), chain: Promise.resolve(), closed: false };
+    if (this.connections.size >= this.maxConnections) { socket.destroy(); return; }
+    const state: ConnectionState = { connectionId: randomBytes(18).toString("base64url"), socket, reader: new NdjsonReader(), pending: new Map(), chain: Promise.resolve(), bindTimer: undefined, closed: false };
+    state.bindTimer = setTimeout(() => this.closeConnection(state), this.bindTimeoutMs);
+    state.bindTimer.unref();
     this.connections.add(state);
     socket.on("data", (chunk: Buffer) => {
       try {
@@ -107,6 +169,7 @@ export class BrowserdServer {
         const bind = parseBindRequest(value);
         if (!secretMatches(bind.bindingSecret, this.descriptor.bindingSecret)) throw new BrowserProtocolError("AUTH_FAILED", "Binding authentication failed.");
         state.actor = Object.freeze({ ...bind.actor });
+        if (state.bindTimer !== undefined) { clearTimeout(state.bindTimer); state.bindTimer = undefined; }
         this.send(state, { protocolVersion: PROTOCOL_VERSION, kind: "bound", requestId: bind.requestId, actor: state.actor });
       } catch (error) {
         const requestId = isRecord(value) && typeof value.requestId === "string" ? value.requestId : undefined;
@@ -163,6 +226,7 @@ export class BrowserdServer {
   private closeConnection(state: ConnectionState, graceful = false): void {
     if (state.closed) return;
     state.closed = true;
+    if (state.bindTimer !== undefined) { clearTimeout(state.bindTimer); state.bindTimer = undefined; }
     for (const controller of state.pending.values()) controller.abort(new BrowserProtocolError("OPERATION_CANCELLED", "browserd connection closed."));
     state.pending.clear();
     this.runtime.releaseConnection(state.connectionId);
@@ -171,5 +235,9 @@ export class BrowserdServer {
   }
 }
 
+async function closeNetServer(server: Server): Promise<void> {
+  if (!server.listening) return;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+}
 function secretMatches(received: string, expected: string): boolean { const left = Buffer.from(received); const right = Buffer.from(expected); return left.byteLength === right.byteLength && timingSafeEqual(left, right); }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
