@@ -22,6 +22,25 @@ interface RegisteredTool {
 
 type EventHandler = (event?: unknown, context?: unknown) => Promise<unknown> | unknown;
 
+interface DispatchMetric {
+  readonly kind: string;
+  readonly durationMs: number;
+}
+
+interface SoakSample {
+  readonly elapsedSeconds: number;
+  readonly nodeHeapUsedBytes: number;
+  readonly browserdConnections: number;
+  readonly sessions: number;
+  readonly tabs: number;
+  readonly artifacts: number;
+  readonly artifactBytes: number;
+  readonly operations: number;
+  readonly droppedFrames: number;
+  readonly profileBytes: number;
+  readonly chrome: Array<{ readonly pid: number; readonly pssKiB: number; readonly privateDirtyKiB: number; readonly processCount: number }>;
+}
+
 class PiHarness {
   readonly tools = new Map<string, RegisteredTool>();
   readonly events = new Map<string, EventHandler>();
@@ -122,8 +141,10 @@ async function main(): Promise<void> {
   const webxPath = join(root, "webxd.sock");
   const destinationAuthority = new LoopbackDestinationAuthority(origin);
   const runtime = makeBrowserRuntime(origin, chromeExecutable, profileRoot, 1_024);
+  const dispatchMetrics: DispatchMetric[] = [];
+  instrumentRuntime(runtime, dispatchMetrics);
   browserd = new BrowserdServer({ runtimeDirectory: transportRoot, runtime });
-  const startedAt = performance.now();
+  const serviceStartupStarted = performance.now();
   await browserd.start();
   webxd = new WebxdRuntime({
     socketPath: webxPath,
@@ -136,6 +157,7 @@ async function main(): Promise<void> {
     authenticateActor: sameUserPiActorAuthenticator,
   });
   await webxd.start();
+  const serviceStartupMs = performance.now() - serviceStartupStarted;
 
   piA = new PiHarness("phase2a-agent-a", webxPath, join(root, "exports-a"));
   piB = new PiHarness("phase2a-agent-b", webxPath, join(root, "exports-b"));
@@ -201,6 +223,23 @@ async function main(): Promise<void> {
   assert.match(textOf(listed), new RegExp(secondTabId));
   await piA.execute("browser_tabs", { action: "close-tab", browserSessionId: identityA.browserSessionId, tabId: secondTabId });
 
+  const soakDurationSeconds = numberArgument("--soak-duration-seconds", 0);
+  const soakResult = soakDurationSeconds > 0 ? await runRoutedSoak({
+    durationSeconds: soakDurationSeconds,
+    sampleSeconds: numberArgument("--sample-seconds", 15),
+    piA,
+    piB,
+    identityA,
+    identityB,
+    sessionA,
+    sessionB,
+    runtime,
+    browserd,
+    profileRoot,
+    webxPath,
+    dispatchMetrics,
+  }) : undefined;
+
   const cancelObservation = await piA.execute("browser_observe", { browserSessionId: identityA.browserSessionId, tabId: identityA.tabId });
   const cancelIdentity = observationIdentity(cancelObservation);
   const cancelController = new AbortController();
@@ -240,7 +279,7 @@ async function main(): Promise<void> {
   const result = {
     passed: true,
     chromium: await executableVersion(chromeExecutable),
-    startupMs: performance.now() - startedAt,
+    serviceStartupMs,
     agentSessions: [identityA.browserSessionId, identityB.browserSessionId],
     chromePids: [sessionA.host.pid, sessionB.host.pid],
     distinctProfiles: sessionA.host.profileDirectory !== sessionB.host.profileDirectory,
@@ -254,9 +293,16 @@ async function main(): Promise<void> {
     searchReadIndependence: { searchSucceededWhileBrowserdAbsent: true },
     cleanup: { profilesRemaining: (await profileDirectories(profileRoot)).length, browserdDescriptorRemoved: !(await exists(join(transportRoot, "browserd.json"))), webxdSocketRemoved: !(await exists(webxPath)) },
     testOnlyEgress: "LoopbackFixtureAuthorization and LoopbackDestinationAuthority exist only in this opt-in live test. Production proxy enforcement is tested separately.",
+    ...(soakResult === undefined ? {} : { routedSoak: soakResult }),
   };
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(result, null, 2)}\n`);
+  const soakOutput = argument("--soak-output");
+  if (soakOutput !== undefined && soakResult !== undefined) {
+    const path = resolve(soakOutput);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, `${JSON.stringify({ passed: true, chromium: await executableVersion(chromeExecutable), ...soakResult }, null, 2)}\n`);
+  }
   console.log(JSON.stringify(result, null, 2));
   await rm(root, { recursive: true, force: true });
   root = undefined;
@@ -273,6 +319,253 @@ function makeBrowserRuntime(origin: string, executable: string, profileRoot: str
   });
 }
 
+function instrumentRuntime(runtime: BrowserRuntime, metrics: DispatchMetric[]): void {
+  const original = runtime.dispatch.bind(runtime);
+  const instrumented = async (...args: Parameters<BrowserRuntime["dispatch"]>): Promise<unknown> => {
+    const started = performance.now();
+    try { return await original(...args); }
+    finally {
+      metrics.push({ kind: args[1].kind, durationMs: performance.now() - started });
+      if (metrics.length > 20_000) metrics.splice(0, metrics.length - 20_000);
+    }
+  };
+  (runtime as unknown as { dispatch: typeof instrumented }).dispatch = instrumented;
+}
+
+async function runRoutedSoak(options: {
+  readonly durationSeconds: number;
+  readonly sampleSeconds: number;
+  readonly piA: PiHarness;
+  readonly piB: PiHarness;
+  readonly identityA: { browserSessionId: string; tabId: string };
+  readonly identityB: { browserSessionId: string; tabId: string };
+  readonly sessionA: BrowserSession;
+  readonly sessionB: BrowserSession;
+  readonly runtime: BrowserRuntime;
+  readonly browserd: BrowserdServer;
+  readonly profileRoot: string;
+  readonly webxPath: string;
+  readonly dispatchMetrics: DispatchMetric[];
+}): Promise<Record<string, unknown>> {
+  if (options.durationSeconds < 1 || options.sampleSeconds < 1) throw new Error("soak duration and sample interval must be positive");
+  const piRequestLatencyMs: number[] = [];
+  const screenshotRouteLatencyMs: number[] = [];
+  const pathRouteLatencyMs: number[] = [];
+  const domRouteLatencyMs: number[] = [];
+  const searchReadLatencyMs: number[] = [];
+  const samples: SoakSample[] = [];
+  const started = performance.now();
+  const end = started + options.durationSeconds * 1_000;
+  let nextSample = started;
+  let nextIteration = started;
+  let iterations = 0;
+  let tabCycles = 0;
+  let retryCalls = 0;
+  let disconnects = 0;
+  let transientActorCreated = false;
+  const retryFacade = new WebxFacadeClient(options.webxPath, join(options.profileRoot, "..", "soak-retry-exports"));
+  const retrySignal = new AbortController();
+  await retryFacade.start({ signal: retrySignal.signal, ownerId: "phase2a-agent-a", cwd: "/deterministic/phase2a-live" });
+  try {
+    while (performance.now() < end) {
+      iterations += 1;
+      const observed = await Promise.all([
+        timed(() => options.piA.execute("browser_observe", { browserSessionId: options.identityA.browserSessionId, tabId: options.identityA.tabId }), screenshotRouteLatencyMs, piRequestLatencyMs),
+        timed(() => options.piB.execute("browser_observe", { browserSessionId: options.identityB.browserSessionId, tabId: options.identityB.tabId }), screenshotRouteLatencyMs, piRequestLatencyMs),
+      ]);
+      assertPiImage(observed[0]);
+      assertPiImage(observed[1]);
+      const imageA = observationIdentity(observed[0]);
+      const imageB = observationIdentity(observed[1]);
+      const alternate = iterations % 2 === 0;
+      await Promise.all([
+        timed(() => options.piA.execute("browser_act", { browserSessionId: options.identityA.browserSessionId, tabId: options.identityA.tabId, action: { kind: "move", observationId: imageA.observationId, coordinateSpace: "imagePixels", x: alternate ? 500 : 260, y: alternate ? 420 : 300 } }), pathRouteLatencyMs, piRequestLatencyMs),
+        timed(() => options.piB.execute("browser_act", { browserSessionId: options.identityB.browserSessionId, tabId: options.identityB.tabId, action: { kind: "move", observationId: imageB.observationId, coordinateSpace: "imagePixels", x: alternate ? 260 : 500, y: alternate ? 300 : 420 } }), pathRouteLatencyMs, piRequestLatencyMs),
+      ]);
+
+      if (iterations % 3 === 0) {
+        await Promise.all([
+          timed(() => options.piA.execute("browser_observe", { browserSessionId: options.identityA.browserSessionId, tabId: options.identityA.tabId, mode: "dom", maxNodes: 30 }), domRouteLatencyMs, piRequestLatencyMs),
+          timed(() => options.piB.execute("browser_observe", { browserSessionId: options.identityB.browserSessionId, tabId: options.identityB.tabId, mode: "dom", maxNodes: 30 }), domRouteLatencyMs, piRequestLatencyMs),
+        ]);
+      }
+      if (iterations % 6 === 0) {
+        await timed(() => options.piA.execute("web_search", { query: "WebX" }), searchReadLatencyMs, piRequestLatencyMs);
+        await timed(() => options.piB.execute("web_read", { url: "https://fixture.invalid/webx", maxChars: 1_000 }), searchReadLatencyMs, piRequestLatencyMs);
+      }
+      if (iterations % 12 === 0) {
+        const created = await options.piA.execute("browser_tabs", { action: "create-tab", browserSessionId: options.identityA.browserSessionId });
+        const tabId = allMatches(textOf(created), /"tabId":\s*"([^"]+)"/gu).find((value) => value !== options.identityA.tabId);
+        if (tabId === undefined) throw new Error("soak tab churn did not return a new tab");
+        await options.piA.execute("browser_tabs", { action: "close-tab", browserSessionId: options.identityA.browserSessionId, tabId });
+        tabCycles += 1;
+      }
+      if (iterations % 10 === 0) {
+        const requestOptions = { signal: retrySignal.signal, ownerId: "phase2a-agent-a", cwd: "/deterministic/phase2a-live", idempotencyKey: `soak-retry-${iterations}` };
+        const input = { action: "focus-tab", browserSessionId: options.identityA.browserSessionId, tabId: options.identityA.tabId };
+        await retryFacade.request("browser.tabs", input, requestOptions);
+        await retryFacade.request("browser.tabs", input, requestOptions);
+        retryCalls += 1;
+      }
+      if (!transientActorCreated) {
+        transientActorCreated = true;
+        const transient = new PiHarness("phase2a-soak-transient", options.webxPath, join(options.profileRoot, "..", "soak-transient-exports"));
+        await transient.start();
+        const opened = await transient.execute("browser_open", {});
+        const identity = browserIdentity(opened);
+        await transient.execute("browser_tabs", { action: "close-session", browserSessionId: identity.browserSessionId });
+        await transient.stop();
+      }
+      if (iterations === 5) {
+        for (const connection of browserdConnectionStates(options.browserd)) connection.socket.destroy();
+        disconnects += 1;
+      }
+
+      const now = performance.now();
+      if (now >= nextSample) {
+        const chrome = await Promise.all([processTreeMemory(options.sessionA.host.pid), processTreeMemory(options.sessionB.host.pid)]);
+        samples.push({
+          elapsedSeconds: (now - started) / 1_000,
+          nodeHeapUsedBytes: process.memoryUsage().heapUsed,
+          browserdConnections: browserdConnectionStates(options.browserd).length,
+          sessions: 2,
+          tabs: options.sessionA.listTabs().length + options.sessionB.listTabs().length,
+          artifacts: options.runtime.artifacts.entryCount,
+          artifactBytes: options.runtime.artifacts.totalBytes,
+          operations: options.runtime.operations.size,
+          droppedFrames: options.sessionA.frames.droppedFrames + options.sessionB.frames.droppedFrames,
+          profileBytes: await directoryBytes(options.profileRoot),
+          chrome,
+        });
+        nextSample += options.sampleSeconds * 1_000;
+      }
+      nextIteration += 5_000;
+      const delay = Math.min(Math.max(0, nextIteration - performance.now()), Math.max(0, end - performance.now()));
+      if (delay > 0) await sleep(delay);
+    }
+  } finally {
+    retrySignal.abort();
+    await retryFacade.stop({ ownerId: "phase2a-agent-a" }).catch(() => undefined);
+  }
+  const actualDurationSeconds = (performance.now() - started) / 1_000;
+  assert.ok(actualDurationSeconds >= options.durationSeconds);
+  assert.ok(samples.length >= Math.max(1, Math.floor(options.durationSeconds / options.sampleSeconds)));
+  assert.ok(samples.every((sample) => sample.sessions === 2 && sample.tabs === 2));
+  assert.ok(samples.every((sample) => sample.artifacts <= 256 && sample.operations <= 2_048));
+  assert.deepEqual(options.sessionA.motor.heldInputState, { buttons: [], keys: [] });
+  assert.deepEqual(options.sessionB.motor.heldInputState, { buttons: [], keys: [] });
+  const dispatch = (kind: string) => distribution(options.dispatchMetrics.filter((metric) => metric.kind === kind).map((metric) => metric.durationMs));
+  return {
+    requestedDurationSeconds: options.durationSeconds,
+    actualDurationSeconds,
+    iterations,
+    sampleIntervalSeconds: options.sampleSeconds,
+    sampleCount: samples.length,
+    piWebxRequestLatencyMs: distribution(piRequestLatencyMs),
+    screenshotRouteLatencyMs: distribution(screenshotRouteLatencyMs),
+    browserdScreenshotDispatchLatencyMs: dispatch("observe.screenshot"),
+    browserdArtifactReadLatencyMs: dispatch("artifact.read"),
+    browserdTransportAndRouteOverheadMs: derivedOverhead(screenshotRouteLatencyMs, options.dispatchMetrics),
+    humanPathRouteLatencyMs: distribution(pathRouteLatencyMs),
+    browserdHumanPathDispatchLatencyMs: dispatch("action.coordinate"),
+    domFallbackRouteLatencyMs: distribution(domRouteLatencyMs),
+    searchReadLatencyMs: distribution(searchReadLatencyMs),
+    nodeHarnessHeapUsedBytes: numericRange(samples.map((sample) => sample.nodeHeapUsedBytes)),
+    heapMeasurementNote: "The opt-in route harness hosts webxd and browserd in one Node process, so its heap sample is combined. Chrome process-tree memory is separate.",
+    chrome: [
+      { pid: options.sessionA.host.pid, pssKiB: numericRange(samples.map((sample) => sample.chrome[0]?.pssKiB ?? 0)), privateDirtyKiB: numericRange(samples.map((sample) => sample.chrome[0]?.privateDirtyKiB ?? 0)), processCount: numericRange(samples.map((sample) => sample.chrome[0]?.processCount ?? 0)) },
+      { pid: options.sessionB.host.pid, pssKiB: numericRange(samples.map((sample) => sample.chrome[1]?.pssKiB ?? 0)), privateDirtyKiB: numericRange(samples.map((sample) => sample.chrome[1]?.privateDirtyKiB ?? 0)), processCount: numericRange(samples.map((sample) => sample.chrome[1]?.processCount ?? 0)) },
+    ],
+    browserdConnections: numericRange(samples.map((sample) => sample.browserdConnections)),
+    sessionCount: numericRange(samples.map((sample) => sample.sessions)),
+    tabCount: numericRange(samples.map((sample) => sample.tabs)),
+    operationCount: numericRange(samples.map((sample) => sample.operations)),
+    artifactCount: numericRange(samples.map((sample) => sample.artifacts)),
+    artifactBytes: numericRange(samples.map((sample) => sample.artifactBytes)),
+    droppedFrames: numericRange(samples.map((sample) => sample.droppedFrames)),
+    profileBytes: numericRange(samples.map((sample) => sample.profileBytes)),
+    tabCycles,
+    exactRetryCalls: retryCalls,
+    forcedBrowserdReconnects: disconnects,
+    transientActorIdleEvictionExercised: options.durationSeconds >= 70,
+    samples,
+  };
+}
+
+async function timed<T>(task: () => Promise<T>, specific: number[], all: number[]): Promise<T> {
+  const started = performance.now();
+  try { return await task(); }
+  finally { const duration = performance.now() - started; specific.push(duration); all.push(duration); }
+}
+
+function browserdConnectionStates(server: BrowserdServer): Array<{ socket: { destroy(): void } }> {
+  return [...(server as unknown as { connections: Set<{ socket: { destroy(): void } }> }).connections];
+}
+
+async function processTreeMemory(rootPid: number): Promise<{ pid: number; pssKiB: number; privateDirtyKiB: number; processCount: number }> {
+  const entries = (await readdir("/proc")).filter((entry) => /^\d+$/u.test(entry));
+  const parents = new Map<number, number>();
+  for (const entry of entries) {
+    const text = await import("node:fs/promises").then(({ readFile }) => readFile(`/proc/${entry}/stat`, "utf8").catch(() => ""));
+    const end = text.lastIndexOf(")");
+    if (end > 0) parents.set(Number(entry), Number(text.slice(end + 2).split(" ")[1]));
+  }
+  const tree = new Set([rootPid]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [pid, parent] of parents) if (tree.has(parent) && !tree.has(pid)) { tree.add(pid); changed = true; }
+  }
+  let pssKiB = 0;
+  let privateDirtyKiB = 0;
+  let processCount = 0;
+  for (const pid of tree) {
+    const rollup = await import("node:fs/promises").then(({ readFile }) => readFile(`/proc/${pid}/smaps_rollup`, "utf8").catch(() => ""));
+    const pss = Number(rollup.match(/^Pss:\s+(\d+)/mu)?.[1] ?? 0);
+    const dirty = Number(rollup.match(/^Private_Dirty:\s+(\d+)/mu)?.[1] ?? 0);
+    if (pss === 0 && dirty === 0) continue;
+    pssKiB += pss;
+    privateDirtyKiB += dirty;
+    processCount += 1;
+  }
+  return { pid: rootPid, pssKiB, privateDirtyKiB, processCount };
+}
+
+async function directoryBytes(path: string): Promise<number> {
+  let total = 0;
+  for (const entry of await readdir(path, { withFileTypes: true }).catch(() => [])) {
+    const child = join(path, entry.name);
+    if (entry.isDirectory()) total += await directoryBytes(child);
+    else if (entry.isFile()) total += (await stat(child)).size;
+  }
+  return total;
+}
+
+function distribution(values: number[]): { count: number; min: number; median: number; p95: number; max: number; mean: number } {
+  if (values.length === 0) return { count: 0, min: 0, median: 0, p95: 0, max: 0, mean: 0 };
+  const sorted = [...values].sort((left, right) => left - right);
+  const at = (fraction: number) => sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction))] ?? 0;
+  return { count: values.length, min: sorted[0] ?? 0, median: at(0.5), p95: at(0.95), max: sorted.at(-1) ?? 0, mean: values.reduce((sum, value) => sum + value, 0) / values.length };
+}
+
+function numericRange(values: number[]): { start: number; end: number; min: number; max: number } {
+  if (values.length === 0) return { start: 0, end: 0, min: 0, max: 0 };
+  return { start: values[0] ?? 0, end: values.at(-1) ?? 0, min: Math.min(...values), max: Math.max(...values) };
+}
+
+function derivedOverhead(route: number[], dispatchMetrics: DispatchMetric[]): ReturnType<typeof distribution> {
+  const dispatch = dispatchMetrics.filter((metric) => metric.kind === "observe.screenshot" || metric.kind === "artifact.read").map((metric) => metric.durationMs);
+  const averageDispatch = dispatch.length === 0 ? 0 : dispatch.reduce((sum, value) => sum + value, 0) / dispatch.length;
+  return distribution(route.map((value) => Math.max(0, value - averageDispatch)));
+}
+
+function numberArgument(name: string, fallback: number): number {
+  const raw = argument(name);
+  const value = raw === undefined ? fallback : Number(raw);
+  if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be a non-negative number`);
+  return value;
+}
+
 function privateSession(runtime: BrowserRuntime, actorId: string, browserSessionId: string): BrowserSession {
   const actor = { principalId: actorId, agentSessionId: actorId };
   return (runtime as unknown as { getSession(boundActor: typeof actor, id: string): BrowserSession }).getSession(actor, browserSessionId);
@@ -282,7 +575,8 @@ async function setDpr2(session: BrowserSession, tabId: string): Promise<void> {
   const tab = session.targets.getById(tabId);
   if (tab === undefined) throw new Error("live route tab was not found");
   await session.host.cdp.send("Emulation.setDeviceMetricsOverride", { width: 800, height: 600, deviceScaleFactor: 2, mobile: false }, tab.cdpSessionId);
-  await sleep(100);
+  await session.host.cdp.send("Runtime.evaluate", { expression: "scrollTo(0, 0)", returnByValue: true }, tab.cdpSessionId);
+  await sleep(300);
 }
 
 function browserIdentity(presentation: ToolPresentation): { browserSessionId: string; tabId: string } {

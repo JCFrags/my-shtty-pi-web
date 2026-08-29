@@ -9,7 +9,8 @@
     "start": "pnpm run build && node dist/apps/webxd/src/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:live-agentcursor": "tsx tests/live-agentcursor-route.ts"
+    "test:live-agentcursor": "tsx tests/live-agentcursor-route.ts",
+    "test:routed-soak": "tsx tests/live-agentcursor-route.ts --soak-duration-seconds=1800 --sample-seconds=15"
   },
   "devDependencies": {
     "@types/node": "24.12.4"
