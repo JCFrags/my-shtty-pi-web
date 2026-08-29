@@ -111,8 +111,8 @@ export const BrowserRequestSchema = Type.Union([
   request("operation.status", { targetOperationId: IdSchema }),
   request("operation.cancel", { targetOperationId: IdSchema }),
   request("artifact.read", { artifactId: OpaqueIdSchema, offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 16 * 1024 * 1024 })), maxBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 * 1024 })) }),
-  request("frames.subscribe", { address: TabAddressSchema, interest: Type.Optional(Type.Union([Type.Literal("idle"), Type.Literal("selected")])) }),
-  request("frames.unsubscribe", { address: TabAddressSchema }),
+  request("frames.subscribe", { address: TabAddressSchema, subscriptionId: OpaqueIdSchema, interest: Type.Optional(Type.Union([Type.Literal("idle"), Type.Literal("selected")])) }),
+  request("frames.unsubscribe", { address: TabAddressSchema, subscriptionId: OpaqueIdSchema }),
 ]);
 
 export const DispatchStateSchema = Type.Union([
@@ -134,6 +134,7 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal("HANDLE_STALE"), Type.Literal("OPERATION_CONFLICT"), Type.Literal("OPERATION_CANCELLED"),
   Type.Literal("BROWSER_START_FAILED"), Type.Literal("BROWSER_EXITED"), Type.Literal("CDP_DISCONNECTED"),
   Type.Literal("TARGET_CRASHED"), Type.Literal("CDP_ERROR"), Type.Literal("ARTIFACT_FORBIDDEN"),
+  Type.Literal("OPERATION_NOT_FOUND"), Type.Literal("ARTIFACT_NOT_FOUND"), Type.Literal("INTERNAL_ERROR"),
   Type.Literal("CAPABILITY_UNAVAILABLE"), Type.Literal("NAVIGATION_DENIED"), Type.Literal("LIMIT_EXCEEDED"),
 ]);
 
@@ -231,19 +232,24 @@ export const FrameEventSchema = Type.Object({
   frameSequence: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
   capturedMonotonicMs: Type.Number({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
   publishedMonotonicMs: Type.Number({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
-  mediaType: Type.Union([Type.Literal("image/png"), Type.Literal("image/jpeg")]),
+  mediaType: Type.Literal("image/png"),
+  byteLength: Type.Integer({ minimum: 1, maximum: 16 * 1024 * 1024 }),
   artifactId: OpaqueIdSchema,
   sha256: Sha256Schema,
+  viewport,
+  url: PageUrlSchema,
+  title: Type.String({ maxLength: 4096 }),
   cursor,
 }, strict);
 
 const capabilityResult = Type.Object({ kind: Type.Literal("capabilities"), headed: Type.Literal(true), screenshotFirst: Type.Literal(true), domFallback: Type.Literal(true), virtualMouse: Type.Literal(true), osMouse: Type.Literal(false) }, strict);
 const sessionsResult = Type.Object({ kind: Type.Literal("sessions"), sessions: Type.Array(SessionDescriptorSchema, { maxItems: 32 }) }, strict);
 const tabsResult = Type.Object({ kind: Type.Literal("tabs"), tabs: Type.Array(TabDescriptorSchema, { maxItems: 16 }) }, strict);
-const artifactResult = Type.Object({ kind: Type.Literal("artifact"), artifactId: OpaqueIdSchema, mediaType: Type.Union([Type.Literal("image/png"), Type.Literal("image/jpeg")]), byteLength: Type.Integer({ minimum: 1, maximum: 16 * 1024 * 1024 }), sha256: Sha256Schema, offset: Type.Integer({ minimum: 0, maximum: 16 * 1024 * 1024 }), totalBytes: Type.Integer({ minimum: 1, maximum: 16 * 1024 * 1024 }), eof: Type.Boolean(), base64: Type.String({ maxLength: 1_500_000 }) }, strict);
+const artifactResult = Type.Object({ kind: Type.Literal("artifact"), artifactId: OpaqueIdSchema, mediaType: Type.Literal("image/png"), byteLength: Type.Integer({ minimum: 1, maximum: 16 * 1024 * 1024 }), sha256: Sha256Schema, offset: Type.Integer({ minimum: 0, maximum: 16 * 1024 * 1024 }), totalBytes: Type.Integer({ minimum: 1, maximum: 16 * 1024 * 1024 }), eof: Type.Boolean(), base64: Type.String({ maxLength: 1_500_000 }) }, strict);
 const ackResult = Type.Object({ kind: Type.Literal("ack"), operationId: IdSchema }, strict);
+const subscriptionResult = Type.Object({ kind: Type.Literal("subscription"), operationId: IdSchema, subscriptionId: OpaqueIdSchema, subscribed: Type.Boolean() }, strict);
 
-export const ResultSchema = Type.Union([capabilityResult, SessionDescriptorSchema, sessionsResult, TabDescriptorSchema, tabsResult, ScreenshotObservationSchema, DomObservationSchema, OperationStatusSchema, artifactResult, ackResult]);
+export const ResultSchema = Type.Union([capabilityResult, SessionDescriptorSchema, sessionsResult, TabDescriptorSchema, tabsResult, ScreenshotObservationSchema, DomObservationSchema, OperationStatusSchema, artifactResult, ackResult, subscriptionResult]);
 
 export const BindResponseSchema = Type.Object({
   protocolVersion: Type.Literal(PROTOCOL_VERSION),

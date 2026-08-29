@@ -1657,7 +1657,8 @@
             "operationId",
             "deadline",
             "kind",
-            "address"
+            "address",
+            "subscriptionId"
           ],
           "properties": {
             "protocolVersion": {
@@ -1721,6 +1722,12 @@
               },
               "additionalProperties": false
             },
+            "subscriptionId": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]{16,128}$"
+            },
             "interest": {
               "anyOf": [
                 {
@@ -1744,7 +1751,8 @@
             "operationId",
             "deadline",
             "kind",
-            "address"
+            "address",
+            "subscriptionId"
           ],
           "properties": {
             "protocolVersion": {
@@ -1807,6 +1815,12 @@
                 }
               },
               "additionalProperties": false
+            },
+            "subscriptionId": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]{16,128}$"
             }
           },
           "additionalProperties": false
@@ -3197,6 +3211,18 @@
                             },
                             {
                               "type": "string",
+                              "const": "OPERATION_NOT_FOUND"
+                            },
+                            {
+                              "type": "string",
+                              "const": "ARTIFACT_NOT_FOUND"
+                            },
+                            {
+                              "type": "string",
+                              "const": "INTERNAL_ERROR"
+                            },
+                            {
+                              "type": "string",
                               "const": "CAPABILITY_UNAVAILABLE"
                             },
                             {
@@ -3270,16 +3296,8 @@
                       "pattern": "^[A-Za-z0-9_-]{16,128}$"
                     },
                     "mediaType": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "image/png"
-                        },
-                        {
-                          "type": "string",
-                          "const": "image/jpeg"
-                        }
-                      ]
+                      "type": "string",
+                      "const": "image/png"
                     },
                     "byteLength": {
                       "type": "integer",
@@ -3328,6 +3346,37 @@
                       "minLength": 1,
                       "maxLength": 128,
                       "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "operationId",
+                    "subscriptionId",
+                    "subscribed"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "subscription"
+                    },
+                    "operationId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "subscriptionId": {
+                      "type": "string",
+                      "minLength": 16,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]{16,128}$"
+                    },
+                    "subscribed": {
+                      "type": "boolean"
                     }
                   },
                   "additionalProperties": false
@@ -3479,6 +3528,18 @@
                     },
                     {
                       "type": "string",
+                      "const": "OPERATION_NOT_FOUND"
+                    },
+                    {
+                      "type": "string",
+                      "const": "ARTIFACT_NOT_FOUND"
+                    },
+                    {
+                      "type": "string",
+                      "const": "INTERNAL_ERROR"
+                    },
+                    {
+                      "type": "string",
                       "const": "CAPABILITY_UNAVAILABLE"
                     },
                     {
@@ -3539,8 +3600,12 @@
             "capturedMonotonicMs",
             "publishedMonotonicMs",
             "mediaType",
+            "byteLength",
             "artifactId",
             "sha256",
+            "viewport",
+            "url",
+            "title",
             "cursor"
           ],
           "properties": {
@@ -3613,16 +3678,13 @@
               "maximum": 9007199254740991
             },
             "mediaType": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "const": "image/png"
-                },
-                {
-                  "type": "string",
-                  "const": "image/jpeg"
-                }
-              ]
+              "type": "string",
+              "const": "image/png"
+            },
+            "byteLength": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
             },
             "artifactId": {
               "type": "string",
@@ -3635,6 +3697,42 @@
               "minLength": 64,
               "maxLength": 64,
               "pattern": "^[0-9a-f]{64}$"
+            },
+            "viewport": {
+              "type": "object",
+              "required": [
+                "width",
+                "height",
+                "devicePixelRatio"
+              ],
+              "properties": {
+                "width": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 16384
+                },
+                "height": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 16384
+                },
+                "devicePixelRatio": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 16
+                }
+              },
+              "additionalProperties": false
+            },
+            "url": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 8192,
+              "pattern": "^(?:https?://[^\\s]{1,8184}|about:blank|chrome-error://[^\\s]{1,8176})$"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 4096
             },
             "cursor": {
               "type": "object",
