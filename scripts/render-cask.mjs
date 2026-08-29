@@ -1,37 +1,24 @@
 import fs from "node:fs";
-import path from "node:path";
 
-const dir = process.argv[2] ?? "dist-release";
-const manifests = fs
-  .readdirSync(dir)
-  .filter((file) => /^manifest-[a-z0-9-]+\.json$/.test(file))
-  .map((file) => JSON.parse(fs.readFileSync(path.join(dir, file), "utf8")));
+// the aggregate manifest publish-r2.sh uploads next to the tarballs
+const source = process.argv[2] ?? "https://terminal-browser.sh/install/latest.json";
+const manifest = source.startsWith("http")
+  ? await (await fetch(source)).json()
+  : JSON.parse(fs.readFileSync(source, "utf8"));
 
-const byPlatform = Object.fromEntries(manifests.map((m) => [m.platform, m]));
 const required = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"];
-const missing = required.filter((platform) => !byPlatform[platform]);
+const missing = required.filter((platform) => !manifest.platforms?.[platform]);
 if (missing.length) {
-  console.error(`missing manifests in ${dir} for: ${missing.join(", ")}`);
+  console.error(`missing manifests in ${source} for: ${missing.join(", ")}`);
+  process.exit(1);
+}
+if (manifest.channel !== "stable") {
+  console.error(`refusing to render a cask for the ${manifest.channel} channel`);
   process.exit(1);
 }
 
-const [first, ...rest] = manifests;
-for (const manifest of rest) {
-  if (manifest.version !== first.version || manifest.channel !== first.channel) {
-    console.error(
-      `manifest mismatch: ${manifest.platform} is ${manifest.channel}/${manifest.version}, ` +
-        `expected ${first.channel}/${first.version}`,
-    );
-    process.exit(1);
-  }
-}
-if (first.channel !== "stable") {
-  console.error(`refusing to render a cask for the ${first.channel} channel`);
-  process.exit(1);
-}
-
-const version = first.version.replace(/^v/, "");
-const sha = (platform) => byPlatform[platform].sha256;
+const version = manifest.version.replace(/^v/, "");
+const sha = (platform) => manifest.platforms[platform].sha256;
 
 process.stdout.write(`cask "terminal-browser" do
   arch arm: "arm64", intel: "x64"
@@ -46,7 +33,7 @@ process.stdout.write(`cask "terminal-browser" do
   url "https://terminal-browser.sh/install/dl/stable/v#{version}/terminal-browser-#{os}-#{arch}.tar.gz"
   name "terminal-browser"
   desc "Terminal-based web browser"
-  homepage "https://terminal-browser.sh"
+  homepage "https://terminal-browser.sh/"
 
   livecheck do
     url "https://terminal-browser.sh/install/latest.json"
