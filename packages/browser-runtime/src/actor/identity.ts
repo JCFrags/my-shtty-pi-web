@@ -13,12 +13,13 @@ export interface NavigationAuthorization {
 }
 
 export class DenyNavigationAuthorization implements NavigationAuthorization {
-  async authorize(): Promise<void> { throw new Error("Navigation authorization is not configured."); }
+  async authorize(actor: ActorIdentity, url: URL, signal: AbortSignal): Promise<void> { void actor; void url; void signal; throw new Error("Navigation authorization is not configured."); }
 }
 
 export class LoopbackFixtureAuthorization implements NavigationAuthorization {
   constructor(private readonly allowedOrigins: ReadonlySet<string>) {}
-  async authorize(_actor: ActorIdentity, url: URL): Promise<void> {
+  async authorize(actor: ActorIdentity, url: URL, signal: AbortSignal): Promise<void> {
+    void actor; void signal;
     if (!this.allowedOrigins.has(url.origin) || (url.hostname !== "127.0.0.1" && url.hostname !== "localhost")) {
       throw new Error("Navigation is outside the fixture allowlist.");
     }

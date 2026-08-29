@@ -3,6 +3,7 @@ import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "vitest";
+import { DenyNavigationAuthorization, LoopbackFixtureAuthorization } from "../src/actor/identity.js";
 import { BrowserArtifactStore } from "../src/artifacts/store.js";
 import { cleanupOrphanProfiles, validateExtraFlags } from "../src/chrome/host.js";
 import { OperationRegistry } from "../src/operations/registry.js";
@@ -14,6 +15,17 @@ const actor = { principalId: "owner:test", agentSessionId: "agent:test" } as con
 const other = { principalId: "owner:other", agentSessionId: "agent:other" } as const;
 function deadline(ms = 5_000): string { return new Date(Date.now() + ms).toISOString(); }
 function sleep(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+describe("navigation authority", () => {
+  it("fails closed by default and limits the live fixture authorizer to loopback", async () => {
+    const signal = new AbortController().signal;
+    await assert.rejects(() => new DenyNavigationAuthorization().authorize(actor, new URL("https://example.com"), signal), /not configured/i);
+    const fixture = new LoopbackFixtureAuthorization(new Set(["http://127.0.0.1:4321"]));
+    await fixture.authorize(actor, new URL("http://127.0.0.1:4321/page"), signal);
+    await assert.rejects(() => fixture.authorize(actor, new URL("http://localhost:4321/page"), signal), /allowlist/i);
+    await assert.rejects(() => fixture.authorize(actor, new URL("https://example.com"), signal), /allowlist/i);
+  });
+});
 
 describe("AgentCursor selective port", () => {
   it("generates deterministic seeded, sampled, non-teleporting paths", () => {
