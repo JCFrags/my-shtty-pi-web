@@ -4,6 +4,13 @@ This file preserves useful ideas from the earlier WebX platform plan. These item
 
 The first goal is a small and reliable Pi internet tool set: search, direct page reading, document conversion, browser control, a visible desktop workspace, and one simple installation path.
 
+## Deferred WP1 completion-audit follow-ups
+
+These small follow-ups do not block the accepted `web-core` release. A future agent that changes profiles, doctor output, or extraction benchmarks should settle them in the same change.
+
+- **Report every profile capability in doctor output.** `scripts/pi-web-doctor.mjs` currently reports explicit search, read, and browser states plus the installed profile. Add explicit documents and render states, including a clear unavailable or not-installed state for `web-core`. Protect the five independent search, read, documents, render, and browser states with doctor contract tests.
+- **Reconsider Scrapling only as a fetch-independent extractor.** WP1 originally listed Scrapling as a benchmark candidate. The M7 review rejected its broader scraping stack because it includes acquisition, TLS impersonation, proxy, session, anti-bot, and browser behavior that would duplicate WebX controls. Do not install that stack only to satisfy the old list. If a later Scrapling release exposes a bounded, fetch-independent main-content adapter with compatible licensing, run it against the immutable extraction corpus and the existing marker, boilerplate, structure, runtime, memory, disk, and process gates before considering adoption.
+
 ## Search and discovery
 
 - Search several public providers through a self-hosted search service.
