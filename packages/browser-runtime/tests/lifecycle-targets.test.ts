@@ -9,6 +9,7 @@ class FakeCdp extends EventEmitter {
   connected = true;
   blockAttach = false;
   abortOnMethod?: string;
+  failOnMethod?: string;
   controller?: AbortController;
 
   async send<T>(method: string, params: Readonly<Record<string, unknown>> = {}, _sessionId?: string, options: { signal?: AbortSignal; timeoutMs?: number; onDispatch?: () => void } = {}): Promise<T> {
@@ -16,6 +17,7 @@ class FakeCdp extends EventEmitter {
     options.onDispatch?.();
     this.calls.push({ method, params });
     if (this.abortOnMethod === method) this.controller?.abort(new BrowserProtocolError("OPERATION_CANCELLED", "cancelled"));
+    if (this.failOnMethod === method) throw new BrowserProtocolError("CDP_ERROR", `${method} failed`);
     options.signal?.throwIfAborted();
     if (method === "Target.getTargets") return { targetInfos: [] } as T;
     if (method === "Target.createTarget") return { targetId: "target_lifecycle01" } as T;
@@ -58,6 +60,17 @@ describe("lifecycle cancellation dispatch matrix", () => {
     await assert.rejects(() => creating);
     assert.equal(dispatched, true);
     assert.ok(cdp.calls.some((call) => call.method === "Target.closeTarget" && call.params.targetId === "target_lifecycle01"));
+    await targets.close();
+  });
+
+  it("publishes no tab or mapping when required domain enablement fails", async () => {
+    const cdp = new FakeCdp();
+    const targets = await registry(cdp);
+    cdp.failOnMethod = "Page.enable";
+    await assert.rejects(() => targets.createTab(), (error) => error instanceof BrowserProtocolError && error.code === "CDP_ERROR");
+    assert.deepEqual(targets.list(1), []);
+    assert.ok(cdp.calls.some((call) => call.method === "Target.detachFromTarget"));
+    assert.ok(cdp.calls.some((call) => call.method === "Target.closeTarget"));
     await targets.close();
   });
 

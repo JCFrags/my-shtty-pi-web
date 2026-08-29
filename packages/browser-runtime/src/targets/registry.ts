@@ -23,6 +23,10 @@ export class TargetRegistry extends EventEmitter {
   private readonly tabs = new Map<string, TabRecord>();
   private readonly targetToTab = new Map<string, string>();
   private readonly autoSessions = new Map<string, string>();
+  private readonly attachingTargets = new Set<string>();
+  private readonly destroyedDuringAttach = new Set<string>();
+  private readonly rolledBackTargets = new Set<string>();
+  private readonly maxTabs = 8;
   private closed = false;
 
   private constructor(readonly browserSessionId: string, private readonly host: ChromeHost) {
@@ -54,24 +58,30 @@ export class TargetRegistry extends EventEmitter {
 
   async createTab(url = "about:blank", options: { signal?: AbortSignal; markDispatched?: () => void } = {}): Promise<TabRecord> {
     this.assertOpen();
+    this.assertTabCapacity();
     options.signal?.throwIfAborted();
     const created = await this.host.cdp.send<{ targetId: string }>("Target.createTarget", { url }, undefined, { ...(options.signal ? { signal: options.signal } : {}), ...(options.markDispatched ? { onDispatch: options.markDispatched } : {}) });
-    let committed = false;
+    this.attachingTargets.add(created.targetId);
+    let cdpSessionId: string | undefined;
     try {
       options.signal?.throwIfAborted();
-      const cdpSessionId = await this.obtainSession(created.targetId, options.signal);
+      cdpSessionId = await this.obtainSession(created.targetId, options.signal);
       const tab: TabRecord = {
         browserSessionId: this.browserSessionId, tabId: opaqueId("tab"), targetId: created.targetId, cdpSessionId,
         documentGeneration: 1, viewportGeneration: 1, state: "open", latestFrameSequence: 0, url: pageUrl(url), title: "",
       };
-      this.tabs.set(tab.tabId, tab);
-      this.targetToTab.set(tab.targetId, tab.tabId);
       await this.enableTab(tab, options.signal);
       options.signal?.throwIfAborted();
-      committed = true;
+      if (this.destroyedDuringAttach.has(created.targetId)) throw new BrowserProtocolError("TARGET_CRASHED", "Browser target closed during registration.");
+      this.tabs.set(tab.tabId, tab);
+      this.targetToTab.set(tab.targetId, tab.tabId);
       return tab;
+    } catch (error) {
+      await this.rollbackTarget(created.targetId, cdpSessionId);
+      throw error;
     } finally {
-      if (!committed) await this.host.cdp.send("Target.closeTarget", { targetId: created.targetId }, undefined, { timeoutMs: 1_000 }).catch(() => undefined);
+      this.attachingTargets.delete(created.targetId);
+      this.destroyedDuringAttach.delete(created.targetId);
     }
   }
 
@@ -84,6 +94,16 @@ export class TargetRegistry extends EventEmitter {
   }
 
   getById(tabId: string): TabRecord | undefined { return this.tabs.get(tabId); }
+
+  async rollbackRegisteredTab(tab: TabRecord): Promise<void> {
+    if (this.tabs.get(tab.tabId) === tab) {
+      this.tabs.delete(tab.tabId);
+      this.targetToTab.delete(tab.targetId);
+      this.autoSessions.delete(tab.targetId);
+      this.markTerminal(tab, "closed");
+    }
+    await this.rollbackTarget(tab.targetId, tab.cdpSessionId);
+  }
 
   async focus(address: TabAddress, signal?: AbortSignal, markDispatched?: () => void): Promise<void> {
     const tab = this.resolve(address);
@@ -115,6 +135,7 @@ export class TargetRegistry extends EventEmitter {
     const existing = this.autoSessions.get(targetId);
     if (existing !== undefined) return existing;
     const attached = await this.host.cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true }, undefined, signal ? { signal } : {});
+    this.autoSessions.set(targetId, attached.sessionId);
     return attached.sessionId;
   }
 
@@ -125,18 +146,23 @@ export class TargetRegistry extends EventEmitter {
   }
 
   private async registerPopup(targetId: string, openerId: string, url: string): Promise<void> {
-    if (this.closed || this.targetToTab.has(targetId) || !this.targetToTab.has(openerId)) return;
+    if (this.closed || this.targetToTab.has(targetId) || this.attachingTargets.has(targetId) || !this.targetToTab.has(openerId)) return;
+    try { this.assertTabCapacity(); } catch { await this.rollbackTarget(targetId); return; }
+    this.attachingTargets.add(targetId);
+    let cdpSessionId: string | undefined;
     try {
-      const cdpSessionId = await this.obtainSession(targetId);
+      cdpSessionId = await this.obtainSession(targetId);
       const tab: TabRecord = {
         browserSessionId: this.browserSessionId, tabId: opaqueId("tab"), targetId, cdpSessionId,
         documentGeneration: 1, viewportGeneration: 1, state: "open", latestFrameSequence: 0, url: pageUrl(url), title: "",
       };
+      await this.enableTab(tab);
+      if (this.closed || this.destroyedDuringAttach.has(targetId) || !this.targetToTab.has(openerId)) throw new BrowserProtocolError("TARGET_CRASHED", "Popup closed during registration.");
       this.tabs.set(tab.tabId, tab);
       this.targetToTab.set(targetId, tab.tabId);
-      await this.enableTab(tab);
       this.emit("tabRegistered", tab);
-    } catch { /* Popup failed closed and remains unowned. */ }
+    } catch { await this.rollbackTarget(targetId, cdpSessionId); }
+    finally { this.attachingTargets.delete(targetId); this.destroyedDuringAttach.delete(targetId); }
   }
 
   private readonly onEvent = (event: CdpEvent): void => {
@@ -144,6 +170,7 @@ export class TargetRegistry extends EventEmitter {
       const sessionId = typeof event.params.sessionId === "string" ? event.params.sessionId : undefined;
       const targetInfo = isRecord(event.params.targetInfo) ? event.params.targetInfo : undefined;
       const targetId = targetInfo && typeof targetInfo.targetId === "string" ? targetInfo.targetId : undefined;
+      if (sessionId && targetId && this.rolledBackTargets.has(targetId)) { void this.host.cdp.send("Target.detachFromTarget", { sessionId }).catch(() => undefined); return; }
       if (sessionId && targetId) this.autoSessions.set(targetId, sessionId);
       return;
     }
@@ -154,8 +181,18 @@ export class TargetRegistry extends EventEmitter {
       }
       return;
     }
+    if (event.method === "Target.targetInfoChanged" && isRecord(event.params.targetInfo)) {
+      const info = event.params.targetInfo;
+      const targetId = typeof info.targetId === "string" ? info.targetId : undefined;
+      const tabId = targetId === undefined ? undefined : this.targetToTab.get(targetId);
+      const tab = tabId === undefined ? undefined : this.tabs.get(tabId);
+      if (tab !== undefined) { if (typeof info.url === "string") tab.url = info.url; if (typeof info.title === "string") tab.title = info.title; }
+      return;
+    }
     if (event.method === "Target.targetDestroyed" || event.method === "Target.targetCrashed") {
       const targetId = typeof event.params.targetId === "string" ? event.params.targetId : undefined;
+      if (targetId !== undefined && this.attachingTargets.has(targetId)) this.destroyedDuringAttach.add(targetId);
+      if (targetId !== undefined) this.rolledBackTargets.delete(targetId);
       const tabId = targetId ? this.targetToTab.get(targetId) : undefined;
       const tab = tabId ? this.tabs.get(tabId) : undefined;
       if (tab) this.markTerminal(tab, event.method === "Target.targetCrashed" ? "crashed" : "closed");
@@ -168,7 +205,8 @@ export class TargetRegistry extends EventEmitter {
       tab.documentGeneration++;
       if (typeof event.params.frame.id === "string") tab.topFrameId = event.params.frame.id;
       if (typeof event.params.frame.url === "string") tab.url = event.params.frame.url;
-    } else if (event.method === "Page.frameResized") tab.viewportGeneration++;
+    } else if (event.method === "Page.navigatedWithinDocument" && typeof event.params.url === "string") tab.url = event.params.url;
+    else if (event.method === "Page.frameResized") tab.viewportGeneration++;
     else if (event.method === "Inspector.targetCrashed") this.markTerminal(tab, "crashed");
   };
 
@@ -179,6 +217,20 @@ export class TargetRegistry extends EventEmitter {
     this.emit("tabTerminal", { tabId: tab.tabId, targetId: tab.targetId, state });
     this.targetToTab.delete(tab.targetId);
     this.autoSessions.delete(tab.targetId);
+  }
+
+  private assertTabCapacity(): void {
+    const open = [...this.tabs.values()].filter((tab) => tab.state === "open").length;
+    if (open + this.attachingTargets.size >= this.maxTabs) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Browser tab limit reached.", true);
+  }
+
+  private async rollbackTarget(targetId: string, cdpSessionId?: string): Promise<void> {
+    this.autoSessions.delete(targetId);
+    this.targetToTab.delete(targetId);
+    this.rolledBackTargets.add(targetId);
+    while (this.rolledBackTargets.size > 32) { const oldest = this.rolledBackTargets.values().next().value; if (typeof oldest !== "string") break; this.rolledBackTargets.delete(oldest); }
+    if (cdpSessionId !== undefined) await this.host.cdp.send("Target.detachFromTarget", { sessionId: cdpSessionId }, undefined, { timeoutMs: 1_000 }).catch(() => undefined);
+    await this.host.cdp.send("Target.closeTarget", { targetId }, undefined, { timeoutMs: 1_000 }).catch(() => undefined);
   }
 
   private async closeBootstrapTargets(): Promise<void> {

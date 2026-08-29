@@ -73,10 +73,17 @@ export class BrowserSession {
   async createTab(url?: string, signal = new AbortController().signal, markDispatched?: () => void): Promise<TabRecord> {
     this.assertOpen();
     const tab = await this.targets.createTab("about:blank", { signal, ...(markDispatched ? { markDispatched } : {}) });
-    this.bindTab(tab);
-    await this.motor.initializeTab(tab);
-    if (url !== undefined) await this.navigate(this.address(tab), url, signal);
-    return tab;
+    try {
+      this.bindTab(tab);
+      await this.motor.initializeTab(tab);
+      signal.throwIfAborted();
+      if (url !== undefined) await this.navigate(this.address(tab), url, signal);
+      signal.throwIfAborted();
+      return tab;
+    } catch (error) {
+      await this.targets.rollbackRegisteredTab(tab);
+      throw error;
+    }
   }
 
   listTabs(): TabDescriptor[] { return this.targets.list(this.controlEpoch); }
