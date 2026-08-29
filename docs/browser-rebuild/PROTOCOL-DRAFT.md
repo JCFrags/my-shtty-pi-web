@@ -1,399 +1,186 @@
-# Internal browser protocol draft
+# Internal browser protocol
 
-Status: Phase 0 draft. This is not the current public SDK contract.
+Status: Phase 1 executable internal contract. This is not the current public SDK contract.
 
-## Envelope and identity
+The authoritative source is `packages/browser-protocol/src/schema.ts`. The deterministic machine-readable artifact is `packages/browser-protocol/schema/browser-protocol.schema.json`. Conformance fixtures and parser tests are in `packages/browser-protocol/tests/`.
 
-All requests use a private same-user transport. Every operation on an existing tab, including reads, carries the full browser address. Pre-creation and list requests carry the most specific owner and browser-session scope that exists. The authority never fills a missing target from focus or recent state.
+## Framing and version
+
+`browserd` uses bounded newline-delimited JSON on an owner-only Unix socket. Every record has `protocolVersion: "browser.v1"`. Request and response objects reject unknown fields. IDs, strings, URLs, numbers, lists, screenshots, and frame sizes have explicit bounds.
+
+Mutation and observation requests contain:
 
 ```ts
-type BrowserAddress = {
-  ownerId: string;             // authenticated Pi agent owner
-  agentSessionId: string;      // Pi lifecycle session
-  browserSessionId: string;    // isolated Chrome host/session
-  tabId: string;               // stable authority ID
-  targetId: string;            // current CDP target ID
-  controlEpoch: number;        // increases at takeover/return/recovery
-};
-
-type BaseRequest<T> = {
+{
   protocolVersion: "browser.v1";
+  kind: string;
   requestId: string;
   operationId: string;
-  deadline: string;            // absolute RFC 3339 UTC time
-  body: T;
-};
+  deadline: string; // absolute RFC 3339 timestamp
+}
+```
 
-type ScopedRequest<T> = BaseRequest<T> & {
-  ownerId: string;
-  agentSessionId: string;
-};
+The parser rejects expired deadlines and deadlines too far in the future. URLs are bounded HTTP or HTTPS URLs. Error codes are a finite enum. Errors use sanitized messages and bounded primitive details.
 
-type BrowserSessionAddress = {
-  ownerId: string;
-  agentSessionId: string;
+## Connection binding
+
+The first client record is:
+
+```ts
+{
+  protocolVersion: "browser.v1";
+  kind: "bind";
+  requestId: string;
+  bindingSecret: string;
+  actor: {
+    principalId: string;
+    agentSessionId: string;
+  };
+}
+```
+
+The server validates the per-start secret and returns `kind: "bound"`. The connection can bind only once. An ordinary request has no principal or agent-session field. It cannot select or replace identity.
+
+The descriptor secret proves access to the same-user descriptor. The intended client is trusted `webxd`. It does not isolate hostile processes that already run as the same Unix user.
+
+## Addresses and generations
+
+A tab request uses:
+
+```ts
+type TabAddress = {
   browserSessionId: string;
+  tabId: string;
+  targetId: string;
   controlEpoch: number;
-};
-
-type BrowserSessionEnvelope<T> = BaseRequest<T> & {
-  address: BrowserSessionAddress;
-};
-
-type RequestEnvelope<T> = BaseRequest<T> & {
-  address: BrowserAddress;
 };
 
 type Generation = {
-  documentGeneration: number;  // increases on top-document replacement
-  viewportGeneration: number;  // increases on CSS viewport or DPR change
+  documentGeneration: number;
+  viewportGeneration: number;
 };
 ```
 
-Host-level and session-create requests omit only IDs that do not exist yet. They still carry authenticated `ownerId`, `agentSessionId`, `requestId`, `operationId`, and `deadline`. Browser-session requests also carry `browserSessionId` and `controlEpoch`. Any operation on an existing tab carries the full address.
+The server resolves the address under the connection-bound actor. It never fills an address from Chrome focus, OS focus, workspace selection, an active tab, or a recent request.
 
-## Capabilities
+Session create and list need no tab address. Session close, tab create, and tab list use `browserSessionId` plus `controlEpoch`. Operation status and cancel use only `targetOperationId` because their records survive tab and browser failure.
 
-Request:
+## Requests
 
-```json
-{"protocolVersion":"browser.v1","requestId":"req-cap-1","operationId":"op-cap-1","deadline":"2026-08-29T01:01:00.000Z","ownerId":"owner-1","agentSessionId":"pi-1","body":{"type":"capabilities.get"}}
-```
+The executable request union includes:
 
-Response:
+- `capabilities.get`
+- `session.create`, `session.close`, `session.list`
+- `tab.create`, `tab.list`, `tab.focus`, `tab.close`
+- `observe.screenshot`
+- `observe.domFallback`
+- `action.coordinate`
+- `action.domFallback`
+- `navigate`
+- `input.text`, `input.key`
+- `operation.status`, `operation.cancel`
+- `artifact.read`
+- `frames.subscribe`, `frames.unsubscribe`
 
-```json
-{
-  "type":"capabilities",
-  "protocolVersion":"browser.v1",
-  "browser":{"available":true,"headed":true,"screenshotFirst":true,"domFallback":true},
-  "executables":[{"path":"/usr/bin/chromium-browser","product":"Fedora Chromium","version":"151.0.7922.173"}],
-  "input":{"virtualMouse":true,"osMouse":false,"move":true,"click":true,"doubleClick":true,"drag":true,"wheel":true,"hover":true,"text":true,"key":true},
-  "screenshot":{"mediaTypes":["image/png"],"maxInlineBytes":1048576,"maxFps":2},
-  "limits":{"sessionsPerOwner":4,"tabsPerSession":8,"operationsPerTab":1},
-  "workspace":{"available":true,"takeover":true}
-}
-```
+A normal `session.create` transaction creates the Chrome host and first tab. There is no required public `host.start` step. Host state is an internal diagnostic.
 
-## Host lifecycle
+`frames.subscribe` accepts `interest: "idle" | "selected"`. Active pointer actions temporarily override either rate with a burst rate.
 
-```ts
-type HostStart = ScopedRequest<{
-  type: "host.start";
-  executableId?: string;
-}>;
+## Session and tab records
 
-type HostStop = ScopedRequest<{
-  type: "host.stop";
-  browserSessionId: string;
-  controlEpoch: number;
-  reason: "owner-close" | "shutdown" | "recovery";
-}>;
+A session descriptor contains its browser session ID, control epoch, state, persona ID, cursor state, and explicit tab descriptors. A tab descriptor contains its full address, URL, title, state, document generation, viewport generation, and latest frame sequence.
 
-type HostStatus = {
-  type: "host.status";
-  ownerId: string;
-  agentSessionId: string;
-  browserSessionId: string;
-  browserHostId: string;
-  controlEpoch: number;
-  state: "starting" | "ready" | "disconnected" | "exited" | "stopping";
-  processId?: number;
-  executable: string;
-  productVersion?: string;
-  cdpConnected: boolean;
-  profileKind: "isolated-disposable";
-  startedAt: string;
-  exit?: { code?: number; signal?: string; at: string };
-};
-```
-
-`host.start` creates one private profile and one headed Chrome process. It never accepts arbitrary Chrome flags through the protocol.
-
-## Browser session operations
-
-```ts
-type SessionCreate = ScopedRequest<{
-  type: "session.create";
-  initialUrl?: string;
-}>;
-
-type SessionClose = ScopedRequest<{
-  type: "session.close";
-  browserSessionId: string;
-  controlEpoch: number;
-}>;
-
-type SessionList = ScopedRequest<{
-  type: "session.list";
-}>;
-
-type SessionDescriptor = {
-  ownerId: string;
-  agentSessionId: string;
-  browserSessionId: string;
-  browserHostId: string;
-  controlEpoch: number;
-  controller: "agent" | "user" | "none";
-  state: "starting" | "ready" | "degraded" | "closed";
-  tabs: TabDescriptor[];
-};
-```
-
-A normal owner can list only its sessions. The workspace uses a separate user-authorized list scope and receives redacted data.
-
-## Tab operations
-
-```ts
-type TabCreate = BrowserSessionEnvelope<{ type: "tab.create"; url?: string }>;
-type TabList = BrowserSessionEnvelope<{ type: "tab.list" }>;
-type TabFocus = RequestEnvelope<{ type: "tab.focus" }>;
-type TabClose = RequestEnvelope<{ type: "tab.close" }>;
-
-type TabDescriptor = BrowserAddress & Generation & {
-  url: string;
-  title: string;
-  state: "attaching" | "ready" | "crashed" | "closed";
-  frameSequence: number;
-  cursor: { x: number; y: number; personaSeedId: string };
-};
-```
-
-`tab.create` and `tab.list` use the exact browser-session address because no tab target exists for creation and no single tab is authoritative for listing. The create response supplies the new full browser address, including tab and CDP target IDs. `tab.focus` changes Chrome presentation only. It does not set a default protocol target.
+Tab focus changes presentation only. It does not set request authority.
 
 ## Screenshot observation
 
-Request:
+`observe.screenshot` accepts the full address and `delivery: "inline" | "artifact" | "auto"`.
+
+Its result contains:
+
+- observation ID and exact address;
+- URL and title;
+- wall-clock and monotonic capture time;
+- CSS viewport, DPR, and scroll;
+- document and viewport generations;
+- increasing frame sequence;
+- PNG media type, byte length, and SHA-256;
+- bounded inline bytes or an owner-scoped artifact ID;
+- cursor position, visibility, path sequence, and persona ID;
+- validity timestamp.
+
+The observation record does not retain another full screenshot buffer. It retains bounded binding metadata and an artifact reference.
+
+## DOM fallback observation
+
+`observe.domFallback` is a separate request. It returns a bounded list of nodes. Each node can contain an opaque handle, role, accessible name, value, selected state fields, CSS viewport bounds, document generation, and a bounded locator description.
+
+A handle is bound to the exact actor, browser session, tab, target, and document generation. Navigation invalidates it. Same-document detach returns `HANDLE_STALE`. The runtime does not search a replacement document.
+
+## Actions
+
+`action.coordinate` cites an observation ID and one action:
+
+- move or hover;
+- left, right, or middle click;
+- double-click;
+- drag;
+- vertical or horizontal wheel.
+
+The server validates the observation before path replay. Immediately before mouse press, drag press, or wheel dispatch, it validates the control epoch, target, document generation, viewport generation, dimensions, DPR, scroll tolerance, deadline, cancellation, and coordinate bounds again. A change after movement settles as partially dispatched and does not send the irreversible event.
+
+`action.domFallback` cites a DOM observation and handle. It supports click, double-click, hover, type or fill, and key press. Pointer actions use the session motor. They do not call page `click()`.
+
+`navigate`, `input.text`, and `input.key` also use the exact tab address. Navigation requires the configured `NavigationAuthorization`. The production default denies it.
+
+## Operation records
+
+Status and cancellation are actor-scoped by operation ID:
 
 ```ts
-type ScreenshotObserve = RequestEnvelope<{
-  type: "observe.screenshot";
-  format?: "png";
-  delivery?: "inline" | "artifact" | "auto";
-}>;
+type OperationState =
+  | "queued"
+  | "running"
+  | "committed"
+  | "failed"
+  | "cancelled"
+  | "expired";
+
+type DispatchState =
+  | "not-dispatched"
+  | "partially-dispatched"
+  | "dispatched";
 ```
 
-Response:
+The status record has queue, start, and finish times, terminal result or sanitized error, and dispatch state. It may retain former session and tab IDs for internal correlation. The status request does not require a live tab address.
 
-```ts
-type ScreenshotObservation = BrowserAddress & Generation & {
-  type: "observation.screenshot";
-  observationId: string;
-  operationId: string;
-  url: string;
-  title: string;
-  capturedAt: string;
-  viewport: { width: number; height: number; devicePixelRatio: number };
-  scroll: { x: number; y: number };
-  frameSequence: number;
-  mediaType: "image/png";
-  byteLength: number;
-  sha256: string;
-  image: { kind: "inline"; base64: string } | { kind: "artifact"; artifactId: string };
-  cursor: { x: number; y: number; visible: boolean; pathSequence: number };
-  validUntil: string;
-};
-```
+Duplicate mutation operation IDs do not execute twice. Cancellation is idempotent. Queued cancellation prevents dispatch. Running cancellation stops unsent samples and tries to release held input. Cancellation after an irreversible event does not claim rollback. Late CDP results cannot change a terminal status.
 
-Frame sequence increases for every completed capture. Observation IDs are random and never reused. An observation is a binding record, not a durable locator.
+## Frame event
 
-## DOM or accessibility fallback
+A workspace frame event contains:
 
-```ts
-type DomObserve = RequestEnvelope<{
-  type: "observe.domFallback";
-  mode: "accessibility" | "interactive-dom";
-  maxNodes: number;
-}>;
+- exact full address;
+- document and viewport generations;
+- increasing frame sequence;
+- monotonic capture and publication times;
+- media type, artifact ID, and digest;
+- current session cursor state.
 
-type DomFallbackObservation = BrowserAddress & Generation & {
-  type: "observation.domFallback";
-  observationId: string;
-  operationId: string;
-  observedAt: string;
-  truncated: boolean;
-  nodes: Array<{
-    handle: string;            // documentGeneration + opaque node identity
-    role: string;
-    name: string;
-    value?: string;
-    state: Record<string, string | number | boolean>;
-    bounds?: { x: number; y: number; width: number; height: number };
-    locatorDescription: string;
-  }>;
-};
-```
+It does not contain an agent observation ID. A frame does not create a durable model observation. The server sends frame events on the same bound socket. Frame writes are droppable when the socket is slow.
 
-The runtime does not return this data with screenshot observation. A handle is valid only for the exact browser, tab, target, and document generation. Top-document replacement invalidates all handles. DOM mutation can also detach a handle before generation changes. The driver must detect detach and return `HANDLE_STALE`.
+## Artifact reads
 
-## Coordinate actions
+`artifact.read` supplies an artifact ID, byte offset, and bounded maximum byte count. It returns one base64 chunk with total size, digest, and end-of-file state. Authorization uses the connection-bound actor. A caller cannot choose a file path.
 
-```ts
-type CoordinateAction = RequestEnvelope<{
-  type: "action.coordinate";
-  observationId: string;
-  action:
-    | { kind: "move" | "hover"; x: number; y: number }
-    | { kind: "click" | "doubleClick"; x: number; y: number; button?: "left" | "middle" | "right" }
-    | { kind: "drag"; from: { x: number; y: number }; to: { x: number; y: number }; button?: "left" }
-    | { kind: "wheel"; x: number; y: number; deltaX: number; deltaY: number };
-}>;
-```
+## Responses and errors
 
-Validation order is deadline, authenticated owner, address registry, control epoch/controller, operation uniqueness, observation ownership, target, document generation, viewport generation, freshness, viewport/scale/scroll check, and coordinate bounds. There is no fallback to a current tab or another observation.
+A response has the request ID, optional operation ID, `ok`, and either a validated result or a sanitized error. Ownership failures do not reveal whether a foreign session, tab, target, observation, artifact, or operation exists.
 
-Action result:
+The error enum includes request, authentication, deadline, ownership, session, tab, target, epoch, observation, document, viewport, coordinate, handle, operation, browser, CDP, artifact, navigation, limit, and capability failures. Ordinary errors exclude profile paths, CDP endpoints, cookies, headers, storage, and page secrets.
 
-```json
-{
-  "type":"action.result",
-  "operationId":"op-42",
-  "state":"committed",
-  "address":{"ownerId":"owner-1","agentSessionId":"pi-1","browserSessionId":"bs-1","tabId":"tab-1","targetId":"target-A","controlEpoch":7},
-  "cursor":{"x":410,"y":260,"pathSequence":19},
-  "timing":{"intentionalPathMs":532,"pathWallMs":548,"completionAfterPathMs":172,"totalMs":720},
-  "completedAt":"2026-08-29T01:00:00.000Z"
-}
-```
+## Lifecycle behavior
 
-## Semantic fallback actions
+Target close, target crash, Chrome exit, and CDP disconnect settle affected operations and stop frame capture. Operation records remain queryable. The runtime never chooses another browser or tab as a fallback.
 
-```ts
-type SemanticAction = RequestEnvelope<{
-  type: "action.domFallback";
-  domObservationId: string;
-  handle: string;
-  action:
-    | { kind: "click" | "doubleClick" | "hover" }
-    | { kind: "type"; text: string; replace?: boolean }
-    | { kind: "press"; key: string };
-}>;
-```
-
-This operation is explicitly a fallback. The authority resolves the handle in the exact document. It must not rerun a broad locator against a replacement document after stale-handle failure.
-
-## Navigation and keyboard
-
-```ts
-type Navigation = RequestEnvelope<{
-  type: "navigate";
-  url: string;
-  waitUntil: "load" | "domContentLoaded";
-}>;
-
-type TextInput = RequestEnvelope<{
-  type: "input.text";
-  text: string;
-  replace?: boolean;
-}>;
-
-type KeyPress = RequestEnvelope<{
-  type: "input.key";
-  key: string;
-}>;
-```
-
-Navigation increments document generation when the top frame commits, clears observations and handles, restores the overlay, and emits lifecycle events. Text and key input address the explicit target and its current focused element. A coordinate or semantic focus action should precede text when focus matters.
-
-## Operation status and cancellation
-
-```ts
-type OperationStatusRequest = RequestEnvelope<{
-  type: "operation.status";
-  targetOperationId: string;
-}>;
-
-type OperationStatus = {
-  type: "operation.status";
-  operationId: string;
-  state: "queued" | "running" | "committed" | "failed" | "cancelled" | "expired";
-  queuedAt: string;
-  startedAt?: string;
-  finishedAt?: string;
-  dispatchState: "not-dispatched" | "partially-dispatched" | "dispatched";
-  error?: BrowserError;
-};
-
-type OperationCancel = RequestEnvelope<{
-  type: "operation.cancel";
-  targetOperationId: string;
-  cancellationId: string;
-}>;
-```
-
-Cancellation is idempotent. Before dispatch it prevents side effects. During a mouse path it stops unsent samples and releases a held button when CDP is connected. After a click or navigation command is dispatched, it suppresses later steps and results but cannot promise rollback. Status reports partial dispatch. Deadline expiry uses the same cancellation path.
-
-## Frame events
-
-```ts
-type FrameEvent = BrowserAddress & Generation & {
-  type: "frame.available";
-  observationId: string;
-  frameSequence: number;
-  capturedAt: string;
-  url: string;
-  title: string;
-  viewport: { width: number; height: number; devicePixelRatio: number };
-  scroll: { x: number; y: number };
-  mediaType: "image/png";
-  byteLength: number;
-  sha256: string;
-  artifactId: string;
-  cursor: { x: number; y: number; pathSequence: number };
-};
-```
-
-Subscriptions declare allowed owner/session IDs in the authenticated handshake. The server keeps only the latest pending frame per tab per consumer. A consumer can acknowledge a sequence. A slow consumer skips intermediate frames. URLs contain no control credentials.
-
-## Browser and tab lifecycle events
-
-```ts
-type LifecycleEvent =
-  | { type: "browser.starting" | "browser.ready"; ownerId: string; agentSessionId: string; browserSessionId: string; controlEpoch: number; at: string }
-  | { type: "browser.disconnected" | "browser.exited"; ownerId: string; agentSessionId: string; browserSessionId: string; controlEpoch: number; at: string; reason: string }
-  | { type: "tab.created" | "tab.attached" | "tab.closed" | "tab.crashed"; address: BrowserAddress; at: string; reason?: string }
-  | { type: "document.committed"; address: BrowserAddress; documentGeneration: number; url: string; at: string }
-  | { type: "viewport.changed"; address: BrowserAddress; viewportGeneration: number; viewport: { width: number; height: number; devicePixelRatio: number }; at: string }
-  | { type: "control.changed"; ownerId: string; agentSessionId: string; browserSessionId: string; oldEpoch: number; controlEpoch: number; controller: "agent" | "user" | "none"; at: string };
-```
-
-Events contain exact identity at event time. Consumers discard events that do not match their selected full address and current control epoch.
-
-## Errors
-
-```ts
-type BrowserError = {
-  type: "error";
-  operationId?: string;
-  code:
-    | "INVALID_REQUEST"
-    | "DEADLINE_EXCEEDED"
-    | "OWNER_MISMATCH"
-    | "SESSION_NOT_FOUND"
-    | "TAB_NOT_FOUND"
-    | "TARGET_MISMATCH"
-    | "CONTROL_EPOCH_STALE"
-    | "CONTROL_HELD_BY_USER"
-    | "OBSERVATION_NOT_FOUND"
-    | "OBSERVATION_STALE"
-    | "DOCUMENT_CHANGED"
-    | "VIEWPORT_CHANGED"
-    | "COORDINATE_OUT_OF_BOUNDS"
-    | "HANDLE_STALE"
-    | "OPERATION_CONFLICT"
-    | "OPERATION_CANCELLED"
-    | "BROWSER_START_FAILED"
-    | "BROWSER_EXITED"
-    | "CDP_DISCONNECTED"
-    | "TARGET_CRASHED"
-    | "CDP_ERROR"
-    | "ARTIFACT_FORBIDDEN"
-    | "CAPABILITY_UNAVAILABLE";
-  message: string;
-  retryable: boolean;
-  address?: Partial<BrowserAddress>;
-  details?: Record<string, string | number | boolean>;
-};
-```
-
-Errors do not include profile paths, CDP WebSocket URLs, raw page secrets, cookies, headers, or another owner’s IDs. An ownership failure must look the same whether the foreign target exists or not.
+Control-epoch increment cancels queued prior-epoch actions and stops running actions at the next cancellable boundary. An old action remains invalid after an agent-user-agent ABA sequence.

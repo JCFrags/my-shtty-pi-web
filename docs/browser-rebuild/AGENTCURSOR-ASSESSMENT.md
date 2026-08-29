@@ -6,9 +6,11 @@
 - Version: `0.3.0`
 - Pinned commit: `b23c633c66fd240f836f5edd1034f6fcf678e237`
 - License: MIT, copyright 2026 Deepanshu Kumar
-- Local attribution and license: `spikes/screenshot-first-browser/third_party/agentcursor/`
+- Phase 0 attribution and license: `spikes/screenshot-first-browser/third_party/agentcursor/`
+- Phase 1 production attribution: `packages/browser-runtime/third_party/agentcursor/`
+- Phase 1 port: `packages/browser-runtime/src/vendor/agentcursor/`
 
-The Phase 0 spike selectively ports source from `src/path-engine/*` and `src/persona/*`. Imports and the reduced local protocol types were adapted for this repository. No AgentCursor package is installed. No AgentCursor MCP or extension code runs.
+The production runtime selectively ports source from `src/path-engine/*` and `src/persona/*`. Imports and reduced local protocol types were adapted for this repository. `UPSTREAM.md` records exact source paths and changes. No AgentCursor package is installed. No AgentCursor MCP or extension code runs.
 
 ## Reusable parts
 
@@ -79,7 +81,7 @@ The product needs an isolated Chrome host created by our runtime. Raw CDP alread
 - Stock `ActionService` needs adaptation rather than blind import.
 - We must maintain tests against Chrome changes.
 
-**Phase 0 evidence:** two headed Chromium processes used separate profiles and endpoints. A custom CDP driver performed concurrent sampled cursor paths, visible overlay updates, clicks, typing, screenshots, navigation, keys, wheel, drag support, and explicit accessibility fallback. Cross-session target use was rejected. No warm action launched a process.
+**Phase 0 and Phase 1 evidence:** two headed Chromium processes used separate profiles and endpoints. A custom CDP driver performed concurrent sampled cursor paths, visible overlay updates, clicks, typing, screenshots, navigation, keys, wheel, drag support, and explicit accessibility fallback. Cross-session target use was rejected. No warm action launched a process.
 
 **Decision:** preferred.
 

@@ -19,29 +19,31 @@ Scale: impact and likelihood are low, medium, or high before mitigation.
 | Cross-agent action or frame leakage | Critical | Low–medium | Validate full owner/session/browser/tab/target lineage and control epoch for every operation and frame read. Use constant-shape ownership errors. Partition artifacts and subscriptions. Test wrong values at every address field and valid foreign IDs. Phase 0 proves target rejection; production must also protect frame and artifact reads. |
 | Workspace selection becomes authority | High | Medium | Keep selected session only in workspace view state. All control calls still carry full identity and pass authority checks. Switching never changes controller. Test rapid switch while frames and actions arrive. |
 | Screenshot bandwidth or queues grow without bound | High | High | Default to about 2 fps selected/recent and a lower idle rate. Allow one pending capture per tab. Keep only the latest pending frame per consumer. Bound inline size and artifact retention. Measure encoding time, bytes per second, dropped frames, CPU, and memory. |
-| Two Chrome processes use too much memory | High | High | Phase 0 measured about 3.25 GiB across runtime and both process trees. Repeat on a clean machine for longer periods, separate private/shared RSS, tune background features only through reviewed safe flags, reduce idle frame rate, and set a documented session limit. Do not merge agent profiles to save memory. |
+| Two Chrome processes use too much memory | High | High | Phase 0 summed RSS and can double-count shared pages. The Phase 1 30-minute soak measured 870,667–901,214 KiB PSS for browserd plus both Chrome trees and a positive `+33,139 KiB/hour` full-run regression. Use 1.0 GiB only as a Phase 2 development budget. Run a longer real-task soak before a service limit. Do not merge agent profiles to save memory. |
 | User takeover races with an agent action | High | Medium | Increment control epoch at takeover and return. Cancel queued old-epoch actions. Stop unsent path samples. Report already-dispatched effects. Reject all old-epoch results. Test the agent-user-agent ABA sequence and takeover during drag. |
 | User assumes the page cursor is the Linux OS cursor | Medium | Medium | Label it “virtual mouse.” Keep it visible in screenshots and workspace. State that CDP events are not OS-level trusted input. Put optional Linux OS control in a later explicit phase. |
 | AgentCursor upstream change breaks behavior or licensing | Medium | Low | Selectively vendor one exact MIT commit with license, source list, and local changes. Do not use a floating dependency. Review and test any update manually. |
 | AgentCursor extension becomes required unexpectedly | Medium | Low | Phase 0 covers required capabilities without it. Add an extension only after a fixture demonstrates a named CDP gap. Review permissions, target authority, packaging, and Chrome extension policy before adoption. Never use active-tab fallback. |
-| Local authority or viewer transport permits unauthorized reads/control | Critical | Medium | Production uses owner-only Unix socket or authenticated local IPC. Verify peer/user where possible. Keep tokens out of URLs and logs. Authorize frame reads and control separately. Rotate transport credentials on restart. Test another local user, wrong owner, stale token, and path permissions. The unauthenticated loopback spike viewer is not production code. |
+| Local service transport permits unauthorized reads or control | Critical | Medium | Phase 1 uses a `0700` runtime directory, `0600` descriptor and socket, a random per-start secret, one-time connection binding, bounded frames, and actor-scoped objects. The descriptor secret proves same-user access but is not actor-specific proof. The intended caller is trusted `webxd`. Add actor-specific attestation before any deployment in which same-user processes are not trusted. Keep secrets out of URLs and logs. |
 | Unsafe Chrome flags enter configuration | Critical | Low–medium | Configuration chooses an executable and reviewed options, not arbitrary flags. Validate an allowlist. Reject `--no-sandbox`, broad web-security/site-isolation disablement, certificate bypass, and normal-profile paths. Test the effective process command line. |
 | Page secrets leak through diagnostics or artifacts | High | Medium | Bound outputs. Do not log cookies, storage, headers, profile paths, raw CDP endpoints, or screenshot bodies. Owner-scope artifacts, store hashes, use short retention, and keep directories private. Browser debugging remains explicit. |
-| Cancellation claims rollback after side effects | High | Medium | Track dispatch state. Cancel queued work fully. Stop future steps in running work. Return `cancelled_after_dispatch` when CDP already received an effectful command. Never claim click or navigation rollback. |
+| Cancellation claims rollback after side effects | High | Medium | Track operation state separately from `not-dispatched`, `partially-dispatched`, or `dispatched`. Cancel queued work fully. Stop future path samples and release held input when possible. Never claim click or navigation rollback. |
 | Fedora packaging cannot inherit a graphical session | High | Medium | Use a user service or desktop activation with documented environment import. Doctor checks display variables and bus access. Test login, reboot, lock screen, remote shell, and no-display cases. Keep search/read services independent. |
 | Fedora Chromium differs from Google Chrome | Medium | Medium | Prefer Chrome and make executable configurable. Report exact product/version. Run deterministic gates on both. Document codec, enterprise policy, release, wrapper, and user-agent differences. Avoid extension dependence. |
 | Tauri embeds remote content and expands the trust boundary | High | Low | Bundle local UI only. Display screenshots as image data. Apply a strict content security policy. Reject remote navigation. All page interaction remains in the separate Chrome process. |
 | Cleanup deletes the wrong directory | Critical | Low | Create profiles only under a dedicated private root. Store random ownership metadata and canonical path. Refuse cleanup outside that root or without matching metadata. Stop process first. Test symlinks and path traversal. Phase 0 uses `mkdtemp` and tracks only returned paths. |
 
-## Phase 1 blocking risks
+## Residual risks after Phase 1
 
-Before production routing, Phase 1 must close these specific gaps:
+Phase 1 closes the runtime foundation but does not make the new path model-facing. These items remain gates before production routing:
 
-1. Authenticate and authorize workspace frame subscriptions.
-2. Enforce every identity field, control epoch, deadline, and operation ID.
-3. Add cancellation for queued and partially dispatched actions.
-4. Validate runtime directory, socket, profile, endpoint, and launch flags.
-5. Test Chrome and daemon crash behavior.
-6. Establish reviewed CPU, memory, frame-rate, and artifact limits.
+1. Add actor-specific `webxd` attestation. The shared same-user descriptor secret is not enough when same-user processes are outside the trust boundary.
+2. Add the production Tauri frame bridge and human takeover. Keep workspace selection separate from authority.
+3. Test Google Chrome when it is installed. Phase 1 evidence on this host covers Fedora Chromium only.
+4. Test native Wayland, fractional scale, multiple monitors, fullscreen, PDF, top-layer dialog, and aggressive overlay mutation cases.
+5. Expand deterministic cancellation coverage for drag release, navigation dispatch, and CDP disconnect at each boundary.
+6. Set reviewed production session, CPU, PSS, frame-rate, artifact, and operation budgets from the Phase 1 soak and later real-task measurements.
+7. Prove that `webxd` search and read remain healthy when the separate daemon is killed after the Phase 2 integration exists.
+8. Add final package, systemd user service, graphical-session, upgrade, and rollback tests.
 
-The Phase 0 read-only viewer is deliberately not a security reference. Its only purpose is to prove the frame/session model.
+The Phase 0 viewer is not a security reference. Phase 1 transport tests cover only the private daemon boundary.

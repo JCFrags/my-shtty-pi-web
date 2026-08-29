@@ -22,6 +22,9 @@ These paths already form useful non-browser or boundary code. They need normal p
 - `apps/webxd/test/local-json-client.test.ts`
 - `apps/webxd/test/passage-selector.test.ts`
 - `packages/artifacts/`
+- `packages/browser-protocol/`: Phase 1 executable internal contract.
+- `packages/browser-runtime/`: Phase 1 Chrome lifecycle, CDP, target, motor, observation, frame, artifact, and operation core.
+- `apps/browserd/`: Phase 1 separate actor-bound Node daemon.
 - `packages/policy/`
 - `packages/test-fixtures/`
 - `components/browser/services/reader/`
@@ -41,10 +44,10 @@ These paths own the right product boundary or UI concept. Their browser portions
 - `apps/pi-webx/src/schemas.ts`: replace browser schemas. Keep search/read schemas.
 - `apps/pi-webx/skills/webx/SKILL.md`: change browser flow from semantic-first to screenshot-first.
 - `apps/pi-webx/README.md`: update browser contract.
-- `apps/webxd/src/authority.ts`: retain one local authority concept. Move browser authority to the persistent TypeScript runtime.
-- `apps/webxd/src/runtime.ts`: integrate browser runtime health without tying search/read health to Chrome.
-- `apps/webxd/src/main.ts`, `apps/webxd/src/index.ts`, and matching tests: expose the new internal protocol.
-- `apps/webxd/src/browser-daemon-port.ts`: replace the Rust daemon adapter with direct runtime ownership or a small in-process module boundary.
+- `apps/webxd/src/authority.ts`: retain public URL and service authority. Add trusted navigation attestation for the separate browser daemon.
+- `apps/webxd/src/runtime.ts`: monitor a separate `browserd` service without tying search/read health to Chrome.
+- `apps/webxd/src/main.ts`, `apps/webxd/src/index.ts`, and matching tests: connect to the new internal protocol without importing the full browser runtime.
+- `apps/webxd/src/browser-daemon-port.ts`: replace the Rust daemon adapter with one narrow actor-bound Unix client for `apps/browserd`.
 - `packages/sdk/src/client.ts`, `packages/sdk/src/facade.ts`, `packages/sdk/src/types.ts`, and SDK tests: retain the canonical client. Replace browser request and event types.
 - `components/browser/apps/workspace/`: retain a Tauri desktop workspace, but rewrite its model and viewport to render explicit screenshot frames. Keep Tauri as a shell only.
 - `components/browser/fixtures/`: retain useful fixture ideas. Move browser-runtime fixtures to a TypeScript-owned test package and make screenshot/cursor assertions deterministic.
@@ -105,7 +108,8 @@ Do not move or rewrite these because of this project:
 ```text
 apps/
   pi-webx/                    # native Pi extension
-  webxd/                      # search/read authority and runtime composition
+  webxd/                      # search/read and public navigation authority
+  browserd/                   # separate persistent browser service
   browser-workspace/          # Tauri shell + local frame UI
 packages/
   sdk/                        # canonical client and public types
@@ -124,8 +128,8 @@ install/
 spikes/screenshot-first-browser/  # retained until production parity, then archived or removed
 ```
 
-`webxd` can import `browser-runtime` in-process at first. Split it into another Node service only if crash containment or packaging measurements justify the extra process. Do not create a Rust daemon, MCP server, CLI adapter, extension bridge, or alternate browser backend by default.
+`browserd` remains a separate Node process. `webxd` uses its private actor-bound Unix protocol and must not import the full browser runtime. Browser and CDP failures must not disable healthy search, read, cache, or content services. Do not create another Rust daemon, MCP server, CLI adapter, extension bridge, or alternate browser backend by default.
 
 ## Deletion gate
 
-Delete old production browser code only when the new runtime passes explicit ownership, two-browser concurrency, screenshot observation, pointer overlay, DOM fallback, cancellation, takeover, crash cleanup, workspace switching, Fedora install, and native Pi end-to-end tests. Make one focused deletion commit. The rollback is the prior commit and service selection, not permanent parallel stacks.
+Phase 1 enables no production deletion or rerouting. Delete old production browser code only after later phases pass explicit ownership, two-browser concurrency, screenshot observation, pointer overlay, DOM fallback, cancellation, takeover, crash cleanup, workspace switching, Fedora install, and native Pi end-to-end tests. Make one focused deletion commit. The rollback is the prior commit and service selection, not permanent parallel stacks.

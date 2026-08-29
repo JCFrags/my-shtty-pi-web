@@ -4,26 +4,34 @@
 
 | ID | Criterion | Acceptance test |
 |---|---|---|
-| BR-01 | Each active Pi agent can own an isolated browser session. | Create two agent owners. Confirm each receives a different browser host ID, process ID, profile directory, debugging endpoint, session ID, and target ID. |
+| BR-01 | Each active Pi agent can own an isolated browser session. | Bind two connections to different principal and Pi agent-session pairs. Confirm each gets a different process, temporary profile, CDP endpoint, browser session, and target. |
 | BR-02 | Agents can act concurrently without cross-session effects. | Run interleaved and concurrent clicks and typing. Confirm each fixture state contains only its owner’s values. Reject a valid target used with the wrong owner. |
 | BR-03 | A desktop workspace can list and switch between agent sessions. | The workspace lists both owners, selects either explicit session, shows its latest frame and status, and does not change control ownership when selection changes. |
 | BR-04 | Perception is screenshot-first. | The primary observe result contains an image and frame metadata. DOM or accessibility data appears only after an explicit fallback request. |
-| BR-05 | Every visual observation has binding metadata. | Return an observation ID, owner, browser session, tab/target, URL, title, capture time, CSS viewport, device-pixel ratio, scroll offset, media type, bytes or controlled artifact, SHA-256, document generation, viewport generation, and increasing frame sequence. |
-| BR-06 | Coordinate input is observation-bound. | Reject a coordinate action when its observation is missing, too old, owned by another session, for another target, from another document or viewport generation, at a changed scale/scroll position, or outside the viewport. |
-| BR-07 | The virtual mouse behaves as one persistent person per session. | Preserve position and one seeded persona across move, hover, click, double-click, drag, and wheel actions. Record multiple timed path samples. Do not teleport. |
+| BR-05 | Every agent visual observation has binding metadata. | Return an observation ID, connection-bound actor, browser session, tab/target, URL, title, wall and monotonic capture time, CSS viewport, device-pixel ratio, scroll offset, media type, bounded inline bytes or controlled artifact, SHA-256, document generation, viewport generation, and increasing frame sequence. Do not retain a duplicate full image in metadata. |
+| BR-06 | Coordinate input is observation-bound and revalidated. | Reject a coordinate action when its observation is missing, too old, foreign, for another target, from another document or viewport generation, at a changed scale or scroll position, or outside the viewport. Repeat these checks immediately before press, drag press, or wheel dispatch. |
+| BR-07 | The virtual mouse behaves as one persistent person per browser session. | Preserve one position, persona, path sequence, and input lane across tabs in the same browser session. Serialize cross-tab pointer work in that session. Let different browser sessions act concurrently. Do not teleport. |
 | BR-08 | The virtual mouse is visible. | Inject a pointer-events-none overlay. Confirm it appears in captured screenshots and moves along the input path. |
-| BR-09 | Keyboard and browser controls use explicit targets. | Support text input, key press, navigation, screenshot, tab create/list/focus/close, and cancellation with an explicit owner, browser session, and tab/target. |
-| BR-10 | The browser is real and headed. | Launch supported Google Chrome or Chromium without headless mode. Use one private isolated profile and one Chrome process per agent session. Never use the normal user profile. |
+| BR-09 | Keyboard and browser controls use explicit targets. | Support text input, key press, navigation, screenshot, tab create/list/focus/close, and cancellation under the connection-bound actor with an explicit browser session and tab/target. |
+| BR-10 | The browser is real and headed. | Launch supported Google Chrome or Chromium without headless mode. Use one private isolated profile and one Chrome process per browser session. Never use the normal user profile. |
 | BR-11 | The runtime is persistent. | After session creation, execute warm observations and actions without starting Node, MCP, CLI, or browser processes. |
 | BR-12 | The Pi interface is native. | Register browser tools from `apps/pi-webx` and call the local authority through the SDK. Do not add MCP to the request path. |
 | BR-13 | Identity is explicit. | No browser operation can resolve authority from the active OS window, active Chrome tab, workspace selection, or last caller. |
 | BR-14 | DOM fallback is bounded and document-scoped. | An explicit fallback returns role, accessible name, value/state, bounds when available, and a generation-scoped handle or locator description. Navigation makes old handles stale. |
 | BR-15 | The workspace is a viewer, not a remote web embed. | Tauri renders local application UI and screenshot frames. It does not embed arbitrary remote websites. No control token appears in a URL. |
-| BR-16 | Lifecycle failure is visible and contained. | Detect Chrome startup failure, browser exit, CDP disconnect, target close, and navigation replacement. Stop affected operations. Do not fall back to another agent’s browser. |
+| BR-16 | Lifecycle failure is visible and contained. | Detect Chrome startup failure, browser exit, CDP disconnect, target close, and target crash. Stop affected work without fallback. Keep actor-scoped operation status and cancel available after the tab or browser fails. |
 | BR-17 | Cleanup is reliable. | Normal close, cancellation, process exit, and failed startup close Chrome, disconnect CDP, and remove only the owned temporary profile. |
-| BR-18 | Security controls remain enabled. | Keep the Chrome sandbox, web security, certificate validation, and site isolation enabled. Bind CDP to loopback and protect the production authority with same-user local transport. |
+| BR-18 | Security controls remain enabled. | Keep the Chrome sandbox, web security, certificate validation, and site isolation enabled. Use a separate `browserd` Unix service with a `0700` runtime directory, `0600` descriptor and socket, a per-start secret, one-time connection binding, and bounded frames. |
 | BR-19 | Deployment is configurable and diagnosed. | Prefer Google Chrome when installed. Permit a configured Chromium executable. Report executable and version. Fedora installation checks display session, binary, writable private directories, and runtime socket permissions. |
-| BR-20 | Performance is measured. | Report startup, warm screenshot, warm CDP round trip, intentional path duration, post-path click completion, frame update latency, CPU, and memory for two browsers at the chosen frame rate. |
+| BR-20 | Performance is measured. | Run a genuine 30-minute two-browser soak. Report startup, screenshot, CDP round trip, path, frame publication, event-loop, CPU, process count, profile disk, artifact and operation bounds, and memory slopes. Use Linux process-tree PSS as the primary memory metric. |
+| BR-21 | Actor identity is connection-bound. | Bind once with the protocol version and per-start secret. Reject rebind. Confirm ordinary request schemas have no principal or agent-session selector and foreign ownership returns the same not-found shape. |
+| BR-22 | Agent observations and workspace frames are separate bounded products. | Create observations only on explicit requests. Run idle, selected, and active-burst frame scheduling with one capture in flight and latest-frame backpressure. Confirm frames do not create observation records. |
+| BR-23 | Production navigation fails closed. | Start the runtime without `NavigationAuthorization` and reject navigation. Permit only deterministic loopback fixture URLs in live tests. |
+| BR-24 | Browser failures cannot disable search and read. | Run `browserd` as a separate process from `webxd`. Kill Chrome and `browserd` while independent search/read service tests remain healthy. |
+
+## Phase 1 delivery boundary
+
+Phase 1 implements BR-01, BR-02, BR-04 through BR-11, BR-13, BR-14, BR-16 through BR-23 in the parallel runtime. It does not connect the native Pi tools, `webxd`, or Tauri workspace to that runtime. BR-03, BR-12, BR-15, and the full service-containment part of BR-24 remain later cutover gates.
 
 ## Required pointer operations
 

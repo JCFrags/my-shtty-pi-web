@@ -2,178 +2,170 @@
 
 ## Recommendation
 
-Use TypeScript for the Pi extension, SDK, browser authority, browser runtime, CDP driver, and local workspace protocol. Keep Tauri only as a thin desktop shell around a local React viewer. Do not keep Rust in the browser control path unless packaging evidence later shows a concrete need. A single language makes ownership types, protocol validation, cancellation, target mapping, and tests easier to review.
+Use TypeScript for the Pi extension, web authority, browser protocol, browser runtime, and CDP driver. Keep browser control in a separate long-lived Node service named `browserd`. Keep Tauri as a local screenshot workspace. Do not put Chrome lifecycle or CDP state inside `webxd`.
 
-Keep three long-lived process boundaries:
-
-1. **Pi process with native extension**: agent-facing tools and user commands only.
-2. **Web authority plus browser runtime**: a same-user Node service. It owns policy, sessions, operations, CDP connections, frames, and artifacts. It launches Chrome only at session create.
-3. **One headed Chrome host per agent browser session**: one isolated profile and one loopback debugging endpoint.
-
-The Tauri workspace is a fourth optional process. It is a viewer and user-control client. It never becomes browser authority. Search, direct reading, document conversion, and their services stay outside the browser host lifecycle.
-
-## Clean-slate component view
+The intended process boundary is:
 
 ```mermaid
 flowchart LR
   Agent[Pi agent] -->|native Pi tools| Ext[apps/pi-webx]
-  Ext -->|same-user Unix socket\nowner context + request| Authority[Node Web authority]
-  Authority --> Search[search/read path]
-  Authority --> Runtime[persistent browser runtime]
-  Runtime --> Registry[owner/session/target registry]
-  Runtime --> Ops[operation queue + cancellation]
-  Runtime --> Frames[frame and artifact pipeline]
-  Runtime -->|CDP WebSocket A| ChromeA[headed Chrome A\nprivate profile A]
-  Runtime -->|CDP WebSocket B| ChromeB[headed Chrome B\nprivate profile B]
-  Workspace[Tauri local workspace] -->|authenticated local IPC| Authority
-  Frames --> Workspace
+  Ext --> Webxd[webxd\nsearch, read, URL authority]
+  Webxd -->|private actor-bound Unix socket| Browserd[browserd\noperations and browser runtime]
+  Browserd -->|explicit browser CDP| ChromeA[headed Chrome A\ntemporary profile A]
+  Browserd -->|explicit browser CDP| ChromeB[headed Chrome B\ntemporary profile B]
+  Browserd --> Artifacts[owner-scoped artifacts]
+  Workspace[Tauri local workspace] -->|future authenticated frame bridge| Browserd
+  Artifacts --> Workspace
 ```
 
-## General search and read path
+Phase 1 adds `packages/browser-protocol`, `packages/browser-runtime`, and `apps/browserd` in parallel with the current production stack. It does not connect `webxd`, the Pi tools, or the current workspace to the new runtime.
 
-`web_search`, `web_read`, `web_read_batch`, and `web_content` remain the default internet path. The Pi extension asks the authority for these operations without starting Chrome. Browser creation occurs only for dynamic rendering, interaction, or a visual check that the read path cannot supply. Browser failure must not disable healthy search and read capabilities.
+## Process responsibilities
 
-## Browser authority boundary
+### Pi native extension
 
-The Node authority is the only component allowed to:
+The extension supplies model-facing tools. It uses `webxd` as the policy boundary. It will not connect directly to CDP or select an active tab.
 
-- create or close a browser session;
-- allocate a profile and debugging endpoint;
-- map an agent owner to a browser host and target;
-- accept an operation, change its state, or cancel it;
-- issue CDP commands;
-- publish a frame or browser artifact;
-- grant or revoke user control.
+### webxd
 
-The workspace selection, Chrome focus, OS focus, and CDP’s current target are presentation state. They never grant authority. The authority validates `ownerId`, `agentSessionId`, `browserSessionId`, `tabId`, `targetId`, `controlEpoch`, `operationId`, and `deadline` before dispatch.
+`webxd` remains healthy when Chrome or `browserd` fails. It owns public navigation policy and attestation. It also owns search, direct read, cache, content, and destination policy. In a later phase, it will authenticate to `browserd` and bind each connection to one principal and Pi agent session.
 
-Production transport uses a private Unix socket in a `0700` runtime directory. The socket is `0600` or owner-only by directory policy. The daemon derives the peer user where the platform supports it. A random bearer value can protect an HTTP bridge used by Tauri, but it belongs in an authorization header or IPC handshake, never a URL. Raw CDP ports bind to `127.0.0.1` and are not exposed to extension or workspace clients.
+### browserd
 
-## Persistent browser runtime and Chrome hosts
+`browserd` is a separate persistent Node process. It owns:
 
-Session creation performs one lifecycle transaction:
+- the private Unix socket and per-start descriptor;
+- connection-bound actor identity;
+- browser session, tab, and target registries;
+- one Chrome host and temporary profile per browser session;
+- one browser-level CDP connection per Chrome host;
+- operation lanes, deadlines, cancellation, and control epochs;
+- virtual-mouse motors;
+- screenshot observations, workspace frames, DOM handles, and artifacts;
+- failure settlement and deterministic cleanup.
 
-1. Reserve IDs and a control epoch.
-2. Create a private profile directory.
-3. Launch the configured headed Chrome executable with that profile and `--remote-debugging-address=127.0.0.1 --remote-debugging-port=0`.
-4. Read `DevToolsActivePort` from that profile.
-5. Connect one persistent browser-level CDP WebSocket.
-6. create or discover an explicit page target;
-7. attach with a flattened CDP target session;
-8. install lifecycle listeners and the cursor preload script;
-9. publish `session.ready` only after a screenshot succeeds.
+A browser or CDP failure cannot crash healthy `webxd` search and read work.
 
-Chrome’s sandbox, web security, site isolation, and certificate checks remain at defaults. A launch-policy module owns an allowlist of flags. It rejects unsafe configured flags. The executable and effective command line appear in diagnostics without secrets.
+### Chrome host
 
-Each simulated agent session gets one dedicated Chrome browser process for the initial release. Multiple tabs can live in that process. A `BrowserHost` owns the child process, profile, endpoint, browser CDP connection, and exit state. A `TabTarget` owns target ID, flattened CDP session ID, top-frame ID, document generation, viewport generation, and cursor overlay state.
+Each browser session gets one headed Chrome or Chromium process. Each process gets a new private `0700` profile. `DevToolsActivePort` supplies a race-free loopback endpoint. The runtime keeps one browser-level CDP WebSocket and attaches each page through an explicit flattened CDP session.
 
-## Explicit target registry
+The runtime does not accept a profile path or arbitrary Chrome flags from a request. It rejects flags that disable the sandbox, web security, certificate checking, or site isolation.
+
+### Tauri workspace
+
+The future Tauri workspace renders local UI and screenshot bytes only. It must not embed arbitrary remote sites. Workspace selection is presentation state. It does not grant browser authority or create an implicit active tab.
+
+## Actor and authority model
+
+A new socket connection first supplies the per-start binding secret and one actor identity:
 
 ```text
-OwnerRecord
-  ownerId
+ActorIdentity
+  principalId
   agentSessionId
-    BrowserSessionRecord
-      browserSessionId
-      browserHostId -> process/profile/CDP
-      controlEpoch
-      controller = agent | user | none
-        TabRecord
-          tabId
-          targetId
-          cdpSessionId
-          topFrameId
-          documentGeneration
-          viewportGeneration
-          latestFrameSequence
 ```
 
-A lookup uses the full address. It verifies every parent-child relation. A target ID from browser A cannot pass lookup under browser B even if the caller has a valid owner ID. Tab focus is an explicit operation for user presentation or site behavior. It is never implicit target selection.
+The connection binds once. It cannot bind again. Ordinary requests contain no principal or agent-session fields. They cannot replace the actor identity. Browser session lookup compares the bound actor to the session owner. Ownership failures use a not-found result and do not reveal whether another actor's object exists.
 
-## Screenshot and frame pipeline
+The Phase 1 binding secret authenticates access to the owner-only descriptor. `webxd` is the intended trusted caller. The same-user boundary does not defend against a process that already runs as the same Unix user and can read that descriptor. A future multi-principal deployment must add an actor-specific attestation rather than treating the shared descriptor secret as actor proof.
 
-The runtime captures screenshots on a bounded schedule independent of actions. Default production policy should start at 2 frames per second for selected or recently active sessions and reduce to a low idle rate for unselected sessions. Only one screenshot capture can be pending per tab. A slow consumer receives the latest complete frame, not an unbounded queue.
+All tab work uses this full address:
 
-A frame record contains:
-
-- owner, browser session, tab, target, and control epoch;
-- observation ID and operation correlation when applicable;
-- document and viewport generations;
-- monotonically increasing frame sequence;
-- URL, title, timestamp, CSS viewport, device-pixel ratio, and scroll offset;
-- media type, byte length, and SHA-256;
-- an inline bounded image or an owner-scoped artifact ID.
-
-PNG is the correctness default. JPEG or WebP can become a negotiated viewer transport after visual tests. The agent receives screenshot-first observations. The runtime does not run DOM extraction during each capture.
-
-Coordinate actions cite an observation ID. Initial freshness policy is 3 seconds plus exact owner/target/document/viewport generation, CSS viewport, device-pixel ratio, and near-equal scroll offset. It does not require equal screenshot bytes. This permits animation. It can miss an element that moves inside a stable viewport. High-risk actions can require a newer frame or a local region check in a later phase.
-
-## Virtual mouse and CDP driver
-
-The custom `CdpBrowserDriver` implements AgentCursor’s browser-driver concept with explicit target binding. One driver instance exists per tab. One persona and cursor state exist per browser session. The action service creates timed sampled paths from AgentCursor’s path engine. It dispatches `Input.dispatchMouseEvent` to the tab’s flattened CDP session and updates the overlay for each sample.
-
-The preload script installs a fixed, pointer-events-none, maximum-z-index cursor overlay. The runtime restores it after navigation and before capture. Page code can still remove or cover an in-page overlay. The driver verifies presence and reinjects. A dedicated isolated-world overlay is preferred if screenshot composition tests prove that it is captured consistently.
-
-CDP supplies navigation, input, key events, screenshots, layout, accessibility, and lifecycle signals. DOM fallback is a separate operation. It uses the Accessibility and DOM domains and returns bounded document-generation handles.
-
-## Operations, deadlines, and cancellation
-
-An operation moves through `queued -> running -> committed | failed | cancelled | expired`. The runtime serializes mutating actions per tab. Independent tabs and sessions run concurrently. Screenshot capture can run between path samples when capacity permits so the workspace can show movement.
-
-Every request has an absolute deadline. Queue admission rejects an expired request. Cancellation removes queued work immediately. Running CDP commands cannot always be recalled. Cancellation marks the operation, stops future path samples or command steps, and discards any late result. A navigation or click already sent to Chrome can have side effects; the terminal status reports `cancelled_after_dispatch` rather than claiming rollback.
-
-Control takeover increments `controlEpoch`. All queued agent actions from the prior epoch are cancelled. The user controls one explicit session and tab. Returning control increments the epoch again. This prevents an old agent action from becoming valid after an agent-user-agent sequence.
-
-## Workspace
-
-The production Tauri workspace replaces the spike’s HTTP viewer. Its webview renders only local bundled UI. It receives frame bytes and metadata from the authority. It does not navigate to the controlled page.
-
-The workspace:
-
-- lists explicit agent and browser sessions;
-- keeps selection separate from authority;
-- shows connection, URL, frame age, frame sequence, cursor, and controller;
-- switches frames only after matching the selected full identity;
-- requests takeover and return through authority operations;
-- applies latest-frame backpressure;
-- clears a frame immediately when a session closes or ownership changes.
-
-## Artifacts
-
-Large screenshots use the existing controlled artifact concept after it is adapted to browser ownership. Artifact metadata includes owner, browser session, tab, document generation, frame sequence, media type, size, hash, creation time, and expiry. Reads verify owner and hash. Paths are never accepted from a model or remote page. Browser profiles, cookies, storage, and raw CDP traces are not artifacts.
-
-## Recovery
-
-- **Chrome startup failure:** remove the new profile and return a bounded diagnostic.
-- **Chrome exit or CDP disconnect:** fail running operations, mark tabs disconnected, stop frame capture, and publish lifecycle events. Never attach another agent’s host.
-- **Target close:** remove only that tab and invalidate its observations and handles.
-- **Authority restart:** initial release marks old sessions lost and removes verified orphan profiles after checking ownership metadata and process liveness. Later recovery can reconnect only with a persisted random host secret and exact process/endpoint identity.
-- **Overlay loss:** reinject before input and screenshot. Report degraded status if verification still fails.
-- **Profile corruption:** quarantine or remove the session-owned disposable profile. Never retry with the user profile.
-
-## Deployment on Fedora
-
-Install one Node runtime service and the Tauri workspace. Run the Node authority as a same-user systemd service. Chrome processes inherit the logged-in graphical session when the user requests headed browser support. The doctor checks `DISPLAY` or `WAYLAND_DISPLAY`, Chrome executable/version, runtime-directory mode, socket mode, profile root, CDP loopback binding, and effective launch flags.
-
-Prefer Google Chrome when installed. Support `BROWSER_EXECUTABLE` or equivalent configuration for Fedora Chromium and Chrome for Testing. Chromium can differ in codecs, enterprise policy, bundled services, release cadence, executable wrappers, and user agent. Automated fixtures must not depend on those differences.
-
-Wayland and X11 affect window placement and later OS-level input. They do not change CSS coordinates sent through CDP. Fractional display scaling still affects the visible desktop and workspace, so production tests must cover device-pixel ratio and multi-monitor movement.
-
-## Data flow for one action
-
-```mermaid
-sequenceDiagram
-  participant P as Pi extension
-  participant A as Authority/runtime
-  participant C as Explicit Chrome target
-  participant W as Workspace
-  P->>A: coordinate action(full identity, observationId, epoch, deadline)
-  A->>A: validate owner, target, generation, freshness, controller
-  A->>C: sampled CDP mouseMoved + overlay updates
-  A->>C: mousePressed / mouseReleased
-  C-->>A: CDP results and lifecycle events
-  A-->>P: operation result with timings
-  A->>C: scheduled Page.captureScreenshot
-  C-->>A: PNG frame
-  A-->>W: latest frame event for exact session/tab
+```text
+browserSessionId
+  tabId
+  targetId
+  controlEpoch
 ```
+
+The registry verifies the full parent-child relation. Chrome focus, workspace selection, OS focus, and the last used tab never supply authority.
+
+## Session, tab, and motor model
+
+One browser session owns:
+
+- one Chrome process;
+- one disposable profile;
+- one browser CDP connection;
+- one persistent AgentCursor persona;
+- one persistent cursor position and button state;
+- one serialized pointer and keyboard lane.
+
+A browser session can own many explicit tabs. Each tab owns its target ID, flattened CDP session, top-frame ID, document generation, viewport generation, observation records, DOM handles, overlay state, and latest frame.
+
+Pointer actions on two tabs in one browser session serialize through the same motor. Actions in different browser sessions can run concurrently. When the motor moves to another tab, the runtime first restores the session cursor overlay at its current position.
+
+## Target lifecycle
+
+The registry creates and adopts only targets that belong to its exact browser session. It closes or hides the browser bootstrap page. A popup is registered only when its opener is an owned tab. Unknown targets are not adopted.
+
+A target close or crash invalidates its observations, DOM handles, and frame schedule. It also settles affected operations. Renderer replacement, prerender activation, or an unproven target swap fails closed. There is no active-tab or last-tab fallback.
+
+## Two screenshot products
+
+### Agent screenshot observation
+
+An agent observation exists only after an explicit `observe.screenshot` request. It uses lossless PNG in Phase 1. Its bounded metadata includes the exact actor-owned address, URL, title, wall and monotonic capture time, viewport, DPR, scroll, document and viewport generations, frame sequence, digest, cursor state, and validity time.
+
+The image is stored as an owner-scoped artifact unless it is below the reviewed inline limit. Observation metadata stores an artifact ID and digest. It does not retain another full image buffer.
+
+### Workspace live frame
+
+A workspace frame is a separate, short-lived product. A bounded scheduler keeps at most one capture in flight per tab and one latest frame per tab. An idle subscription uses a low rate. A selected subscription uses a higher rate. An active pointer action temporarily uses a burst rate. Slow clients drop replaceable frames.
+
+A workspace frame does not create an agent observation. Frame bytes use owner-scoped artifacts in Phase 1. A later Tauri bridge can use a more direct bounded byte channel after review.
+
+## Screenshot-bound input
+
+A coordinate action cites an observation ID. Admission checks the exact actor-owned address, document generation, viewport generation, freshness, CSS viewport, DPR, scroll tolerance, coordinate bounds, control epoch, deadline, and cancellation state.
+
+Movement alone is not commitment. Immediately before a press, drag press, or wheel dispatch, the runtime repeats the checks. If the page changes after movement, the operation settles as partially dispatched and does not send the irreversible event. The normal policy does not require equal screenshot bytes because animation can change the image. Higher-risk policy can require a newer observation or local region evidence.
+
+## Virtual mouse
+
+The runtime selectively ports AgentCursor `0.3.0` path and persona code from commit `b23c633c66fd240f836f5edd1034f6fcf678e237`. It does not use AgentCursor MCP, extension, stock transport, macOS driver, or full package.
+
+The motor sends sampled CDP input to the exact flattened target session. It supports move, hover, click, double-click, drag, vertical and horizontal wheel, text, and keys. Cancellation stops unsent samples. Cleanup releases recorded buttons and keys when CDP remains available.
+
+A closed-shadow-root overlay has `pointer-events: none`. The runtime installs it for every top-level document and verifies it before input and capture. Mutation tests confirm reinjection while a modal dialog exists. An in-page overlay can still be occluded by browser fullscreen UI, PDF or internal viewers, and top-layer content; the test proves survival, not visual precedence over every top layer. CDP input and the overlay are a virtual page mouse. They are not Linux OS input and do not imply bot-detection immunity.
+
+## DOM fallback
+
+DOM or accessibility inspection is explicit. It does not run for every screenshot. The runtime returns a bounded list of role, name, value, state, bounds, and diagnostic locator text. The public handle is opaque and maps to an internal backend node for one actor, session, tab, target, and document generation.
+
+Navigation invalidates all handles. A detached node returns `HANDLE_STALE`. The runtime does not search a replacement document. Pointer-based fallback actions still use the session motor and its human-style path.
+
+## Operations and control epoch
+
+Operation status is actor-scoped by operation ID. The record does not depend on a live tab address. Status and cancellation remain queryable after tab close, target crash, Chrome exit, or CDP disconnect.
+
+States are `queued`, `running`, `committed`, `failed`, `cancelled`, and `expired`. Dispatch state is separate: `not-dispatched`, `partially-dispatched`, or `dispatched`. Cancellation after a click or navigation dispatch does not claim rollback.
+
+Each absolute deadline is converted to a monotonic budget at admission. Expired queue entries do not dispatch. Duplicate mutation operation IDs do not run twice. Actor-scoped status, cancellation, count, and retention are bounded.
+
+A control takeover increments the session epoch. It cancels queued old-epoch work and stops running work at the next cancellable boundary. A later epoch cannot make an old action valid again. Phase 1 tests this mechanism but does not expose user takeover.
+
+## Transport and artifacts
+
+`browserd` listens only on a Unix-domain socket in a `0700` runtime directory. The descriptor and socket use mode `0600`. The descriptor contains a random per-start secret. The protocol uses bounded newline-delimited JSON. Request and response frames have size limits. A disconnect cancels its pending requests. Events share the same authenticated connection and use droppable backpressure.
+
+Artifacts have random IDs, private storage, owner-scoped reads, SHA-256 integrity, item and total byte limits, entry limits, expiry, and pruning. Callers cannot choose a storage path. Profile paths, CDP URLs, cookies, headers, storage, and page secrets do not appear in ordinary errors.
+
+## Recovery and cleanup
+
+Session creation is transactional. Failure closes CDP, stops Chrome, and removes the owned profile. Normal shutdown sends `Browser.close`, then uses TERM and KILL only if needed. The runtime waits for process settlement before profile deletion.
+
+Profile deletion requires a runtime-owned manifest under the configured root. Startup orphan cleanup checks the exact recorded process identity and removes only a verified dead runtime-owned profile. Symlinks and paths outside the root are rejected.
+
+Chrome exit or CDP disconnect stops frames and settles all session operations. A target failure affects only that target. The runtime never falls back to another browser.
+
+## Navigation policy
+
+Public navigation authority remains in `webxd`. `browserd` has a narrow `NavigationAuthorization` interface. Production defaults to deny when no authorizer is configured. Phase 1 live tests use an authorizer that permits only their deterministic loopback fixture.
+
+## Fedora deployment and resources
+
+The executable comes only from reviewed service configuration. Prefer Google Chrome when it is already installed. Support configured Fedora Chromium. Do not install a browser as a runtime side effect.
+
+Linux resource evidence uses `/proc/<pid>/smaps_rollup` PSS as the primary memory metric. Summed RSS can double-count shared pages and is not the production decision metric. Keep one Chrome process per browser session until PSS evidence and a separate architecture decision justify a change.

@@ -1,0 +1,34 @@
+{
+  "passed": true,
+  "chromium": "Chromium 151.0.7922.173 Built from source for Fedora release 44 (Forty Four)",
+  "startupMs": 504.82401200000004,
+  "pathWallMs": 905.4070780000002,
+  "parallelMs": 1332.3469260000002,
+  "serialMs": 5905.855256000003,
+  "activeFrameCount": 10,
+  "distinctIntermediateCursorPositions": 10,
+  "actorIsolation": true,
+  "sharedPersonaAcrossTabs": true,
+  "overlayMutationAndTopLayerDialog": true,
+  "publicWheelAndScrollGuard": true,
+  "cancellation": {
+    "state": "cancelled",
+    "dispatchState": "partially-dispatched"
+  },
+  "navigationCancellation": {
+    "state": "cancelled",
+    "dispatchState": "dispatched"
+  },
+  "postPathRevalidation": {
+    "state": "failed",
+    "dispatchState": "partially-dispatched",
+    "clickPrevented": true
+  },
+  "targetCrash": "failed",
+  "chromeKillFailedClosed": true,
+  "processTreePssKiB": 581745,
+  "processTreePrivateDirtyKiB": 261820,
+  "artifactCount": 28,
+  "artifactBytes": 304879,
+  "operationCount": 47
+}

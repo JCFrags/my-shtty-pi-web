@@ -24,27 +24,31 @@ Each phase has one acceptance gate. Keep the old browser production path until t
 
 ## Phase 1 — production browser runtime core
 
-**Goal:** turn the spike into a tested internal package with full ownership, operations, deadlines, and cancellation.
+**Goal:** add a production-grade parallel runtime and a separate actor-bound Node daemon. Do not route production browser tools to it.
 
-**Files/modules:** new `packages/browser-protocol/`; new `packages/browser-runtime/`; selected AgentCursor port and license; `packages/artifacts/` integration.
+**Files/modules:** `packages/browser-protocol/`; `packages/browser-runtime/`; `apps/browserd/`; selected AgentCursor port and license; owner-scoped browser artifact integration.
 
 **Tasks:**
 
-- Define runtime schemas and generated TypeScript types from `PROTOCOL-DRAFT.md`.
+- Generate strict executable protocol types and a deterministic JSON Schema from one TypeBox source.
+- Run `browserd` as a separate persistent process from `webxd`.
+- Bind each Unix-socket connection once to one principal and Pi agent session.
 - Implement host/session/tab registries and full-address lookup.
-- Add an allowlisted Chrome launch policy, private profile root, loopback endpoint checks, and orphan cleanup metadata.
-- Implement persistent CDP connection, flattened target sessions, explicit page lifecycle, and target crash detection.
-- Adapt action orchestration with per-session persona and per-tab cursor state.
-- Implement observation storage, artifact delivery, accessibility fallback, operation state machine, cancellation, and deadlines.
-- Add `controlEpoch` but keep user takeover disabled until Phase 3.
+- Add allowlisted Chrome launch policy, private temporary profiles, loopback endpoint checks, manifests, orphan cleanup, and close escalation.
+- Implement one persistent browser CDP connection, explicit flattened target sessions, popup registration, page lifecycle, and target crash detection.
+- Use one persistent persona, cursor, and serialized input lane per browser session. Keep document, viewport, observation, frame, overlay, and handle state per tab.
+- Keep explicit PNG agent observations separate from bounded workspace frame scheduling.
+- Add bounded artifacts, DOM handles, operation records, absolute deadlines, cancellation, post-path revalidation, and control epochs.
+- Keep user takeover disabled while testing epoch changes internally.
+- Default production navigation to deny unless a `NavigationAuthorization` is configured.
 
-**Tests:** unit tests for every address mismatch; two-browser fixture integration; stale document/viewport/scroll tests; cancellation before and during path; Chrome exit/disconnect; target close/crash; flag policy; profile modes; no process spawn during warm actions.
+**Tests:** strict schema conformance; Unix transport binding, framing, modes, and cleanup; two actor-bound browser sessions; two tabs in one session; shared persona and serialization; cross-session concurrency and isolation; stale document, viewport, and scroll; explicit DOM fallback; intermediate cursor frames; cancellation and partial dispatch; target close and crash; Chrome exit and CDP disconnect; flag policy; profile modes; no warm process spawn; 30-minute PSS resource soak.
 
-**Acceptance gate:** the package passes all tests on Google Chrome and Fedora Chromium. Two sessions run for 30 minutes at the selected frame rate without cross-effects, unbounded queues, or leaked profiles.
+**Acceptance gate:** unit and live tests pass on configured Fedora Chromium. Google Chrome is tested only when it is already installed or explicitly configured. Two sessions and three tabs complete a genuine 30-minute run with bounded artifacts, operations, frames, handles, no leaked profiles, and recorded Linux PSS, CPU, event-loop, latency, and disk evidence.
 
-**Deletions enabled:** `components/browser/packages/browserd-reference/`; old protocol reference fixtures when equivalent conformance coverage exists.
+**Deletions enabled:** none. The current Rust browserd, backends, browser protocol, Tauri workspace, and `webxd` adapter remain unchanged and unrouted.
 
-**Rollback:** restore those paths and stop importing `browser-runtime`. No production route uses it yet.
+**Rollback:** stop and remove the new parallel packages and daemon. Production behavior is unchanged.
 
 ## Phase 2 — native Pi extension and authority cutover behind one switch
 
@@ -54,7 +58,8 @@ Each phase has one acceptance gate. Keep the old browser production path until t
 
 **Tasks:**
 
-- Compose `browser-runtime` inside `webxd` or one long-lived sibling Node service.
+- Connect `webxd` to the separate long-lived `browserd` Unix service. Do not import the full runtime into `webxd`.
+- Add actor-specific trusted-service attestation and bind one `webxd` connection to one actor.
 - Replace browser SDK types with full target-aware messages.
 - Make screenshot observation the primary `browser_observe` response.
 - Expose DOM fallback as an explicit observe mode or separate internal operation.
