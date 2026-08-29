@@ -88,6 +88,11 @@ export class BrowserRuntime extends EventEmitter {
       return { kind: "artifact", artifactId: request.artifactId, mediaType: artifact.descriptor.mediaType, byteLength: chunk.byteLength, sha256: artifact.descriptor.sha256, offset, totalBytes: artifact.bytes.byteLength, eof: offset + chunk.byteLength >= artifact.bytes.byteLength, base64: Buffer.from(chunk).toString("base64") };
     }
 
+    if (isExecutedRequest(request)) {
+      const existing = this.operations.lookup(actor, request.operationId, requestFingerprint(request, connectionId));
+      if (existing !== undefined) return await this.awaitExisting(actor, request.operationId, signal);
+    }
+
     if (request.kind === "session.create") {
       return await this.execute(actor, request, `actor:${actorKey(actor)}:sessions`, undefined, undefined, async (context) => {
         context.checkpoint();
@@ -124,8 +129,8 @@ export class BrowserRuntime extends EventEmitter {
     if (request.kind === "navigate") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); await session.navigate(request.address, request.url, context.signal, () => context.markDispatched()); return { kind: "ack", operationId: request.operationId }; }, signal);
     if (request.kind === "input.text") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { await session.typeText(request.address, request.text, request.replace ?? false, context); return { kind: "ack", operationId: request.operationId }; }, signal);
     if (request.kind === "input.key") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { await session.pressKey(request.address, request.key, context); return { kind: "ack", operationId: request.operationId }; }, signal);
-    if (request.kind === "frames.subscribe") return await this.execute(actor, request, `frames:${browserSessionId}`, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const id = requireConnectionId(connectionId); const subscription = this.addSubscription(actor, id, request.subscriptionId, request.address, request.interest ?? "selected"); session.subscribeFrames(subscription.consumerKey, request.address, subscription.interest); context.markDispatched(); return { kind: "subscription", operationId: request.operationId, subscriptionId: request.subscriptionId, subscribed: true }; }, signal);
-    if (request.kind === "frames.unsubscribe") return await this.execute(actor, request, `frames:${browserSessionId}`, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const id = requireConnectionId(connectionId); const subscription = this.findSubscription(actor, id, request.subscriptionId); if (subscription !== undefined) { if (!sameAddress(subscription.address, request.address)) throw new BrowserProtocolError("OPERATION_CONFLICT", "Frame subscription address does not match."); session.unsubscribeFrames(subscription.consumerKey, request.address); this.subscriptions.get(id)?.delete(request.subscriptionId); } context.markDispatched(); return { kind: "subscription", operationId: request.operationId, subscriptionId: request.subscriptionId, subscribed: false }; }, signal);
+    if (request.kind === "frames.subscribe") return await this.execute(actor, request, `frames:${browserSessionId}`, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const id = requireConnectionId(connectionId); const subscription = this.addSubscription(actor, id, request.subscriptionId, request.address, request.interest ?? "selected"); session.subscribeFrames(subscription.consumerKey, request.address, subscription.interest); context.markDispatched(); return { kind: "subscription", operationId: request.operationId, subscriptionId: request.subscriptionId, subscribed: true }; }, signal, connectionId);
+    if (request.kind === "frames.unsubscribe") return await this.execute(actor, request, `frames:${browserSessionId}`, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const id = requireConnectionId(connectionId); const subscription = this.findSubscription(actor, id, request.subscriptionId); if (subscription !== undefined) { if (!sameAddress(subscription.address, request.address)) throw new BrowserProtocolError("OPERATION_CONFLICT", "Frame subscription address does not match."); session.unsubscribeFrames(subscription.consumerKey, request.address); this.subscriptions.get(id)?.delete(request.subscriptionId); } context.markDispatched(); return { kind: "subscription", operationId: request.operationId, subscriptionId: request.subscriptionId, subscribed: false }; }, signal, connectionId);
     throw new BrowserProtocolError("INVALID_REQUEST", "Unsupported browser request.");
   }
 
@@ -133,9 +138,9 @@ export class BrowserRuntime extends EventEmitter {
 
   async close(): Promise<void> { const sessions = [...this.sessions.values()]; this.sessions.clear(); this.subscriptions.clear(); await Promise.allSettled(sessions.map(async (session) => { session.offFrame(this.onFrame); await session.close(); })); this.artifacts.clear(); this.operations.clear(); await this.profileManager.close(); }
 
-  private async execute<T>(actor: ActorIdentity, request: BrowserRequest, laneKey: string, browserSessionId: string | undefined, controlEpoch: number | undefined, task: (context: OperationContext) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  private async execute<T>(actor: ActorIdentity, request: BrowserRequest, laneKey: string, browserSessionId: string | undefined, controlEpoch: number | undefined, task: (context: OperationContext) => Promise<T>, signal?: AbortSignal, connectionId?: string): Promise<T> {
     this.operations.submit(actor, {
-      operationId: request.operationId, fingerprint: requestFingerprint(request), laneKey, deadline: request.deadline,
+      operationId: request.operationId, fingerprint: requestFingerprint(request, connectionId), laneKey, deadline: request.deadline,
       ...(browserSessionId !== undefined ? { browserSessionId } : {}), ...("address" in request ? { tabId: request.address.tabId } : {}), ...(controlEpoch !== undefined ? { controlEpoch } : {}),
       ...(request.kind === "tab.close" ? { failOnTargetTermination: false } : {}),
     }, task);
@@ -147,6 +152,15 @@ export class BrowserRuntime extends EventEmitter {
       if (status.state !== "committed") { const error = status.error; throw new BrowserProtocolError(error?.code ?? "INTERNAL_ERROR", error?.message ?? `Operation ${status.state}.`, error?.retryable ?? false, error?.details); }
       return this.operations.result(actor, request.operationId) as T;
     } finally { signal?.removeEventListener("abort", abort); }
+  }
+
+  private async awaitExisting(actor: ActorIdentity, operationId: string, signal?: AbortSignal): Promise<unknown> {
+    const status = await this.operations.wait(actor, operationId, signal);
+    if (status.state !== "committed") {
+      const error = status.error;
+      throw new BrowserProtocolError(error?.code ?? "INTERNAL_ERROR", error?.message ?? `Operation ${status.state}.`, error?.retryable ?? false, error?.details);
+    }
+    return this.operations.result(actor, operationId);
   }
 
   private addSubscription(actor: ActorIdentity, connectionId: string, subscriptionId: string, address: TabAddress, interest: "idle" | "selected"): RuntimeSubscription {
@@ -165,7 +179,16 @@ export class BrowserRuntime extends EventEmitter {
   private readonly onFrame = (frame: FrameEvent): void => { this.emit("frame", frame); };
 }
 
-function requestFingerprint(request: BrowserRequest): string { const semantics = { ...request } as Record<string, unknown>; delete semantics.requestId; delete semantics.deadline; return canonicalOperationFingerprint(semantics); }
+function requestFingerprint(request: BrowserRequest, connectionId?: string): string {
+  const semantics = { ...request } as Record<string, unknown>;
+  delete semantics.requestId;
+  delete semantics.deadline;
+  if (request.kind === "frames.subscribe" || request.kind === "frames.unsubscribe") semantics.connectionId = connectionId ?? "unbound";
+  return canonicalOperationFingerprint(semantics);
+}
+function isExecutedRequest(request: BrowserRequest): boolean {
+  return request.kind !== "capabilities.get" && request.kind !== "session.list" && request.kind !== "tab.list" && request.kind !== "operation.status" && request.kind !== "operation.cancel" && request.kind !== "artifact.read";
+}
 function requireConnectionId(connectionId: string | undefined): string { if (connectionId === undefined) throw new BrowserProtocolError("AUTH_FAILED", "Frame operations require a bound connection."); return connectionId; }
 function ensureRequestLive(request: BrowserRequest): void { if (Date.parse(request.deadline) <= Date.now()) throw new BrowserProtocolError("DEADLINE_EXCEEDED", "Request deadline has expired."); }
 function sameAddress(left: TabAddress, right: TabAddress): boolean { return left.browserSessionId === right.browserSessionId && left.tabId === right.tabId && left.targetId === right.targetId && left.controlEpoch === right.controlEpoch; }

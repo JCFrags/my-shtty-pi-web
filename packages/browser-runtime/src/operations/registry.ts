@@ -124,6 +124,14 @@ export class OperationRegistry {
     return publicStatus(operation);
   }
 
+  lookup(actor: ActorIdentity, operationId: string, fingerprint: string): OperationStatus | undefined {
+    this.prune();
+    const operation = this.operations.get(operationKey(actor, operationId));
+    if (operation === undefined) return undefined;
+    if (operation.fingerprint !== fingerprint) throw new BrowserProtocolError("OPERATION_CONFLICT", "Operation ID was reused for different mutation semantics.");
+    return publicStatus(operation);
+  }
+
   status(actor: ActorIdentity, operationId: string): OperationStatus {
     const operation = this.operations.get(operationKey(actor, operationId));
     if (operation === undefined) throw new BrowserProtocolError("OPERATION_NOT_FOUND", "Operation not found.");
