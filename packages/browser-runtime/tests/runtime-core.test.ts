@@ -121,8 +121,8 @@ describe("bounded actor-scoped operations", () => {
   it("does not execute a duplicate operation ID twice and makes cancellation idempotent", async () => {
     const registry = new OperationRegistry();
     let executions = 0;
-    registry.submit(actor, { operationId: "operation:duplicate", laneKey: "duplicate", deadline: deadline() }, async () => { executions++; await sleep(20); return "first"; });
-    registry.submit(actor, { operationId: "operation:duplicate", laneKey: "other-lane", deadline: deadline() }, async () => { executions++; return "second"; });
+    registry.submit(actor, { operationId: "operation:duplicate", fingerprint: "same-mutation", laneKey: "duplicate", deadline: deadline() }, async () => { executions++; await sleep(20); return "first"; });
+    registry.submit(actor, { operationId: "operation:duplicate", fingerprint: "same-mutation", laneKey: "other-lane", deadline: deadline() }, async () => { executions++; return "second"; });
     assert.equal((await registry.wait(actor, "operation:duplicate")).state, "committed");
     assert.equal(registry.cancel(actor, "operation:duplicate").state, "committed");
     assert.equal(registry.cancel(actor, "operation:duplicate").state, "committed");
@@ -216,10 +216,11 @@ describe("motor cancellation cleanup", () => {
 describe("artifacts and Chrome configuration", () => {
   it("keeps artifacts bounded and owner-scoped", async () => {
     const store = new BrowserArtifactStore({ maxEntries: 2, maxTotalBytes: 8, maxItemBytes: 4 });
-    const one = await store.put(actor, Uint8Array.of(1, 2, 3, 4), "image/png");
-    await store.put(actor, Uint8Array.of(5, 6, 7, 8), "image/png");
+    const scope = { browserSessionId: "session:artifact", purpose: "agent-observation", mediaType: "image/png" } as const;
+    const one = await store.put(actor, Uint8Array.of(1, 2, 3, 4), scope);
+    await store.put(actor, Uint8Array.of(5, 6, 7, 8), scope);
     await assert.rejects(() => store.read(other, one.artifactId), /not found/i);
-    await assert.rejects(() => store.put(actor, Uint8Array.of(1, 2, 3, 4, 5), "image/png"), /size/i);
+    await assert.rejects(() => store.put(actor, Uint8Array.of(1, 2, 3, 4, 5), scope), /size/i);
     assert.equal(store.entryCount, 2);
     assert.equal(store.totalBytes, 8);
   });

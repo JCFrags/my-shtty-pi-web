@@ -1,9 +1,11 @@
-import type { ActorIdentity, DispatchState, OperationState, OperationStatus, ProtocolError } from "@webx/browser-protocol";
+import { createHash } from "node:crypto";
+import { BrowserProtocolError, type ActorIdentity, type DispatchState, type OperationState, type OperationStatus, type ProtocolError } from "@webx/browser-protocol";
 import { actorKey } from "../actor/identity.js";
 
 interface MutableOperation {
   readonly actor: string;
   readonly operationId: string;
+  readonly fingerprint: string;
   readonly laneKey: string;
   readonly browserSessionId?: string;
   readonly tabId?: string;
@@ -32,6 +34,7 @@ export type OperationTask<T> = (context: OperationContext) => Promise<T>;
 
 export interface SubmitOptions {
   operationId: string;
+  fingerprint?: string;
   laneKey: string;
   deadline: string;
   browserSessionId?: string;
@@ -78,7 +81,7 @@ export class OperationRegistry {
     this.epochs.set(key, next);
     for (const operation of this.operations.values()) {
       if (operation.actor === actorKey(actor) && operation.browserSessionId === browserSessionId && operation.controlEpoch !== undefined && operation.controlEpoch < next && !isTerminal(operation.state)) {
-        this.cancelMutable(operation, "CONTROL_EPOCH_STALE", "Control changed before the operation completed.");
+        this.cancelMutable(operation, new BrowserProtocolError("CONTROL_EPOCH_STALE", "Control changed before the operation completed."));
       }
     }
     return next;
@@ -87,19 +90,23 @@ export class OperationRegistry {
   submit<T>(actor: ActorIdentity, options: SubmitOptions, task: OperationTask<T>): OperationStatus {
     this.prune();
     const key = operationKey(actor, options.operationId);
+    const fingerprint = options.fingerprint ?? canonicalOperationFingerprint({ laneKey: options.laneKey, browserSessionId: options.browserSessionId, tabId: options.tabId, controlEpoch: options.controlEpoch });
     const duplicate = this.operations.get(key);
-    if (duplicate !== undefined) return publicStatus(duplicate);
-    if (this.operations.size >= this.maxOperations) throw new Error("Operation registry is full.");
+    if (duplicate !== undefined) {
+      if (duplicate.fingerprint !== fingerprint) throw new BrowserProtocolError("OPERATION_CONFLICT", "Operation ID was reused for different mutation semantics.");
+      return publicStatus(duplicate);
+    }
+    if (this.operations.size >= this.maxOperations) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Operation registry is full.", true);
     const deadlineWall = Date.parse(options.deadline);
     const remaining = deadlineWall - this.wall();
-    if (!Number.isFinite(deadlineWall) || remaining <= 0) throw new Error("Operation deadline has expired.");
+    if (!Number.isFinite(deadlineWall) || remaining <= 0) throw new BrowserProtocolError("DEADLINE_EXCEEDED", "Operation deadline has expired.");
     if (options.browserSessionId !== undefined && options.controlEpoch !== undefined && options.controlEpoch !== this.currentEpoch(actor, options.browserSessionId)) {
-      throw new Error("Control epoch is stale.");
+      throw new BrowserProtocolError("CONTROL_EPOCH_STALE", "Control epoch is stale.");
     }
     const lane = this.queues.get(options.laneKey) ?? [];
-    if (lane.length >= this.maxQueuedPerLane) throw new Error("Operation lane is full.");
+    if (lane.length >= this.maxQueuedPerLane) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Operation lane is full.", true);
     const operation: MutableOperation = {
-      actor: actorKey(actor), operationId: options.operationId, laneKey: options.laneKey,
+      actor: actorKey(actor), operationId: options.operationId, fingerprint, laneKey: options.laneKey,
       ...(options.browserSessionId !== undefined ? { browserSessionId: options.browserSessionId } : {}),
       ...(options.tabId !== undefined ? { tabId: options.tabId } : {}),
       ...(options.controlEpoch !== undefined ? { controlEpoch: options.controlEpoch } : {}),
@@ -116,40 +123,42 @@ export class OperationRegistry {
 
   status(actor: ActorIdentity, operationId: string): OperationStatus {
     const operation = this.operations.get(operationKey(actor, operationId));
-    if (operation === undefined) throw new Error("Operation not found.");
+    if (operation === undefined) throw new BrowserProtocolError("OPERATION_NOT_FOUND", "Operation not found.");
     return publicStatus(operation);
   }
 
   result(actor: ActorIdentity, operationId: string): unknown {
     const operation = this.operations.get(operationKey(actor, operationId));
-    if (operation === undefined) throw new Error("Operation not found.");
+    if (operation === undefined) throw new BrowserProtocolError("OPERATION_NOT_FOUND", "Operation not found.");
     return operation.result;
   }
 
   async wait(actor: ActorIdentity, operationId: string, signal?: AbortSignal): Promise<OperationStatus> {
+    signal?.throwIfAborted();
     while (true) {
       const status = this.status(actor, operationId);
       if (isTerminal(status.state)) return status;
       await new Promise<void>((resolve, reject) => {
+        const abort = (): void => { cleanup(); reject(signal?.reason ?? new BrowserProtocolError("OPERATION_CANCELLED", "Operation wait cancelled.")); };
         const timer = setTimeout(() => { cleanup(); resolve(); }, 5);
-        const abort = (): void => { cleanup(); reject(signal?.reason ?? new Error("Operation wait cancelled.")); };
         const cleanup = (): void => { clearTimeout(timer); signal?.removeEventListener("abort", abort); };
         signal?.addEventListener("abort", abort, { once: true });
+        if (signal?.aborted) abort();
       });
     }
   }
 
   cancel(actor: ActorIdentity, operationId: string): OperationStatus {
     const operation = this.operations.get(operationKey(actor, operationId));
-    if (operation === undefined) throw new Error("Operation not found.");
-    if (!isTerminal(operation.state)) this.cancelMutable(operation, "OPERATION_CANCELLED", "The operation was cancelled.");
+    if (operation === undefined) throw new BrowserProtocolError("OPERATION_NOT_FOUND", "Operation not found.");
+    if (!isTerminal(operation.state)) this.cancelMutable(operation, new BrowserProtocolError("OPERATION_CANCELLED", "The operation was cancelled."));
     return publicStatus(operation);
   }
 
-  failSession(actor: ActorIdentity, browserSessionId: string, message = "Browser session failed."): void {
+  failSession(actor: ActorIdentity, browserSessionId: string, code: "BROWSER_EXITED" | "CDP_DISCONNECTED" = "BROWSER_EXITED"): void {
     for (const operation of this.operations.values()) {
       if (operation.actor === actorKey(actor) && operation.browserSessionId === browserSessionId && !isTerminal(operation.state)) {
-        this.failMutable(operation, "BROWSER_EXITED", message);
+        this.failMutable(operation, new BrowserProtocolError(code, code === "CDP_DISCONNECTED" ? "Browser connection disconnected." : "Browser session exited.", true));
       }
     }
   }
@@ -157,7 +166,7 @@ export class OperationRegistry {
   failTab(actor: ActorIdentity, browserSessionId: string, tabId: string): void {
     for (const operation of this.operations.values()) {
       if (operation.actor === actorKey(actor) && operation.browserSessionId === browserSessionId && operation.tabId === tabId && !isTerminal(operation.state)) {
-        this.failMutable(operation, "TARGET_CRASHED", "Browser target closed.");
+        this.failMutable(operation, new BrowserProtocolError("TARGET_CRASHED", "Browser target closed."));
       }
     }
   }
@@ -170,7 +179,7 @@ export class OperationRegistry {
   }
 
   clear(): void {
-    for (const operation of this.operations.values()) if (!isTerminal(operation.state)) this.failMutable(operation, "BROWSER_EXITED", "Browser runtime stopped.");
+    for (const operation of this.operations.values()) if (!isTerminal(operation.state)) this.failMutable(operation, new BrowserProtocolError("BROWSER_EXITED", "Browser runtime stopped."));
     this.queues.clear();
     this.operations.clear();
     this.epochs.clear();
@@ -187,13 +196,13 @@ export class OperationRegistry {
         if (this.monotonic() >= operation.deadlineMonotonicMs) { this.expireMutable(operation); continue; }
         if (operation.browserSessionId !== undefined && operation.controlEpoch !== undefined) {
           const actor = splitActor(operation.actor);
-          if (operation.controlEpoch !== this.currentEpoch(actor, operation.browserSessionId)) { this.cancelMutable(operation, "CONTROL_EPOCH_STALE", "Control epoch is stale."); continue; }
+          if (operation.controlEpoch !== this.currentEpoch(actor, operation.browserSessionId)) { this.cancelMutable(operation, new BrowserProtocolError("CONTROL_EPOCH_STALE", "Control epoch is stale.")); continue; }
         }
         operation.state = "running";
         operation.startedAt = new Date(this.wall()).toISOString();
         const deadlineTimer = setTimeout(() => {
           if (!isTerminal(operation.state)) {
-            operation.controller.abort(new Error("Operation deadline exceeded."));
+            operation.controller.abort(new BrowserProtocolError("DEADLINE_EXCEEDED", "Operation deadline exceeded."));
             this.expireMutable(operation);
           }
         }, Math.max(0, operation.deadlineMonotonicMs - this.monotonic()));
@@ -203,16 +212,16 @@ export class OperationRegistry {
           markPartiallyDispatched: () => { if (!isTerminal(operation.state) && operation.dispatchState === "not-dispatched") operation.dispatchState = "partially-dispatched"; },
           markDispatched: () => { if (!isTerminal(operation.state)) operation.dispatchState = "dispatched"; },
           checkpoint: () => {
-            if (operation.controller.signal.aborted) throw operation.controller.signal.reason;
-            if (this.monotonic() >= operation.deadlineMonotonicMs) throw new Error("Operation deadline exceeded.");
-            if (operation.browserSessionId !== undefined && operation.controlEpoch !== undefined && operation.controlEpoch !== this.currentEpoch(splitActor(operation.actor), operation.browserSessionId)) throw new Error("Control epoch is stale.");
+            operation.controller.signal.throwIfAborted();
+            if (this.monotonic() >= operation.deadlineMonotonicMs) throw new BrowserProtocolError("DEADLINE_EXCEEDED", "Operation deadline exceeded.");
+            if (operation.browserSessionId !== undefined && operation.controlEpoch !== undefined && operation.controlEpoch !== this.currentEpoch(splitActor(operation.actor), operation.browserSessionId)) throw new BrowserProtocolError("CONTROL_EPOCH_STALE", "Control epoch is stale.");
           },
         };
         try {
           const result = await operation.task(context);
           if (!isTerminal(operation.state)) { operation.result = result; operation.state = "committed"; operation.finishedAt = new Date(this.wall()).toISOString(); }
         } catch (error) {
-          if (!isTerminal(operation.state)) this.failMutable(operation, "CDP_ERROR", error instanceof Error ? error.message : "Operation failed.");
+          if (!isTerminal(operation.state)) this.failMutable(operation, toProtocolError(error));
         } finally { clearTimeout(deadlineTimer); }
       }
     } finally {
@@ -222,26 +231,27 @@ export class OperationRegistry {
     }
   }
 
-  private cancelMutable(operation: MutableOperation, code: "OPERATION_CANCELLED" | "CONTROL_EPOCH_STALE", message: string): void {
+  private cancelMutable(operation: MutableOperation, error: BrowserProtocolError): void {
     this.removeQueued(operation);
-    operation.controller.abort(new Error(message));
+    operation.controller.abort(error);
     operation.state = "cancelled";
     operation.finishedAt = new Date(this.wall()).toISOString();
-    operation.error = errorRecord(code, message);
+    operation.error = error.sanitized();
   }
-  private failMutable(operation: MutableOperation, code: ProtocolError["code"], message: string): void {
+  private failMutable(operation: MutableOperation, error: BrowserProtocolError): void {
     this.removeQueued(operation);
-    operation.controller.abort(new Error(message));
+    operation.controller.abort(error);
     operation.state = "failed";
     operation.finishedAt = new Date(this.wall()).toISOString();
-    operation.error = errorRecord(code, message);
+    operation.error = error.sanitized();
   }
   private expireMutable(operation: MutableOperation): void {
     this.removeQueued(operation);
-    operation.controller.abort(new Error("Operation deadline exceeded."));
+    const error = new BrowserProtocolError("DEADLINE_EXCEEDED", "Operation deadline exceeded.");
+    operation.controller.abort(error);
     operation.state = "expired";
     operation.finishedAt = new Date(this.wall()).toISOString();
-    operation.error = errorRecord("DEADLINE_EXCEEDED", "Operation deadline exceeded.");
+    operation.error = error.sanitized();
   }
 
   private removeQueued(operation: MutableOperation): void {
@@ -254,6 +264,24 @@ export class OperationRegistry {
   }
 }
 
+export function canonicalOperationFingerprint(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new BrowserProtocolError("INVALID_REQUEST", "Operation fingerprint contains a non-finite number.");
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).filter((key) => record[key] !== undefined).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+  }
+  throw new BrowserProtocolError("INVALID_REQUEST", "Operation fingerprint contains an unsupported value.");
+}
+
 function publicStatus(operation: MutableOperation): OperationStatus {
   return {
     kind: "operation", operationId: operation.operationId, state: operation.state, dispatchState: operation.dispatchState,
@@ -263,7 +291,10 @@ function publicStatus(operation: MutableOperation): OperationStatus {
     ...(operation.error !== undefined ? { error: operation.error } : {}),
   };
 }
-function errorRecord(code: ProtocolError["code"], message: string): ProtocolError { return { code, message: message.slice(0, 512), retryable: false }; }
+function toProtocolError(error: unknown): BrowserProtocolError {
+  if (error instanceof BrowserProtocolError) return error;
+  return new BrowserProtocolError("INTERNAL_ERROR", "Browser operation failed.");
+}
 function isTerminal(state: OperationState): boolean { return state === "committed" || state === "failed" || state === "cancelled" || state === "expired"; }
 function operationKey(actor: ActorIdentity, operationId: string): string { return `${actorKey(actor)}\u0000${operationId}`; }
 function epochKey(actor: ActorIdentity, browserSessionId: string): string { return `${actorKey(actor)}\u0000${browserSessionId}`; }

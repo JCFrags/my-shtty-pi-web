@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
-import type { TabAddress, TabDescriptor } from "@webx/browser-protocol";
+import { BrowserProtocolError, type TabAddress, type TabDescriptor } from "@webx/browser-protocol";
 import type { CdpEvent } from "../cdp/connection.js";
 import type { ChromeHost } from "../chrome/host.js";
 
@@ -52,38 +52,52 @@ export class TargetRegistry extends EventEmitter {
     }));
   }
 
-  async createTab(url = "about:blank"): Promise<TabRecord> {
+  async createTab(url = "about:blank", options: { signal?: AbortSignal; markDispatched?: () => void } = {}): Promise<TabRecord> {
     this.assertOpen();
-    const created = await this.host.cdp.send<{ targetId: string }>("Target.createTarget", { url });
-    const cdpSessionId = await this.obtainSession(created.targetId);
-    const tab: TabRecord = {
-      browserSessionId: this.browserSessionId, tabId: opaqueId("tab"), targetId: created.targetId, cdpSessionId,
-      documentGeneration: 1, viewportGeneration: 1, state: "open", latestFrameSequence: 0, url: pageUrl(url), title: "",
-    };
-    this.tabs.set(tab.tabId, tab);
-    this.targetToTab.set(tab.targetId, tab.tabId);
-    await this.enableTab(tab);
-    return tab;
+    options.signal?.throwIfAborted();
+    const created = await this.host.cdp.send<{ targetId: string }>("Target.createTarget", { url }, undefined, { ...(options.signal ? { signal: options.signal } : {}), ...(options.markDispatched ? { onDispatch: options.markDispatched } : {}) });
+    let committed = false;
+    try {
+      options.signal?.throwIfAborted();
+      const cdpSessionId = await this.obtainSession(created.targetId, options.signal);
+      const tab: TabRecord = {
+        browserSessionId: this.browserSessionId, tabId: opaqueId("tab"), targetId: created.targetId, cdpSessionId,
+        documentGeneration: 1, viewportGeneration: 1, state: "open", latestFrameSequence: 0, url: pageUrl(url), title: "",
+      };
+      this.tabs.set(tab.tabId, tab);
+      this.targetToTab.set(tab.targetId, tab.tabId);
+      await this.enableTab(tab, options.signal);
+      options.signal?.throwIfAborted();
+      committed = true;
+      return tab;
+    } finally {
+      if (!committed) await this.host.cdp.send("Target.closeTarget", { targetId: created.targetId }, undefined, { timeoutMs: 1_000 }).catch(() => undefined);
+    }
   }
 
   resolve(address: TabAddress): TabRecord {
     const tab = this.tabs.get(address.tabId);
     if (tab === undefined || tab.state !== "open" || tab.browserSessionId !== address.browserSessionId || tab.targetId !== address.targetId) {
-      throw new Error("Tab not found.");
+      throw new BrowserProtocolError("TAB_NOT_FOUND", "Tab not found.");
     }
     return tab;
   }
 
   getById(tabId: string): TabRecord | undefined { return this.tabs.get(tabId); }
 
-  async focus(address: TabAddress): Promise<void> {
+  async focus(address: TabAddress, signal?: AbortSignal, markDispatched?: () => void): Promise<void> {
     const tab = this.resolve(address);
-    await this.host.cdp.send("Target.activateTarget", { targetId: tab.targetId });
+    signal?.throwIfAborted();
+    await this.host.cdp.send("Target.activateTarget", { targetId: tab.targetId }, undefined, { ...(signal ? { signal } : {}), ...(markDispatched ? { onDispatch: markDispatched } : {}) });
   }
 
-  async closeTab(address: TabAddress): Promise<void> {
+  async closeTab(address: TabAddress, signal?: AbortSignal, markDispatched?: () => void): Promise<void> {
     const tab = this.resolve(address);
-    try { await this.host.cdp.send("Target.closeTarget", { targetId: tab.targetId }); } finally { this.markTerminal(tab, "closed"); }
+    signal?.throwIfAborted();
+    let dispatched = false;
+    try {
+      await this.host.cdp.send("Target.closeTarget", { targetId: tab.targetId }, undefined, { ...(signal ? { signal } : {}), onDispatch: () => { dispatched = true; markDispatched?.(); } });
+    } finally { if (dispatched || !this.host.connected) this.markTerminal(tab, "closed"); }
   }
 
   incrementFrame(tab: TabRecord): number { return ++tab.latestFrameSequence; }
@@ -97,16 +111,16 @@ export class TargetRegistry extends EventEmitter {
     for (const tab of this.tabs.values()) if (tab.state === "open") this.markTerminal(tab, "closed");
   }
 
-  private async obtainSession(targetId: string): Promise<string> {
+  private async obtainSession(targetId: string, signal?: AbortSignal): Promise<string> {
     const existing = this.autoSessions.get(targetId);
     if (existing !== undefined) return existing;
-    const attached = await this.host.cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true });
+    const attached = await this.host.cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true }, undefined, signal ? { signal } : {});
     return attached.sessionId;
   }
 
-  private async enableTab(tab: TabRecord): Promise<void> {
+  private async enableTab(tab: TabRecord, signal?: AbortSignal): Promise<void> {
     await Promise.all([
-      this.command(tab, "Page.enable"), this.command(tab, "Runtime.enable"), this.command(tab, "DOM.enable"), this.command(tab, "Accessibility.enable"),
+      this.command(tab, "Page.enable", {}, signal), this.command(tab, "Runtime.enable", {}, signal), this.command(tab, "DOM.enable", {}, signal), this.command(tab, "Accessibility.enable", {}, signal),
     ]);
   }
 
@@ -176,11 +190,11 @@ export class TargetRegistry extends EventEmitter {
     }
   }
 
-  private async command(tab: TabRecord, method: string, params: Readonly<Record<string, unknown>> = {}): Promise<unknown> {
-    return await this.host.cdp.send(method, params, tab.cdpSessionId);
+  private async command(tab: TabRecord, method: string, params: Readonly<Record<string, unknown>> = {}, signal?: AbortSignal): Promise<unknown> {
+    return await this.host.cdp.send(method, params, tab.cdpSessionId, signal ? { signal } : {});
   }
 
-  private assertOpen(): void { if (this.closed || !this.host.connected) throw new Error("Target registry is unavailable."); }
+  private assertOpen(): void { if (this.closed || !this.host.connected) throw new BrowserProtocolError("CDP_DISCONNECTED", "Target registry is unavailable.", true); }
 }
 
 function pageUrl(value: string): string { return /^(?:https?:\/\/|about:blank|chrome-error:\/\/)/.test(value) ? value : "about:blank"; }

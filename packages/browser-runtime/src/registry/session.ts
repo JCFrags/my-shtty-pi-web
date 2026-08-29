@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { ActorIdentity, DomObservation, FrameEvent, ScreenshotObservation, SessionDescriptor, TabAddress, TabDescriptor } from "@webx/browser-protocol";
+import { BrowserProtocolError, type ActorIdentity, type DomObservation, type FrameEvent, type ScreenshotObservation, type SessionDescriptor, type TabAddress, type TabDescriptor } from "@webx/browser-protocol";
 import type { NavigationAuthorization } from "../actor/identity.js";
 import type { BrowserArtifactStore } from "../artifacts/store.js";
 import { ChromeHost, type ChromeHostOptions } from "../chrome/host.js";
@@ -29,7 +29,7 @@ export class BrowserSession {
     readonly host: ChromeHost,
     readonly targets: TargetRegistry,
     private readonly operations: OperationRegistry,
-    artifacts: BrowserArtifactStore,
+    private readonly artifacts: BrowserArtifactStore,
     private readonly navigationAuthorization: NavigationAuthorization,
     personaSeed: number,
     motorMinimumPathMs: number,
@@ -38,22 +38,24 @@ export class BrowserSession {
     this.motor = new SessionMotor(browserSessionId, personaSeed, motorMinimumPathMs);
     this.observations = new ObservationStore(actor, targets, artifacts, this.motor, { freshnessMs: observationFreshnessMs });
     this.dom = new DomObservationStore(targets);
-    this.frames = new FrameScheduler(actor, targets, artifacts, this.motor);
-    host.on("exit", this.onHostFailure);
-    host.on("disconnect", this.onHostFailure);
+    this.frames = new FrameScheduler(actor, targets, artifacts, this.motor, () => this.controlEpoch);
+    host.on("exit", this.onHostExit);
+    host.on("disconnect", this.onHostDisconnect);
     targets.on("tabTerminal", this.onTabTerminal);
     targets.on("tabRegistered", this.onTabRegistered);
   }
 
-  static async create(actor: ActorIdentity, operations: OperationRegistry, artifacts: BrowserArtifactStore, navigationAuthorization: NavigationAuthorization, options: Omit<ChromeHostOptions, "hostId"> & { initialUrl?: string; personaSeed?: number; motorMinimumPathMs?: number; observationFreshnessMs?: number } = {}): Promise<BrowserSession> {
+  static async create(actor: ActorIdentity, operations: OperationRegistry, artifacts: BrowserArtifactStore, navigationAuthorization: NavigationAuthorization, options: Omit<ChromeHostOptions, "hostId"> & { initialUrl?: string; personaSeed?: number; motorMinimumPathMs?: number; observationFreshnessMs?: number } = {}, signal?: AbortSignal, markProcessDispatched?: () => void): Promise<BrowserSession> {
+    signal?.throwIfAborted();
     const browserSessionId = opaqueId("session");
     const { initialUrl, personaSeed, motorMinimumPathMs, observationFreshnessMs, ...hostOptions } = options;
-    const host = await ChromeHost.launch({ hostId: browserSessionId, ...hostOptions });
+    const host = await ChromeHost.launch({ hostId: browserSessionId, ...hostOptions }, signal, markProcessDispatched);
     try {
+      signal?.throwIfAborted();
       const targets = await TargetRegistry.create(browserSessionId, host);
       const session = new BrowserSession(actor, browserSessionId, host, targets, operations, artifacts, navigationAuthorization, personaSeed ?? randomBytes(4).readUInt32BE(), motorMinimumPathMs ?? 0, observationFreshnessMs ?? 3_000);
-      const tab = await session.createTab();
-      if (initialUrl !== undefined) await session.navigate(session.address(tab), initialUrl, new AbortController().signal);
+      const tab = await session.createTab(undefined, signal);
+      if (initialUrl !== undefined) await session.navigate(session.address(tab), initialUrl, signal ?? new AbortController().signal);
       return session;
     } catch (error) {
       await host.close();
@@ -68,9 +70,9 @@ export class BrowserSession {
     return { kind: "session", browserSessionId: this.browserSessionId, controlEpoch: this.controlEpoch, state: this.closed ? "closed" : this.host.connected ? "ready" : "degraded", personaId: this.personaId, cursor: this.motor.state, tabs: this.targets.list(this.controlEpoch) };
   }
 
-  async createTab(url?: string, signal = new AbortController().signal): Promise<TabRecord> {
+  async createTab(url?: string, signal = new AbortController().signal, markDispatched?: () => void): Promise<TabRecord> {
     this.assertOpen();
-    const tab = await this.targets.createTab();
+    const tab = await this.targets.createTab("about:blank", { signal, ...(markDispatched ? { markDispatched } : {}) });
     this.bindTab(tab);
     await this.motor.initializeTab(tab);
     if (url !== undefined) await this.navigate(this.address(tab), url, signal);
@@ -81,9 +83,9 @@ export class BrowserSession {
   address(tab: TabRecord): TabAddress { return { browserSessionId: this.browserSessionId, tabId: tab.tabId, targetId: tab.targetId, controlEpoch: this.controlEpoch }; }
   resolve(address: TabAddress): TabRecord { this.assertEpoch(address); return this.targets.resolve(address); }
 
-  async observe(address: TabAddress, delivery: "auto" | "inline" | "artifact" = "auto"): Promise<ScreenshotObservation> {
+  async observe(address: TabAddress, delivery: "auto" | "inline" | "artifact" = "auto", signal?: AbortSignal): Promise<ScreenshotObservation> {
     this.assertEpoch(address);
-    return await this.observations.capture(address, delivery);
+    return await this.observations.capture(address, delivery, signal);
   }
 
   async observeDom(address: TabAddress, maxNodes: number): Promise<DomObservation> {
@@ -120,38 +122,37 @@ export class BrowserSession {
   async navigate(address: TabAddress, rawUrl: string, signal: AbortSignal, markDispatched?: () => void): Promise<void> {
     const tab = this.resolve(address);
     const url = new URL(rawUrl);
-    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Navigation URL is not HTTP(S).");
+    if (url.protocol !== "http:" && url.protocol !== "https:") throw new BrowserProtocolError("INVALID_REQUEST", "Navigation URL is not HTTP(S).");
     await this.navigationAuthorization.authorize(this.actor, url, signal);
     const eventController = new AbortController();
     const abort = (): void => eventController.abort(signal.reason);
     signal.addEventListener("abort", abort, { once: true });
     const loaded = this.host.cdp.waitForEvent("Page.loadEventFired", (event) => event.sessionId === tab.cdpSessionId, { timeoutMs: 15_000, signal: eventController.signal });
     try {
-      markDispatched?.();
-      const result = await this.host.cdp.send<{ errorText?: string }>("Page.navigate", { url: url.href }, tab.cdpSessionId, { timeoutMs: 10_000, signal });
-      if (result.errorText) throw new Error("Navigation failed.");
+      const result = await this.host.cdp.send<{ errorText?: string }>("Page.navigate", { url: url.href }, tab.cdpSessionId, { timeoutMs: 10_000, signal, ...(markDispatched ? { onDispatch: markDispatched } : {}) });
+      if (result.errorText) throw new BrowserProtocolError("CDP_ERROR", "Navigation failed.");
       await loaded;
       await this.motor.initializeTab(tab);
     } catch (error) { eventController.abort(); await loaded.catch(() => undefined); throw error; }
     finally { signal.removeEventListener("abort", abort); }
   }
 
-  subscribeFrames(address: TabAddress, interest: "idle" | "selected" = "selected"): void { this.assertEpoch(address); this.frames.subscribe(address, interest); }
-  unsubscribeFrames(address: TabAddress): void { this.frames.unsubscribe(address); }
+  subscribeFrames(consumerKey: string, address: TabAddress, interest: "idle" | "selected" = "selected"): void { this.assertEpoch(address); this.frames.subscribe(consumerKey, address, interest); }
+  unsubscribeFrames(consumerKey: string, address: TabAddress): void { this.frames.unsubscribe(consumerKey, address); }
+  disconnectFrameConsumer(prefix: string): void { this.frames.removeConsumerPrefix(prefix); }
   onFrame(listener: (frame: FrameEvent) => void): void { this.frames.on("frame", listener); }
   offFrame(listener: (frame: FrameEvent) => void): void { this.frames.off("frame", listener); }
 
-  incrementControlEpoch(): number { return this.operations.incrementEpoch(this.actor, this.browserSessionId); }
+  incrementControlEpoch(): number { const epoch = this.operations.incrementEpoch(this.actor, this.browserSessionId); this.frames.invalidateEpoch(epoch); void this.motor.releaseAll(); return epoch; }
 
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
     this.frames.close();
-    const tab = this.targets.list(this.controlEpoch)[0];
-    const record = tab ? this.targets.getById(tab.address.tabId) : undefined;
-    await this.motor.releaseAll(record);
+    await this.motor.releaseAll();
     await this.targets.close();
     await this.host.close();
+    this.artifacts.clearSession(this.actor, this.browserSessionId);
   }
 
   private bindTab(tab: TabRecord): void {
@@ -163,14 +164,18 @@ export class BrowserSession {
 
   private assertEpoch(address: TabAddress): void {
     this.assertOpen();
-    if (address.browserSessionId !== this.browserSessionId || address.controlEpoch !== this.controlEpoch) throw new Error("Control epoch or browser session is stale.");
+    if (address.browserSessionId !== this.browserSessionId || address.controlEpoch !== this.controlEpoch) throw new BrowserProtocolError("CONTROL_EPOCH_STALE", "Control epoch is stale.");
   }
-  private assertOpen(): void { if (this.closed || !this.host.running || !this.host.connected) throw new Error("Browser session is unavailable."); }
+  private assertOpen(): void { if (this.closed || !this.host.running || !this.host.connected) throw new BrowserProtocolError("CDP_DISCONNECTED", "Browser session is unavailable.", true); }
 
-  private readonly onHostFailure = (): void => { if (!this.closed) this.operations.failSession(this.actor, this.browserSessionId); void this.motor.releaseAll(); };
+  private readonly onHostExit = (): void => { if (!this.closed) this.operations.failSession(this.actor, this.browserSessionId, "BROWSER_EXITED"); void this.motor.releaseAll(); };
+  private readonly onHostDisconnect = (): void => { if (!this.closed) this.operations.failSession(this.actor, this.browserSessionId, "CDP_DISCONNECTED"); void this.motor.releaseAll(); };
   private readonly onTabRegistered = (tab: TabRecord): void => { this.bindTab(tab); void this.motor.initializeTab(tab).catch(() => undefined); };
   private readonly onTabTerminal = ({ tabId }: { tabId: string }): void => {
+    const tab = this.targets.getById(tabId);
+    if (tab !== undefined && this.motor.isActiveTab(tabId)) void this.motor.releaseAll(tab);
     this.observations.invalidateTab(tabId); this.dom.invalidateTab(tabId); this.frames.stop(tabId);
+    this.artifacts.clearTab(this.actor, this.browserSessionId, tabId);
     this.operations.failTab(this.actor, this.browserSessionId, tabId);
   };
 }
