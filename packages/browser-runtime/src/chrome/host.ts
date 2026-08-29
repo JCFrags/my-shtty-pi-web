@@ -20,6 +20,7 @@ export interface ChromeHostOptions {
   windowSize?: { width: number; height: number };
   windowPosition?: { x: number; y: number };
   extraFlags?: readonly string[];
+  egressProxy?: { readonly host: "127.0.0.1" | "::1"; readonly port: number };
 }
 
 export class ChromeHost extends EventEmitter {
@@ -54,6 +55,7 @@ export class ChromeHost extends EventEmitter {
     signal?.throwIfAborted();
     await access(executable, constants.X_OK);
     const extraFlags = validateExtraFlags(options.extraFlags ?? []);
+    const egressFlags = proxyFlags(options.egressProxy);
     const manager = options.profileManager ?? new ProfileManager(options.profileRoot);
     const lease = await manager.allocate();
     let child: ChildProcess | undefined;
@@ -68,7 +70,7 @@ export class ChromeHost extends EventEmitter {
         "--no-first-run", "--no-default-browser-check", "--disable-sync", "--disable-background-networking",
         "--disable-component-update", "--disable-default-apps", "--password-store=basic",
         `--window-size=${size.width},${size.height}`, `--window-position=${position.x},${position.y}`,
-        ...extraFlags, "about:blank",
+        ...egressFlags, ...extraFlags, "about:blank",
       ];
       signal?.throwIfAborted();
       markProcessDispatched?.();
@@ -149,6 +151,18 @@ export function validateExtraFlags(flags: readonly string[]): string[] {
 }
 
 export async function cleanupOrphanProfiles(profileRoot: string): Promise<void> { await cleanupLegacyOrphanProfiles(profileRoot); }
+
+function proxyFlags(proxy: ChromeHostOptions["egressProxy"]): string[] {
+  if (proxy === undefined) return [];
+  if ((proxy.host !== "127.0.0.1" && proxy.host !== "::1") || !Number.isInteger(proxy.port) || proxy.port < 1 || proxy.port > 65_535) throw new BrowserProtocolError("INVALID_REQUEST", "Browser egress proxy configuration is invalid.");
+  const authority = proxy.host === "::1" ? `[::1]:${proxy.port}` : `127.0.0.1:${proxy.port}`;
+  return [
+    `--proxy-server=http://${authority}`,
+    "--proxy-bypass-list=<-loopback>",
+    "--disable-quic",
+    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+  ];
+}
 
 async function waitForActivePort(path: string, child: ChildProcess, timeoutMs: number, diagnostics: () => string, signal?: AbortSignal): Promise<[number, string]> {
   const deadline = performance.now() + timeoutMs;

@@ -156,6 +156,7 @@ export class TargetRegistry extends EventEmitter {
 
   private async registerPopup(targetId: string, openerId: string, url: string): Promise<void> {
     if (this.closed || this.targetToTab.has(targetId) || this.attachingTargets.has(targetId) || !this.targetToTab.has(openerId)) return;
+    if (url !== "" && !isAllowedTopLevelUrl(url)) { await this.rollbackTarget(targetId); return; }
     try { this.assertTabCapacity(); } catch { await this.rollbackTarget(targetId); return; }
     this.attachingTargets.add(targetId);
     let cdpSessionId: string | undefined;
@@ -195,7 +196,13 @@ export class TargetRegistry extends EventEmitter {
       const targetId = typeof info.targetId === "string" ? info.targetId : undefined;
       const tabId = targetId === undefined ? undefined : this.targetToTab.get(targetId);
       const tab = tabId === undefined ? undefined : this.tabs.get(tabId);
-      if (tab !== undefined) { if (typeof info.url === "string") tab.url = info.url; if (typeof info.title === "string") tab.title = info.title; }
+      if (tab !== undefined) {
+        if (typeof info.url === "string" && info.url !== "") {
+          if (!isAllowedTopLevelUrl(info.url)) { this.quarantine(tab); return; }
+          tab.url = info.url;
+        }
+        if (typeof info.title === "string") tab.title = info.title;
+      }
       return;
     }
     if (event.method === "Target.targetDestroyed" || event.method === "Target.targetCrashed") {
@@ -211,6 +218,7 @@ export class TargetRegistry extends EventEmitter {
     const tab = [...this.tabs.values()].find((candidate) => candidate.cdpSessionId === event.sessionId);
     if (tab === undefined) return;
     if (event.method === "Page.frameNavigated" && isRecord(event.params.frame) && event.params.frame.parentId === undefined) {
+      if (typeof event.params.frame.url === "string" && !isAllowedTopLevelUrl(event.params.frame.url)) { this.quarantine(tab); return; }
       tab.documentGeneration++;
       if (typeof event.params.frame.id === "string") tab.topFrameId = event.params.frame.id;
       if (typeof event.params.frame.url === "string") tab.url = event.params.frame.url;
@@ -220,6 +228,12 @@ export class TargetRegistry extends EventEmitter {
   };
 
   private readonly onDisconnect = (): void => { for (const tab of this.tabs.values()) if (tab.state === "open") this.markTerminal(tab, "detached"); };
+
+  private quarantine(tab: TabRecord): void {
+    if (tab.state !== "open") return;
+    this.markTerminal(tab, "closed");
+    void this.rollbackTarget(tab.targetId, tab.cdpSessionId);
+  }
 
   private markTerminal(tab: TabRecord, state: Exclude<TabState, "open">): void {
     if (tab.state !== "open" && !this.tabs.has(tab.tabId)) return;
@@ -269,6 +283,14 @@ export class TargetRegistry extends EventEmitter {
   private assertOpen(): void { if (this.closed || !this.host.connected) throw new BrowserProtocolError("CDP_DISCONNECTED", "Target registry is unavailable.", true); }
 }
 
-function pageUrl(value: string): string { return /^(?:https?:\/\/|about:blank|chrome-error:\/\/)/.test(value) ? value : "about:blank"; }
+function pageUrl(value: string): string { return isAllowedTopLevelUrl(value) ? value : "about:blank"; }
+function isAllowedTopLevelUrl(value: string): boolean {
+  if (value === "about:blank") return true;
+  if (value.startsWith("chrome-error://chromewebdata/")) return value.length <= 8192;
+  if (value.length > 8192) return false;
+  let parsed: URL;
+  try { parsed = new URL(value); } catch { return false; }
+  return (parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.username === "" && parsed.password === "";
+}
 function opaqueId(prefix: string): string { return `${prefix}_${randomBytes(18).toString("base64url")}`; }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }

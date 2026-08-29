@@ -1,7 +1,7 @@
 import { Check, Parse } from "typebox/value";
 import { BrowserProtocolError } from "./errors.js";
-import { BindRequestSchema, BrowserRequestSchema, MAX_DEADLINE_FUTURE_MS } from "./schema.js";
-import type { BindRequest, BrowserRequest } from "./types.js";
+import { BindRequestSchema, BrowserRequestSchema, MAX_DEADLINE_FUTURE_MS, ServerMessageSchema } from "./schema.js";
+import type { BindRequest, BrowserRequest, ServerMessage } from "./types.js";
 
 export function parseBindRequest(input: unknown): BindRequest {
   if (!Check(BindRequestSchema, input)) {
@@ -17,6 +17,11 @@ export function parseBrowserRequest(input: unknown, nowMs = Date.now()): Browser
   const request = Parse(BrowserRequestSchema, input);
   assertDeadline(request.deadline, nowMs);
   return request;
+}
+
+export function parseServerMessage(input: unknown): ServerMessage {
+  if (!Check(ServerMessageSchema, input)) throw new BrowserProtocolError("INVALID_REQUEST", "The server message does not match the browser protocol.");
+  return Parse(ServerMessageSchema, input);
 }
 
 export function assertDeadline(deadline: string, nowMs: number): void {

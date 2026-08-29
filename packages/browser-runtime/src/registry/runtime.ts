@@ -21,6 +21,7 @@ export interface BrowserRuntimeOptions {
   motorMinimumPathMsForTest?: number;
   observationFreshnessMsForTest?: number;
   egressConfigured?: boolean;
+  requireEgressForSessions?: boolean;
 }
 
 export class BrowserRuntime extends EventEmitter {
@@ -42,6 +43,7 @@ export class BrowserRuntime extends EventEmitter {
   private readonly motorMinimumPathMsForTest: number;
   private readonly observationFreshnessMsForTest: number | undefined;
   private readonly egressConfigured: boolean;
+  private readonly requireEgressForSessions: boolean;
 
   constructor(options: BrowserRuntimeOptions = {}) {
     super();
@@ -56,7 +58,8 @@ export class BrowserRuntime extends EventEmitter {
     this.personaSeedForTest = options.personaSeedForTest;
     this.motorMinimumPathMsForTest = options.motorMinimumPathMsForTest ?? 0;
     this.observationFreshnessMsForTest = options.observationFreshnessMsForTest;
-    this.egressConfigured = options.egressConfigured ?? false;
+    this.egressConfigured = options.egressConfigured ?? options.chrome?.egressProxy !== undefined;
+    this.requireEgressForSessions = options.requireEgressForSessions ?? false;
   }
 
   get subscriptionCount(): number { let count = 0; for (const values of this.subscriptions.values()) count += values.size; return count; }
@@ -107,13 +110,14 @@ export class BrowserRuntime extends EventEmitter {
     if (request.kind === "session.create") {
       return await this.execute(actor, request, `actor:${actorKey(actor)}:sessions`, undefined, undefined, async (context) => {
         context.checkpoint();
+        if (this.requireEgressForSessions && !this.egressConfigured) throw new BrowserProtocolError("CAPABILITY_UNAVAILABLE", "Browser egress is not configured.", true);
         if (this.listSessions(actor).length >= this.maxSessionsPerActor) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Browser session limit reached.", true);
         if (this.sessions.size + this.creatingSessions >= this.maxSessionsGlobal) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Global browser session limit reached.", true);
         this.creatingSessions++;
         try {
           const session = await BrowserSession.create(actor, this.operations, this.artifacts, this.navigationAuthorization, {
             ...this.chrome, profileManager: this.profileManager,
-            ...(request.initialUrl !== undefined ? { initialUrl: request.initialUrl } : {}),
+            ...(request.initialUrl !== undefined ? { initialUrl: request.initialUrl, initialNavigationContext: { operationId: request.operationId, ...(request.navigationAuthorization !== undefined ? { authorization: request.navigationAuthorization } : {}) } } : {}),
             ...(this.personaSeedForTest !== undefined ? { personaSeed: this.personaSeedForTest } : {}),
             motorMinimumPathMs: this.motorMinimumPathMsForTest,
             ...(this.observationFreshnessMsForTest !== undefined ? { observationFreshnessMs: this.observationFreshnessMsForTest } : {}),
@@ -134,14 +138,14 @@ export class BrowserRuntime extends EventEmitter {
 
     if (request.kind === "session.close") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); context.markDispatched(); await session.close(); this.sessions.delete(browserSessionId); this.removeSessionSubscriptions(browserSessionId); return session.descriptor(); }, signal);
     if (request.kind === "tab.list") return { kind: "tabs", tabs: session.listTabs() };
-    if (request.kind === "tab.create") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const tab = await session.createTab(request.url, context.signal, () => context.markDispatched()); return session.listTabs().find((item) => item.address.tabId === tab.tabId); }, signal);
+    if (request.kind === "tab.create") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const tab = await session.createTab(request.url, context.signal, () => context.markDispatched(), { operationId: request.operationId, ...(request.navigationAuthorization !== undefined ? { authorization: request.navigationAuthorization } : {}) }); return session.listTabs().find((item) => item.address.tabId === tab.tabId); }, signal);
     if (request.kind === "tab.focus") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); await session.targets.focus(request.address, context.signal, () => context.markDispatched()); return session.listTabs().find((item) => item.address.tabId === request.address.tabId); }, signal);
     if (request.kind === "tab.close") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const tab = session.resolve(request.address); if (session.motor.isActiveTab(tab.tabId)) await session.motor.releaseAll(tab); await session.targets.closeTab(request.address, context.signal, () => context.markDispatched()); this.removeTabSubscriptions(browserSessionId, request.address.tabId); return { kind: "ack", operationId: request.operationId }; }, signal);
     if (request.kind === "observe.screenshot") return await this.execute(actor, request, `capture:${browserSessionId}:${request.address.tabId}`, browserSessionId, controlEpoch, async (context) => await session.observe(request.address, request.delivery, context.signal), signal);
     if (request.kind === "observe.domFallback") return await this.execute(actor, request, `dom:${browserSessionId}:${request.address.tabId}`, browserSessionId, controlEpoch, async (context) => await session.observeDom(request.address, request.maxNodes, context.signal), signal);
-    if (request.kind === "action.coordinate") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { await session.coordinate(request.address, request.observationId, request.action as CoordinateAction, context, request.riskPolicy); return { kind: "ack", operationId: request.operationId }; }, signal);
+    if (request.kind === "action.coordinate") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { await session.coordinate(request.address, request.observationId, request.action as CoordinateAction, context, request.riskPolicy, request.coordinateSpace ?? "imagePixels"); return { kind: "ack", operationId: request.operationId }; }, signal);
     if (request.kind === "action.domFallback") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { await session.domAction(request.address, request.domObservationId, request.handle, request.action as DomFallbackAction, context); return { kind: "ack", operationId: request.operationId }; }, signal);
-    if (request.kind === "navigate") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); await session.navigate(request.address, request.url, context.signal, () => context.markDispatched()); return { kind: "ack", operationId: request.operationId }; }, signal);
+    if (request.kind === "navigate") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); await session.navigate(request.address, request.url, context.signal, () => context.markDispatched(), { operationId: request.operationId, authorization: request.navigationAuthorization }); return { kind: "ack", operationId: request.operationId }; }, signal);
     if (request.kind === "input.text") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { await session.typeText(request.address, request.text, request.replace ?? false, context); return { kind: "ack", operationId: request.operationId }; }, signal);
     if (request.kind === "input.key") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { await session.pressKey(request.address, request.key, context); return { kind: "ack", operationId: request.operationId }; }, signal);
     if (request.kind === "frames.subscribe") return await this.execute(actor, request, `frames:${browserSessionId}`, browserSessionId, controlEpoch, async (context) => {

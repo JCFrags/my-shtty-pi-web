@@ -200,7 +200,7 @@ describe("screenshot consistency transaction", () => {
     let screenshotCount = 0;
     let layoutCount = 0;
     bindObservationTab(target, { async send<T>(method: string): Promise<T> {
-      if (method === "Page.captureScreenshot") { screenshotCount++; return { data: Buffer.from(`png-${screenshotCount}`).toString("base64") } as T; }
+      if (method === "Page.captureScreenshot") { screenshotCount++; return { data: fakePngBase64(800, 600, screenshotCount) } as T; }
       layoutCount++;
       const value = layoutCount === 2 ? layout({ scrollY: 10 }) : layout();
       return { result: { value } } as T;
@@ -219,7 +219,7 @@ describe("screenshot consistency transaction", () => {
     const artifacts = new BrowserArtifactStore();
     let layoutCount = 0;
     bindObservationTab(target, { async send<T>(method: string): Promise<T> {
-      if (method === "Page.captureScreenshot") return { data: Buffer.from("png").toString("base64") } as T;
+      if (method === "Page.captureScreenshot") return { data: fakePngBase64() } as T;
       const value = layout({ scrollY: layoutCount++ * 10 });
       return { result: { value } } as T;
     } });
@@ -232,7 +232,7 @@ describe("screenshot consistency transaction", () => {
     const target = tab("commit-navigation");
     const tabs = [target];
     const artifacts = new BrowserArtifactStore();
-    bindObservationTab(target, { async send<T>(method: string): Promise<T> { if (method === "Page.captureScreenshot") return { data: Buffer.from("old-pixels").toString("base64") } as T; return { result: { value: layout() } } as T; } });
+    bindObservationTab(target, { async send<T>(method: string): Promise<T> { if (method === "Page.captureScreenshot") return { data: fakePngBase64() } as T; return { result: { value: layout() } } as T; } });
     const store = new ObservationStore(actor, registryFor(tabs), artifacts, new FakeMotor() as never, {
       currentEpoch: () => 1,
       commitBarrierForTest: async () => { target.documentGeneration++; },
@@ -248,7 +248,7 @@ describe("screenshot consistency transaction", () => {
     const tabs = [target];
     let epoch = 1;
     const artifacts = new BrowserArtifactStore();
-    bindObservationTab(target, { async send<T>(method: string): Promise<T> { if (method === "Page.captureScreenshot") return { data: Buffer.from("pixels").toString("base64") } as T; return { result: { value: layout() } } as T; } });
+    bindObservationTab(target, { async send<T>(method: string): Promise<T> { if (method === "Page.captureScreenshot") return { data: fakePngBase64() } as T; return { result: { value: layout() } } as T; } });
     const store = new ObservationStore(actor, registryFor(tabs), artifacts, new FakeMotor() as never, {
       currentEpoch: () => epoch,
       commitBarrierForTest: async () => { artifacts.clearTab(actor, target.browserSessionId, target.tabId); tabs.length = 0; epoch = 2; },
@@ -327,9 +327,117 @@ describe("screenshot consistency transaction", () => {
       override async put(...args: Parameters<BrowserArtifactStore["put"]>): ReturnType<BrowserArtifactStore["put"]> { const value = await super.put(...args); controller.abort(new Error("cancelled")); return value; }
     }
     const artifacts = new CancellingStore();
-    bindObservationTab(target, { async send<T>(method: string): Promise<T> { if (method === "Page.captureScreenshot") return { data: Buffer.from("png").toString("base64") } as T; return { result: { value: layout() } } as T; } });
+    bindObservationTab(target, { async send<T>(method: string): Promise<T> { if (method === "Page.captureScreenshot") return { data: fakePngBase64() } as T; return { result: { value: layout() } } as T; } });
     const store = new ObservationStore(actor, registryFor([target]), artifacts, new FakeMotor() as never);
     await assert.rejects(() => store.capture(address(target), "artifact", controller.signal), /cancelled/);
     assert.equal(artifacts.entryCount, 0);
   });
 });
+
+describe("image-pixel observation grounding", () => {
+  it("converts exact image dimensions to CSS coordinates at DPR 1, 1.25, 2, and fractional capture scale", async () => {
+    const cases = [
+      { id: "dpr-1", cssWidth: 800, cssHeight: 600, dpr: 1, imageWidth: 800, imageHeight: 600 },
+      { id: "dpr-125", cssWidth: 800, cssHeight: 600, dpr: 1.25, imageWidth: 1000, imageHeight: 750 },
+      { id: "dpr-2", cssWidth: 800, cssHeight: 600, dpr: 2, imageWidth: 1600, imageHeight: 1200 },
+      { id: "fractional-scale", cssWidth: 801, cssHeight: 601, dpr: 1.25, imageWidth: 1001, imageHeight: 751 },
+    ] as const;
+    for (const item of cases) {
+      const target = tab(item.id);
+      const stable = layout({ width: item.cssWidth, height: item.cssHeight, dpr: item.dpr });
+      bindObservationTab(target, { async send<T>(method: string): Promise<T> {
+        if (method === "Page.captureScreenshot") return { data: fakePngBase64(item.imageWidth, item.imageHeight) } as T;
+        return { result: { value: stable } } as T;
+      } });
+      const store = new ObservationStore(actor, registryFor([target]), new BrowserArtifactStore(), new FakeMotor() as never);
+      const observation = await store.capture(address(target), "inline");
+      assert.equal(observation.imagePixelWidth, item.imageWidth);
+      assert.equal(observation.imagePixelHeight, item.imageHeight);
+      assert.equal(observation.viewport.width, item.cssWidth);
+      assert.equal(observation.viewport.height, item.cssHeight);
+      assert.equal(observation.viewport.devicePixelRatio, item.dpr);
+      const converted = store.convertPoint(address(target), observation.observationId, { x: item.imageWidth / 2, y: item.imageHeight / 2 }, "imagePixels");
+      assert.ok(Math.abs(converted.x - item.cssWidth / 2) < 1e-9);
+      assert.ok(Math.abs(converted.y - item.cssHeight / 2) < 1e-9);
+      assert.deepEqual(store.convertPoint(address(target), observation.observationId, { x: 10.25, y: 20.5 }, "cssViewport"), { x: 10.25, y: 20.5 });
+    }
+  });
+
+  it("converts both drag endpoints and rejects finite edge, non-finite, foreign, and stale coordinates", async () => {
+    const target = tab("drag-edges");
+    const stable = layout({ width: 800, height: 600, dpr: 2 });
+    bindObservationTab(target, { async send<T>(method: string): Promise<T> {
+      if (method === "Page.captureScreenshot") return { data: fakePngBase64(1600, 1200) } as T;
+      return { result: { value: stable } } as T;
+    } });
+    const store = new ObservationStore(actor, registryFor([target]), new BrowserArtifactStore(), new FakeMotor() as never, { freshnessMs: 1 });
+    const observation = await store.capture(address(target), "inline");
+    const from = store.convertPoint(address(target), observation.observationId, { x: 200, y: 300 }, "imagePixels");
+    const to = store.convertPoint(address(target), observation.observationId, { x: 1400, y: 900 }, "imagePixels");
+    assert.deepEqual(from, { x: 100, y: 150 });
+    assert.deepEqual(to, { x: 700, y: 450 });
+    const lastPixel = store.convertPoint(address(target), observation.observationId, { x: 1599, y: 1199 }, "imagePixels");
+    assert.ok(lastPixel.x < 800 && lastPixel.y < 600);
+    for (const point of [{ x: 1600, y: 0 }, { x: 0, y: 1200 }, { x: -1, y: 0 }, { x: Number.NaN, y: 0 }, { x: Number.POSITIVE_INFINITY, y: 0 }]) {
+      assert.throws(() => store.convertPoint(address(target), observation.observationId, point, "imagePixels"), (error) => error instanceof BrowserProtocolError && error.code === "COORDINATE_OUT_OF_BOUNDS");
+    }
+    assert.throws(() => store.convertPoint({ ...address(target), tabId: "tab:foreign" }, observation.observationId, { x: 1, y: 1 }, "imagePixels"), (error) => error instanceof BrowserProtocolError && error.code === "OBSERVATION_NOT_FOUND");
+    await sleep(3);
+    await assert.rejects(() => store.guard(address(target), observation.observationId, from), (error) => error instanceof BrowserProtocolError && error.code === "OBSERVATION_STALE");
+  });
+
+  it("recaptures an oversized PNG as bounded JPEG and verifies the JPEG dimensions", async () => {
+    const target = tab("jpeg-fallback");
+    const stable = layout({ width: 800, height: 600, dpr: 2 });
+    const calls: Array<{ readonly method: string; readonly params: Readonly<Record<string, unknown>> }> = [];
+    bindObservationTab(target, { async send<T>(method: string, params: Readonly<Record<string, unknown>>): Promise<T> {
+      calls.push({ method, params });
+      if (method === "Page.captureScreenshot") {
+        if (params.format === "png") return { data: oversizedPngBase64(1600, 1200) } as T;
+        return { data: fakeJpegBase64(1600, 1200) } as T;
+      }
+      return { result: { value: stable } } as T;
+    } });
+    const artifacts = new BrowserArtifactStore();
+    const store = new ObservationStore(actor, registryFor([target]), artifacts, new FakeMotor() as never);
+    const observation = await store.capture(address(target), "artifact");
+    assert.equal(observation.mediaType, "image/jpeg");
+    assert.equal(observation.imagePixelWidth, 1600);
+    assert.equal(observation.imagePixelHeight, 1200);
+    assert.equal(observation.captureScale, 2);
+    assert.deepEqual(calls.filter((call) => call.method === "Page.captureScreenshot").map((call) => call.params.format), ["png", "jpeg"]);
+    assert.equal(calls.find((call) => call.params.format === "jpeg")?.params.quality, 82);
+    if (observation.image.kind !== "artifact") throw new Error("expected artifact delivery");
+    assert.equal((await artifacts.read(actor, observation.image.artifactId)).descriptor.mediaType, "image/jpeg");
+  });
+});
+
+function fakePngBase64(width = 800, height = 600, marker = 0): string {
+  const bytes = Buffer.alloc(25);
+  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(bytes, 0);
+  bytes.write("IHDR", 12, "ascii");
+  bytes.writeUInt32BE(width, 16);
+  bytes.writeUInt32BE(height, 20);
+  bytes[24] = marker;
+  return bytes.toString("base64");
+}
+
+function oversizedPngBase64(width: number, height: number): string {
+  const bytes = Buffer.alloc(4 * 1024 * 1024 + 1);
+  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(bytes, 0);
+  bytes.write("IHDR", 12, "ascii");
+  bytes.writeUInt32BE(width, 16);
+  bytes.writeUInt32BE(height, 20);
+  return bytes.toString("base64");
+}
+
+function fakeJpegBase64(width: number, height: number): string {
+  const bytes = Buffer.alloc(11);
+  bytes[0] = 0xff; bytes[1] = 0xd8;
+  bytes[2] = 0xff; bytes[3] = 0xc0;
+  bytes.writeUInt16BE(7, 4);
+  bytes[6] = 8;
+  bytes.writeUInt16BE(height, 7);
+  bytes.writeUInt16BE(width, 9);
+  return bytes.toString("base64");
+}

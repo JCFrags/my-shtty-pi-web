@@ -4,7 +4,7 @@ import { BrowserProtocolError, type ActorIdentity } from "@webx/browser-protocol
 import { actorKey } from "../actor/identity.js";
 
 export type ArtifactPurpose = "agent-observation" | "workspace-frame";
-export type BrowserMediaType = "image/png";
+export type BrowserMediaType = "image/png" | "image/jpeg";
 
 interface ArtifactRecord {
   readonly id: string;

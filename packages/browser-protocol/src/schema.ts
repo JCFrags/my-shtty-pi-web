@@ -56,6 +56,9 @@ const cursor = Type.Object({
   visible: Type.Boolean(),
 }, strict);
 
+const NavigationAuthorizationSchema = Type.String({ minLength: 64, maxLength: 4096, pattern: "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]{43}$" });
+const CoordinateSpaceSchema = Type.Union([Type.Literal("imagePixels"), Type.Literal("cssViewport")]);
+
 const coordinateAction = Type.Union([
   Type.Object({ kind: Type.Literal("move"), to: point }, strict),
   Type.Object({ kind: Type.Literal("hover"), to: point }, strict),
@@ -94,18 +97,18 @@ export const BindRequestSchema = Type.Object({
 
 export const BrowserRequestSchema = Type.Union([
   request("capabilities.get", {}),
-  request("session.create", { initialUrl: Type.Optional(HttpUrlSchema) }),
+  request("session.create", { initialUrl: Type.Optional(HttpUrlSchema), navigationAuthorization: Type.Optional(NavigationAuthorizationSchema) }),
   request("session.list", {}),
   request("session.close", { browserSessionId: IdSchema, controlEpoch: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }) }),
-  request("tab.create", { browserSessionId: IdSchema, controlEpoch: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }), url: Type.Optional(HttpUrlSchema) }),
+  request("tab.create", { browserSessionId: IdSchema, controlEpoch: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }), url: Type.Optional(HttpUrlSchema), navigationAuthorization: Type.Optional(NavigationAuthorizationSchema) }),
   request("tab.list", { browserSessionId: IdSchema, controlEpoch: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }) }),
   request("tab.focus", { address: TabAddressSchema }),
   request("tab.close", { address: TabAddressSchema }),
   request("observe.screenshot", { address: TabAddressSchema, delivery: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("inline"), Type.Literal("artifact")])) }),
   request("observe.domFallback", { address: TabAddressSchema, maxNodes: Type.Integer({ minimum: 1, maximum: 200 }) }),
-  request("action.coordinate", { address: TabAddressSchema, observationId: OpaqueIdSchema, action: coordinateAction, riskPolicy: Type.Optional(Type.Union([Type.Literal("normal"), Type.Literal("newer-observation"), Type.Literal("local-region")])) }),
+  request("action.coordinate", { address: TabAddressSchema, observationId: OpaqueIdSchema, coordinateSpace: Type.Optional(CoordinateSpaceSchema), action: coordinateAction, riskPolicy: Type.Optional(Type.Union([Type.Literal("normal"), Type.Literal("newer-observation"), Type.Literal("local-region")])) }),
   request("action.domFallback", { address: TabAddressSchema, domObservationId: OpaqueIdSchema, handle: OpaqueIdSchema, action: fallbackAction }),
-  request("navigate", { address: TabAddressSchema, url: HttpUrlSchema, waitUntil: Type.Optional(Type.Union([Type.Literal("load"), Type.Literal("domContentLoaded")])) }),
+  request("navigate", { address: TabAddressSchema, url: HttpUrlSchema, navigationAuthorization: NavigationAuthorizationSchema, waitUntil: Type.Optional(Type.Union([Type.Literal("load"), Type.Literal("domContentLoaded")])) }),
   request("input.text", { address: TabAddressSchema, text: Type.String({ maxLength: 65_536 }), replace: Type.Optional(Type.Boolean()) }),
   request("input.key", { address: TabAddressSchema, key: Type.String({ minLength: 1, maxLength: 64 }) }),
   request("operation.status", { targetOperationId: IdSchema }),
@@ -196,8 +199,11 @@ export const ScreenshotObservationSchema = Type.Object({
   viewport,
   scroll,
   frameSequence: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
-  mediaType: Type.Literal("image/png"),
-  byteLength: Type.Integer({ minimum: 1, maximum: 16 * 1024 * 1024 }),
+  mediaType: Type.Union([Type.Literal("image/png"), Type.Literal("image/jpeg")]),
+  byteLength: Type.Integer({ minimum: 1, maximum: 4 * 1024 * 1024 }),
+  imagePixelWidth: Type.Integer({ minimum: 1, maximum: 32_768 }),
+  imagePixelHeight: Type.Integer({ minimum: 1, maximum: 32_768 }),
+  captureScale: Type.Number({ exclusiveMinimum: 0, maximum: 16 }),
   sha256: Sha256Schema,
   cursor,
   image: imageDelivery,
@@ -259,7 +265,7 @@ const capabilityResult = Type.Object({
 }, strict);
 const sessionsResult = Type.Object({ kind: Type.Literal("sessions"), sessions: Type.Array(SessionDescriptorSchema, { maxItems: 32 }) }, strict);
 const tabsResult = Type.Object({ kind: Type.Literal("tabs"), tabs: Type.Array(TabDescriptorSchema, { maxItems: 16 }) }, strict);
-const artifactResult = Type.Object({ kind: Type.Literal("artifact"), artifactId: OpaqueIdSchema, mediaType: Type.Literal("image/png"), byteLength: Type.Integer({ minimum: 1, maximum: 16 * 1024 * 1024 }), sha256: Sha256Schema, offset: Type.Integer({ minimum: 0, maximum: 16 * 1024 * 1024 }), totalBytes: Type.Integer({ minimum: 1, maximum: 16 * 1024 * 1024 }), eof: Type.Boolean(), base64: Type.String({ maxLength: 1_500_000 }) }, strict);
+const artifactResult = Type.Object({ kind: Type.Literal("artifact"), artifactId: OpaqueIdSchema, mediaType: Type.Union([Type.Literal("image/png"), Type.Literal("image/jpeg")]), byteLength: Type.Integer({ minimum: 1, maximum: 1024 * 1024 }), sha256: Sha256Schema, offset: Type.Integer({ minimum: 0, maximum: 4 * 1024 * 1024 }), totalBytes: Type.Integer({ minimum: 1, maximum: 4 * 1024 * 1024 }), eof: Type.Boolean(), base64: Type.String({ maxLength: 1_500_000 }) }, strict);
 const ackResult = Type.Object({ kind: Type.Literal("ack"), operationId: IdSchema }, strict);
 const subscriptionResult = Type.Object({ kind: Type.Literal("subscription"), operationId: IdSchema, subscriptionId: OpaqueIdSchema, subscribed: Type.Boolean() }, strict);
 

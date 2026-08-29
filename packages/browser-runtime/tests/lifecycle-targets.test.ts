@@ -99,6 +99,32 @@ describe("lifecycle cancellation dispatch matrix", () => {
     await targets.close();
   });
 
+  it("keeps unexpected popup protocols private and closes them before registration", async () => {
+    const cdp = new FakeCdp();
+    const targets = await registry(cdp);
+    const opener = await targets.createTab();
+    cdp.emit("event", { method: "Target.targetCreated", params: { targetInfo: { type: "page", targetId: "target_popup_file", openerId: opener.targetId, url: "file:///etc/passwd" } } });
+    for (let attempt = 0; attempt < 100 && !cdp.calls.some((call) => call.method === "Target.closeTarget" && call.params.targetId === "target_popup_file"); attempt++) await new Promise((resolve) => setTimeout(resolve, 2));
+    assert.equal(targets.list(1).length, 1);
+    assert.equal(cdp.calls.some((call) => call.method === "Target.attachToTarget" && call.params.targetId === "target_popup_file"), false);
+    assert.ok(cdp.calls.some((call) => call.method === "Target.closeTarget" && call.params.targetId === "target_popup_file"));
+    await targets.close();
+  });
+
+  it("quarantines an owned tab that commits an unexpected top-level protocol", async () => {
+    const cdp = new FakeCdp();
+    const targets = await registry(cdp);
+    const owned = await targets.createTab();
+    const ownedAddress = { browserSessionId: owned.browserSessionId, tabId: owned.tabId, targetId: owned.targetId, controlEpoch: 1 };
+    cdp.emit("event", { method: "Target.targetInfoChanged", params: { targetInfo: { targetId: owned.targetId, url: "chrome-error://chromewebdata/", title: "Allowed error" } } });
+    assert.equal(targets.resolve(ownedAddress).url, "chrome-error://chromewebdata/");
+    cdp.emit("event", { method: "Page.frameNavigated", sessionId: owned.cdpSessionId, params: { frame: { id: "frame-owned", url: "file:///etc/passwd" } } });
+    assert.throws(() => targets.resolve(ownedAddress), (error) => error instanceof BrowserProtocolError && error.code === "TAB_NOT_FOUND");
+    for (let attempt = 0; attempt < 100 && !cdp.calls.some((call) => call.method === "Target.closeTarget" && call.params.targetId === owned.targetId); attempt++) await new Promise((resolve) => setTimeout(resolve, 2));
+    assert.ok(cdp.calls.some((call) => call.method === "Target.closeTarget" && call.params.targetId === owned.targetId));
+    await targets.close();
+  });
+
   it("keeps rollback authoritative even when target close fails", async () => {
     const cdp = new FakeCdp();
     const targets = await registry(cdp);

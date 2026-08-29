@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { BrowserProtocolError, type ActorIdentity, type DomObservation, type FrameEvent, type ScreenshotObservation, type SessionDescriptor, type TabAddress, type TabDescriptor } from "@webx/browser-protocol";
-import type { NavigationAuthorization } from "../actor/identity.js";
+import type { NavigationAuthorization, NavigationAuthorizationContext } from "../actor/identity.js";
 import type { BrowserArtifactStore } from "../artifacts/store.js";
 import { ChromeHost, type ChromeHostOptions } from "../chrome/host.js";
 import { bindFrameTab, FrameScheduler } from "../frames/scheduler.js";
@@ -46,17 +46,17 @@ export class BrowserSession {
     targets.on("tabRegistered", this.onTabRegistered);
   }
 
-  static async create(actor: ActorIdentity, operations: OperationRegistry, artifacts: BrowserArtifactStore, navigationAuthorization: NavigationAuthorization, options: Omit<ChromeHostOptions, "hostId"> & { initialUrl?: string; personaSeed?: number; motorMinimumPathMs?: number; observationFreshnessMs?: number } = {}, signal?: AbortSignal, markProcessDispatched?: () => void): Promise<BrowserSession> {
+  static async create(actor: ActorIdentity, operations: OperationRegistry, artifacts: BrowserArtifactStore, navigationAuthorization: NavigationAuthorization, options: Omit<ChromeHostOptions, "hostId"> & { initialUrl?: string; initialNavigationContext?: NavigationAuthorizationContext; personaSeed?: number; motorMinimumPathMs?: number; observationFreshnessMs?: number } = {}, signal?: AbortSignal, markProcessDispatched?: () => void): Promise<BrowserSession> {
     signal?.throwIfAborted();
     const browserSessionId = opaqueId("session");
-    const { initialUrl, personaSeed, motorMinimumPathMs, observationFreshnessMs, ...hostOptions } = options;
+    const { initialUrl, initialNavigationContext, personaSeed, motorMinimumPathMs, observationFreshnessMs, ...hostOptions } = options;
     const host = await ChromeHost.launch({ hostId: browserSessionId, ...hostOptions }, signal, markProcessDispatched);
     try {
       signal?.throwIfAborted();
       const targets = await TargetRegistry.create(browserSessionId, host);
       const session = new BrowserSession(actor, browserSessionId, host, targets, operations, artifacts, navigationAuthorization, personaSeed ?? randomBytes(4).readUInt32BE(), motorMinimumPathMs ?? 0, observationFreshnessMs ?? 3_000);
       const tab = await session.createTab(undefined, signal);
-      if (initialUrl !== undefined) await session.navigate(session.address(tab), initialUrl, signal ?? new AbortController().signal);
+      if (initialUrl !== undefined) await session.navigate(session.address(tab), initialUrl, signal ?? new AbortController().signal, undefined, initialNavigationContext ?? { operationId: "session.create" });
       return session;
     } catch (error) {
       await host.close();
@@ -71,14 +71,14 @@ export class BrowserSession {
     return { kind: "session", browserSessionId: this.browserSessionId, controlEpoch: this.controlEpoch, state: this.closeState === "open" ? this.host.connected ? "ready" : "degraded" : "closed", personaId: this.personaId, cursor: this.motor.state, tabs: this.targets.list(this.controlEpoch) };
   }
 
-  async createTab(url?: string, signal = new AbortController().signal, markDispatched?: () => void): Promise<TabRecord> {
+  async createTab(url?: string, signal = new AbortController().signal, markDispatched?: () => void, navigationContext: NavigationAuthorizationContext = { operationId: "tab.create" }): Promise<TabRecord> {
     this.assertOpen();
     const tab = await this.targets.createTab("about:blank", { signal, ...(markDispatched ? { markDispatched } : {}) });
     try {
       this.bindTab(tab);
       await this.motor.initializeTab(tab);
       signal.throwIfAborted();
-      if (url !== undefined) await this.navigate(this.address(tab), url, signal);
+      if (url !== undefined) await this.navigate(this.address(tab), url, signal, undefined, navigationContext);
       signal.throwIfAborted();
       return tab;
     } catch (error) {
@@ -101,12 +101,13 @@ export class BrowserSession {
     return await this.dom.observe(address, maxNodes, signal);
   }
 
-  async coordinate(address: TabAddress, observationId: string, action: CoordinateAction, context: OperationContext, riskPolicy: "normal" | "newer-observation" | "local-region" = "normal"): Promise<unknown> {
+  async coordinate(address: TabAddress, observationId: string, action: CoordinateAction, context: OperationContext, riskPolicy: "normal" | "newer-observation" | "local-region" = "normal", coordinateSpace: "imagePixels" | "cssViewport" = "imagePixels"): Promise<unknown> {
     const tab = this.resolve(address);
-    const point = coordinatePoint(action);
+    const converted = convertCoordinateAction(action, (point) => this.observations.convertPoint(address, observationId, point, coordinateSpace));
+    const point = coordinatePoint(converted);
     await this.observations.guard(address, observationId, point, riskPolicy, context.signal);
-    return await this.motor.coordinate(tab, action, context, async () => {
-      const irreversiblePoint = coordinatePoint(action);
+    return await this.motor.coordinate(tab, converted, context, async () => {
+      const irreversiblePoint = coordinatePoint(converted);
       this.assertEpoch(address);
       await this.observations.guard(address, observationId, irreversiblePoint, riskPolicy, context.signal);
     });
@@ -133,11 +134,11 @@ export class BrowserSession {
   async typeText(address: TabAddress, text: string, replace: boolean, context: OperationContext): Promise<void> { await this.motor.typeText(this.resolve(address), text, replace, context); }
   async pressKey(address: TabAddress, key: string, context: OperationContext): Promise<void> { await this.motor.pressKey(this.resolve(address), key, context); }
 
-  async navigate(address: TabAddress, rawUrl: string, signal: AbortSignal, markDispatched?: () => void): Promise<void> {
+  async navigate(address: TabAddress, rawUrl: string, signal: AbortSignal, markDispatched?: () => void, authorizationContext: NavigationAuthorizationContext = { operationId: "navigate" }): Promise<void> {
     const tab = this.resolve(address);
     const url = new URL(rawUrl);
     if (url.protocol !== "http:" && url.protocol !== "https:") throw new BrowserProtocolError("INVALID_REQUEST", "Navigation URL is not HTTP(S).");
-    await this.navigationAuthorization.authorize(this.actor, url, signal);
+    await this.navigationAuthorization.authorize(this.actor, url, signal, authorizationContext);
     signal.throwIfAborted();
     const eventController = new AbortController();
     const abort = (): void => eventController.abort(signal.reason);
@@ -207,6 +208,15 @@ export class BrowserSession {
 
 export function assertDomHandleUnmoved(initial: { x: number; y: number }, current: { x: number; y: number }): void {
   if (Math.abs(current.x - initial.x) > 2 || Math.abs(current.y - initial.y) > 2) throw new BrowserProtocolError("HANDLE_STALE", "DOM target moved before dispatch.");
+}
+
+function convertCoordinateAction(action: CoordinateAction, convert: (point: { x: number; y: number }) => { x: number; y: number }): CoordinateAction {
+  switch (action.kind) {
+    case "move": case "hover": return { kind: action.kind, to: convert(action.to) };
+    case "drag": return { kind: "drag", from: convert(action.from), to: convert(action.to) };
+    case "click": case "doubleClick": return { kind: action.kind, at: convert(action.at), button: action.button };
+    case "wheel": return { kind: "wheel", at: convert(action.at), deltaX: action.deltaX, deltaY: action.deltaY };
+  }
 }
 
 function coordinatePoint(action: CoordinateAction): { x: number; y: number } {

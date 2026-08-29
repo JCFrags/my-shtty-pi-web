@@ -7,7 +7,7 @@ import {
   parseBindRequest, parseBrowserRequest, sanitizeMessage,
   type ActorIdentity, type ErrorCode, type FrameEvent,
 } from "@webx/browser-protocol";
-import { BrowserRuntime, type BrowserRuntimeOptions } from "@webx/browser-runtime";
+import { BrokerNavigationAuthorization, BrowserRuntime, type BrowserRuntimeOptions } from "@webx/browser-runtime";
 import { cleanupDescriptor, prepareDescriptor, publishDescriptor, type BrowserdDescriptor, type DescriptorPaths, type StartupLease } from "./descriptor.js";
 import { NdjsonReader, sendJson } from "./transport.js";
 
@@ -33,6 +33,8 @@ export interface BrowserdServerOptions extends BrowserRuntimeOptions {
 
 export class BrowserdServer {
   private readonly runtime: BrowserRuntime;
+  private readonly brokerAuthorization: BrokerNavigationAuthorization | undefined;
+  private readonly egressBindingId: string;
   private readonly runtimeDirectory: string | undefined;
   private readonly maxConnections: number;
   private readonly bindTimeoutMs: number;
@@ -50,7 +52,11 @@ export class BrowserdServer {
   private readonly connections = new Set<ConnectionState>();
 
   constructor(options: BrowserdServerOptions = {}) {
-    this.runtime = options.runtime ?? new BrowserRuntime(options);
+    const brokerAuthorization = options.runtime === undefined ? new BrokerNavigationAuthorization() : undefined;
+    this.brokerAuthorization = brokerAuthorization;
+    this.runtime = options.runtime ?? new BrowserRuntime({ ...options, navigationAuthorization: brokerAuthorization as BrokerNavigationAuthorization, requireEgressForSessions: true });
+    const proxy = options.chrome?.egressProxy;
+    this.egressBindingId = proxy === undefined ? "unconfigured" : `forward-proxy://${proxy.host === "::1" ? "[::1]" : proxy.host}:${proxy.port}`;
     this.runtimeDirectory = options.runtimeDirectory;
     this.maxConnections = options.maxConnections ?? 128;
     this.bindTimeoutMs = options.bindTimeoutMs ?? 5_000;
@@ -93,6 +99,7 @@ export class BrowserdServer {
 
   private async startInternal(): Promise<BrowserdDescriptor> {
     const prepared = await prepareDescriptor(this.runtimeDirectory, { allowTemporaryFallback: this.allowTemporaryRuntimeDirectoryForTest });
+    this.brokerAuthorization?.configure({ runtimeInstanceId: prepared.descriptor.runtimeInstanceId, signingSecret: prepared.descriptor.brokerSigningSecret, egressBindingId: this.egressBindingId });
     const server = createServer((socket) => this.accept(socket));
     this.server = server;
     this.paths = prepared.paths;
