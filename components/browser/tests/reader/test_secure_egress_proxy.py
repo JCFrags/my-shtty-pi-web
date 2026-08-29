@@ -13,6 +13,17 @@ proxy = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(proxy)
 
 
+def test_listener_accepts_only_loopback_literals_and_valid_ports() -> None:
+    assert proxy.validate_listener("127.0.0.1", 8877) == ("127.0.0.1", 8877)
+    assert proxy.validate_listener("::1", 8877) == ("::1", 8877)
+    with pytest.raises(RuntimeError):
+        proxy.validate_listener("0.0.0.0", 8877)
+    with pytest.raises(RuntimeError):
+        proxy.validate_listener("localhost", 8877)
+    with pytest.raises(RuntimeError):
+        proxy.validate_listener("127.0.0.1", 0)
+
+
 def test_authority_rejects_credentials_and_local_names() -> None:
     with pytest.raises(proxy.ProxyDenied):
         proxy.parse_authority("user:secret@example.org:443", 443)
@@ -34,6 +45,22 @@ def test_resolution_rejects_private_literal() -> None:
 
 def test_resolution_accepts_public_literal_without_dns() -> None:
     assert asyncio.run(proxy.resolve_public("1.1.1.1", 443)) == [(2, "1.1.1.1")]
+
+
+def test_connection_uses_the_validated_address_not_the_hostname(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, int, int | None]] = []
+
+    async def resolved(_host: str, _port: int):
+        return [(2, "93.184.216.34")]
+
+    async def connected(host: str, port: int, family: int | None = None):
+        calls.append((host, port, family))
+        return object(), object()
+
+    monkeypatch.setattr(proxy, "resolve_public", resolved)
+    monkeypatch.setattr(asyncio, "open_connection", connected)
+    asyncio.run(proxy.open_pinned("example.test", 443))
+    assert calls == [("93.184.216.34", 443, 2)]
 
 
 def test_mixed_dns_answers_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -25,6 +25,18 @@ class ProxyDenied(Exception):
     pass
 
 
+def validate_listener(host: str, port: int) -> tuple[str, int]:
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as error:
+        raise RuntimeError("proxy listener must use a loopback IP literal") from error
+    if not address.is_loopback:
+        raise RuntimeError("proxy listener must use a loopback IP literal")
+    if port < 1 or port > 65535:
+        raise RuntimeError("proxy listener port is invalid")
+    return str(address), port
+
+
 def validate_host(host: str) -> str:
     normalized = host.rstrip(".").lower()
     if not normalized or normalized == "localhost" or normalized.endswith(".localhost"):
@@ -197,7 +209,8 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
 
 async def main() -> None:
-    server = await asyncio.start_server(handle_client, HOST, PORT, limit=HEADER_LIMIT)
+    host, port = validate_listener(HOST, PORT)
+    server = await asyncio.start_server(handle_client, host, port, limit=HEADER_LIMIT)
     async with server:
         await server.serve_forever()
 
