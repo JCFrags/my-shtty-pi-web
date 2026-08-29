@@ -117,6 +117,26 @@ describe("pressed input cleanup", () => {
     assert.deepEqual(motor.heldInputState, { buttons: [], keys: [] });
   });
 
+  it("clears tracked input after the active target becomes terminal", async () => {
+    let failRelease = true;
+    const fixture = motorFixture(async (event) => {
+      if (event.method === "Runtime.evaluate") return { result: { value: true } };
+      if (event.params.type === "mouseReleased" && failRelease) throw new BrowserProtocolError("CDP_ERROR", "release failed");
+      return {};
+    });
+    const registry = new OperationRegistry();
+    const motor = new SessionMotor("session:motor-adversarial", 7);
+    registry.submit(actor, { operationId: "terminal-held", laneKey: "motor", deadline: deadline() }, async (context) => {
+      await motor.coordinate(fixture.tab, { kind: "click", at: { x: 81, y: 81 }, button: "left" }, context, async () => undefined);
+    });
+    assert.equal((await registry.wait(actor, "terminal-held")).state, "failed");
+    assert.deepEqual(motor.heldInputState.buttons, ["left"]);
+    fixture.tab.state = "closed";
+    failRelease = false;
+    await motor.releaseAll(fixture.tab);
+    assert.deepEqual(motor.heldInputState, { buttons: [], keys: [] });
+  });
+
   it("routes epoch cancellation through mouse release", async () => {
     const fixture = motorFixture();
     const registry = new OperationRegistry();

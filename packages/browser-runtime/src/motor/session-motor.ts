@@ -135,8 +135,8 @@ export class SessionMotor extends EventEmitter {
   }
 
   async releaseAll(tab = this.activeTab): Promise<void> {
-    if (tab === undefined || motorConnection(tab).connected === false) {
-      if (this.pressedButtons.size > 0 || this.pressedKeys.size > 0) this.emit("cleanupUnavailable", { reason: "CDP disconnected" });
+    if (tab === undefined || tab.state !== "open" || motorConnection(tab).connected === false) {
+      if (this.pressedButtons.size > 0 || this.pressedKeys.size > 0) this.emit("cleanupUnavailable", { reason: tab?.state !== "open" ? "Target is terminal" : "CDP disconnected" });
       this.pressedButtons.clear();
       this.pressedKeys.clear();
       return;

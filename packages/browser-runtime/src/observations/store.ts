@@ -62,7 +62,7 @@ export class ObservationStore {
     if (delivery === "inline" && bytes.byteLength > this.inlineLimitBytes) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Screenshot exceeds the reviewed inline limit.");
     let artifactId: string | undefined;
     const descriptor = inline
-      ? { sizeBytes: bytes.byteLength, sha256: await sha256Hex(bytes) }
+      ? { sizeBytes: bytes.byteLength, sha256: await sha256Hex(Uint8Array.from(bytes)) }
       : await this.artifacts.put(this.actor, bytes, { browserSessionId: address.browserSessionId, tabId: address.tabId, purpose: "agent-observation", mediaType: "image/png" });
     if ("artifactId" in descriptor) artifactId = descriptor.artifactId;
     try {

@@ -106,7 +106,7 @@ export class BrowserArtifactStore {
     this.makeRoom(owner, options.browserSessionId, bytes.byteLength);
     const now = this.now();
     const id = `artifact_${randomBytes(24).toString("base64url")}`;
-    const copy = bytes.slice();
+    const copy = Uint8Array.from(bytes);
     const record: ArtifactRecord = {
       id, owner, browserSessionId: options.browserSessionId,
       ...(options.tabId !== undefined ? { tabId: options.tabId } : {}),
@@ -123,7 +123,7 @@ export class BrowserArtifactStore {
     this.prune();
     const record = this.records.get(id);
     if (record === undefined || record.owner !== actorKey(actor)) throw new BrowserProtocolError("ARTIFACT_NOT_FOUND", "Artifact not found.");
-    const copy = record.bytes.slice();
+    const copy = Uint8Array.from(record.bytes);
     if (await sha256Hex(copy) !== record.sha256) { this.delete(id); throw new BrowserProtocolError("INTERNAL_ERROR", "Artifact integrity verification failed."); }
     return { descriptor: descriptor(record), bytes: copy };
   }
