@@ -133,6 +133,18 @@ importers:
 
   packages/test-fixtures: {}
 
+  spikes/screenshot-first-browser:
+    devDependencies:
+      '@types/node':
+        specifier: 24.12.4
+        version: 24.12.4
+      tsx:
+        specifier: 4.20.6
+        version: 4.20.6
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
 packages:
 
   '@anthropic-ai/sdk@0.91.1':

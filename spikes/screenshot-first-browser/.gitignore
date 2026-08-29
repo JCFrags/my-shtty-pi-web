@@ -1,0 +1,9 @@
+node_modules/
+dist/
+build/
+profiles/
+artifacts/
+*.png
+*.jpg
+*.jpeg
+*.log

@@ -1,0 +1,16 @@
+{
+  "name": "@webx/screenshot-first-browser-spike",
+  "version": "0.0.0-phase0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "verify": "tsc --noEmit && node --import tsx --test tests/*.test.ts && tsx src/verify.ts"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "tsx": "4.20.6",
+    "typescript": "6.0.3"
+  }
+}

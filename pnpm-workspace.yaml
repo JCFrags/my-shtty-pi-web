@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+  - spikes/*
   - components/browser/apps/*
   - components/browser/packages/*
 
