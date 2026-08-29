@@ -137,6 +137,80 @@ describe("pressed input cleanup", () => {
     assert.deepEqual(motor.heldInputState, { buttons: [], keys: [] });
   });
 
+  it("does not dispatch wheel after cancellation or deadline while the post-path guard is blocked", async () => {
+    for (const mode of ["cancel", "deadline"] as const) {
+      const fixture = motorFixture();
+      const registry = new OperationRegistry();
+      const motor = new SessionMotor("session:motor-adversarial", mode === "cancel" ? 8 : 9);
+      let guardEntered = false;
+      let releaseGuard!: () => void;
+      const guard = new Promise<void>((resolve) => { releaseGuard = resolve; });
+      registry.submit(actor, { operationId: `wheel-${mode}`, laneKey: `wheel-${mode}`, deadline: new Date(Date.now() + (mode === "cancel" ? 5_000 : 500)).toISOString() }, async (context) => {
+        await motor.coordinate(fixture.tab, { kind: "wheel", at: { x: 81, y: 81 }, deltaX: 0, deltaY: 100 }, context, async () => { guardEntered = true; await guard; });
+      });
+      await waitFor(() => guardEntered);
+      if (mode === "cancel") registry.cancel(actor, `wheel-${mode}`);
+      else await waitFor(() => registry.status(actor, `wheel-${mode}`).state === "expired");
+      releaseGuard();
+      const status = await registry.wait(actor, `wheel-${mode}`);
+      assert.equal(status.dispatchState, "partially-dispatched");
+      assert.equal(fixture.sent.some((event) => event.params.type === "mouseWheel"), false);
+    }
+  });
+
+  it("checks cancellation again after the post-path guard resolves and before wheel send", async () => {
+    const fixture = motorFixture();
+    const motor = new SessionMotor("session:motor-adversarial", 10);
+    const controller = new AbortController();
+    const context = {
+      signal: controller.signal,
+      deadlineMonotonicMs: performance.now() + 1_000,
+      markPartiallyDispatched() {}, markDispatched() {},
+      checkpoint() { controller.signal.throwIfAborted(); },
+    };
+    await assert.rejects(() => motor.coordinate(fixture.tab, { kind: "wheel", at: { x: 81, y: 81 }, deltaX: 0, deltaY: 100 }, context, async () => { controller.abort(new BrowserProtocolError("OPERATION_CANCELLED", "cancelled")); }));
+    assert.equal(fixture.sent.some((event) => event.params.type === "mouseWheel"), false);
+  });
+
+  it("fails a drag when release fails, retains held state, and performs one bounded retry", async () => {
+    let releases = 0;
+    const fixture = motorFixture(async (event) => {
+      if (event.method === "Runtime.evaluate") return { result: { value: true } };
+      if (event.params.type === "mouseReleased") { releases++; throw new BrowserProtocolError("CDP_ERROR", "release failed"); }
+      return {};
+    });
+    const registry = new OperationRegistry();
+    const motor = new SessionMotor("session:motor-adversarial", 11);
+    registry.submit(actor, { operationId: "drag-release-fail", laneKey: "drag-release-fail", deadline: deadline() }, async (context) => {
+      await motor.coordinate(fixture.tab, { kind: "drag", from: { x: 80, y: 80 }, to: { x: 82, y: 82 } }, context, async () => undefined);
+    });
+    const status = await registry.wait(actor, "drag-release-fail");
+    assert.equal(status.state, "failed");
+    assert.equal(status.error?.code, "CDP_ERROR");
+    assert.equal(status.dispatchState, "dispatched");
+    assert.equal(releases, 2);
+    assert.deepEqual(motor.heldInputState.buttons, ["left"]);
+  });
+
+  it("still fails the drag truthfully when the bounded release retry succeeds", async () => {
+    let releases = 0;
+    const fixture = motorFixture(async (event) => {
+      if (event.method === "Runtime.evaluate") return { result: { value: true } };
+      if (event.params.type === "mouseReleased" && ++releases === 1) throw new BrowserProtocolError("CDP_ERROR", "first release failed");
+      return {};
+    });
+    const registry = new OperationRegistry();
+    const motor = new SessionMotor("session:motor-adversarial", 12);
+    registry.submit(actor, { operationId: "drag-release-retry", laneKey: "drag-release-retry", deadline: deadline() }, async (context) => {
+      await motor.coordinate(fixture.tab, { kind: "drag", from: { x: 80, y: 80 }, to: { x: 82, y: 82 } }, context, async () => undefined);
+    });
+    const status = await registry.wait(actor, "drag-release-retry");
+    assert.equal(status.state, "failed");
+    assert.equal(status.error?.code, "CDP_ERROR");
+    assert.equal(releases, 2);
+    assert.deepEqual(motor.heldInputState.buttons, []);
+  });
+
   it("routes epoch cancellation through mouse release", async () => {
     const fixture = motorFixture();
     const registry = new OperationRegistry();

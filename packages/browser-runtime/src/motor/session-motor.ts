@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { randomBytes } from "node:crypto";
+import { BrowserProtocolError } from "@webx/browser-protocol";
 import type { OperationContext } from "../operations/registry.js";
 import type { TabRecord } from "../targets/registry.js";
 import { generateMove, sampleDwellMs, samplePressMs, createPersona, type CursorSample, type Point } from "../vendor/agentcursor/index.js";
@@ -73,6 +74,7 @@ export class SessionMotor extends EventEmitter {
         await sleep(sampleDwellMs(this.persona.rng, this.persona.traits().dwellScale), context.signal);
         context.checkpoint();
         await postPathGuard();
+        context.checkpoint();
         const count = action.kind === "doubleClick" ? 2 : 1;
         for (let index = 1; index <= count; index++) {
           context.checkpoint();
@@ -92,14 +94,16 @@ export class SessionMotor extends EventEmitter {
         await this.moveTo(tab, action.at, context, started);
         context.checkpoint();
         await postPathGuard();
+        context.checkpoint();
         context.markDispatched();
-        await this.command(tab, "Input.dispatchMouseEvent", { type: "mouseWheel", ...action.at, button: "none", buttons: 0, deltaX: action.deltaX, deltaY: action.deltaY });
+        await this.command(tab, "Input.dispatchMouseEvent", { type: "mouseWheel", ...action.at, button: "none", buttons: 0, deltaX: action.deltaX, deltaY: action.deltaY }, context.signal);
         return { pathDurationMs: 0, pathWallMs: 0, completionAfterPathMs: 0, totalMs: performance.now() - started };
       }
       if (action.kind !== "drag") throw new Error("Unsupported coordinate action.");
       await this.moveTo(tab, action.from, context, started);
       context.checkpoint();
       await postPathGuard();
+      context.checkpoint();
       await this.press(tab, "left", action.from, 1, context);
       try {
         const moveStarted = performance.now();
@@ -110,7 +114,7 @@ export class SessionMotor extends EventEmitter {
         context.markDispatched();
         return { pathDurationMs: nominal, pathWallMs: performance.now() - moveStarted, completionAfterPathMs: 0, totalMs: performance.now() - started };
       } finally {
-        await this.releaseWithCleanup(tab, "left", this.cursor, 1).catch(() => undefined);
+        await this.releaseAfterDrag(tab, "left", this.cursor, 1);
       }
     } finally { this.emit("actionEnd", { tabId: tab.tabId }); }
   }
@@ -125,7 +129,7 @@ export class SessionMotor extends EventEmitter {
       await sleep(item.delayMs, context.signal);
       context.checkpoint();
       if (item.t === "back") await this.pressKey(tab, "Backspace", context);
-      else { context.markDispatched(); await this.command(tab, "Input.insertText", { text: item.ch }); }
+      else { context.checkpoint(); context.markDispatched(); await this.command(tab, "Input.insertText", { text: item.ch }, context.signal); }
     }
   }
 
@@ -232,6 +236,15 @@ export class SessionMotor extends EventEmitter {
       await this.cleanupCommand(tab, "Input.dispatchMouseEvent", { type: "mouseReleased", ...at, button, buttons: 0, clickCount }, cleanup.signal);
       this.pressedButtons.delete(button);
     } finally { cleanup.dispose(); }
+  }
+
+  private async releaseAfterDrag(tab: TabRecord, button: MouseButton, at: Point, clickCount: number): Promise<void> {
+    try { await this.releaseWithCleanup(tab, button, at, clickCount); }
+    catch (error) {
+      await this.releaseWithCleanup(tab, button, at, clickCount).catch(() => undefined);
+      if (error instanceof Error && "code" in error) throw error;
+      throw new BrowserProtocolError("CDP_ERROR", "Mouse release failed while the browser connection remained available.", true);
+    }
   }
 
   private async key(tab: TabRecord, key: string, code: string, modifiers: number, context: OperationContext): Promise<void> {

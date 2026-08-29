@@ -131,6 +131,7 @@ export class BrowserSession {
     const url = new URL(rawUrl);
     if (url.protocol !== "http:" && url.protocol !== "https:") throw new BrowserProtocolError("INVALID_REQUEST", "Navigation URL is not HTTP(S).");
     await this.navigationAuthorization.authorize(this.actor, url, signal);
+    signal.throwIfAborted();
     const eventController = new AbortController();
     const abort = (): void => eventController.abort(signal.reason);
     signal.addEventListener("abort", abort, { once: true });
