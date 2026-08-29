@@ -169,6 +169,23 @@ describe("browserd actor-bound Unix service", () => {
     assert.equal(aborted, true);
   });
 
+  it("clears artifacts and operations during service shutdown", async () => {
+    const runtime = new BrowserRuntime();
+    const actor = { principalId: "owner:cleanup", agentSessionId: "agent:cleanup" };
+    await runtime.artifacts.put(actor, Uint8Array.of(1, 2, 3), "image/png");
+    runtime.operations.submit(actor, { operationId: "operation:cleanup", laneKey: "cleanup", deadline: new Date(Date.now() + 10_000).toISOString() }, async () => "done");
+    await runtime.operations.wait(actor, "operation:cleanup");
+    const directory = await mkdtemp(join(tmpdir(), "browserd-cleanup-test-"));
+    directories.push(directory);
+    const server = new BrowserdServer({ runtimeDirectory: directory, runtime });
+    servers.push(server);
+    await server.start();
+    await server.stop();
+    servers.splice(servers.indexOf(server), 1);
+    assert.equal(runtime.artifacts.entryCount, 0);
+    assert.equal(runtime.operations.size, 0);
+  });
+
   it("enforces bounded NDJSON frames", () => {
     const reader = new NdjsonReader(16);
     assert.deepEqual(reader.push(Buffer.from("{\"a\":1}\n")), ["{\"a\":1}"]);

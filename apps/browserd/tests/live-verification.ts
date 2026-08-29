@@ -86,7 +86,11 @@ class BrowserClient {
 const html = (label: string): string => `<!doctype html><html><head><title>${label}</title><style>body{margin:0;height:2200px;background:#eef;font:20px sans-serif}button,input{position:absolute;left:80px;width:220px;height:52px;font-size:18px}#increment{top:100px}#text{top:180px}#popup{top:260px}</style></head><body><h1>${label}</h1><button id="increment">${label} count 0</button><input id="text" aria-label="${label} text"><button id="popup">Open ${label} popup</button><script>let n=0;increment.onclick=()=>increment.textContent='${label} count '+(++n);popup.onclick=()=>open('/popup-${label}','popup-${label}','width=500,height=400');</script></body></html>`;
 
 async function main(): Promise<void> {
-  const fixture = createHttpServer((request, response) => { const label = request.url?.includes("beta") ? "beta" : request.url?.includes("popup") ? "popup" : "alpha"; response.writeHead(200, { "content-type": "text/html", "cache-control": "no-store" }); response.end(html(label)); });
+  const fixture = createHttpServer((request, response) => {
+    const label = request.url?.includes("beta") ? "beta" : request.url?.includes("popup") ? "popup" : "alpha";
+    const send = (): void => { response.writeHead(200, { "content-type": "text/html", "cache-control": "no-store" }); response.end(html(label)); };
+    if (request.url?.includes("slow-navigation")) setTimeout(send, 2_000); else send();
+  });
   activeFixture = fixture;
   await new Promise<void>((resolvePromise) => fixture.listen(0, "127.0.0.1", resolvePromise));
   const addressInfo = fixture.address(); if (addressInfo === null || typeof addressInfo === "string") throw new Error("fixture did not bind");
@@ -182,10 +186,10 @@ async function main(): Promise<void> {
   const internalA = (runtime as unknown as { getSession(actor: typeof actorA, browserSessionId: string): BrowserSession }).getSession(actorA, sessionA.browserSessionId);
   const tabA1Internal = internalA.targets.getById(tabA1.tabId);
   assert.ok(tabA1Internal !== undefined);
-  await internalA.host.cdp.send("Runtime.evaluate", { expression: "document.querySelector('[id^=pi-cursor-]')?.remove(); const d=document.createElement('dialog'); d.id='phase1-dialog'; d.textContent='top layer'; document.body.append(d); d.showModal();", returnByValue: true }, tabA1Internal.cdpSessionId);
+  await internalA.host.cdp.send("Runtime.evaluate", { expression: `document.querySelector('[id^="pi-cursor-"]')?.remove(); const d=document.createElement('dialog'); d.id='phase1-dialog'; d.textContent='top layer'; document.body.append(d); d.showModal();`, returnByValue: true }, tabA1Internal.cdpSessionId);
   await sleep(100);
   await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
-  const overlayCheck = await internalA.host.cdp.send<{ result?: { value?: number } }>("Runtime.evaluate", { expression: "document.querySelectorAll('[id^=pi-cursor-]').length", returnByValue: true }, tabA1Internal.cdpSessionId);
+  const overlayCheck = await internalA.host.cdp.send<{ result?: { value?: number } }>("Runtime.evaluate", { expression: `document.querySelectorAll('[id^="pi-cursor-"]').length`, returnByValue: true }, tabA1Internal.cdpSessionId);
   assert.equal(overlayCheck.result?.value, 1);
   await internalA.host.cdp.send("Runtime.evaluate", { expression: "document.getElementById('phase1-dialog')?.close(); document.getElementById('phase1-dialog')?.remove();", returnByValue: true }, tabA1Internal.cdpSessionId);
   await clientA.expectFailure("observe.screenshot", { address: { ...tabA1, targetId: "x".repeat(20) } }, /TAB_NOT_FOUND|not found/i);
@@ -208,8 +212,14 @@ async function main(): Promise<void> {
   await clientA.call("navigate", { address: tabA1, url: `${origin}/alpha-scroll`, waitUntil: "load" });
 
   const scrollObservation = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
-  await clientA.call("action.coordinate", { address: tabA1, observationId: scrollObservation.observationId, action: { kind: "wheel", at: { x: 400, y: 400 }, deltaX: 0, deltaY: 700 } });
-  await sleep(250);
+  await clientA.call("action.coordinate", { address: tabA1, observationId: scrollObservation.observationId, action: { kind: "wheel", at: { x: 400, y: 400 }, deltaX: 0, deltaY: 1_200 } });
+  let wheelScrollY = 0;
+  for (let attempt = 0; attempt < 20 && wheelScrollY <= 2; attempt++) {
+    await sleep(100);
+    const scrollCheck = await internalA.host.cdp.send<{ result?: { value?: number } }>("Runtime.evaluate", { expression: "scrollY", returnByValue: true }, tabA1Internal.cdpSessionId);
+    wheelScrollY = scrollCheck.result?.value ?? 0;
+  }
+  assert.ok(wheelScrollY > 2, "public wheel dispatch did not scroll the fixture");
   await clientA.expectFailure("action.coordinate", { address: tabA1, observationId: scrollObservation.observationId, action: { kind: "click", at: { x: 140, y: 125 }, button: "left" } }, /OBSERVATION|Scroll|stale/i);
 
   const resized = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA2, delivery: "artifact" });
@@ -232,6 +242,16 @@ async function main(): Promise<void> {
   const cancelled = await actionPromise; assert.equal(cancelled.ok, false);
   const cancelledStatus = await clientA2.call<OperationResult>("operation.status", { targetOperationId: `operation:${cancelId}` });
   assert.equal(cancelledStatus.state, "cancelled"); assert.equal(cancelledStatus.dispatchState, "partially-dispatched");
+
+  const navigationId = `navigation:${Date.now()}`;
+  const navigationAction = clientA.start("navigate", `operation:${navigationId}`, { address: tabA1, url: `${origin}/slow-navigation`, waitUntil: "load" });
+  await sleep(200);
+  await clientA2.call("operation.cancel", { targetOperationId: `operation:${navigationId}` });
+  assert.equal((await navigationAction).ok, false);
+  const navigationStatus = await clientA2.call<OperationResult>("operation.status", { targetOperationId: `operation:${navigationId}` });
+  assert.equal(navigationStatus.state, "cancelled");
+  assert.equal(navigationStatus.dispatchState, "dispatched");
+  await clientA.call("navigate", { address: tabA1, url: `${origin}/alpha-after-cancel`, waitUntil: "load" });
 
   const processCountBeforeWarm = await chromiumProcessCount();
   const warmObservation = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
@@ -259,6 +279,7 @@ async function main(): Promise<void> {
     overlayMutationAndTopLayerDialog: true,
     publicWheelAndScrollGuard: true,
     cancellation: { state: cancelledStatus.state, dispatchState: cancelledStatus.dispatchState },
+    navigationCancellation: { state: navigationStatus.state, dispatchState: navigationStatus.dispatchState },
     postPathRevalidation: { state: postPathStatus.state, dispatchState: postPathStatus.dispatchState, clickPrevented: true },
     targetCrash: crashStatus.state, chromeKillFailedClosed: true,
     processTreePssKiB: pss.pssKiB, processTreePrivateDirtyKiB: pss.privateDirtyKiB,

@@ -252,6 +252,8 @@ async function main(): Promise<void> {
   fixture = undefined;
   const remainingProfileEntries = (await readdir(profileRoot).catch(() => [])).filter((name) => name.startsWith("session-"));
   assert.equal(remainingProfileEntries.length, 0, "A temporary browser profile leaked.");
+  assert.equal(runtime.artifacts.entryCount, 0, "Artifacts remained after browserd shutdown.");
+  assert.equal(runtime.operations.size, 0, "Operations remained after browserd shutdown.");
 
   const result = {
     passed: true,
@@ -291,7 +293,7 @@ async function main(): Promise<void> {
       artifactBytes: slopePerHour(samples.map((sample) => [sample.elapsedSeconds, sample.artifactBytes])),
       operationCount: slopePerHour(samples.map((sample) => [sample.elapsedSeconds, sample.operationCount])),
     },
-    cleanup: { profilesRemaining: remainingProfileEntries.length, descriptorRemoved: !(await exists(join(root, "transport", "browserd.json"))), socketRemoved: !(await exists(join(root, "transport", "browserd.sock"))) },
+    cleanup: { profilesRemaining: remainingProfileEntries.length, artifactsRemaining: runtime.artifacts.entryCount, operationsRemaining: runtime.operations.size, descriptorRemoved: !(await exists(join(root, "transport", "browserd.json"))), socketRemoved: !(await exists(join(root, "transport", "browserd.sock"))) },
     samples,
   };
   await mkdir(dirname(outputPath), { recursive: true });
