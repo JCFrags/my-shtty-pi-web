@@ -96,7 +96,7 @@ export class SessionMotor extends EventEmitter {
         await postPathGuard();
         context.checkpoint();
         context.markDispatched();
-        await this.command(tab, "Input.dispatchMouseEvent", { type: "mouseWheel", ...action.at, button: "none", buttons: 0, deltaX: action.deltaX, deltaY: action.deltaY }, context.signal);
+        await this.command(tab, "Input.dispatchMouseEvent", { type: "mouseWheel", ...action.at, button: "none", buttons: 0, deltaX: action.deltaX, deltaY: action.deltaY }, context.signal, 30_000);
         return { pathDurationMs: 0, pathWallMs: 0, completionAfterPathMs: 0, totalMs: performance.now() - started };
       }
       if (action.kind !== "drag") throw new Error("Unsupported coordinate action.");
@@ -268,9 +268,10 @@ export class SessionMotor extends EventEmitter {
     return response.result?.value as T;
   }
 
-  private async command<T = Record<string, unknown>>(tab: TabRecord, method: string, params: Readonly<Record<string, unknown>> = {}, signal?: AbortSignal): Promise<T> {
+  private async command<T = Record<string, unknown>>(tab: TabRecord, method: string, params: Readonly<Record<string, unknown>> = {}, signal?: AbortSignal, timeoutMs?: number): Promise<T> {
     if (tab.state !== "open") throw new Error("Browser target is not open.");
-    return await motorConnection(tab).send<T>(method, params, tab.cdpSessionId, signal === undefined ? undefined : { signal });
+    const options = { ...(signal !== undefined ? { signal } : {}), ...(timeoutMs !== undefined ? { timeoutMs } : {}) };
+    return await motorConnection(tab).send<T>(method, params, tab.cdpSessionId, options);
   }
 
   private async cleanupCommand<T = Record<string, unknown>>(tab: TabRecord, method: string, params: Readonly<Record<string, unknown>>, signal: AbortSignal): Promise<T> {

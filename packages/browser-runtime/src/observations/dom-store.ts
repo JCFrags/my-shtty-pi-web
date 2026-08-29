@@ -4,6 +4,7 @@ import type { TargetRegistry, TabRecord } from "../targets/registry.js";
 
 interface AxValue { value?: string | number | boolean }
 interface AxNode { nodeId: string; backendDOMNodeId?: number; ignored?: boolean; role?: AxValue; name?: AxValue; value?: AxValue; properties?: Array<{ name: string; value: AxValue }> }
+interface FrameTreeNode { frame: { id: string }; childFrames?: FrameTreeNode[] }
 interface HandleRecord { handle: string; address: TabAddress; backendNodeId: number; documentGeneration: number; expiresAtMs: number }
 interface DomObservationRecord { address: TabAddress; documentGeneration: number; handles: string[]; expiresAtMs: number }
 export interface ResolvedHandle { tab: TabRecord; bounds: { x: number; y: number; width: number; height: number }; center: { x: number; y: number } }
@@ -40,10 +41,18 @@ export class DomObservationStore {
     this.prune();
     const tab = this.registry.resolve(address);
     const documentGeneration = tab.documentGeneration;
-    const tree = await this.command<{ nodes: AxNode[] }>(tab, "Accessibility.getFullAXTree", { depth: 12 }, signal);
+    const trees: Array<{ nodes: AxNode[] }> = [await this.command<{ nodes: AxNode[] }>(tab, "Accessibility.getFullAXTree", { depth: 12 }, signal)];
     signal?.throwIfAborted();
+    try {
+      const frames = await this.command<{ frameTree: FrameTreeNode }>(tab, "Page.getFrameTree", {}, signal);
+      for (const frameId of childFrameIds(frames.frameTree)) {
+        signal?.throwIfAborted();
+        try { trees.push(await this.command<{ nodes: AxNode[] }>(tab, "Accessibility.getFullAXTree", { depth: 12, frameId }, signal)); }
+        catch (error) { if (signal?.aborted) signal.throwIfAborted(); void error; /* Out-of-process frames are outside this target session. */ }
+      }
+    } catch (error) { if (signal?.aborted) signal.throwIfAborted(); void error; }
     const interactive = new Set(["button", "checkbox", "combobox", "link", "listbox", "menuitem", "radio", "searchbox", "slider", "spinbutton", "switch", "tab", "textbox"]);
-    const candidates = tree.nodes.filter((node) => !node.ignored && interactive.has(String(node.role?.value ?? "")) && typeof node.backendDOMNodeId === "number");
+    const candidates = trees.flatMap((tree) => tree.nodes).filter((node) => !node.ignored && interactive.has(String(node.role?.value ?? "")) && typeof node.backendDOMNodeId === "number");
     const limit = Math.min(maxNodes, this.maxHandlesPerObservation, this.maxHandles);
     const nodes: DomObservation["nodes"] = [];
     const pending: HandleRecord[] = [];
@@ -147,3 +156,4 @@ function domConnection(tab: TabRecord): DomConnection { const connection = conne
 function stale(message = "DOM handle is stale."): BrowserProtocolError { return new BrowserProtocolError("HANDLE_STALE", message); }
 function opaqueId(prefix: string): string { return `${prefix}_${randomBytes(18).toString("base64url")}`; }
 function sameAddress(left: TabAddress, right: TabAddress): boolean { return left.browserSessionId === right.browserSessionId && left.tabId === right.tabId && left.targetId === right.targetId && left.controlEpoch === right.controlEpoch; }
+function childFrameIds(root: FrameTreeNode): string[] { const result: string[] = []; const visit = (node: FrameTreeNode): void => { for (const child of node.childFrames ?? []) { result.push(child.frame.id); visit(child); } }; visit(root); return result; }
