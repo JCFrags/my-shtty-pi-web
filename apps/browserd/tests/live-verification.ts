@@ -15,8 +15,16 @@ let activeBrowserd: BrowserdServer | undefined;
 let activeFixture: ReturnType<typeof createHttpServer> | undefined;
 let activeRoot: string | undefined;
 
-interface WireResponse { kind: "response"; requestId: string; operationId?: string; ok: boolean; result?: any; error?: { code: string; message: string } }
-interface WireFrame { kind: "frame.available"; address: { browserSessionId: string; tabId: string; targetId: string; controlEpoch: number }; frameSequence: number; cursor: { x: number; y: number; personaId: string } }
+interface WireResponse { kind: "response"; requestId: string; operationId?: string; ok: boolean; result?: unknown; error?: { code: string; message: string } }
+interface TabAddress { browserSessionId: string; tabId: string; targetId: string; controlEpoch: number }
+interface WireFrame { kind: "frame.available"; address: TabAddress; frameSequence: number; cursor: { x: number; y: number; personaId: string } }
+interface SessionResult { browserSessionId: string; controlEpoch: number; personaId: string; tabs: Array<{ address: TabAddress }> }
+interface TabResult { address: TabAddress }
+interface ScreenshotResult { observationId: string; sha256: string; address: TabAddress; cursor: { personaId: string } }
+interface DomNodeResult { handle: string; role: string; name: string; value?: string }
+interface DomResult { observationId: string; nodes: DomNodeResult[] }
+interface TabsResult { tabs: TabResult[] }
+interface OperationResult { state: string; dispatchState: string }
 class BrowserClient {
   private sequence = 0;
   private buffer = "";
@@ -45,12 +53,15 @@ class BrowserClient {
     await client.raw({ protocolVersion: PROTOCOL_VERSION, kind: "bind", requestId: `bind:${randomBytes(6).toString("hex")}`, bindingSecret: secret, actor }, false);
     return client;
   }
-  async call(kind: string, payload: Record<string, unknown> = {}, timeoutMs = 30_000): Promise<any> {
+  async call<T = unknown>(kind: string, payload: Record<string, unknown> = {}, timeoutMs = 30_000): Promise<T> {
     const id = `${kind.replaceAll(".", ":")}:${++this.sequence}`;
     this.lastOperationId = `operation:${id}`;
     const response = await this.raw({ protocolVersion: PROTOCOL_VERSION, kind, requestId: `request:${id}`, operationId: this.lastOperationId, deadline: new Date(Date.now() + Math.min(timeoutMs, 5 * 60_000)).toISOString(), ...payload }, true, timeoutMs);
     if (!response.ok) throw new Error(`${response.error?.code ?? "ERROR"}: ${response.error?.message ?? "request failed"}`);
-    return response.result;
+    return response.result as T;
+  }
+  async start(kind: string, operationId: string, payload: Record<string, unknown>, timeoutMs = 10_000): Promise<WireResponse> {
+    return await this.raw({ protocolVersion: PROTOCOL_VERSION, kind, requestId: `request:${operationId}`, operationId, deadline: new Date(Date.now() + 60_000).toISOString(), ...payload }, true, timeoutMs);
   }
   async expectFailure(kind: string, payload: Record<string, unknown>, pattern: RegExp): Promise<WireResponse> {
     const id = `${kind.replaceAll(".", ":")}:failure:${++this.sequence}`;
@@ -66,7 +77,8 @@ class BrowserClient {
     this.socket.write(`${JSON.stringify(message)}\n`);
     const result = await Promise.race([response, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`Timeout for ${requestId}`)), timeoutMs))]);
     this.pending.delete(requestId);
-    if (!expectResponse && result.result?.kind !== "bound" && result.result?.requestId === undefined) throw new Error("Binding failed.");
+    const responseResult = result.result;
+    if (!expectResponse && (!isRecord(responseResult) || responseResult.kind !== "bound")) throw new Error("Binding failed.");
     return result;
   }
 }
@@ -93,8 +105,8 @@ async function main(): Promise<void> {
   const clientA2 = await BrowserClient.open(browserd.descriptor.socketPath, browserd.descriptor.bindingSecret, actorA);
   const clientB = await BrowserClient.open(browserd.descriptor.socketPath, browserd.descriptor.bindingSecret, actorB);
   const [sessionA, sessionB] = await Promise.all([
-    clientA.call("session.create", { initialUrl: `${origin}/alpha` }),
-    clientB.call("session.create", { initialUrl: `${origin}/beta` }),
+    clientA.call<SessionResult>("session.create", { initialUrl: `${origin}/alpha` }),
+    clientB.call<SessionResult>("session.create", { initialUrl: `${origin}/beta` }),
   ]);
   const startupMs = performance.now() - started;
   assert.notEqual(sessionA.browserSessionId, sessionB.browserSessionId);
@@ -102,37 +114,40 @@ async function main(): Promise<void> {
   const profiles = await readdir(profileRoot);
   assert.equal(profiles.filter((name) => name.startsWith("session-")).length, 2);
   for (const profile of profiles) assert.equal((await stat(join(profileRoot, profile))).mode & 0o777, 0o700);
-  const tabA1 = sessionA.tabs[0].address;
-  const tabB1 = sessionB.tabs[0].address;
-  const tabA2Descriptor = await clientA.call("tab.create", { browserSessionId: sessionA.browserSessionId, controlEpoch: sessionA.controlEpoch, url: `${origin}/alpha-two` });
+  const firstTabA = sessionA.tabs[0];
+  const firstTabB = sessionB.tabs[0];
+  assert.ok(firstTabA !== undefined && firstTabB !== undefined);
+  const tabA1 = firstTabA.address;
+  const tabB1 = firstTabB.address;
+  const tabA2Descriptor = await clientA.call<TabResult>("tab.create", { browserSessionId: sessionA.browserSessionId, controlEpoch: sessionA.controlEpoch, url: `${origin}/alpha-two` });
   const tabA2 = tabA2Descriptor.address;
   assert.notEqual(tabA1.targetId, tabA2.targetId);
 
-  const observationA1 = await clientA.call("observe.screenshot", { address: tabA1, delivery: "artifact" });
-  const observationA2 = await clientA.call("observe.screenshot", { address: tabA2, delivery: "artifact" });
-  const observationB = await clientB.call("observe.screenshot", { address: tabB1, delivery: "artifact" });
+  const observationA1 = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
+  const observationA2 = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA2, delivery: "artifact" });
+  const observationB = await clientB.call<ScreenshotResult>("observe.screenshot", { address: tabB1, delivery: "artifact" });
   assert.equal(observationA1.cursor.personaId, observationA2.cursor.personaId);
   assert.notEqual(observationA1.cursor.personaId, observationB.cursor.personaId);
   assert.notEqual(observationA1.sha256, observationB.sha256);
   const metadataText = JSON.stringify(observationA1); assert.ok(!metadataText.includes("iVBOR"));
 
   await clientA.call("tab.focus", { address: tabA1 });
-  const beforeA2 = await clientA.call("observe.domFallback", { address: tabA2, maxNodes: 50 });
-  const buttonA2 = beforeA2.nodes.find((node: any) => node.role === "button" && node.name.includes("count")); assert.ok(buttonA2);
+  const beforeA2 = await clientA.call<DomResult>("observe.domFallback", { address: tabA2, maxNodes: 50 });
+  const buttonA2 = beforeA2.nodes.find((node) => node.role === "button" && node.name.includes("count")); assert.ok(buttonA2);
   await clientA.call("action.domFallback", { address: tabA2, domObservationId: beforeA2.observationId, handle: buttonA2.handle, action: { kind: "click" } }, 60_000);
-  const afterA2 = await clientA.call("observe.domFallback", { address: tabA2, maxNodes: 50 });
-  assert.ok(afterA2.nodes.some((node: any) => node.name.includes("count 1")));
-  const unchangedA1 = await clientA.call("observe.domFallback", { address: tabA1, maxNodes: 50 });
-  assert.ok(unchangedA1.nodes.some((node: any) => node.name.includes("count 0")));
+  const afterA2 = await clientA.call<DomResult>("observe.domFallback", { address: tabA2, maxNodes: 50 });
+  assert.ok(afterA2.nodes.some((node) => node.name.includes("count 1")));
+  const unchangedA1 = await clientA.call<DomResult>("observe.domFallback", { address: tabA1, maxNodes: 50 });
+  assert.ok(unchangedA1.nodes.some((node) => node.name.includes("count 0")));
 
-  const textNode = afterA2.nodes.find((node: any) => node.role === "textbox"); assert.ok(textNode);
+  const textNode = afterA2.nodes.find((node) => node.role === "textbox"); assert.ok(textNode);
   await clientA.call("action.domFallback", { address: tabA2, domObservationId: afterA2.observationId, handle: textNode.handle, action: { kind: "type", text: "alpha isolated", replace: true } });
-  const typed = await clientA.call("observe.domFallback", { address: tabA2, maxNodes: 50 });
-  assert.ok(typed.nodes.some((node: any) => node.role === "textbox" && node.value === "alpha isolated"));
+  const typed = await clientA.call<DomResult>("observe.domFallback", { address: tabA2, maxNodes: 50 });
+  assert.ok(typed.nodes.some((node) => node.role === "textbox" && node.value === "alpha isolated"));
 
   await clientA.call("frames.subscribe", { address: tabA1 });
   await sleep(550); clientA.frames.length = 0;
-  const moveObservation = await clientA.call("observe.screenshot", { address: tabA1, delivery: "artifact" });
+  const moveObservation = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
   const pathStarted = performance.now();
   await clientA.call("action.coordinate", { address: tabA1, observationId: moveObservation.observationId, action: { kind: "move", to: { x: 700, y: 430 } } });
   const pathWallMs = performance.now() - pathStarted;
@@ -144,8 +159,8 @@ async function main(): Promise<void> {
   assert.ok(positions.size >= 3, `only ${positions.size} cursor positions`);
   await clientA.call("frames.unsubscribe", { address: tabA1 });
 
-  const parallelA = await clientA.call("observe.screenshot", { address: tabA1, delivery: "artifact" });
-  const parallelB = await clientB.call("observe.screenshot", { address: tabB1, delivery: "artifact" });
+  const parallelA = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
+  const parallelB = await clientB.call<ScreenshotResult>("observe.screenshot", { address: tabB1, delivery: "artifact" });
   const parallelStarted = performance.now();
   await Promise.all([
     clientA.call("action.coordinate", { address: tabA1, observationId: parallelA.observationId, action: { kind: "click", at: { x: 140, y: 125 }, button: "left" } }),
@@ -153,8 +168,8 @@ async function main(): Promise<void> {
   ]);
   const parallelMs = performance.now() - parallelStarted;
 
-  const serialA1 = await clientA.call("observe.screenshot", { address: tabA1, delivery: "artifact" });
-  const serialA2 = await clientA.call("observe.screenshot", { address: tabA2, delivery: "artifact" });
+  const serialA1 = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
+  const serialA2 = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA2, delivery: "artifact" });
   const serialStarted = performance.now();
   await Promise.all([
     clientA.call("action.coordinate", { address: tabA1, observationId: serialA1.observationId, action: { kind: "move", to: { x: 650, y: 390 } } }),
@@ -165,47 +180,71 @@ async function main(): Promise<void> {
 
   await clientB.expectFailure("observe.screenshot", { address: tabA1 }, /SESSION_NOT_FOUND|not found/i);
   const internalA = (runtime as unknown as { getSession(actor: typeof actorA, browserSessionId: string): BrowserSession }).getSession(actorA, sessionA.browserSessionId);
-  const tabA1Internal = internalA.targets.getById(tabA1.tabId)!;
+  const tabA1Internal = internalA.targets.getById(tabA1.tabId);
+  assert.ok(tabA1Internal !== undefined);
+  await internalA.host.cdp.send("Runtime.evaluate", { expression: "document.querySelector('[id^=pi-cursor-]')?.remove(); const d=document.createElement('dialog'); d.id='phase1-dialog'; d.textContent='top layer'; document.body.append(d); d.showModal();", returnByValue: true }, tabA1Internal.cdpSessionId);
+  await sleep(100);
+  await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
+  const overlayCheck = await internalA.host.cdp.send<{ result?: { value?: number } }>("Runtime.evaluate", { expression: "document.querySelectorAll('[id^=pi-cursor-]').length", returnByValue: true }, tabA1Internal.cdpSessionId);
+  assert.equal(overlayCheck.result?.value, 1);
+  await internalA.host.cdp.send("Runtime.evaluate", { expression: "document.getElementById('phase1-dialog')?.close(); document.getElementById('phase1-dialog')?.remove();", returnByValue: true }, tabA1Internal.cdpSessionId);
   await clientA.expectFailure("observe.screenshot", { address: { ...tabA1, targetId: "x".repeat(20) } }, /TAB_NOT_FOUND|not found/i);
-  const old = await clientA.call("observe.screenshot", { address: tabA1, delivery: "artifact" });
+  const old = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
   await clientA.call("navigate", { address: tabA1, url: `${origin}/alpha-new`, waitUntil: "load" });
   await clientA.expectFailure("action.coordinate", { address: tabA1, observationId: old.observationId, action: { kind: "click", at: { x: 140, y: 125 }, button: "left" } }, /OBSERVATION|Document|not found/i);
-  const scrollObservation = await clientA.call("observe.screenshot", { address: tabA1, delivery: "artifact" });
+
+  const postPathObservation = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
+  const postPathId = `post-path:${Date.now()}`;
+  const postPathAction = clientA.start("action.coordinate", `operation:${postPathId}`, { address: tabA1, observationId: postPathObservation.observationId, action: { kind: "click", at: { x: 140, y: 125 }, button: "left" } });
+  await sleep(350);
   await internalA.host.cdp.send("Runtime.evaluate", { expression: "scrollTo(0,700)", returnByValue: true }, tabA1Internal.cdpSessionId);
+  const postPathResponse = await postPathAction;
+  assert.equal(postPathResponse.ok, false);
+  const postPathStatus = await clientA.call<OperationResult>("operation.status", { targetOperationId: `operation:${postPathId}` });
+  assert.equal(postPathStatus.state, "failed");
+  assert.equal(postPathStatus.dispatchState, "partially-dispatched");
+  const postPathDom = await clientA.call<DomResult>("observe.domFallback", { address: tabA1, maxNodes: 50 });
+  assert.ok(postPathDom.nodes.some((node) => node.name.includes("count 0")), "post-path guard allowed the click");
+  await clientA.call("navigate", { address: tabA1, url: `${origin}/alpha-scroll`, waitUntil: "load" });
+
+  const scrollObservation = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
+  await clientA.call("action.coordinate", { address: tabA1, observationId: scrollObservation.observationId, action: { kind: "wheel", at: { x: 400, y: 400 }, deltaX: 0, deltaY: 700 } });
+  await sleep(250);
   await clientA.expectFailure("action.coordinate", { address: tabA1, observationId: scrollObservation.observationId, action: { kind: "click", at: { x: 140, y: 125 }, button: "left" } }, /OBSERVATION|Scroll|stale/i);
 
-  const resized = await clientA.call("observe.screenshot", { address: tabA2, delivery: "artifact" });
-  const tabA2Internal = internalA.targets.getById(tabA2.tabId)!;
+  const resized = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA2, delivery: "artifact" });
+  const tabA2Internal = internalA.targets.getById(tabA2.tabId);
+  assert.ok(tabA2Internal !== undefined);
   await internalA.host.cdp.send("Emulation.setDeviceMetricsOverride", { width: 760, height: 520, deviceScaleFactor: 1, mobile: false }, tabA2Internal.cdpSessionId);
   await clientA.expectFailure("action.coordinate", { address: tabA2, observationId: resized.observationId, action: { kind: "click", at: { x: 140, y: 125 }, button: "left" } }, /VIEWPORT|Viewport|stale/i);
   await internalA.host.cdp.send("Emulation.clearDeviceMetricsOverride", {}, tabA2Internal.cdpSessionId);
 
   await internalA.host.cdp.send("Runtime.evaluate", { expression: "open('/popup-alpha','phase1-popup','width=500,height=400'); true", userGesture: true, returnByValue: true }, tabA1Internal.cdpSessionId);
   await sleep(2_500);
-  const tabsAfterPopup = await clientA.call("tab.list", { browserSessionId: sessionA.browserSessionId, controlEpoch: sessionA.controlEpoch });
+  const tabsAfterPopup = await clientA.call<TabsResult>("tab.list", { browserSessionId: sessionA.browserSessionId, controlEpoch: sessionA.controlEpoch });
   assert.ok(tabsAfterPopup.tabs.length >= 3);
 
-  const cancelObservation = await clientA.call("observe.screenshot", { address: tabA1, delivery: "artifact" });
+  const cancelObservation = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
   const cancelId = `cancel:${Date.now()}`;
-  const actionPromise = (clientA as any).raw({ protocolVersion: PROTOCOL_VERSION, kind: "action.coordinate", requestId: `request:${cancelId}`, operationId: `operation:${cancelId}`, deadline: new Date(Date.now() + 60_000).toISOString(), address: tabA1, observationId: cancelObservation.observationId, action: { kind: "move", to: { x: 700, y: 430 } } }, true, 10_000);
+  const actionPromise = clientA.start("action.coordinate", `operation:${cancelId}`, { address: tabA1, observationId: cancelObservation.observationId, action: { kind: "move", to: { x: 700, y: 430 } } });
   await sleep(250);
   await clientA2.call("operation.cancel", { targetOperationId: `operation:${cancelId}` });
   const cancelled = await actionPromise; assert.equal(cancelled.ok, false);
-  const cancelledStatus = await clientA2.call("operation.status", { targetOperationId: `operation:${cancelId}` });
+  const cancelledStatus = await clientA2.call<OperationResult>("operation.status", { targetOperationId: `operation:${cancelId}` });
   assert.equal(cancelledStatus.state, "cancelled"); assert.equal(cancelledStatus.dispatchState, "partially-dispatched");
 
   const processCountBeforeWarm = await chromiumProcessCount();
-  const warmObservation = await clientA.call("observe.screenshot", { address: tabA1, delivery: "artifact" });
+  const warmObservation = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" });
   await clientA.call("action.coordinate", { address: tabA1, observationId: warmObservation.observationId, action: { kind: "move", to: { x: 300, y: 300 } } });
   assert.equal(await chromiumProcessCount(), processCountBeforeWarm);
 
-  const targetCrashObservation = await clientA.call("observe.screenshot", { address: tabA2, delivery: "artifact" });
+  const targetCrashObservation = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA2, delivery: "artifact" });
   const crashId = `crash:${Date.now()}`;
-  const crashAction = (clientA as any).raw({ protocolVersion: PROTOCOL_VERSION, kind: "action.coordinate", requestId: `request:${crashId}`, operationId: `operation:${crashId}`, deadline: new Date(Date.now() + 60_000).toISOString(), address: tabA2, observationId: targetCrashObservation.observationId, action: { kind: "move", to: { x: 700, y: 430 } } }, true, 10_000);
+  const crashAction = clientA.start("action.coordinate", `operation:${crashId}`, { address: tabA2, observationId: targetCrashObservation.observationId, action: { kind: "move", to: { x: 700, y: 430 } } });
   await sleep(200); await internalA.host.cdp.send("Page.crash", {}, tabA2Internal.cdpSessionId).catch(() => undefined);
   assert.equal((await crashAction).ok, false);
-  const crashStatus = await clientA.call("operation.status", { targetOperationId: `operation:${crashId}` }); assert.equal(crashStatus.state, "failed");
-  const surviving = await clientA.call("observe.screenshot", { address: tabA1, delivery: "artifact" }); assert.equal(surviving.address.tabId, tabA1.tabId);
+  const crashStatus = await clientA.call<OperationResult>("operation.status", { targetOperationId: `operation:${crashId}` }); assert.equal(crashStatus.state, "failed");
+  const surviving = await clientA.call<ScreenshotResult>("observe.screenshot", { address: tabA1, delivery: "artifact" }); assert.equal(surviving.address.tabId, tabA1.tabId);
 
   const internalB = (runtime as unknown as { getSession(actor: typeof actorB, browserSessionId: string): BrowserSession }).getSession(actorB, sessionB.browserSessionId);
   internalB.host.killForTest(); await sleep(300);
@@ -217,7 +256,10 @@ async function main(): Promise<void> {
     passed: true, chromium: await chromiumVersion(), startupMs, pathWallMs, parallelMs, serialMs,
     activeFrameCount: activeFrames.length, distinctIntermediateCursorPositions: positions.size,
     actorIsolation: true, sharedPersonaAcrossTabs: observationA1.cursor.personaId === observationA2.cursor.personaId,
+    overlayMutationAndTopLayerDialog: true,
+    publicWheelAndScrollGuard: true,
     cancellation: { state: cancelledStatus.state, dispatchState: cancelledStatus.dispatchState },
+    postPathRevalidation: { state: postPathStatus.state, dispatchState: postPathStatus.dispatchState, clickPrevented: true },
     targetCrash: crashStatus.state, chromeKillFailedClosed: true,
     processTreePssKiB: pss.pssKiB, processTreePrivateDirtyKiB: pss.privateDirtyKiB,
     artifactCount: runtime.artifacts.entryCount, artifactBytes: runtime.artifacts.totalBytes, operationCount: runtime.operations.size,
@@ -241,6 +283,7 @@ async function chromiumVersion(): Promise<string> { const { execFile } = await i
 async function chromiumProcessCount(): Promise<number> { const entries = await readdir("/proc"); let count = 0; for (const entry of entries) if (/^\d+$/.test(entry)) { const command = await import("node:fs/promises").then(({ readFile }) => readFile(`/proc/${entry}/comm`, "utf8").catch(() => "")); if (/chrom/i.test(command)) count++; } return count; }
 async function processTreeMemory(roots: number[]): Promise<{ pssKiB: number; privateDirtyKiB: number }> { const entries = (await readdir("/proc")).filter((entry) => /^\d+$/.test(entry)); const parent = new Map<number, number>(); for (const entry of entries) { const text = await import("node:fs/promises").then(({ readFile }) => readFile(`/proc/${entry}/stat`, "utf8").catch(() => "")); const end = text.lastIndexOf(")"); if (end > 0) { const fields = text.slice(end + 2).split(" "); parent.set(Number(entry), Number(fields[1])); } } const tree = new Set(roots); let changed = true; while (changed) { changed = false; for (const [pid, ppid] of parent) if (tree.has(ppid) && !tree.has(pid)) { tree.add(pid); changed = true; } } let pssKiB = 0, privateDirtyKiB = 0; for (const pid of tree) { const rollup = await import("node:fs/promises").then(({ readFile }) => readFile(`/proc/${pid}/smaps_rollup`, "utf8").catch(() => "")); pssKiB += Number(rollup.match(/^Pss:\s+(\d+)/m)?.[1] ?? 0); privateDirtyKiB += Number(rollup.match(/^Private_Dirty:\s+(\d+)/m)?.[1] ?? 0); } return { pssKiB, privateDirtyKiB }; }
 function sleep(ms: number): Promise<void> { return new Promise((resolvePromise) => setTimeout(resolvePromise, ms)); }
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 
 try {
   await main();

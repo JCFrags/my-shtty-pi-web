@@ -20,6 +20,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      - name: Phase 1 browser protocol and runtime contracts
+        run: pnpm test:browser-core
       - run: pnpm test
 
   browser-python:

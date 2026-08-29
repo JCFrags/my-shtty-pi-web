@@ -15,6 +15,9 @@
     "benchmark:extraction": "cd components/browser && uv run --offline python benchmarks/extraction/run.py",
     "test:extraction": "cd components/browser && uv run --offline python benchmarks/extraction/generate_fixtures.py --check && uv run --offline pytest benchmarks/extraction/tests && uv run --offline python benchmarks/extraction/run.py",
     "test:live": "pnpm --filter @webx/pi-webx exec tsx ../../scripts/live-web-acceptance.ts",
+    "test:browser-core": "pnpm --filter @webx/browser-protocol test && pnpm --filter @webx/browser-runtime test && pnpm --filter @webx/browserd test",
+    "test:browser-live": "pnpm --filter @webx/browserd test:live",
+    "test:browser-soak": "pnpm --filter @webx/browserd test:soak",
     "check:rust": "cd components/browser && cargo check --workspace",
     "test:rust": "cd components/browser && cargo test --workspace"
   },
