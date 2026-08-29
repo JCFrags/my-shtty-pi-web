@@ -1,11 +1,12 @@
 import { randomBytes } from "node:crypto";
 import type { ActorIdentity, ScreenshotObservation, TabAddress } from "@webx/browser-protocol";
+import { BrowserProtocolError } from "@webx/browser-protocol";
 import { sha256Hex } from "@webx/artifacts";
 import type { BrowserArtifactStore } from "../artifacts/store.js";
 import type { SessionMotor } from "../motor/session-motor.js";
 import type { TargetRegistry, TabRecord } from "../targets/registry.js";
 
-interface Layout { url: string; title: string; width: number; height: number; dpr: number; scrollX: number; scrollY: number }
+export interface Layout { url: string; title: string; width: number; height: number; dpr: number; scrollX: number; scrollY: number }
 interface ObservationRecord {
   readonly id: string;
   readonly address: TabAddress;
@@ -43,90 +44,109 @@ export class ObservationStore {
 
   get size(): number { return this.records.size; }
 
-  async capture(address: TabAddress, delivery: "auto" | "inline" | "artifact" = "auto"): Promise<ScreenshotObservation> {
-    const tab = this.registry.resolve(address);
-    await this.motor.ensureOverlay(tab);
-    const layout = await this.layout(tab);
-    const response = await this.command<{ data: string }>(tab, "Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false });
-    const bytes = Buffer.from(response.data, "base64");
-    const capturedMonotonicMs = performance.now();
-    const capturedWall = Date.now();
+  async capture(address: TabAddress, delivery: "auto" | "inline" | "artifact" = "auto", signal?: AbortSignal): Promise<ScreenshotObservation> {
+    signal?.throwIfAborted();
+    let captured: { tab: TabRecord; layout: Layout; bytes: Buffer; capturedMonotonicMs: number; capturedWall: number } | undefined;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { captured = await this.captureConsistent(address, signal); break; }
+      catch (error) {
+        lastError = error;
+        if (signal?.aborted || !(error instanceof BrowserProtocolError) || (error.code !== "DOCUMENT_CHANGED" && error.code !== "VIEWPORT_CHANGED") || attempt === 1) throw error;
+      }
+    }
+    if (captured === undefined) throw lastError;
+    const { tab, layout, bytes, capturedMonotonicMs, capturedWall } = captured;
+    signal?.throwIfAborted();
     const inline = delivery === "inline" || (delivery === "auto" && bytes.byteLength <= this.inlineLimitBytes);
-    if (delivery === "inline" && bytes.byteLength > this.inlineLimitBytes) throw new Error("Screenshot exceeds the reviewed inline limit.");
+    if (delivery === "inline" && bytes.byteLength > this.inlineLimitBytes) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Screenshot exceeds the reviewed inline limit.");
+    let artifactId: string | undefined;
     const descriptor = inline
       ? { sizeBytes: bytes.byteLength, sha256: await sha256Hex(bytes) }
-      : await this.artifacts.put(this.actor, bytes, "image/png");
-    const observationId = opaqueId("observation");
-    const frameSequence = this.registry.incrementFrame(tab);
-    const record: ObservationRecord = {
-      id: observationId, address: { ...address }, documentGeneration: tab.documentGeneration, viewportGeneration: tab.viewportGeneration,
-      capturedMonotonicMs, validUntilMonotonicMs: capturedMonotonicMs + this.freshnessMs,
-      width: layout.width, height: layout.height, dpr: layout.dpr, scrollX: layout.scrollX, scrollY: layout.scrollY,
-    };
-    this.records.set(observationId, record);
-    this.latestByTab.set(tab.tabId, observationId);
-    this.prune();
-    return {
-      kind: "screenshotObservation", observationId, address: { ...address },
-      documentGeneration: tab.documentGeneration, viewportGeneration: tab.viewportGeneration,
-      url: layout.url, title: layout.title, capturedAt: new Date(capturedWall).toISOString(), capturedMonotonicMs,
-      validUntil: new Date(capturedWall + this.freshnessMs).toISOString(),
-      viewport: { width: layout.width, height: layout.height, devicePixelRatio: layout.dpr },
-      scroll: { x: layout.scrollX, y: layout.scrollY }, frameSequence,
-      mediaType: "image/png", byteLength: descriptor.sizeBytes, sha256: descriptor.sha256,
-      cursor: this.motor.state,
-      image: inline
-        ? { kind: "inline", base64: bytes.toString("base64") }
-        : { kind: "artifact", artifactId: "artifactId" in descriptor ? descriptor.artifactId : neverReached() },
-    };
+      : await this.artifacts.put(this.actor, bytes, { browserSessionId: address.browserSessionId, tabId: address.tabId, purpose: "agent-observation", mediaType: "image/png" });
+    if ("artifactId" in descriptor) artifactId = descriptor.artifactId;
+    try {
+      signal?.throwIfAborted();
+      const observationId = opaqueId("observation");
+      const frameSequence = this.registry.incrementFrame(tab);
+      const record: ObservationRecord = {
+        id: observationId, address: { ...address }, documentGeneration: tab.documentGeneration, viewportGeneration: tab.viewportGeneration,
+        capturedMonotonicMs, validUntilMonotonicMs: capturedMonotonicMs + this.freshnessMs,
+        width: layout.width, height: layout.height, dpr: layout.dpr, scrollX: layout.scrollX, scrollY: layout.scrollY,
+      };
+      this.records.set(observationId, record);
+      this.latestByTab.set(tab.tabId, observationId);
+      this.prune();
+      return {
+        kind: "screenshotObservation", observationId, address: { ...address },
+        documentGeneration: tab.documentGeneration, viewportGeneration: tab.viewportGeneration,
+        url: layout.url, title: layout.title, capturedAt: new Date(capturedWall).toISOString(), capturedMonotonicMs,
+        validUntil: new Date(capturedWall + this.freshnessMs).toISOString(),
+        viewport: { width: layout.width, height: layout.height, devicePixelRatio: layout.dpr },
+        scroll: { x: layout.scrollX, y: layout.scrollY }, frameSequence,
+        mediaType: "image/png", byteLength: descriptor.sizeBytes, sha256: descriptor.sha256,
+        cursor: this.motor.state,
+        image: inline ? { kind: "inline", base64: bytes.toString("base64") } : { kind: "artifact", artifactId: artifactId as string },
+      };
+    } catch (error) {
+      if (artifactId !== undefined) this.artifacts.revoke(this.actor, artifactId);
+      throw error;
+    }
   }
 
   async guard(address: TabAddress, observationId: string, point: { x: number; y: number }, riskPolicy: "normal" | "newer-observation" | "local-region" = "normal"): Promise<void> {
     const tab = this.registry.resolve(address);
     const record = this.records.get(observationId);
-    if (record === undefined || !sameAddress(record.address, address)) throw new Error("Observation not found.");
-    if (record.documentGeneration !== tab.documentGeneration) throw new Error("Document changed after observation.");
-    if (record.viewportGeneration !== tab.viewportGeneration) throw new Error("Viewport changed after observation.");
-    if (performance.now() > record.validUntilMonotonicMs) throw new Error("Observation is stale.");
-    if (riskPolicy === "newer-observation" && this.latestByTab.get(tab.tabId) !== observationId) throw new Error("A newer observation is required.");
-    if (riskPolicy === "local-region") throw new Error("Local region comparison is not configured.");
+    if (record === undefined || !sameAddress(record.address, address)) throw new BrowserProtocolError("OBSERVATION_NOT_FOUND", "Observation not found.");
+    if (record.documentGeneration !== tab.documentGeneration) throw new BrowserProtocolError("DOCUMENT_CHANGED", "Document changed after observation.");
+    if (record.viewportGeneration !== tab.viewportGeneration) throw new BrowserProtocolError("VIEWPORT_CHANGED", "Viewport changed after observation.");
+    if (performance.now() > record.validUntilMonotonicMs) throw new BrowserProtocolError("OBSERVATION_STALE", "Observation is stale.");
+    if (riskPolicy === "newer-observation" && this.latestByTab.get(tab.tabId) !== observationId) throw new BrowserProtocolError("OBSERVATION_STALE", "A newer observation is required.");
+    if (riskPolicy === "local-region") throw new BrowserProtocolError("CAPABILITY_UNAVAILABLE", "Local region comparison is not configured.");
     const layout = await this.layout(tab);
-    if (layout.width !== record.width || layout.height !== record.height || layout.dpr !== record.dpr) throw new Error("Viewport changed after observation.");
-    if (Math.abs(layout.scrollX - record.scrollX) > 2 || Math.abs(layout.scrollY - record.scrollY) > 2) throw new Error("Scroll changed after observation.");
-    if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || point.x < 0 || point.y < 0 || point.x >= layout.width || point.y >= layout.height) throw new Error("Coordinate is outside the observed viewport.");
+    if (layout.width !== record.width || layout.height !== record.height || layout.dpr !== record.dpr) throw new BrowserProtocolError("VIEWPORT_CHANGED", "Viewport changed after observation.");
+    if (Math.abs(layout.scrollX - record.scrollX) > 2 || Math.abs(layout.scrollY - record.scrollY) > 2) throw new BrowserProtocolError("VIEWPORT_CHANGED", "Scroll changed after observation.");
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || point.x < 0 || point.y < 0 || point.x >= layout.width || point.y >= layout.height) throw new BrowserProtocolError("COORDINATE_OUT_OF_BOUNDS", "Coordinate is outside the observed viewport.");
   }
 
-  invalidateTab(tabId: string): void {
-    this.latestByTab.delete(tabId);
-    for (const [id, record] of this.records) if (record.address.tabId === tabId) this.records.delete(id);
+  invalidateTab(tabId: string): void { this.latestByTab.delete(tabId); for (const [id, record] of this.records) if (record.address.tabId === tabId) this.records.delete(id); }
+
+  async readLayout(tab: TabRecord, signal?: AbortSignal): Promise<Layout> { return await this.layout(tab, signal); }
+
+  private async captureConsistent(address: TabAddress, signal?: AbortSignal): Promise<{ tab: TabRecord; layout: Layout; bytes: Buffer; capturedMonotonicMs: number; capturedWall: number }> {
+    const tab = this.registry.resolve(address);
+    const targetId = tab.targetId;
+    const documentGeneration = tab.documentGeneration;
+    const viewportGeneration = tab.viewportGeneration;
+    await this.motor.ensureOverlay(tab);
+    signal?.throwIfAborted();
+    const before = await this.layout(tab, signal);
+    const response = await this.command<{ data: string }>(tab, "Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false }, signal);
+    const after = await this.layout(tab, signal);
+    const capturedMonotonicMs = performance.now();
+    const capturedWall = Date.now();
+    if (tab.targetId !== targetId || tab.documentGeneration !== documentGeneration) throw new BrowserProtocolError("DOCUMENT_CHANGED", "Document changed during screenshot capture.", true);
+    if (tab.viewportGeneration !== viewportGeneration || before.width !== after.width || before.height !== after.height || before.dpr !== after.dpr) throw new BrowserProtocolError("VIEWPORT_CHANGED", "Viewport changed during screenshot capture.", true);
+    if (Math.abs(before.scrollX - after.scrollX) > 2 || Math.abs(before.scrollY - after.scrollY) > 2) throw new BrowserProtocolError("VIEWPORT_CHANGED", "Scroll changed during screenshot capture.", true);
+    return { tab, layout: after, bytes: Buffer.from(response.data, "base64"), capturedMonotonicMs, capturedWall };
   }
 
-  private prune(): void {
-    const now = performance.now();
-    for (const [id, record] of this.records) if (record.validUntilMonotonicMs <= now) this.records.delete(id);
-    while (this.records.size > this.maxRecords) {
-      const id = this.records.keys().next().value;
-      if (typeof id !== "string") break;
-      this.records.delete(id);
-    }
-  }
+  private prune(): void { const now = performance.now(); for (const [id, record] of this.records) if (record.validUntilMonotonicMs <= now) this.records.delete(id); while (this.records.size > this.maxRecords) { const id = this.records.keys().next().value; if (typeof id !== "string") break; this.records.delete(id); } }
 
-  private async layout(tab: TabRecord): Promise<Layout> {
+  private async layout(tab: TabRecord, signal?: AbortSignal): Promise<Layout> {
     const expression = "({url:location.href,title:document.title,width:innerWidth,height:innerHeight,dpr:devicePixelRatio,scrollX:scrollX,scrollY:scrollY})";
-    const response = await this.command<{ result?: { value?: unknown }; exceptionDetails?: unknown }>(tab, "Runtime.evaluate", { expression, returnByValue: true });
-    if (response.exceptionDetails !== undefined || !isLayout(response.result?.value)) throw new Error("Could not inspect the target viewport.");
+    const response = await this.command<{ result?: { value?: unknown }; exceptionDetails?: unknown }>(tab, "Runtime.evaluate", { expression, returnByValue: true }, signal);
+    if (response.exceptionDetails !== undefined || !isLayout(response.result?.value)) throw new BrowserProtocolError("CDP_ERROR", "Could not inspect the target viewport.");
     return response.result.value;
   }
 
-  private async command<T>(tab: TabRecord, method: string, params: Readonly<Record<string, unknown>>): Promise<T> {
-    return await observationConnection(tab).send<T>(method, params, tab.cdpSessionId);
-  }
+  private async command<T>(tab: TabRecord, method: string, params: Readonly<Record<string, unknown>>, signal?: AbortSignal): Promise<T> { return await observationConnection(tab).send<T>(method, params, tab.cdpSessionId, signal ? { signal } : undefined); }
 }
 
-const connections = new WeakMap<TabRecord, { send<T>(method: string, params: Readonly<Record<string, unknown>>, sessionId: string): Promise<T> }>();
-export function bindObservationTab(tab: TabRecord, connection: { send<T>(method: string, params: Readonly<Record<string, unknown>>, sessionId: string): Promise<T> }): void { connections.set(tab, connection); }
-function observationConnection(tab: TabRecord) { const connection = connections.get(tab); if (connection === undefined) throw new Error("Tab has no CDP connection."); return connection; }
+interface ObservationConnection { send<T>(method: string, params: Readonly<Record<string, unknown>>, sessionId: string, options?: { signal?: AbortSignal }): Promise<T> }
+const connections = new WeakMap<TabRecord, ObservationConnection>();
+export function bindObservationTab(tab: TabRecord, connection: ObservationConnection): void { connections.set(tab, connection); }
+function observationConnection(tab: TabRecord): ObservationConnection { const connection = connections.get(tab); if (connection === undefined) throw new BrowserProtocolError("CDP_DISCONNECTED", "Tab has no CDP connection."); return connection; }
 function opaqueId(prefix: string): string { return `${prefix}_${randomBytes(18).toString("base64url")}`; }
 function sameAddress(left: TabAddress, right: TabAddress): boolean { return left.browserSessionId === right.browserSessionId && left.tabId === right.tabId && left.targetId === right.targetId && left.controlEpoch === right.controlEpoch; }
-function neverReached(): never { throw new Error("Artifact descriptor is unavailable."); }
 function isLayout(value: unknown): value is Layout { if (typeof value !== "object" || value === null) return false; const item = value as Partial<Layout>; return typeof item.url === "string" && typeof item.title === "string" && [item.width, item.height, item.dpr, item.scrollX, item.scrollY].every((number) => typeof number === "number" && Number.isFinite(number)); }
