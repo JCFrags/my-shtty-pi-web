@@ -131,7 +131,7 @@ export class BrowserRuntime extends EventEmitter {
 
   incrementControlEpochForTest(actor: ActorIdentity, browserSessionId: string): number { const session = this.getSession(actor, browserSessionId); const epoch = session.incrementControlEpoch(); this.removeSessionSubscriptions(browserSessionId); return epoch; }
 
-  async close(): Promise<void> { const sessions = [...this.sessions.values()]; this.sessions.clear(); this.subscriptions.clear(); await Promise.allSettled(sessions.map(async (session) => { session.offFrame(this.onFrame); await session.close(); })); this.artifacts.clear(); this.operations.clear(); }
+  async close(): Promise<void> { const sessions = [...this.sessions.values()]; this.sessions.clear(); this.subscriptions.clear(); await Promise.allSettled(sessions.map(async (session) => { session.offFrame(this.onFrame); await session.close(); })); this.artifacts.clear(); this.operations.clear(); await this.profileManager.close(); }
 
   private async execute<T>(actor: ActorIdentity, request: BrowserRequest, laneKey: string, browserSessionId: string | undefined, controlEpoch: number | undefined, task: (context: OperationContext) => Promise<T>, signal?: AbortSignal): Promise<T> {
     this.operations.submit(actor, {
