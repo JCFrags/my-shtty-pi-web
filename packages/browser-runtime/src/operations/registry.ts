@@ -169,6 +169,13 @@ export class OperationRegistry {
     }
   }
 
+  clear(): void {
+    for (const operation of this.operations.values()) if (!isTerminal(operation.state)) this.failMutable(operation, "BROWSER_EXITED", "Browser runtime stopped.");
+    this.queues.clear();
+    this.operations.clear();
+    this.epochs.clear();
+  }
+
   private async drain(laneKey: string): Promise<void> {
     if (this.runningLanes.has(laneKey)) return;
     this.runningLanes.add(laneKey);

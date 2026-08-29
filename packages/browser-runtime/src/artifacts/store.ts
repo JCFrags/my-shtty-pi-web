@@ -86,6 +86,8 @@ export class BrowserArtifactStore {
     for (const [id, record] of this.records) if (record.owner === owner) this.delete(id);
   }
 
+  clear(): void { this.records.clear(); this.total = 0; }
+
   private removeOldest(): boolean {
     const id = this.records.keys().next().value;
     if (typeof id !== "string") return false;

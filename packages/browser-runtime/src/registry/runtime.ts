@@ -107,6 +107,8 @@ export class BrowserRuntime extends EventEmitter {
     const sessions = [...this.sessions.values()];
     this.sessions.clear();
     await Promise.allSettled(sessions.map(async (session) => { session.offFrame(this.onFrame); await session.close(); }));
+    this.artifacts.clear();
+    this.operations.clear();
   }
 
   private async execute<T>(actor: ActorIdentity, request: BrowserRequest, laneKey: string, browserSessionId: string | undefined, controlEpoch: number | undefined, task: (context: OperationContext) => Promise<T>, signal?: AbortSignal): Promise<T> {
