@@ -21,7 +21,27 @@ interface ObservationRecord {
   readonly scrollY: number;
 }
 
-export interface ObservationStoreOptions { maxRecords?: number; freshnessMs?: number; inlineLimitBytes?: number }
+export interface ObservationStoreOptions {
+  maxRecords?: number;
+  freshnessMs?: number;
+  inlineLimitBytes?: number;
+  currentEpoch?: () => number;
+  commitBarrierForTest?: (stage: "afterDigest" | "afterArtifactPut") => Promise<void>;
+}
+
+interface CapturedObservation {
+  readonly tab: TabRecord;
+  readonly address: TabAddress;
+  readonly targetId: string;
+  readonly cdpSessionId: string;
+  readonly documentGeneration: number;
+  readonly viewportGeneration: number;
+  readonly controlEpoch: number;
+  readonly layout: Layout;
+  readonly bytes: Buffer;
+  readonly capturedMonotonicMs: number;
+  readonly capturedWall: number;
+}
 
 export class ObservationStore {
   private readonly records = new Map<string, ObservationRecord>();
@@ -29,6 +49,8 @@ export class ObservationStore {
   private readonly maxRecords: number;
   private readonly freshnessMs: number;
   private readonly inlineLimitBytes: number;
+  private readonly currentEpoch: (() => number) | undefined;
+  private readonly commitBarrierForTest: ((stage: "afterDigest" | "afterArtifactPut") => Promise<void>) | undefined;
 
   constructor(
     private readonly actor: ActorIdentity,
@@ -40,13 +62,15 @@ export class ObservationStore {
     this.maxRecords = options.maxRecords ?? 64;
     this.freshnessMs = options.freshnessMs ?? 3_000;
     this.inlineLimitBytes = options.inlineLimitBytes ?? 768 * 1024;
+    this.currentEpoch = options.currentEpoch;
+    this.commitBarrierForTest = options.commitBarrierForTest;
   }
 
   get size(): number { return this.records.size; }
 
   async capture(address: TabAddress, delivery: "auto" | "inline" | "artifact" = "auto", signal?: AbortSignal): Promise<ScreenshotObservation> {
     signal?.throwIfAborted();
-    let captured: { tab: TabRecord; layout: Layout; bytes: Buffer; capturedMonotonicMs: number; capturedWall: number } | undefined;
+    let captured: CapturedObservation | undefined;
     let lastError: unknown;
     for (let attempt = 0; attempt < 2; attempt++) {
       try { captured = await this.captureConsistent(address, signal); break; }
@@ -63,14 +87,15 @@ export class ObservationStore {
     let artifactId: string | undefined;
     const descriptor = inline
       ? { sizeBytes: bytes.byteLength, sha256: await sha256Hex(Uint8Array.from(bytes)) }
-      : await this.artifacts.put(this.actor, bytes, { browserSessionId: address.browserSessionId, tabId: address.tabId, purpose: "agent-observation", mediaType: "image/png" });
+      : await this.artifacts.put(this.actor, bytes, { browserSessionId: captured.address.browserSessionId, tabId: captured.address.tabId, purpose: "agent-observation", mediaType: "image/png" });
     if ("artifactId" in descriptor) artifactId = descriptor.artifactId;
     try {
-      signal?.throwIfAborted();
+      await this.commitBarrierForTest?.(inline ? "afterDigest" : "afterArtifactPut");
+      this.validateCaptured(captured, signal);
       const observationId = opaqueId("observation");
       const frameSequence = this.registry.incrementFrame(tab);
       const record: ObservationRecord = {
-        id: observationId, address: { ...address }, documentGeneration: tab.documentGeneration, viewportGeneration: tab.viewportGeneration,
+        id: observationId, address: { ...captured.address }, documentGeneration: captured.documentGeneration, viewportGeneration: captured.viewportGeneration,
         capturedMonotonicMs, validUntilMonotonicMs: capturedMonotonicMs + this.freshnessMs,
         width: layout.width, height: layout.height, dpr: layout.dpr, scrollX: layout.scrollX, scrollY: layout.scrollY,
       };
@@ -78,8 +103,8 @@ export class ObservationStore {
       this.latestByTab.set(tab.tabId, observationId);
       this.prune();
       return {
-        kind: "screenshotObservation", observationId, address: { ...address },
-        documentGeneration: tab.documentGeneration, viewportGeneration: tab.viewportGeneration,
+        kind: "screenshotObservation", observationId, address: { ...captured.address },
+        documentGeneration: captured.documentGeneration, viewportGeneration: captured.viewportGeneration,
         url: layout.url, title: layout.title, capturedAt: new Date(capturedWall).toISOString(), capturedMonotonicMs,
         validUntil: new Date(capturedWall + this.freshnessMs).toISOString(),
         viewport: { width: layout.width, height: layout.height, devicePixelRatio: layout.dpr },
@@ -89,7 +114,7 @@ export class ObservationStore {
         image: inline ? { kind: "inline", base64: bytes.toString("base64") } : { kind: "artifact", artifactId: artifactId as string },
       };
     } catch (error) {
-      if (artifactId !== undefined) this.artifacts.revoke(this.actor, artifactId);
+      if (artifactId !== undefined) this.artifacts.revokeIfOwned(this.actor, artifactId);
       throw error;
     }
   }
@@ -113,7 +138,7 @@ export class ObservationStore {
 
   async readLayout(tab: TabRecord, signal?: AbortSignal): Promise<Layout> { return await this.layout(tab, signal); }
 
-  private async captureConsistent(address: TabAddress, signal?: AbortSignal): Promise<{ tab: TabRecord; layout: Layout; bytes: Buffer; capturedMonotonicMs: number; capturedWall: number }> {
+  private async captureConsistent(address: TabAddress, signal?: AbortSignal): Promise<CapturedObservation> {
     const tab = this.registry.resolve(address);
     const targetId = tab.targetId;
     const documentGeneration = tab.documentGeneration;
@@ -128,7 +153,25 @@ export class ObservationStore {
     if (tab.targetId !== targetId || tab.documentGeneration !== documentGeneration) throw new BrowserProtocolError("DOCUMENT_CHANGED", "Document changed during screenshot capture.", true);
     if (tab.viewportGeneration !== viewportGeneration || before.width !== after.width || before.height !== after.height || before.dpr !== after.dpr) throw new BrowserProtocolError("VIEWPORT_CHANGED", "Viewport changed during screenshot capture.", true);
     if (Math.abs(before.scrollX - after.scrollX) > 2 || Math.abs(before.scrollY - after.scrollY) > 2) throw new BrowserProtocolError("VIEWPORT_CHANGED", "Scroll changed during screenshot capture.", true);
-    return { tab, layout: after, bytes: Buffer.from(response.data, "base64"), capturedMonotonicMs, capturedWall };
+    return {
+      tab, address: { ...address }, targetId, cdpSessionId: tab.cdpSessionId,
+      documentGeneration, viewportGeneration, controlEpoch: address.controlEpoch,
+      layout: after, bytes: Buffer.from(response.data, "base64"), capturedMonotonicMs, capturedWall,
+    };
+  }
+
+  private validateCaptured(captured: CapturedObservation, signal?: AbortSignal): void {
+    signal?.throwIfAborted();
+    if (this.currentEpoch !== undefined && this.currentEpoch() !== captured.controlEpoch) throw new BrowserProtocolError("CONTROL_EPOCH_STALE", "Control epoch is stale.");
+    let current: TabRecord;
+    try { current = this.registry.resolve(captured.address); }
+    catch (error) {
+      if (signal?.aborted) signal.throwIfAborted();
+      void error;
+      throw new BrowserProtocolError("DOCUMENT_CHANGED", "Document changed before screenshot commit.");
+    }
+    if (current.targetId !== captured.targetId || current.cdpSessionId !== captured.cdpSessionId || current.documentGeneration !== captured.documentGeneration) throw new BrowserProtocolError("DOCUMENT_CHANGED", "Document changed before screenshot commit.");
+    if (current.viewportGeneration !== captured.viewportGeneration) throw new BrowserProtocolError("VIEWPORT_CHANGED", "Viewport changed before screenshot commit.");
   }
 
   private prune(): void { const now = performance.now(); for (const [id, record] of this.records) if (record.validUntilMonotonicMs <= now) this.records.delete(id); while (this.records.size > this.maxRecords) { const id = this.records.keys().next().value; if (typeof id !== "string") break; this.records.delete(id); } }

@@ -109,6 +109,26 @@ describe("artifact provenance, fairness, and lifetime", () => {
     assert.equal((await store.read(actor, third.artifactId)).bytes[0], 3);
   });
 
+  it("applies a noisy session quota before evicting another session owned by the same actor", async () => {
+    const store = new BrowserArtifactStore({ maxEntries: 3, maxEntriesPerOwner: 3, maxEntriesPerSession: 1, maxTotalBytes: 20, maxBytesPerOwner: 20, maxBytesPerSession: 10 });
+    const firstA = await store.put(actor, Uint8Array.of(1), observation);
+    const stableB = await store.put(actor, Uint8Array.of(2), { ...observation, browserSessionId: "session:b", tabId: "tab:b" });
+    await store.put(actor, Uint8Array.of(3), observation);
+    await assert.rejects(() => store.read(actor, firstA.artifactId));
+    assert.equal((await store.read(actor, stableB.artifactId)).bytes[0], 2);
+  });
+
+  it("makes transaction rollback idempotent and releases frame-ring pins", async () => {
+    const store = new BrowserArtifactStore({ maxEntries: 2, maxEntriesPerOwner: 2, maxEntriesPerSession: 2, maxTotalBytes: 20, maxBytesPerOwner: 20, maxBytesPerSession: 20, frameRingSize: 2 });
+    const frameOptions = { browserSessionId: "session:frame", tabId: "tab:frame", purpose: "workspace-frame", mediaType: "image/png", latestFrameKey: "session:frame\0tab:frame" } as const;
+    const first = await store.put(actor, Uint8Array.of(1), frameOptions);
+    await store.put(actor, Uint8Array.of(2), frameOptions);
+    assert.equal(store.revokeIfOwned(actor, "missing"), false);
+    store.releaseFrameRing("session:frame", "tab:frame");
+    await store.put(actor, Uint8Array.of(3), { ...observation, browserSessionId: "session:frame", tabId: "tab:other" });
+    await assert.rejects(() => store.read(actor, first.artifactId));
+  });
+
   it("expires unpinned artifacts and detects digest corruption", async () => {
     let now = 100;
     const store = new BrowserArtifactStore({ retentionMs: 10, now: () => now });
@@ -158,6 +178,56 @@ describe("screenshot consistency transaction", () => {
     } });
     const store = new ObservationStore(actor, registryFor([target]), artifacts, new FakeMotor() as never);
     await assert.rejects(() => store.capture(address(target), "artifact"), (error) => error instanceof BrowserProtocolError && error.code === "VIEWPORT_CHANGED");
+    assert.equal(artifacts.entryCount, 0);
+  });
+
+  it("rejects navigation during artifact commit and stores only captured immutable generations", async () => {
+    const target = tab("commit-navigation");
+    const tabs = [target];
+    const artifacts = new BrowserArtifactStore();
+    bindObservationTab(target, { async send<T>(method: string): Promise<T> { if (method === "Page.captureScreenshot") return { data: Buffer.from("old-pixels").toString("base64") } as T; return { result: { value: layout() } } as T; } });
+    const store = new ObservationStore(actor, registryFor(tabs), artifacts, new FakeMotor() as never, {
+      currentEpoch: () => 1,
+      commitBarrierForTest: async () => { target.documentGeneration++; },
+    });
+    await assert.rejects(() => store.capture(address(target), "artifact"), (error) => error instanceof BrowserProtocolError && error.code === "DOCUMENT_CHANGED");
+    assert.equal(store.size, 0);
+    assert.equal(artifacts.entryCount, 0);
+    assert.equal(target.latestFrameSequence, 0);
+  });
+
+  it("rejects epoch change and tab cleanup during artifact commit without masking the capture error", async () => {
+    const target = tab("commit-cleanup");
+    const tabs = [target];
+    let epoch = 1;
+    const artifacts = new BrowserArtifactStore();
+    bindObservationTab(target, { async send<T>(method: string): Promise<T> { if (method === "Page.captureScreenshot") return { data: Buffer.from("pixels").toString("base64") } as T; return { result: { value: layout() } } as T; } });
+    const store = new ObservationStore(actor, registryFor(tabs), artifacts, new FakeMotor() as never, {
+      currentEpoch: () => epoch,
+      commitBarrierForTest: async () => { artifacts.clearTab(actor, target.browserSessionId, target.tabId); tabs.length = 0; epoch = 2; },
+    });
+    await assert.rejects(() => store.capture(address(target), "artifact"), (error) => error instanceof BrowserProtocolError && error.code === "CONTROL_EPOCH_STALE");
+    assert.equal(store.size, 0);
+    assert.equal(artifacts.entryCount, 0);
+  });
+
+  it("rejects a workspace frame changed during artifact commit without event, sequence, or artifact", async () => {
+    const target = tab("frame-commit");
+    const artifacts = new BrowserArtifactStore();
+    const motor = new FakeMotor();
+    let barrierCalls = 0;
+    bindFrameTab(target, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: layout() } } as T; return { data: Buffer.from("old-frame").toString("base64") } as T; } });
+    const scheduler = new FrameScheduler(actor, registryFor([target]), artifacts, motor as never, () => 1, {
+      selectedIntervalMs: 10_000,
+      commitBarrierForTest: async () => { barrierCalls++; target.viewportGeneration++; },
+    });
+    const events: FrameEvent[] = [];
+    scheduler.on("frame", (event) => events.push(event));
+    scheduler.subscribe("connection\0commit", address(target));
+    await waitFor(() => barrierCalls === 1 && artifacts.entryCount === 0);
+    scheduler.close();
+    assert.equal(events.length, 0);
+    assert.equal(target.latestFrameSequence, 0);
     assert.equal(artifacts.entryCount, 0);
   });
 

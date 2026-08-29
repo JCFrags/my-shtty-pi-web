@@ -16,7 +16,12 @@ interface TabSchedule {
   timer?: NodeJS.Timeout;
 }
 
-export interface FrameSchedulerOptions { idleIntervalMs?: number; selectedIntervalMs?: number; burstIntervalMs?: number }
+export interface FrameSchedulerOptions {
+  idleIntervalMs?: number;
+  selectedIntervalMs?: number;
+  burstIntervalMs?: number;
+  commitBarrierForTest?: () => Promise<void>;
+}
 
 export class FrameScheduler extends EventEmitter {
   private readonly schedules = new Map<string, TabSchedule>();
@@ -25,6 +30,7 @@ export class FrameScheduler extends EventEmitter {
   private readonly idleIntervalMs: number;
   private readonly selectedIntervalMs: number;
   private readonly burstIntervalMs: number;
+  private readonly commitBarrierForTest: (() => Promise<void>) | undefined;
   droppedFrames = 0;
   private closed = false;
 
@@ -33,6 +39,7 @@ export class FrameScheduler extends EventEmitter {
     this.idleIntervalMs = options.idleIntervalMs ?? 2_000;
     this.selectedIntervalMs = options.selectedIntervalMs ?? 500;
     this.burstIntervalMs = options.burstIntervalMs ?? 100;
+    this.commitBarrierForTest = options.commitBarrierForTest;
     motor.on("actionStart", this.onActionStart);
     motor.on("actionEnd", this.onActionEnd);
     motor.on("sample", this.onSample);
@@ -72,7 +79,15 @@ export class FrameScheduler extends EventEmitter {
   hasConsumer(key: string, address: TabAddress): boolean { const consumer = this.schedules.get(address.tabId)?.consumers.get(key); return consumer !== undefined && sameAddress(consumer.address, address); }
   latestFrame(tabId: string): FrameEvent | undefined { return this.latest.get(tabId); }
 
-  stop(tabId: string): void { const schedule = this.schedules.get(tabId); if (schedule?.timer) clearTimeout(schedule.timer); for (const key of schedule?.consumers.keys() ?? []) this.consumerAddresses.delete(key); this.schedules.delete(tabId); this.latest.delete(tabId); }
+  stop(tabId: string): void {
+    const schedule = this.schedules.get(tabId);
+    if (schedule?.timer) clearTimeout(schedule.timer);
+    for (const key of schedule?.consumers.keys() ?? []) this.consumerAddresses.delete(key);
+    const tab = this.registry.getById(tabId);
+    if (tab !== undefined) this.artifacts.releaseFrameRing(tab.browserSessionId, tab.tabId);
+    this.schedules.delete(tabId);
+    this.latest.delete(tabId);
+  }
 
   close(): void { if (this.closed) return; this.closed = true; this.motor.off("actionStart", this.onActionStart); this.motor.off("actionEnd", this.onActionEnd); this.motor.off("sample", this.onSample); for (const tabId of [...this.schedules.keys()]) this.stop(tabId); this.consumerAddresses.clear(); }
 
@@ -97,8 +112,11 @@ export class FrameScheduler extends EventEmitter {
     try {
       await this.motor.ensureOverlay(tab);
       const targetId = tab.targetId;
+      const cdpSessionId = tab.cdpSessionId;
       const documentGeneration = tab.documentGeneration;
       const viewportGeneration = tab.viewportGeneration;
+      const controlEpoch = this.currentEpoch();
+      const address: TabAddress = { browserSessionId: tab.browserSessionId, tabId: tab.tabId, targetId, controlEpoch };
       const before = await layout(tab);
       const result = await frameConnection(tab).send<{ data: string }>("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false }, tab.cdpSessionId);
       const after = await layout(tab);
@@ -106,13 +124,21 @@ export class FrameScheduler extends EventEmitter {
       if (tab.targetId !== targetId || tab.documentGeneration !== documentGeneration || tab.viewportGeneration !== viewportGeneration) throw new BrowserProtocolError("DOCUMENT_CHANGED", "Frame target changed during capture.");
       if (before.width !== after.width || before.height !== after.height || before.dpr !== after.dpr || Math.abs(before.scrollX - after.scrollX) > 2 || Math.abs(before.scrollY - after.scrollY) > 2) throw new BrowserProtocolError("VIEWPORT_CHANGED", "Frame viewport changed during capture.");
       const bytes = Buffer.from(result.data, "base64");
-      const address: TabAddress = { browserSessionId: tab.browserSessionId, tabId: tab.tabId, targetId: tab.targetId, controlEpoch: this.currentEpoch() };
       for (const [key, consumer] of schedule.consumers) if (!sameAddress(consumer.address, address)) { schedule.consumers.delete(key); this.consumerAddresses.delete(key); }
       if (schedule.consumers.size === 0 && schedule.activeActions === 0) { this.stop(tab.tabId); return; }
-      const artifact = await this.artifacts.put(this.actor, bytes, { browserSessionId: tab.browserSessionId, tabId: tab.tabId, purpose: "workspace-frame", mediaType: "image/png", latestFrameKey: `${tab.browserSessionId}\u0000${tab.tabId}` });
+      const artifact = await this.artifacts.put(this.actor, bytes, { browserSessionId: tab.browserSessionId, tabId: tab.tabId, purpose: "workspace-frame", mediaType: "image/png" });
+      try {
+        await this.commitBarrierForTest?.();
+        this.validateCaptured(address, targetId, cdpSessionId, documentGeneration, viewportGeneration);
+        if (schedule.consumers.size === 0 && schedule.activeActions === 0) throw new BrowserProtocolError("OPERATION_CANCELLED", "Frame capture has no current consumer.");
+        this.artifacts.pinFrameArtifact(this.actor, artifact.artifactId, `${tab.browserSessionId}\u0000${tab.tabId}`);
+      } catch (error) {
+        this.artifacts.revokeIfOwned(this.actor, artifact.artifactId);
+        throw error;
+      }
       const frame: FrameEvent = {
         protocolVersion: PROTOCOL_VERSION, kind: "frame.available", address,
-        documentGeneration: tab.documentGeneration, viewportGeneration: tab.viewportGeneration,
+        documentGeneration, viewportGeneration,
         frameSequence: this.registry.incrementFrame(tab), capturedMonotonicMs, publishedMonotonicMs: performance.now(),
         mediaType: "image/png", byteLength: bytes.byteLength, artifactId: artifact.artifactId, sha256: artifact.sha256,
         viewport: { width: after.width, height: after.height, devicePixelRatio: after.dpr }, url: after.url, title: after.title, cursor: this.motor.state,
@@ -121,6 +147,15 @@ export class FrameScheduler extends EventEmitter {
       this.emit("frame", frame);
     } catch { if (tab.state !== "open") this.stop(tab.tabId); }
     finally { schedule.captureInFlight = false; if (schedule.captureRequested) { schedule.captureRequested = false; this.arm(schedule, 0); } else if (this.schedules.has(schedule.tabId)) this.arm(schedule); }
+  }
+
+  private validateCaptured(address: TabAddress, targetId: string, cdpSessionId: string, documentGeneration: number, viewportGeneration: number): void {
+    if (this.currentEpoch() !== address.controlEpoch) throw new BrowserProtocolError("CONTROL_EPOCH_STALE", "Control epoch is stale.");
+    let current: TabRecord;
+    try { current = this.registry.resolve(address); }
+    catch { throw new BrowserProtocolError("DOCUMENT_CHANGED", "Document changed before frame publication."); }
+    if (current.targetId !== targetId || current.cdpSessionId !== cdpSessionId || current.documentGeneration !== documentGeneration) throw new BrowserProtocolError("DOCUMENT_CHANGED", "Document changed before frame publication.");
+    if (current.viewportGeneration !== viewportGeneration) throw new BrowserProtocolError("VIEWPORT_CHANGED", "Viewport changed before frame publication.");
   }
 }
 

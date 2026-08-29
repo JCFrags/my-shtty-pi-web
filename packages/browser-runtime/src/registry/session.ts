@@ -36,7 +36,7 @@ export class BrowserSession {
     observationFreshnessMs: number,
   ) {
     this.motor = new SessionMotor(browserSessionId, personaSeed, motorMinimumPathMs);
-    this.observations = new ObservationStore(actor, targets, artifacts, this.motor, { freshnessMs: observationFreshnessMs });
+    this.observations = new ObservationStore(actor, targets, artifacts, this.motor, { freshnessMs: observationFreshnessMs, currentEpoch: () => this.controlEpoch });
     this.dom = new DomObservationStore(targets);
     this.frames = new FrameScheduler(actor, targets, artifacts, this.motor, () => this.controlEpoch);
     host.on("exit", this.onHostExit);

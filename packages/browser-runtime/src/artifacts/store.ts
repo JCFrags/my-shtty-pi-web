@@ -134,6 +134,31 @@ export class BrowserArtifactStore {
     this.delete(id);
   }
 
+  revokeIfOwned(actor: ActorIdentity, id: string): boolean {
+    const record = this.records.get(id);
+    if (record === undefined || record.owner !== actorKey(actor)) return false;
+    this.delete(id);
+    return true;
+  }
+
+  pinFrameArtifact(actor: ActorIdentity, id: string, key: string): void {
+    const record = this.records.get(id);
+    if (record === undefined || record.owner !== actorKey(actor) || record.purpose !== "workspace-frame") throw new BrowserProtocolError("ARTIFACT_NOT_FOUND", "Artifact not found.");
+    this.releaseOldestFramePinForReplacement(key);
+    this.pinLatest(key, id);
+  }
+
+  releaseFrameRing(browserSessionId: string, tabId: string): void {
+    const key = `${browserSessionId}\u0000${tabId}`;
+    const ring = this.framePins.get(key);
+    if (ring === undefined) return;
+    for (const id of ring) {
+      const record = this.records.get(id);
+      if (record !== undefined) record.pinCount = Math.max(0, record.pinCount - 1);
+    }
+    this.framePins.delete(key);
+  }
+
   prune(): void {
     const now = this.now();
     for (const [id, record] of this.records) if (record.expiresAtMs <= now && record.pinCount === 0) this.delete(id);
@@ -157,11 +182,11 @@ export class BrowserArtifactStore {
   clear(): void { this.records.clear(); this.framePins.clear(); this.total = 0; }
 
   private makeRoom(owner: string, session: string, bytes: number): void {
-    while (this.scopeCount((record) => record.owner === owner) >= this.maxEntriesPerOwner || this.scopeBytes((record) => record.owner === owner) + bytes > this.maxBytesPerOwner) {
-      if (!this.removeOldest((record) => record.owner === owner)) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Artifact owner quota is full.", true);
-    }
     while (this.scopeCount((record) => record.owner === owner && record.browserSessionId === session) >= this.maxEntriesPerSession || this.scopeBytes((record) => record.owner === owner && record.browserSessionId === session) + bytes > this.maxBytesPerSession) {
       if (!this.removeOldest((record) => record.owner === owner && record.browserSessionId === session)) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Artifact session quota is full.", true);
+    }
+    while (this.scopeCount((record) => record.owner === owner) >= this.maxEntriesPerOwner || this.scopeBytes((record) => record.owner === owner) + bytes > this.maxBytesPerOwner) {
+      if (!this.removeOldest((record) => record.owner === owner)) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Artifact owner quota is full.", true);
     }
     while (this.records.size >= this.maxEntries || this.total + bytes > this.maxTotalBytes) {
       if (!this.removeOldest((record) => record.owner === owner)) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Global artifact capacity is occupied by another owner.", true);
