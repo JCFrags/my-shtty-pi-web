@@ -137,6 +137,7 @@ export class BrowserRuntime extends EventEmitter {
     this.operations.submit(actor, {
       operationId: request.operationId, fingerprint: requestFingerprint(request), laneKey, deadline: request.deadline,
       ...(browserSessionId !== undefined ? { browserSessionId } : {}), ...("address" in request ? { tabId: request.address.tabId } : {}), ...(controlEpoch !== undefined ? { controlEpoch } : {}),
+      ...(request.kind === "tab.close" ? { failOnTargetTermination: false } : {}),
     }, task);
     const abort = (): void => { try { this.operations.cancel(actor, request.operationId); } catch { /* Already pruned. */ } };
     signal?.addEventListener("abort", abort, { once: true });

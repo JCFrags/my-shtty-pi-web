@@ -147,6 +147,22 @@ describe("bounded actor-scoped operations", () => {
     assert.equal(registry.status(actor, "operation:browser-failure").error?.code, "BROWSER_EXITED");
   });
 
+  it("does not fail an expected tab-close operation on its own terminal event", async () => {
+    const registry = new OperationRegistry();
+    let finish!: () => void;
+    const closed = new Promise<void>((resolve) => { finish = resolve; });
+    registry.submit(actor, { operationId: "operation:expected-close", laneKey: "close", deadline: deadline(), browserSessionId: "session:close", tabId: "tab:close", controlEpoch: 1, failOnTargetTermination: false }, async (context) => {
+      context.markDispatched();
+      await closed;
+      return "closed";
+    });
+    registry.failTab(actor, "session:close", "tab:close");
+    assert.equal(registry.status(actor, "operation:expected-close").state, "running");
+    finish();
+    assert.equal((await registry.wait(actor, "operation:expected-close")).state, "committed");
+    assert.equal(registry.result(actor, "operation:expected-close"), "closed");
+  });
+
   it("prunes only terminal records after retention", async () => {
     let wall = 1_000_000;
     const registry = new OperationRegistry({ retentionMs: 100, nowWall: () => wall });

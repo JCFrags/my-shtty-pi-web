@@ -10,6 +10,7 @@ interface MutableOperation {
   readonly browserSessionId?: string;
   readonly tabId?: string;
   readonly controlEpoch?: number;
+  readonly failOnTargetTermination: boolean;
   readonly deadlineMonotonicMs: number;
   readonly controller: AbortController;
   state: OperationState;
@@ -40,6 +41,7 @@ export interface SubmitOptions {
   browserSessionId?: string;
   tabId?: string;
   controlEpoch?: number;
+  failOnTargetTermination?: boolean;
 }
 
 export interface OperationRegistryOptions {
@@ -110,6 +112,7 @@ export class OperationRegistry {
       ...(options.browserSessionId !== undefined ? { browserSessionId: options.browserSessionId } : {}),
       ...(options.tabId !== undefined ? { tabId: options.tabId } : {}),
       ...(options.controlEpoch !== undefined ? { controlEpoch: options.controlEpoch } : {}),
+      failOnTargetTermination: options.failOnTargetTermination ?? true,
       deadlineMonotonicMs: this.monotonic() + remaining,
       controller: new AbortController(), state: "queued", dispatchState: "not-dispatched",
       queuedAt: new Date(this.wall()).toISOString(), task: task as OperationTask<unknown>,
@@ -165,7 +168,7 @@ export class OperationRegistry {
 
   failTab(actor: ActorIdentity, browserSessionId: string, tabId: string): void {
     for (const operation of this.operations.values()) {
-      if (operation.actor === actorKey(actor) && operation.browserSessionId === browserSessionId && operation.tabId === tabId && !isTerminal(operation.state)) {
+      if (operation.actor === actorKey(actor) && operation.browserSessionId === browserSessionId && operation.tabId === tabId && operation.failOnTargetTermination && !isTerminal(operation.state)) {
         this.failMutable(operation, new BrowserProtocolError("TARGET_CRASHED", "Browser target closed."));
       }
     }

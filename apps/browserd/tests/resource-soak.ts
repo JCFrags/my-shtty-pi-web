@@ -40,6 +40,7 @@ interface ResourceSample {
 
 class BrowserClient {
   private sequence = 0;
+  private readonly clientId = randomBytes(6).toString("hex");
   private buffer = "";
   private readonly pending = new Map<string, (value: WireResponse) => void>();
   readonly frames: WireFrame[] = [];
@@ -70,7 +71,7 @@ class BrowserClient {
   }
 
   async call(kind: string, payload: Record<string, unknown> = {}, timeoutMs = 60_000): Promise<unknown> {
-    return await this.callOperation(kind, `operation:${kind.replaceAll(".", ":")}:${++this.sequence}`, payload, timeoutMs);
+    return await this.callOperation(kind, `operation:${this.clientId}:${kind.replaceAll(".", ":")}:${++this.sequence}`, payload, timeoutMs);
   }
 
   async callOperation(kind: string, operationId: string, payload: Record<string, unknown> = {}, timeoutMs = 60_000): Promise<unknown> {
