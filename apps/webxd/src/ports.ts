@@ -47,9 +47,11 @@ export interface BrowserDaemonPort {
   createSession(actor: AuthorityActor, request: BrowserSessionRequest, operationId: string, signal?: AbortSignal): Promise<BrowserSession>;
   listSessions(actor: AuthorityActor, signal?: AbortSignal): Promise<readonly BrowserSession[]>;
   getSession(actor: AuthorityActor, sessionId: string, signal?: AbortSignal): Promise<BrowserSession>;
-  observe(actor: AuthorityActor, sessionId: string, view: string, maxChars: number, operationId: string, signal?: AbortSignal): Promise<BrowserObservation>;
-  captureFrame(actor: AuthorityActor, sessionId: string, operationId: string, signal?: AbortSignal): Promise<BrowserVisualFrame>;
-  act(actor: AuthorityActor, sessionId: string, action: BrowserAction, operationId: string, signal?: AbortSignal): Promise<BrowserOperationResult>;
+  observe(actor: AuthorityActor, sessionId: string, view: string, maxChars: number, operationId: string, signal?: AbortSignal, tabId?: string): Promise<BrowserObservation>;
+  captureFrame(actor: AuthorityActor, sessionId: string, operationId: string, signal?: AbortSignal, tabId?: string): Promise<BrowserVisualFrame>;
+  act(actor: AuthorityActor, sessionId: string, action: BrowserAction, operationId: string, signal?: AbortSignal, tabId?: string): Promise<BrowserOperationResult>;
+  createTab(actor: AuthorityActor, sessionId: string, url: string | undefined, operationId: string, signal?: AbortSignal): Promise<BrowserSession>;
+  focusTab(actor: AuthorityActor, sessionId: string, tabId: string, operationId: string, signal?: AbortSignal): Promise<BrowserSession>;
   debug(actor: AuthorityActor, sessionId: string, request: BrowserDebugRequest, operationId: string, signal?: AbortSignal): Promise<BrowserDebugResult>;
   workspace(actor: AuthorityActor, request: BrowserWorkspaceRequest, operationId: string, signal?: AbortSignal): Promise<BrowserWorkspaceResult>;
   setControl(actor: AuthorityActor, sessionId: string, controller: "human" | "agent", operationId: string, signal?: AbortSignal): Promise<BrowserControlResult>;
@@ -68,5 +70,5 @@ export interface AuthorityIdSource {
 }
 
 export function isBrowserPathId(value: unknown): value is BrowserPathId {
-  return value === "agent-browser/chrome" || value === "pinchtab/chrome";
+  return value === "agentcursor/chrome" || value === "agent-browser/chrome";
 }

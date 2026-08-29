@@ -1,4 +1,5 @@
 import process from "node:process";
+import { browserBackendSelection } from "./browser-backend-selection.js";
 import { ProxyBoundBrowserDestinationAuthority } from "./destination-authority.js";
 import { WebxdRuntime, sameUserPiActorAuthenticator } from "./runtime.js";
 
@@ -8,10 +9,15 @@ if (runtimeDirectory === undefined) throw new Error("XDG_RUNTIME_DIR is required
 const cacheHome = process.env.XDG_CACHE_HOME ?? `${process.env.HOME ?? process.cwd()}/.cache`;
 const proxyUrl = process.env.WEBX_EGRESS_PROXY;
 const destinationAuthority = proxyUrl === undefined ? undefined : proxyDestinationAuthority(proxyUrl);
+const browserBackend = browserBackendSelection(process.env.WEBX_BROWSER_BACKEND);
+const browserRuntimeDirectory = process.env.BROWSERD_RUNTIME_DIR ?? `${runtimeDirectory}/pi-browserd`;
 
 const runtime = new WebxdRuntime({
   socketPath: process.env.WEBXD_SOCKET ?? `${runtimeDirectory}/pi-web/webxd.sock`,
   browserSocketPath: process.env.BROWSERD_SOCKET ?? `${runtimeDirectory}/pi-web/browserd.sock`,
+  browserBackend,
+  browserRuntimeDirectory,
+  browserDescriptorPath: process.env.BROWSERD_DESCRIPTOR ?? `${browserRuntimeDirectory}/browserd.json`,
   cwd: process.cwd(),
   searxUrl: process.env.WEBX_SEARX_URL ?? "http://127.0.0.1:8888",
   readerUrl: process.env.WEBX_READER_URL ?? "http://127.0.0.1:8787",

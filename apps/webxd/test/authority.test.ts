@@ -9,8 +9,7 @@ import type { AuthorityActor, BrowserDaemonPort } from "../src/ports.js";
 afterEach(() => vi.unstubAllGlobals());
 
 const paths = [
-  { pathId: "agent-browser/chrome", actions: ["navigate", "click"], observations: ["main", "visual"], visual: true, touch: false, uploads: false, downloads: true },
-  { pathId: "pinchtab/chrome", actions: ["navigate", "fill", "wait"], observations: ["main", "interactive"], visual: false, touch: false, uploads: false, downloads: false },
+  { pathId: "agent-browser/chrome", actions: ["navigate", "click"], observations: ["screenshot"], visual: true, touch: false, uploads: false, downloads: false },
 ] as const;
 
 function actor(principalId = "principal-a", agentId = "agent-a"): AuthorityActor {
@@ -21,19 +20,20 @@ function browser(): BrowserDaemonPort {
   return {
     capabilities: vi.fn(async () => paths),
     listSessions: vi.fn(async () => []),
-    createSession: vi.fn(async (owner, request) => {
-      const capabilities = paths.find((item) => item.pathId === request.pathId);
-      if (capabilities === undefined) throw new Error("unsupported path");
-      return { sessionId: "session-1", tabId: "tab-1", pathId: request.pathId, ownerPrincipalId: owner.principalId, ownerAgentId: owner.agentId, state: "ready", capabilities };
+    createSession: vi.fn(async (_owner, request) => {
+      if (paths.find((item) => item.pathId === request.pathId) === undefined) throw new Error("unsupported path");
+      return { browserSessionId: "session-1", pathId: request.pathId, controlEpoch: 1, state: "ready" as const, tabs: [{ tabId: "tab-1", url: "https://fixture.invalid/", title: "Fixture", state: "ready" as const, documentGeneration: 1, viewportGeneration: 1, frameSequence: 1 }] };
     }),
-    getSession: vi.fn(async (owner) => ({ sessionId: "session-1", tabId: "tab-1", pathId: "agent-browser/chrome", ownerPrincipalId: owner.principalId, ownerAgentId: owner.agentId, state: "ready", capabilities: paths[0] })),
-    observe: vi.fn(async () => ({ operationId: "op-observe", address: { sessionId: "session-1", tabId: "tab-1", pathId: "agent-browser/chrome", hostGeneration: 1, engineGeneration: 1, controlEpoch: 1 }, title: "Fixture", url: "https://fixture.invalid", content: "bounded", truncated: false })),
-    captureFrame: vi.fn(async () => ({ address: { sessionId: "session-1", tabId: "tab-1", pathId: "agent-browser/chrome", hostGeneration: 1, engineGeneration: 1, controlEpoch: 1 }, mediaType: "image/png", width: 1, height: 1, payloadBase64: "", screenshotSha256: "a".repeat(64), screenshotSequence: 1, viewportId: "viewport-1", viewportGeneration: 1 })),
-    act: vi.fn(async (_owner, _session, _action, operationId) => ({ operationId, state: "succeeded" })),
+    getSession: vi.fn(async (owner: AuthorityActor, sessionId: string) => { void owner; void sessionId; return { browserSessionId: "session-1", pathId: "agent-browser/chrome" as const, controlEpoch: 1, state: "ready" as const, tabs: [{ tabId: "tab-1", url: "https://fixture.invalid/", title: "Fixture", state: "ready" as const, documentGeneration: 1, viewportGeneration: 1, frameSequence: 1 }] }; }),
+    observe: vi.fn(async () => ({ kind: "dom" as const, operationId: "op-observe", domObservationId: "dom-1", browserSessionId: "session-1", tabId: "tab-1", documentGeneration: 1, observedAt: "2026-08-12T00:00:00Z", truncated: false, nodes: [] })),
+    captureFrame: vi.fn(async () => ({ browserSessionId: "session-1", tabId: "tab-1", observationId: "observation-1", mediaType: "image/png" as const, imagePixelWidth: 1, imagePixelHeight: 1, payloadBase64: "", digest: "a".repeat(64), frameSequence: 1, viewportGeneration: 1 })),
+    act: vi.fn(async (_owner, _session, _action, operationId) => ({ operationId, state: "succeeded" as const })),
     debug: vi.fn(async (_owner, _sessionId, request, operationId) => ({ operationId, operation: request.operation, ok: true, data: {} })),
     workspace: vi.fn(async (_owner, request) => ({ action: request.action, data: {} })),
     setControl: vi.fn(async (_owner, sessionId, controller) => ({ sessionId, tabId: "tab-1", controller, controlEpoch: 2 })),
-    cancel: vi.fn(async (_owner, operationId) => ({ operationId, state: "cancelled" })),
+    cancel: vi.fn(async (_owner, operationId) => ({ operationId, state: "cancelled" as const })),
+    createTab: vi.fn(async () => ({ browserSessionId: "session-1", pathId: "agent-browser/chrome" as const, controlEpoch: 1, state: "ready" as const, tabs: [] })),
+    focusTab: vi.fn(async () => ({ browserSessionId: "session-1", pathId: "agent-browser/chrome" as const, controlEpoch: 1, state: "ready" as const, tabs: [] })),
     closeTab: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
     shutdown: vi.fn(async () => undefined),
@@ -331,7 +331,7 @@ describe("WebxAuthority", () => {
     expect(await call(instance, actor(), "POST", "/v1/browser/sessions", { pathId: "other/chrome" }, "browser-create-2")).toMatchObject({ status: 400, body: { code: "unsupported" } });
     await call(instance, actor(), "POST", "/v1/browser/sessions", { pathId: "agent-browser/chrome" }, "browser-create-3");
     const denied = await call(instance, actor("principal-b", "agent-b"), "GET", "/v1/browser/sessions/session-1");
-    expect(denied).toMatchObject({ status: 403, body: { code: "wrong-owner" } });
+    expect(denied).toMatchObject({ status: 404, body: { code: "not-found" } });
     expect(port.getSession).not.toHaveBeenCalled();
   });
 
@@ -359,8 +359,8 @@ describe("WebxAuthority", () => {
     const port = browser();
     const instance = authority(port);
     await call(instance, actor(), "POST", "/v1/browser/sessions", { pathId: "agent-browser/chrome" }, "browser-create-frame");
-    const frame = await call(instance, actor(), "POST", "/v1/browser/sessions/session-1/frame", {}, "browser-frame-001");
-    expect(frame).toMatchObject({ status: 200, body: { mediaType: "image/png", viewportId: "viewport-1" } });
+    const frame = await call(instance, actor(), "POST", "/v1/browser/sessions/session-1/frame", { tabId: "tab-1" }, "browser-frame-001");
+    expect(frame).toMatchObject({ status: 200, body: { mediaType: "image/png", observationId: "observation-1" } });
     expect(port.captureFrame).toHaveBeenCalledTimes(1);
   });
 

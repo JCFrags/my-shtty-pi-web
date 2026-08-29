@@ -85,7 +85,7 @@ export class ProxyBoundBrowserDestinationAuthority implements BrowserDestination
       port: destination.port,
       resolvedAddresses: Object.freeze([...addresses]),
       redirectPolicy: Object.freeze({ revalidateEveryHop: true, maxRedirects: 10 }),
-      egressBindingId: `forward-proxy://${this.proxyHost}:${this.proxyPort}`,
+      egressBindingId: `forward-proxy://${this.proxyHost === "::1" ? "[::1]" : this.proxyHost}:${this.proxyPort}`,
     });
   }
 }
@@ -116,10 +116,8 @@ export class FailClosedBrowserDestinationAuthority implements BrowserDestination
   }
 }
 
-export function actionDestination(action: BrowserAction): { operation: "navigate" | "new-tab"; url: string } | undefined {
-  if (action.kind === "navigate") return { operation: "navigate", url: action.url };
-  if (action.kind === "tab-new" && action.url !== undefined) return { operation: "new-tab", url: action.url };
-  return undefined;
+export function actionDestination(action: BrowserAction): { operation: "navigate"; url: string } | undefined {
+  return action.kind === "navigate" ? { operation: "navigate", url: action.url } : undefined;
 }
 
 function parseBrowserUrl(rawUrl: string): URL {

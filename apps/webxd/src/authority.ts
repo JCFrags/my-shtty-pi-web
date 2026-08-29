@@ -217,7 +217,7 @@ export class WebxAuthority {
     const probeSignal = healthProbeSignal(signal);
     try {
       const paths = await this.options.browser.capabilities(probeSignal);
-      const healthy = paths.some((path) => path.pathId === "agent-browser/chrome" && path.visual);
+      const healthy = paths.some((path) => (path.pathId === "agentcursor/chrome" || path.pathId === "agent-browser/chrome") && path.visual);
       return healthy ? { healthy, paths } : { healthy, paths, reason: "required visual browser path is unavailable" };
     } catch (error) {
       if (signal?.aborted) throw error;
@@ -743,7 +743,7 @@ export class WebxAuthority {
     if (request.method === "GET" && segments.length === 3 && segments[2] === "sessions") {
       requireScope(actor, "browser.read");
       const sessions = await this.options.browser.listSessions(actor, request.signal);
-      for (const session of sessions) this.#browserOwners.set(session.sessionId, { principalId: actor.principalId, agentId: actor.agentId });
+      for (const session of sessions) this.#browserOwners.set(session.browserSessionId, { principalId: actor.principalId, agentId: actor.agentId });
       return ok({ sessions });
     }
     if (request.method === "POST" && segments.length === 3 && segments[2] === "sessions") {
@@ -752,26 +752,33 @@ export class WebxAuthority {
       if (!isBrowserPathId(input.pathId)) throw problem(400, "unsupported", "browser path is not supported", false);
       const session = await this.options.browser.createSession(actor, input, operationId(request), request.signal);
       if (session.pathId !== input.pathId) throw problem(502, "wrong-path", "browser daemon changed the selected path", false);
-      this.#browserOwners.set(session.sessionId, { principalId: actor.principalId, agentId: actor.agentId });
+      this.#browserOwners.set(session.browserSessionId, { principalId: actor.principalId, agentId: actor.agentId });
       return ok(session, 201);
     }
     if (sessionId !== undefined && segments[2] === "sessions") {
       this.assertBrowserOwner(actor, sessionId);
       if (request.method === "GET" && segments.length === 4) { requireScope(actor, "browser.read"); return ok(await this.options.browser.getSession(actor, sessionId, request.signal)); }
       if (request.method === "DELETE" && segments.length === 4) { requireScope(actor, "browser.write"); await this.options.browser.close(actor, sessionId, request.signal); this.#browserOwners.delete(sessionId); return { status: 204, headers: jsonHeaders() }; }
+      if (request.method === "POST" && segments.length === 5 && segments[4] === "tabs") { requireScope(actor, "browser.write"); const input = body<{ url?: string }>(request); return ok(await this.options.browser.createTab(actor, sessionId, input.url, operationId(request), request.signal), 201); }
+      if (request.method === "POST" && segments[4] === "tabs" && segments[5] !== undefined && segments[6] === "focus") { requireScope(actor, "browser.write"); return ok(await this.options.browser.focusTab(actor, sessionId, segments[5], operationId(request), request.signal)); }
       if (request.method === "DELETE" && segments[4] === "tabs" && segments[5] !== undefined) { requireScope(actor, "browser.write"); await this.options.browser.closeTab(actor, sessionId, segments[5], request.signal); return { status: 204, headers: jsonHeaders() }; }
       if (request.method === "POST" && segments[4] === "observe") {
         requireScope(actor, "browser.read");
-        const input = body<{ view?: string; maxChars?: number }>(request);
-        return ok(await this.options.browser.observe(actor, sessionId, input.view ?? "main", integer(input.maxChars ?? DEFAULT_CONTENT_CHARS, "maxChars", 1, MAX_CONTENT_CHARS), operationId(request), request.signal));
+        const input = body<{ view?: string; mode?: string; maxChars?: number; maxNodes?: number; tabId?: string }>(request);
+        if (typeof input.tabId !== "string") throw problem(400, "invalid-request", "explicit tabId is required", false);
+        return ok(await this.options.browser.observe(actor, sessionId, input.mode ?? input.view ?? "screenshot", integer(input.maxNodes ?? input.maxChars ?? DEFAULT_CONTENT_CHARS, "observation bound", 1, MAX_CONTENT_CHARS), operationId(request), request.signal, input.tabId));
       }
       if (request.method === "POST" && segments[4] === "frame") {
         requireScope(actor, "browser.read");
-        return ok(await this.options.browser.captureFrame(actor, sessionId, operationId(request), request.signal));
+        const input = body<{ tabId?: string }>(request);
+        if (typeof input.tabId !== "string") throw problem(400, "invalid-request", "explicit tabId is required", false);
+        return ok(await this.options.browser.captureFrame(actor, sessionId, operationId(request), request.signal, input.tabId));
       }
       if (request.method === "POST" && segments[4] === "actions") {
         requireScope(actor, "browser.write");
-        return ok(await this.options.browser.act(actor, sessionId, body<{ action: BrowserAction }>(request).action, operationId(request), request.signal));
+        const input = body<{ action: BrowserAction; tabId?: string }>(request);
+        if (typeof input.tabId !== "string") throw problem(400, "invalid-request", "explicit tabId is required", false);
+        return ok(await this.options.browser.act(actor, sessionId, input.action, operationId(request), request.signal, input.tabId));
       }
       if (request.method === "POST" && segments[4] === "debug") {
         requireScope(actor, "browser.debug");
@@ -817,7 +824,7 @@ export class WebxAuthority {
 
   private assertBrowserOwner(actor: AuthorityActor, sessionId: string): void {
     const owner = this.#browserOwners.get(sessionId);
-    if (owner !== undefined && (owner.principalId !== actor.principalId || owner.agentId !== actor.agentId)) throw problem(403, "wrong-owner", "browser session has a different owner", false);
+    if (owner !== undefined && (owner.principalId !== actor.principalId || owner.agentId !== actor.agentId)) throw problem(404, "not-found", "browser session was not found", false);
   }
 }
 
@@ -1194,7 +1201,7 @@ function searxUnavailableEngines(value: unknown): string[] {
 }
 
 function header(request: TransportRequest, name: string): string | undefined { const entry = Object.entries(request.headers ?? {}).find(([key]) => key.toLocaleLowerCase() === name); return entry?.[1]; }
-function operationId(request: TransportRequest): string { const value = header(request, "idempotency-key"); if (value === undefined) throw problem(400, "missing-idempotency-key", "idempotency key is required", false); return `op-${value}`; }
+function operationId(request: TransportRequest): string { const value = header(request, "idempotency-key"); if (value === undefined) throw problem(400, "missing-idempotency-key", "idempotency key is required", false); return `operation:${createHash("sha256").update(value).digest("hex")}`; }
 function stableStringify(value: unknown): string { if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`; if (typeof value === "object" && value !== null) return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(",")}}`; return JSON.stringify(value) ?? "undefined"; }
 function enforceSerializedBound(response: TransportResponse, maxBytes: number): TransportResponse { if (new TextEncoder().encode(JSON.stringify(response.body ?? null)).byteLength > maxBytes) throw problem(413, "response-too-large", "response exceeds the requested transport bound", false); return response; }
 function jsonHeaders(): Readonly<Record<string, string>> { return { "content-type": "application/json" }; }

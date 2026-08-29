@@ -1,8 +1,9 @@
+import { createHash } from "node:crypto";
 import { WebxClient } from "./client.js";
 import { nodeNdjsonConnectionFactory } from "./node-unix.js";
 import { UnixSocketTransport } from "./transport.js";
 import { defaultExportRoot, saveReadMarkdown, validateRelativeMarkdownPath } from "./save-markdown.js";
-import type { BoundedContent, BrowserAction, BrowserPathId, BrowserVisualFrame, ContentRequest, DirectReadRequest, ReadBatchRequest, ReadRequest, ReadSaveOptions, RequestOptions, VisualGuard } from "./types.js";
+import type { BoundedContent, BrowserAction, BrowserPathId, ContentRequest, DirectReadRequest, ReadBatchRequest, ReadRequest, ReadSaveOptions, RequestOptions } from "./types.js";
 
 export const FACADE_OPERATION_INVENTORY = {
   "web.search": "search",
@@ -26,14 +27,11 @@ export interface FacadeResult {
   readonly trust?: "untrusted-external" | "local";
 }
 export interface FacadeCapabilities { readonly apiVersion: string; readonly daemon: "ready" | "unavailable"; readonly groups: { readonly search: boolean; readonly read: boolean; readonly browser: boolean; readonly browserDebug: boolean }; readonly browserPathIds: readonly string[] }
-interface ObservationBinding { readonly ownerId: string; readonly sessionId: string; readonly frame: BrowserVisualFrame }
-
 /** SDK adapter for the singular Pi facade operation names. */
 export class WebxFacadeClient {
   #ownerId?: string;
   #client?: WebxClient;
-  readonly #observations = new Map<string, ObservationBinding>();
-  #observationSequence = 0;
+  #browserPathId?: BrowserPathId;
 
   constructor(private readonly socketPath: string, private readonly exportRoot = defaultExportRoot()) {}
 
@@ -52,11 +50,14 @@ export class WebxFacadeClient {
       const catalog = await client.capabilities({ signal: options.signal });
       const paths = catalog.browserPaths.map((path) => path.pathId);
       const healthy = (id: "search" | "read" | "browser") => catalog.capabilities.some((capability) => capability.id === id && capability.enabled && capability.healthy);
-      const browser = healthy("browser") && paths.includes("agent-browser/chrome");
-      return { apiVersion: catalog.apiVersion, daemon: "ready", groups: { search: healthy("search"), read: healthy("read"), browser, browserDebug: browser }, browserPathIds: paths };
+      const selected = paths.length === 1 ? paths[0] : undefined;
+      this.#browserPathId = selected === "agentcursor/chrome" || selected === "agent-browser/chrome" ? selected : undefined;
+      const browser = healthy("browser") && this.#browserPathId !== undefined;
+      return { apiVersion: catalog.apiVersion, daemon: "ready", groups: { search: healthy("search"), read: healthy("read"), browser, browserDebug: browser && this.#browserPathId === "agent-browser/chrome" }, browserPathIds: paths };
     } catch (error) {
       if (options.signal.aborted) throw error;
-      return { apiVersion: "2.0.0", daemon: "unavailable", groups: { search: false, read: false, browser: false, browserDebug: false }, browserPathIds: [] };
+      this.#browserPathId = undefined;
+      return { apiVersion: "3.0.0", daemon: "unavailable", groups: { search: false, read: false, browser: false, browserDebug: false }, browserPathIds: [] };
     }
   }
 
@@ -71,10 +72,10 @@ export class WebxFacadeClient {
     if (operation === "web.read") return this.read(client, value, requestOptions);
     if (operation === "web.readBatch") return external("Batch read results", await client.readBatch(readBatchRequest(value), requestOptions));
     if (operation === "web.content") return external("Stored content", await client.content(contentRequest(value), requestOptions));
-    if (operation === "browser.open") { rejectPresent(value, ["newTab"], operation); return local("Browser session opened", await client.createBrowserSession({ pathId: browserPath(value.pathId), url: optionalString(value.url), visible: optionalBoolean(value.visible), label: optionalString(value.label) }, requestOptions)); }
+    if (operation === "browser.open") { rejectPresent(value, ["newTab", "pathId", "visible", "label"], operation); return local("Browser session opened", await client.createBrowserSession({ pathId: await this.selectedBrowserPath(client, options.signal), url: optionalString(value.url) }, requestOptions)); }
     if (operation === "browser.tabs") return this.browserTabs(client, value, requestOptions);
     if (operation === "browser.observe") return this.observe(client, value, options, requestOptions);
-    if (operation === "browser.act") return local("Browser action completed", await client.actBrowser(requiredString(value.browserSessionId, "browserSessionId"), this.browserAction(value.action, options.ownerId, requiredString(value.browserSessionId, "browserSessionId")), requestOptions));
+    if (operation === "browser.act") return local("Browser action completed", await client.actBrowser(requiredString(value.browserSessionId, "browserSessionId"), requiredString(value.tabId, "tabId"), this.browserAction(value.action), requestOptions));
     if (operation === "browser.cancel") return local("Browser cancellation requested", await client.cancelBrowserOperation(requiredString(value.operationId, "operationId"), requestOptions));
     if (operation === "browser.debug") return local("Browser diagnostic completed", await client.debugBrowser(requiredString(value.browserSessionId, "browserSessionId"), { operation: debugOperation(value.operation), args: optionalObject(value.args), maxChars: optionalNumber(value.maxChars) }, requestOptions));
     if (operation === "browser.workspace") return this.workspace(client, value, requestOptions);
@@ -82,12 +83,18 @@ export class WebxFacadeClient {
   }
 
   async decideApproval(): Promise<FacadeResult> { throw unavailable("approval.decide", "this runtime never returns approval placeholders"); }
-  async stop(options: { ownerId: string }): Promise<void> { if (this.#ownerId !== options.ownerId) throw new Error("WebX facade owner mismatch"); this.#observations.clear(); this.#client = undefined; this.#ownerId = undefined; }
-
-  /** Import one visual binding only for deterministic cross-owner refusal tests. */
-  importObservationBindingForTest(observationId: string, ownerId: string, sessionId: string, frame: BrowserVisualFrame): void { this.#observations.set(observationId, { ownerId, sessionId, frame }); }
+  async stop(options: { ownerId: string }): Promise<void> { if (this.#ownerId !== options.ownerId) throw new Error("WebX facade owner mismatch"); this.#browserPathId = undefined; this.#client = undefined; this.#ownerId = undefined; }
 
   private client(ownerId: string): WebxClient { if (this.#client === undefined || this.#ownerId !== ownerId) throw new Error("WebX facade client is not started for this owner"); return this.#client; }
+
+  private async selectedBrowserPath(client: WebxClient, signal: AbortSignal): Promise<BrowserPathId> {
+    if (this.#browserPathId !== undefined) return this.#browserPathId;
+    const catalog = await client.capabilities({ signal });
+    const paths = catalog.browserPaths.map((path) => path.pathId);
+    if (paths.length !== 1 || paths[0] !== "agentcursor/chrome" && paths[0] !== "agent-browser/chrome") throw unavailable("browser.open", "webxd did not report exactly one selected browser path");
+    this.#browserPathId = paths[0];
+    return paths[0];
+  }
 
   private async read(client: WebxClient, value: Record<string, unknown>, options: RequestOptions): Promise<FacadeResult> {
     rejectPresent(value, ["browserSessionId", "tabId"], "web.read");
@@ -136,6 +143,8 @@ export class WebxFacadeClient {
   private async browserTabs(client: WebxClient, input: Record<string, unknown>, options: RequestOptions): Promise<FacadeResult> {
     const action = requiredString(input.action, "action");
     if (action === "list") return local("Owned browser sessions", await client.listBrowserSessions({ signal: options.signal }));
+    if (action === "create-tab") return local("Browser tab created", await client.createBrowserTab(requiredString(input.browserSessionId, "browserSessionId"), optionalString(input.url), options));
+    if (action === "focus-tab") return local("Browser tab focused", await client.focusBrowserTab(requiredString(input.browserSessionId, "browserSessionId"), requiredString(input.tabId, "tabId"), options));
     if (action === "close-session") { await client.closeBrowserSession(requiredString(input.browserSessionId, "browserSessionId"), options); return local("Browser session closed", { closed: true }); }
     if (action === "close-tab") { await client.closeBrowserTab(requiredString(input.browserSessionId, "browserSessionId"), requiredString(input.tabId, "tabId"), options); return local("Browser tab closed", { closed: true }); }
     throw unavailable("browser.tabs", `${action} has no safe Pi 0.84.1 equivalent in this product`);
@@ -144,50 +153,37 @@ export class WebxFacadeClient {
   private async observe(client: WebxClient, value: Record<string, unknown>, options: FacadeRequestOptions, requestOptions: RequestOptions): Promise<FacadeResult> {
     rejectPresent(value, ["selector", "includeBounds"], "browser.observe");
     const sessionId = requiredString(value.browserSessionId, "browserSessionId");
-    const view = observationView(value.view);
-    const observation = await client.observeBrowser(sessionId, view, optionalNumber(value.maxChars) ?? 16_384, requestOptions);
-    if (view !== "visual") return external("Browser observation", observation);
-    const frame = await client.getBrowserVisualFrame(sessionId, { signal: options.signal, idempotencyKey: `${options.idempotencyKey}:frame` });
-    const observationId = `observation-${++this.#observationSequence}`;
-    this.#observations.set(observationId, { ownerId: options.ownerId, sessionId, frame });
-    return external("Browser visual observation", { ...observation, observationId, viewportId: frame.viewportId, screenshot: { mediaType: frame.mediaType, width: frame.width, height: frame.height, payloadBase64: frame.payloadBase64, screenshotSha256: frame.screenshotSha256, screenshotSequence: frame.screenshotSequence, viewportGeneration: frame.viewportGeneration } });
+    const tabId = requiredString(value.tabId, "tabId");
+    const view = observationView(value.mode ?? value.view);
+    const observation = await client.observeBrowser(sessionId, tabId, view, optionalNumber(value.maxNodes) ?? optionalNumber(value.maxChars) ?? 200, requestOptions);
+    if (view !== "screenshot") {
+      if (observation.kind !== "dom") throw new Error("browser service returned the wrong observation kind");
+      return external("Browser DOM observation", observation);
+    }
+    if (observation.kind !== "screenshot") throw new Error("browser service returned the wrong observation kind");
+    const frame = await client.getBrowserVisualFrame(sessionId, tabId, { signal: options.signal, idempotencyKey: `${options.idempotencyKey}:frame` });
+    if (frame.observationId !== observation.observationId || frame.browserSessionId !== sessionId || frame.tabId !== tabId || frame.mediaType !== observation.mediaType || frame.imagePixelWidth !== observation.imagePixelWidth || frame.imagePixelHeight !== observation.imagePixelHeight || frame.frameSequence !== observation.frameSequence || frame.viewportGeneration !== observation.viewportGeneration || frame.digest !== observation.digest) throw new Error("browser screenshot identity verification failed");
+    const bytes = canonicalImageBase64(frame.payloadBase64);
+    if (bytes.byteLength > 4 * 1024 * 1024 || sha256(bytes) !== frame.digest) throw new Error("browser screenshot integrity verification failed");
+    const { artifactId, ...metadata } = observation;
+    return { summary: "Browser screenshot observation", data: metadata, trust: "untrusted-external", artifactPayload: { artifactId, mediaType: frame.mediaType, dataBase64: frame.payloadBase64, size: bytes.byteLength, complete: true, mode: "image" } };
   }
 
-  private browserAction(value: unknown, ownerId: string, sessionId: string): BrowserAction {
+  private browserAction(value: unknown): BrowserAction {
     const action = object(value);
     const kind = requiredString(action.kind, "action.kind");
-    if (kind === "mouse-move" || kind === "mouse-click" || kind === "mouse-double-click" || kind === "mouse-down" || kind === "mouse-up" || kind === "mouse-wheel" || kind === "coordinate-drag") {
-      const guard = this.resolveGuard(action, ownerId, sessionId);
-      if (kind === "mouse-move") return { kind, x: requiredNumber(action.x, "action.x"), y: requiredNumber(action.y, "action.y"), visualGuard: guard };
-      if (kind === "mouse-wheel") return { kind: "wheel", deltaX: requiredNumber(action.deltaX, "action.deltaX"), deltaY: requiredNumber(action.deltaY, "action.deltaY"), visualGuard: guard };
-      if (kind === "coordinate-drag") return { kind: "drag", from: { x: requiredNumber(action.startX, "action.startX"), y: requiredNumber(action.startY, "action.startY") }, to: { x: requiredNumber(action.endX, "action.endX"), y: requiredNumber(action.endY, "action.endY") }, visualGuard: guard };
-      const mapped = kind === "mouse-click" ? "click" : kind === "mouse-double-click" ? "double-click" : kind;
-      return { kind: mapped, x: requiredNumber(action.x, "action.x"), y: requiredNumber(action.y, "action.y"), button: pointerButton(action.button), visualGuard: guard };
+    if (kind === "move" || kind === "click" || kind === "double-click" || kind === "wheel" || kind === "drag") {
+      const binding = { observationId: requiredString(action.observationId, "action.observationId"), coordinateSpace: coordinateSpace(action.coordinateSpace) };
+      if (kind === "move") return { kind, x: requiredNumber(action.x, "action.x"), y: requiredNumber(action.y, "action.y"), ...binding };
+      if (kind === "wheel") return { kind, x: requiredNumber(action.x, "action.x"), y: requiredNumber(action.y, "action.y"), deltaX: requiredNumber(action.deltaX, "action.deltaX"), deltaY: requiredNumber(action.deltaY, "action.deltaY"), ...binding };
+      if (kind === "drag") { const from = object(action.from); const to = object(action.to); return { kind, from: { x: requiredNumber(from.x, "action.from.x"), y: requiredNumber(from.y, "action.from.y") }, to: { x: requiredNumber(to.x, "action.to.x"), y: requiredNumber(to.y, "action.to.y") }, ...binding }; }
+      return { kind, x: requiredNumber(action.x, "action.x"), y: requiredNumber(action.y, "action.y"), button: pointerButton(action.button), ...binding };
     }
     if (kind === "navigate") return { kind, url: requiredString(action.url, "action.url") };
-    if (kind === "click") return { kind, ref: optionalString(action.ref), selector: optionalString(action.selector) };
-    if (kind === "fill" || kind === "type") return { kind, ref: optionalString(action.ref), selector: optionalString(action.selector), text: requiredString(action.text, "action.text") };
-    if (kind === "press") return { kind, key: requiredString(action.key, "action.key") };
-    if (kind === "hover") return { kind, ref: optionalString(action.ref), selector: optionalString(action.selector) };
-    if (kind === "scroll") return { kind, direction: scrollDirection(action.direction), amount: optionalNumber(action.amount) };
-    if (kind === "drag") return { kind: "semantic-drag", ref: requiredString(action.ref, "action.ref"), targetRef: requiredString(action.targetRef, "action.targetRef") };
-    if (kind === "select") return { kind, ref: optionalString(action.ref), selector: optionalString(action.selector), values: stringArray(action.values, "action.values") };
-    if (kind === "wait") return { kind, milliseconds: optionalNumber(action.milliseconds), selector: optionalString(action.selector), text: optionalString(action.text) };
-    if (kind === "tab-new") return { kind, url: optionalString(action.url) };
-    if (kind === "tab-close") return { kind, tabId: optionalString(action.tabId) };
-    if (kind === "tab-focus") return { kind, tabId: requiredString(action.tabId, "action.tabId") };
-    if (kind === "back" || kind === "forward" || kind === "reload") return { kind };
+    if (kind === "dom-click" || kind === "dom-double-click" || kind === "dom-hover") return { kind, domObservationId: requiredString(action.domObservationId, "action.domObservationId"), handle: requiredString(action.handle, "action.handle"), button: pointerButton(action.button) };
+    if (kind === "dom-type" || kind === "dom-fill") return { kind, domObservationId: requiredString(action.domObservationId, "action.domObservationId"), handle: requiredString(action.handle, "action.handle"), text: requiredString(action.text, "action.text") };
+    if (kind === "dom-key-press") return { kind, domObservationId: requiredString(action.domObservationId, "action.domObservationId"), handle: requiredString(action.handle, "action.handle"), key: requiredString(action.key, "action.key") };
     throw unavailable("browser.act", `${kind} is not supported by the frozen daemon action shape`);
-  }
-
-  private resolveGuard(action: Record<string, unknown>, ownerId: string, sessionId: string): VisualGuard {
-    const observationId = requiredString(action.observationId, "action.observationId");
-    const binding = this.#observations.get(observationId);
-    if (binding === undefined) throw unavailable("browser.act", "visual observation binding is stale or unknown");
-    if (binding.ownerId !== ownerId || binding.sessionId !== sessionId) throw unavailable("browser.act", "visual observation binding belongs to another owner or session");
-    if (requiredString(action.viewportId, "action.viewportId") !== binding.frame.viewportId) throw unavailable("browser.act", "visual observation viewport is stale");
-    this.#observations.delete(observationId);
-    return { viewportId: binding.frame.viewportId, viewportGeneration: binding.frame.viewportGeneration, screenshotSha256: binding.frame.screenshotSha256, screenshotSequence: binding.frame.screenshotSequence };
   }
 
   private async workspace(client: WebxClient, input: Record<string, unknown>, options: RequestOptions): Promise<FacadeResult> {
@@ -265,11 +261,12 @@ function optionalStringArray(value: unknown, name: string): readonly string[] | 
 function optionalSearchOutput(value: unknown): "links" | "extracts" | undefined { if (value === undefined) return undefined; if (value === "links" || value === "extracts") return value; throw new TypeError("output must be links or extracts"); }
 function optionalReadView(value: unknown): "main" | "outline" | "raw" | undefined { if (value === undefined) return undefined; if (value === "main" || value === "outline" || value === "raw") return value; throw new TypeError("view is invalid"); }
 function validateId(value: string, name: string): void { if (!/^[A-Za-z0-9._:-]{1,256}$/u.test(value)) throw new TypeError(`${name} is invalid`); }
-function browserPath(value: unknown): BrowserPathId { if (value === undefined || value === "agent-browser/chrome") return "agent-browser/chrome"; if (value === "pinchtab/chrome") return value; throw new TypeError("pathId is unsupported"); }
-function observationView(value: unknown): "main" | "interactive" | "visual" | "full" | "diff" { if (value === undefined || value === "main") return "main"; if (value === "interactive" || value === "visual" || value === "full" || value === "diff") return value; throw unavailable("browser.observe", `${String(value)} view has no daemon route`); }
+function observationView(value: unknown): "screenshot" | "dom" { if (value === undefined || value === "screenshot" || value === "visual") return "screenshot"; if (value === "dom") return "dom"; throw unavailable("browser.observe", `${String(value)} mode has no selected browser route`); }
 function debugOperation(value: unknown): "console" | "network" | "html" | "pdf" | "record-start" | "record-stop" { if (value === "console" || value === "network" || value === "html" || value === "pdf" || value === "record-start" || value === "record-stop") return value; throw unavailable("browser.debug", "secret-bearing or unknown debug operation is refused"); }
 function workspaceAction(value: unknown): "show" | "hide" | "list" | "attach" | "takeover" | "return" { if (value === "show" || value === "hide" || value === "list" || value === "attach" || value === "takeover" || value === "return") return value; throw unavailable("browser.workspace", `${String(value)} is unsupported`); }
 function rejectPresent(value: Record<string, unknown>, names: readonly string[], operation: string): void { for (const name of names) if (value[name] !== undefined) throw unavailable(operation, `${name} is not supported by the daemon route`); }
 function pointerButton(value: unknown): "left" | "middle" | "right" { if (value === undefined || value === "left") return "left"; if (value === "middle" || value === "right") return value; throw new TypeError("action.button is invalid"); }
-function scrollDirection(value: unknown): "up" | "down" | "left" | "right" { if (value === "up" || value === "down" || value === "left" || value === "right") return value; throw new TypeError("action.direction is invalid"); }
+function coordinateSpace(value: unknown): "imagePixels" | "cssViewport" { if (value === undefined || value === "imagePixels") return "imagePixels"; if (value === "cssViewport") return value; throw new TypeError("action.coordinateSpace is invalid"); }
 function stringArray(value: unknown, name: string): readonly string[] { if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) throw new TypeError(`${name} is invalid`); return value as string[]; }
+function canonicalImageBase64(value: string): Uint8Array { if (value.length % 4 !== 0) throw new Error("browser screenshot is not canonical base64"); const bytes = Buffer.from(value, "base64"); if (bytes.toString("base64") !== value) throw new Error("browser screenshot is not canonical base64"); return bytes; }
+function sha256(bytes: Uint8Array): string { return createHash("sha256").update(bytes).digest("hex"); }

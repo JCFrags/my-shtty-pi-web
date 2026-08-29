@@ -13,7 +13,6 @@ import type {
   BrowserVisualFrame,
   BrowserWorkspaceRequest,
   BrowserWorkspaceResult,
-  VisualGuard,
 } from "../../../packages/sdk/src/index.js";
 import {
   FailClosedBrowserDestinationAuthority,
@@ -30,8 +29,20 @@ export interface BrowserRpcConnection {
 /** The factory must authenticate and register the actor on one persistent Unix NDJSON connection. */
 export type BrowserRpcConnectionFactory = (actor: AuthorityActor) => Promise<BrowserRpcConnection>;
 
+interface LegacySession {
+  readonly sessionId: string;
+  readonly tabId: string;
+  readonly pathId: BrowserPathId;
+  readonly ownerPrincipalId: string;
+  readonly ownerAgentId: string;
+  readonly state: "creating" | "ready" | "closing" | "closed" | "failed";
+  readonly capabilities: BrowserPathCapability;
+  readonly url: string;
+  readonly title: string;
+}
+
 interface SessionBinding {
-  readonly session: BrowserSession;
+  readonly session: LegacySession;
   readonly hostGeneration: number;
   readonly engineGeneration: number;
   readonly controlEpoch: number;
@@ -56,12 +67,13 @@ interface PendingVisualFrame {
   readonly sessionId: string;
   readonly tabId: string;
   readonly pathId: BrowserPathId;
+  readonly observationId: string;
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
 interface PreparedWorkspaceInput {
   readonly binding: SessionBinding;
-  readonly action: BrowserAction;
+  readonly action: LegacyCoordinateAction;
   readonly operationId: string;
   readonly workspace: WorkspaceContext;
   readonly frame: WorkspaceFrameShape;
@@ -97,7 +109,7 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     const anonymous: AuthorityActor = { principalId: systemIdentity, agentId: systemIdentity, scopes: new Set() };
     const raw = record(await (await this.connection(anonymous)).call("system.capabilities", {}, signal));
     const paths = array(raw.paths).map(pathCapability);
-    if (paths[0]?.pathId !== "agent-browser/chrome" || paths.some((path) => path.pathId !== "agent-browser/chrome" && path.pathId !== "pinchtab/chrome")) {
+    if (paths[0]?.pathId !== "agent-browser/chrome" || paths.some((path) => path.pathId !== "agent-browser/chrome")) {
       throw new BrowserPortError("unsupported", "browser daemon did not report the required visual path", 503, true);
     }
     return paths;
@@ -111,8 +123,6 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     const raw = record(await connection.call("session.create", {
       pathId: request.pathId,
       ...(authorizedUrl === undefined ? {} : { url: authorizedUrl }),
-      ...(request.visible === undefined ? {} : { visible: request.visible }),
-      ...(request.label === undefined ? {} : { label: request.label }),
     }, signal));
     const daemonSession = record(raw.browserSession);
     const tab = record(raw.tab);
@@ -120,7 +130,7 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     if (pathId !== request.pathId) throw new BrowserPortError("wrong-path", "browser daemon changed path identity", 502);
     const capability = (await this.capabilities(signal)).find((item) => item.pathId === pathId);
     if (capability === undefined) throw new BrowserPortError("unsupported", "browser path has no capability record", 400);
-    const session: BrowserSession = {
+    const session: LegacySession = {
       sessionId: text(daemonSession.browserSessionId, "browserSession.browserSessionId"),
       tabId: text(tab.tabId, "tab.tabId"),
       pathId,
@@ -128,9 +138,12 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
       ownerAgentId: actor.agentId,
       state: "ready",
       capabilities: capability,
+      url: optionalText(tab.url) ?? authorizedUrl ?? "about:blank",
+      title: optionalText(tab.title) ?? "",
     };
-    this.#sessions.set(session.sessionId, { session, hostGeneration: 1, engineGeneration: 1, controlEpoch: positive(raw.controlEpoch, "controlEpoch") });
-    return session;
+    const binding = { session, hostGeneration: 1, engineGeneration: 1, controlEpoch: positive(raw.controlEpoch, "controlEpoch") };
+    this.#sessions.set(session.sessionId, binding);
+    return publicLegacySession(binding);
   }
 
   async listSessions(actor: AuthorityActor, signal?: AbortSignal): Promise<readonly BrowserSession[]> {
@@ -146,7 +159,7 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
       if (tab === undefined) throw new TypeError("browser daemon session has no tab");
       const capability = capabilities.find((item) => item.pathId === pathId);
       if (capability === undefined) throw new TypeError("browser daemon session has an unsupported path");
-      const session: BrowserSession = {
+      const session: LegacySession = {
         sessionId,
         tabId: text(tab.tabId, "tabId"),
         pathId,
@@ -154,56 +167,43 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
         ownerAgentId: actor.agentId,
         state: "ready",
         capabilities: capability,
+        url: optionalText(tab.url) ?? "about:blank",
+        title: optionalText(tab.title) ?? "",
       };
-      this.#sessions.set(sessionId, { session, hostGeneration: 1, engineGeneration: 1, controlEpoch: positive(tab.controlEpoch, "controlEpoch") });
-      return session;
+      const binding = { session, hostGeneration: 1, engineGeneration: 1, controlEpoch: positive(tab.controlEpoch, "controlEpoch") };
+      this.#sessions.set(sessionId, binding);
+      return publicLegacySession(binding);
     });
     return sessions;
   }
 
   async getSession(actor: AuthorityActor, sessionId: string): Promise<BrowserSession> {
-    return this.owned(actor, sessionId).session;
+    return publicLegacySession(this.owned(actor, sessionId));
   }
 
   async observe(actor: AuthorityActor, sessionId: string, view: string, maxChars: number, operationId: string, signal?: AbortSignal): Promise<BrowserObservation> {
     const binding = this.owned(actor, sessionId);
     const raw = record(await (await this.connection(actor)).call("browser.observe", {
-      browserSessionId: sessionId, tabId: binding.session.tabId, view, maxChars, operationId,
+      browserSessionId: sessionId, tabId: binding.session.tabId, view: view === "dom" ? "interactive" : "visual", maxChars, operationId,
     }, signal));
-    const metadata = optionalRecord(raw.metadata);
-    const contentArtifactId = metadata === undefined ? undefined : optionalText(metadata.contentArtifactId);
-    const artifactId = contentArtifactId ?? optionalText(raw.artifactId);
-    return {
-      operationId: text(raw.operationId, "operationId"),
-      address: this.address(binding),
-      title: text(raw.title, "title"),
-      url: text(raw.url, "url"),
-      content: text(raw.content, "content"),
-      truncated: boolean(raw.truncated, "truncated"),
-      ...(artifactId === undefined ? {} : { artifactId }),
-    };
+    if (view === "dom") return { kind: "dom", operationId: text(raw.operationId, "operationId"), domObservationId: operationId, browserSessionId: sessionId, tabId: binding.session.tabId, documentGeneration: 1, observedAt: new Date().toISOString(), truncated: boolean(raw.truncated, "truncated"), nodes: [] };
+    const frame = await this.captureFrame(actor, sessionId, operationId, signal);
+    const now = Date.now();
+    return { kind: "screenshot", operationId: text(raw.operationId, "operationId"), observationId: operationId, browserSessionId: sessionId, tabId: binding.session.tabId, url: text(raw.url, "url"), title: text(raw.title, "title"), capturedAt: new Date(now).toISOString(), documentGeneration: 1, viewportGeneration: frame.viewportGeneration, frameSequence: frame.frameSequence, cssViewportWidth: frame.imagePixelWidth, cssViewportHeight: frame.imagePixelHeight, imagePixelWidth: frame.imagePixelWidth, imagePixelHeight: frame.imagePixelHeight, devicePixelRatio: 1, captureScale: 1, scroll: { x: 0, y: 0 }, digest: frame.digest, mediaType: frame.mediaType, cursor: { x: 0, y: 0, coordinateSpace: "cssViewport", pathSequence: 0, sampleSequence: 0, visible: true }, validUntil: new Date(now + 30_000).toISOString(), artifactId: `legacy-frame:${operationId}` };
   }
 
-  async captureFrame(actor: AuthorityActor, sessionId: string, _operationId: string, signal?: AbortSignal): Promise<BrowserVisualFrame> {
+  async captureFrame(actor: AuthorityActor, sessionId: string, operationId: string, signal?: AbortSignal): Promise<BrowserVisualFrame> {
     return this.withSessionLane(sessionId, async () => {
       const binding = this.owned(actor, sessionId);
       if (binding.session.pathId !== "agent-browser/chrome") throw new BrowserPortError("unsupported", `visual frames are not supported by ${binding.session.pathId}`, 400);
+      const retained = this.#pendingFrames.get(sessionId);
+      if (retained !== undefined && retained.principalId === actor.principalId && retained.agentId === actor.agentId && retained.tabId === binding.session.tabId && retained.workspace.expiresAtMs > Date.now()) return legacyVisualFrame(retained);
       await this.invalidatePendingFrame(sessionId);
       const workspace = await this.openWorkspace(actor, binding, signal);
       try {
         const frame = workspaceFrame(await workspace.connection.call("workspace.getFrame", { scopeId: workspace.scopeId, leaseId: workspace.leaseId }, signal));
-        this.retainFrame(actor, binding, workspace, frame);
-        return {
-          address: this.address(binding),
-          mediaType: frame.mediaType,
-          width: frame.width,
-          height: frame.height,
-          payloadBase64: frame.payload,
-          screenshotSha256: frame.screenshotSha256,
-          screenshotSequence: frame.sequence,
-          viewportId: frame.viewportId,
-          viewportGeneration: frame.viewportGeneration,
-        };
+        this.retainFrame(actor, binding, workspace, frame, operationId);
+        return legacyVisualFrame(this.#pendingFrames.get(sessionId) as PendingVisualFrame);
       } catch (error) {
         await this.releaseWorkspace(workspace);
         throw error;
@@ -227,9 +227,7 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
       const dispatchedAction = candidate === undefined
         ? action
         : { ...action, url: (await this.destinationAuthority.authorize({ actor, operationId, ...candidate }, signal)).normalizedUrl };
-      // A pure wait does not dispatch input or navigation. Browserd still recaptures
-      // and compares the exact frame before any later screenshot-bound input.
-      if (action.kind !== "wait") await this.invalidatePendingFrame(sessionId);
+      await this.invalidatePendingFrame(sessionId);
       return { binding, dispatchedAction, connection: await this.connection(actor) };
     });
     const raw = record(await prepared.connection.call("browser.act", {
@@ -314,6 +312,19 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     return { operationId, state };
   }
 
+  async createTab(actor: AuthorityActor, sessionId: string, url: string | undefined, operationId: string, signal?: AbortSignal): Promise<BrowserSession> {
+    const binding = this.owned(actor, sessionId);
+    const authorizedUrl = url === undefined ? undefined : (await this.destinationAuthority.authorize({ actor, operationId, operation: "new-tab", url }, signal)).normalizedUrl;
+    await (await this.connection(actor)).call("browser.act", { browserSessionId: sessionId, tabId: binding.session.tabId, action: { kind: "tab-new", ...(authorizedUrl === undefined ? {} : { url: authorizedUrl }) }, operationId }, signal);
+    return publicLegacySession(binding);
+  }
+
+  async focusTab(actor: AuthorityActor, sessionId: string, tabId: string, operationId: string, signal?: AbortSignal): Promise<BrowserSession> {
+    const binding = this.owned(actor, sessionId);
+    await (await this.connection(actor)).call("browser.act", { browserSessionId: sessionId, tabId: binding.session.tabId, action: { kind: "tab-focus", tabId }, operationId }, signal);
+    return publicLegacySession(binding);
+  }
+
   async closeTab(actor: AuthorityActor, sessionId: string, tabId: string, signal?: AbortSignal): Promise<void> {
     await this.withSessionLane(sessionId, async () => {
       const binding = this.owned(actor, sessionId);
@@ -352,11 +363,10 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     await Promise.allSettled(connections.map(async (connection) => (await connection).close()));
   }
 
-  private async prepareWorkspaceAct(actor: AuthorityActor, binding: SessionBinding, action: BrowserAction, operationId: string, signal?: AbortSignal): Promise<PreparedWorkspaceInput> {
+  private async prepareWorkspaceAct(actor: AuthorityActor, binding: SessionBinding, action: LegacyCoordinateAction, operationId: string, signal?: AbortSignal): Promise<PreparedWorkspaceInput> {
     if (binding.session.pathId !== "agent-browser/chrome") throw new BrowserPortError("unsupported", `visual input is not supported by ${binding.session.pathId}`, 400);
-    const guard = visualGuard(action);
-    if (guard === undefined) throw new BrowserPortError("stale-visual", "visual input requires an exact captured frame guard", 409);
-    const pending = await this.takePendingFrame(actor, binding, guard);
+    if (!("observationId" in action)) throw new BrowserPortError("stale-visual", "visual input requires an exact screenshot observation", 409);
+    const pending = await this.takePendingFrame(actor, binding, action.observationId);
     const { workspace, frame } = pending;
     try {
       if (workspace.controlState === "human") throw new BrowserPortError("control-conflict", "human takeover is active", 409);
@@ -445,7 +455,7 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     }
   }
 
-  private retainFrame(actor: AuthorityActor, binding: SessionBinding, workspace: WorkspaceContext, frame: WorkspaceFrameShape): void {
+  private retainFrame(actor: AuthorityActor, binding: SessionBinding, workspace: WorkspaceContext, frame: WorkspaceFrameShape, observationId: string): void {
     const delay = Math.max(0, workspace.expiresAtMs - Date.now());
     let pending!: PendingVisualFrame;
     const timer = setTimeout(() => {
@@ -464,12 +474,13 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
       sessionId: binding.session.sessionId,
       tabId: binding.session.tabId,
       pathId: binding.session.pathId,
+      observationId,
       timer,
     };
     this.#pendingFrames.set(binding.session.sessionId, pending);
   }
 
-  private async takePendingFrame(actor: AuthorityActor, binding: SessionBinding, guard: VisualGuard): Promise<PendingVisualFrame> {
+  private async takePendingFrame(actor: AuthorityActor, binding: SessionBinding, observationId: string): Promise<PendingVisualFrame> {
     const pending = this.#pendingFrames.get(binding.session.sessionId);
     if (pending === undefined) throw new BrowserPortError("stale-visual", "captured visual frame is missing or already used", 409);
     this.#pendingFrames.delete(binding.session.sessionId);
@@ -486,11 +497,9 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
       await this.releaseWorkspace(pending.workspace).catch(() => undefined);
       throw new BrowserPortError("wrong-path", "captured visual frame belongs to a different browser path", 409);
     }
-    try {
-      assertFrameGuard(guard, pending.frame);
-    } catch (error) {
+    if (pending.observationId !== observationId) {
       await this.releaseWorkspace(pending.workspace).catch(() => undefined);
-      throw error;
+      throw new BrowserPortError("stale-visual", "visual action does not cite the retained screenshot observation", 409);
     }
     return pending;
   }
@@ -543,52 +552,33 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     if (binding.session.ownerPrincipalId !== actor.principalId || binding.session.ownerAgentId !== actor.agentId) throw new BrowserPortError("wrong-owner", "browser session has a different owner", 403);
     return binding;
   }
-
-  private address(binding: SessionBinding): BrowserObservation["address"] {
-    return { sessionId: binding.session.sessionId, tabId: binding.session.tabId, pathId: binding.session.pathId, hostGeneration: binding.hostGeneration, engineGeneration: binding.engineGeneration, controlEpoch: binding.controlEpoch };
-  }
 }
 
-function isWorkspaceCuaAction(action: BrowserAction): boolean {
-  if (action.kind === "click") return "x" in action;
-  return action.kind === "mouse-move" || action.kind === "mouse-down" || action.kind === "mouse-up" || action.kind === "double-click" || action.kind === "wheel" || action.kind === "drag" || action.kind === "key-press" || action.kind === "key-down" || action.kind === "key-up" || action.kind === "text-input";
-}
+type LegacyCoordinateAction = Extract<BrowserAction, { kind: "move" | "click" | "double-click" | "drag" | "wheel" }>;
+function isWorkspaceCuaAction(action: BrowserAction): action is LegacyCoordinateAction { return action.kind === "move" || action.kind === "click" || action.kind === "double-click" || action.kind === "drag" || action.kind === "wheel"; }
 
-function visualGuard(action: BrowserAction): VisualGuard | undefined {
-  return "visualGuard" in action ? action.visualGuard : undefined;
-}
-
-function assertFrameGuard(guard: VisualGuard, frame: WorkspaceFrameShape): void {
-  if (guard.viewportId !== frame.viewportId || guard.viewportGeneration !== frame.viewportGeneration || guard.screenshotSha256 !== frame.screenshotSha256 || guard.screenshotSequence !== frame.sequence) {
-    throw new BrowserPortError("stale-visual", "visual action is not bound to the current workspace frame", 409);
-  }
-}
-
-function cuaAction(action: BrowserAction): Readonly<Record<string, unknown>> {
-  if (action.kind === "mouse-move") return { type: "mouse_move", x: action.x, y: action.y };
-  if ((action.kind === "mouse-down" || action.kind === "mouse-up" || action.kind === "click" || action.kind === "double-click") && "x" in action) return { type: action.kind.replaceAll("-", "_"), x: action.x, y: action.y, button: action.button };
-  if (action.kind === "wheel") return { type: "wheel", delta_x: action.deltaX, delta_y: action.deltaY };
+function cuaAction(action: LegacyCoordinateAction): Readonly<Record<string, unknown>> {
+  if (action.kind === "move") return { type: "mouse_move", x: action.x, y: action.y };
+  if (action.kind === "click" || action.kind === "double-click") return { type: action.kind.replaceAll("-", "_"), x: action.x, y: action.y, button: action.button ?? "left" };
+  if (action.kind === "wheel") return { type: "wheel", x: action.x, y: action.y, delta_x: action.deltaX, delta_y: action.deltaY };
   if (action.kind === "drag") return { type: "drag", from_x: action.from.x, from_y: action.from.y, to_x: action.to.x, to_y: action.to.y, button: "left" };
-  if (action.kind === "key-press") return { type: "key_press", key: action.key };
-  if (action.kind === "key-down" || action.kind === "key-up") return { type: action.kind.replaceAll("-", "_"), key: action.key, code: action.code ?? action.key, modifiers: action.modifiers ?? 0 };
-  if (action.kind === "text-input") return { type: "text", text: action.text };
-  throw new BrowserPortError("unsupported", `${action.kind} is not a workspace CUA action`, 400);
+  throw new BrowserPortError("unsupported", "action is not a workspace coordinate action", 400);
 }
 
 function legacyAction(action: BrowserAction): Readonly<Record<string, unknown>> {
   if (action.kind === "navigate") return action;
-  if (action.kind === "click" && !("x" in action)) return { kind: "click", ...(action.ref === undefined ? {} : { ref: action.ref }), ...(action.selector === undefined ? {} : { selector: action.selector }) };
-  if (action.kind === "fill" || action.kind === "type") return action;
-  if (action.kind === "press" || action.kind === "hover" || action.kind === "scroll") return action;
-  if (action.kind === "semantic-drag") return { kind: "drag", ref: action.ref, targetRef: action.targetRef };
-  if (action.kind === "select") return { ...action, values: [...action.values] };
-  if (action.kind === "download") return action;
-  if (action.kind === "back" || action.kind === "forward" || action.kind === "reload") return action;
-  if (action.kind === "wait") return action;
-  if (action.kind === "tab-new") return action;
-  if (action.kind === "tab-close") return action;
-  if (action.kind === "tab-focus") return action;
-  throw new BrowserPortError("unsupported", `${action.kind} is not supported by the frozen browser.act shape`, 400);
+  if (action.kind === "text-input") return { kind: action.replace === true ? "fill" : "type", text: action.text };
+  if (action.kind === "key-press") return { kind: "press", key: action.key };
+  throw new BrowserPortError("unsupported", `${action.kind} is not supported by the legacy browser path`, 400);
+}
+
+function publicLegacySession(binding: SessionBinding): BrowserSession {
+  const session = binding.session;
+  return { browserSessionId: session.sessionId, pathId: session.pathId, controlEpoch: binding.controlEpoch, state: session.state === "failed" ? "degraded" : session.state, tabs: [{ tabId: session.tabId, url: session.url, title: session.title, state: session.state === "closed" ? "closed" : "ready", documentGeneration: 1, viewportGeneration: binding.engineGeneration, frameSequence: 0 }] };
+}
+
+function legacyVisualFrame(pending: PendingVisualFrame): BrowserVisualFrame {
+  return { browserSessionId: pending.sessionId, tabId: pending.tabId, observationId: pending.observationId, mediaType: pending.frame.mediaType, imagePixelWidth: pending.frame.width, imagePixelHeight: pending.frame.height, payloadBase64: pending.frame.payload, digest: pending.frame.screenshotSha256, frameSequence: pending.frame.sequence, viewportGeneration: pending.frame.viewportGeneration };
 }
 
 function workspaceFrame(value: unknown): WorkspaceFrameShape {
@@ -610,10 +600,9 @@ function workspaceFrame(value: unknown): WorkspaceFrameShape {
 }
 
 function assertCapability(capability: BrowserPathCapability, action: string): void { if (!capability.actions.includes(action)) throw new BrowserPortError("unsupported", `${action} is not supported by ${capability.pathId}`, 400); }
-function pathCapability(value: unknown): BrowserPathCapability { const item = record(value); return { pathId: browserPath(item.pathId), actions: stringArray(item.actions).filter((action) => action !== "upload"), observations: stringArray(item.observations), visual: boolean(item.visual, "visual"), touch: false, uploads: false, downloads: boolean(item.downloads, "downloads") }; }
-function browserPath(value: unknown): BrowserPathId { if (value === "agent-browser/chrome" || value === "pinchtab/chrome") return value; throw new TypeError("unsupported browser path identity"); }
+function pathCapability(value: unknown): BrowserPathCapability { const item = record(value); const visual = boolean(item.visual, "visual"); void stringArray(item.actions); void stringArray(item.observations); return { pathId: browserPath(item.pathId), actions: visual ? ["move", "click", "double-click", "drag", "wheel", "text-input", "key-press", "navigate", "tab.create", "tab.focus", "tab.close", "session.close"] : ["text-input", "key-press", "navigate", "tab.create", "tab.focus", "tab.close", "session.close"], observations: visual ? ["screenshot"] : [], visual, touch: false, uploads: false, downloads: false }; }
+function browserPath(value: unknown): BrowserPathId { if (value === "agent-browser/chrome") return value; throw new TypeError("unsupported browser path identity"); }
 function record(value: unknown): Record<string, unknown> { if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError("browser daemon returned a non-object"); return value as Record<string, unknown>; }
-function optionalRecord(value: unknown): Record<string, unknown> | undefined { return value === undefined ? undefined : record(value); }
 function array(value: unknown): unknown[] { if (!Array.isArray(value)) throw new TypeError("browser daemon returned a non-array"); return value; }
 function text(value: unknown, name: string): string { if (typeof value !== "string") throw new TypeError(`browser daemon returned invalid ${name}`); return value; }
 function optionalText(value: unknown): string | undefined { return typeof value === "string" ? value : undefined; }

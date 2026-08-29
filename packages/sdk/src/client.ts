@@ -34,7 +34,8 @@ import {
   type WebxTransport,
 } from "./types.js";
 
-const DEFAULT_MAX_RESPONSE_BYTES = 4_194_304;
+// This includes the JSON and base64 envelope for one complete image of at most 4 MiB.
+const DEFAULT_MAX_RESPONSE_BYTES = 6 * 1024 * 1024;
 
 export interface WebxClientOptions {
   readonly maxResponseBytes?: number;
@@ -125,16 +126,24 @@ export class WebxClient {
     return this.call("GET", `/v1/browser/sessions/${encodeURIComponent(sessionId)}`, undefined, options);
   }
 
-  observeBrowser(sessionId: string, view: "main" | "interactive" | "visual" | "full" | "diff", maxChars: number, options: RequestOptions): Promise<BrowserObservation> {
-    return this.call("POST", `/v1/browser/sessions/${encodeURIComponent(sessionId)}/observe`, { view, maxChars }, requireIdempotency(options));
+  observeBrowser(sessionId: string, tabId: string, mode: "screenshot" | "dom", maxNodes: number, options: RequestOptions): Promise<BrowserObservation> {
+    return this.call("POST", `/v1/browser/sessions/${encodeURIComponent(sessionId)}/observe`, { tabId, mode, ...(mode === "dom" ? { maxNodes } : {}) }, requireIdempotency(options));
   }
 
-  getBrowserVisualFrame(sessionId: string, options: RequestOptions): Promise<BrowserVisualFrame> {
-    return this.call("POST", `/v1/browser/sessions/${encodeURIComponent(sessionId)}/frame`, {}, requireIdempotency(options));
+  getBrowserVisualFrame(sessionId: string, tabId: string, options: RequestOptions): Promise<BrowserVisualFrame> {
+    return this.call("POST", `/v1/browser/sessions/${encodeURIComponent(sessionId)}/frame`, { tabId }, requireIdempotency(options));
   }
 
-  actBrowser(sessionId: string, action: BrowserAction, options: RequestOptions): Promise<BrowserOperationResult> {
-    return this.call("POST", `/v1/browser/sessions/${encodeURIComponent(sessionId)}/actions`, { action }, requireIdempotency(options));
+  actBrowser(sessionId: string, tabId: string, action: BrowserAction, options: RequestOptions): Promise<BrowserOperationResult> {
+    return this.call("POST", `/v1/browser/sessions/${encodeURIComponent(sessionId)}/actions`, { tabId, action }, requireIdempotency(options));
+  }
+
+  createBrowserTab(sessionId: string, url: string | undefined, options: RequestOptions): Promise<BrowserSession> {
+    return this.call("POST", `/v1/browser/sessions/${encodeURIComponent(sessionId)}/tabs`, url === undefined ? {} : { url }, requireIdempotency(options));
+  }
+
+  focusBrowserTab(sessionId: string, tabId: string, options: RequestOptions): Promise<BrowserSession> {
+    return this.call("POST", `/v1/browser/sessions/${encodeURIComponent(sessionId)}/tabs/${encodeURIComponent(tabId)}/focus`, {}, requireIdempotency(options));
   }
 
   debugBrowser(sessionId: string, request: BrowserDebugRequest, options: RequestOptions): Promise<BrowserDebugResult> {

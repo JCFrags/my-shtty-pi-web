@@ -1,7 +1,7 @@
-export const WEBX_API_VERSION = "2.0.0" as const;
-export const WEBX_API_MAJOR = 2 as const;
-export const BROWSER_PROTOCOL_VERSION = "2.0.0" as const;
-export const BROWSER_PATH_IDS = ["agent-browser/chrome", "pinchtab/chrome"] as const;
+export const WEBX_API_VERSION = "3.0.0" as const;
+export const WEBX_API_MAJOR = 3 as const;
+export const BROWSER_PROTOCOL_VERSION = "3.0.0" as const;
+export const BROWSER_PATH_IDS = ["agentcursor/chrome", "agent-browser/chrome"] as const;
 
 export type BrowserPathId = (typeof BROWSER_PATH_IDS)[number];
 export type Visibility = "public" | "internal" | "private" | "secret";
@@ -280,58 +280,56 @@ export interface ArtifactByteExcerpt {
 export interface BrowserSessionRequest {
   readonly pathId: BrowserPathId;
   readonly url?: string;
-  readonly visible?: boolean;
-  readonly label?: string;
+}
+
+export interface BrowserTab {
+  readonly tabId: string;
+  readonly url: string;
+  readonly title: string;
+  readonly state: "attaching" | "ready" | "crashed" | "closed";
+  readonly documentGeneration: number;
+  readonly viewportGeneration: number;
+  readonly frameSequence: number;
+}
+
+export interface BrowserCursorSummary {
+  readonly x: number;
+  readonly y: number;
+  readonly coordinateSpace: "cssViewport";
+  readonly pathSequence: number;
+  readonly sampleSequence: number;
+  readonly visible: boolean;
 }
 
 export interface BrowserSession {
-  readonly sessionId: string;
-  readonly tabId: string;
+  readonly browserSessionId: string;
   readonly pathId: BrowserPathId;
-  readonly ownerPrincipalId: string;
-  readonly ownerAgentId: string;
-  readonly state: "creating" | "ready" | "closing" | "closed" | "failed" | "recovering";
-  readonly capabilities: BrowserPathCapability;
-}
-
-export interface BrowserAddress {
-  readonly sessionId: string;
-  readonly tabId: string;
-  readonly pathId: BrowserPathId;
-  readonly hostGeneration: number;
-  readonly engineGeneration: number;
   readonly controlEpoch: number;
+  readonly state: "creating" | "ready" | "degraded" | "closing" | "closed" | "lost";
+  readonly personaId?: string;
+  readonly cursor?: BrowserCursorSummary;
+  readonly tabs: readonly BrowserTab[];
 }
 
-export interface VisualGuard {
-  readonly viewportId: string;
-  readonly viewportGeneration: number;
-  readonly screenshotSha256: string;
-  readonly screenshotSequence: number;
+export type BrowserCoordinateSpace = "imagePixels" | "cssViewport";
+export interface BrowserPoint { readonly x: number; readonly y: number }
+
+interface ScreenshotBoundAction {
+  readonly observationId: string;
+  readonly coordinateSpace?: BrowserCoordinateSpace;
 }
 
 export type BrowserAction =
-  | { readonly kind: "navigate"; readonly url: string }
-  | { readonly kind: "mouse-move"; readonly x: number; readonly y: number; readonly visualGuard: VisualGuard }
-  | { readonly kind: "mouse-down" | "mouse-up" | "click" | "double-click"; readonly x: number; readonly y: number; readonly button: "left" | "middle" | "right"; readonly visualGuard: VisualGuard }
-  | { readonly kind: "click"; readonly ref?: string; readonly selector?: string }
-  | { readonly kind: "wheel"; readonly deltaX: number; readonly deltaY: number; readonly visualGuard: VisualGuard }
-  | { readonly kind: "drag"; readonly from: { readonly x: number; readonly y: number }; readonly to: { readonly x: number; readonly y: number }; readonly visualGuard: VisualGuard }
+  | ({ readonly kind: "move"; readonly x: number; readonly y: number } & ScreenshotBoundAction)
+  | ({ readonly kind: "click" | "double-click"; readonly x: number; readonly y: number; readonly button?: "left" | "middle" | "right" } & ScreenshotBoundAction)
+  | ({ readonly kind: "drag"; readonly from: BrowserPoint; readonly to: BrowserPoint } & ScreenshotBoundAction)
+  | ({ readonly kind: "wheel"; readonly x: number; readonly y: number; readonly deltaX: number; readonly deltaY: number } & ScreenshotBoundAction)
+  | { readonly kind: "text-input"; readonly text: string; readonly replace?: boolean }
   | { readonly kind: "key-press"; readonly key: string }
-  | { readonly kind: "key-down" | "key-up"; readonly key: string; readonly code?: string; readonly modifiers?: number }
-  | { readonly kind: "text-input"; readonly text: string }
-  | { readonly kind: "fill" | "type"; readonly ref?: string; readonly selector?: string; readonly text: string }
-  | { readonly kind: "press"; readonly key: string }
-  | { readonly kind: "hover"; readonly ref?: string; readonly selector?: string }
-  | { readonly kind: "scroll"; readonly direction: "up" | "down" | "left" | "right"; readonly amount?: number }
-  | { readonly kind: "semantic-drag"; readonly ref: string; readonly targetRef: string }
-  | { readonly kind: "select"; readonly ref?: string; readonly selector?: string; readonly values: readonly string[] }
-  | { readonly kind: "download"; readonly ref: string }
-  | { readonly kind: "wait"; readonly milliseconds?: number; readonly selector?: string; readonly text?: string }
-  | { readonly kind: "tab-new"; readonly url?: string }
-  | { readonly kind: "tab-close"; readonly tabId?: string }
-  | { readonly kind: "tab-focus"; readonly tabId: string }
-  | { readonly kind: "back" | "forward" | "reload" };
+  | { readonly kind: "navigate"; readonly url: string }
+  | { readonly kind: "dom-click" | "dom-double-click" | "dom-hover"; readonly domObservationId: string; readonly handle: string; readonly button?: "left" | "middle" | "right" }
+  | { readonly kind: "dom-type" | "dom-fill"; readonly domObservationId: string; readonly handle: string; readonly text: string }
+  | { readonly kind: "dom-key-press"; readonly domObservationId: string; readonly handle: string; readonly key: string };
 
 export interface BrowserSessionList {
   readonly sessions: readonly BrowserSession[];
@@ -366,33 +364,65 @@ export interface BrowserDebugResult {
   readonly artifactId?: string;
 }
 
-export interface BrowserObservation {
-  readonly operationId: string;
-  readonly observationId?: string;
-  readonly address: BrowserAddress;
-  readonly title: string;
-  readonly url: string;
-  readonly content: string;
-  readonly truncated: boolean;
-  readonly artifactId?: string;
-  readonly screenshot?: {
-    readonly artifactId: string;
-    readonly sha256: string;
-    readonly sequence: number;
-    readonly viewportId: string;
-    readonly viewportGeneration: number;
-  };
+export interface BrowserDomNode {
+  readonly handle: string;
+  readonly role: string;
+  readonly name: string;
+  readonly value?: string;
+  readonly state: Readonly<Record<string, string | number | boolean>>;
+  readonly bounds?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
 }
 
-export interface BrowserVisualFrame {
-  readonly address: BrowserAddress;
+export interface BrowserScreenshotObservation {
+  readonly kind: "screenshot";
+  readonly operationId: string;
+  readonly observationId: string;
+  readonly browserSessionId: string;
+  readonly tabId: string;
+  readonly url: string;
+  readonly title: string;
+  readonly capturedAt: string;
+  readonly documentGeneration: number;
+  readonly viewportGeneration: number;
+  readonly frameSequence: number;
+  readonly cssViewportWidth: number;
+  readonly cssViewportHeight: number;
+  readonly imagePixelWidth: number;
+  readonly imagePixelHeight: number;
+  readonly devicePixelRatio: number;
+  readonly captureScale: number;
+  readonly scroll: { readonly x: number; readonly y: number };
+  readonly digest: string;
   readonly mediaType: "image/png" | "image/jpeg";
-  readonly width: number;
-  readonly height: number;
+  readonly cursor: BrowserCursorSummary;
+  readonly validUntil: string;
+  readonly artifactId: string;
+}
+
+export interface BrowserDomObservation {
+  readonly kind: "dom";
+  readonly operationId: string;
+  readonly domObservationId: string;
+  readonly browserSessionId: string;
+  readonly tabId: string;
+  readonly documentGeneration: number;
+  readonly observedAt: string;
+  readonly truncated: boolean;
+  readonly nodes: readonly BrowserDomNode[];
+}
+
+export type BrowserObservation = BrowserScreenshotObservation | BrowserDomObservation;
+
+export interface BrowserVisualFrame {
+  readonly browserSessionId: string;
+  readonly tabId: string;
+  readonly observationId: string;
+  readonly mediaType: "image/png" | "image/jpeg";
+  readonly imagePixelWidth: number;
+  readonly imagePixelHeight: number;
   readonly payloadBase64: string;
-  readonly screenshotSha256: string;
-  readonly screenshotSequence: number;
-  readonly viewportId: string;
+  readonly digest: string;
+  readonly frameSequence: number;
   readonly viewportGeneration: number;
 }
 

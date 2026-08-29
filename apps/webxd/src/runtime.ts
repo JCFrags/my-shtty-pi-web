@@ -4,13 +4,17 @@ import { createConnection, createServer, type Server, type Socket } from "node:n
 import process, { pid } from "node:process";
 import type { TransportRequest, TransportResponse } from "../../../packages/sdk/src/index.js";
 import { WebxAuthority } from "./authority.js";
+import { AgentCursorBrowserPort } from "./agentcursor-browser-port.js";
 import { BrowserDaemonRpcPort, type BrowserRpcConnection, type BrowserRpcConnectionFactory } from "./browser-daemon-port.js";
-import type { BrowserDestinationAuthority } from "./destination-authority.js";
+import { BrowserdClientPool } from "./browserd-client.js";
+import type { BrowserBackendSelection } from "./browser-backend-selection.js";
+import { FailClosedBrowserDestinationAuthority, type BrowserDestinationAuthority } from "./destination-authority.js";
 import { PUBLIC_SOURCES } from "./fixtures.js";
 import type { AuthorityActor, IndexedSource } from "./ports.js";
 
 const MAX_REQUEST_BYTES = 1_048_576;
-const MAX_RESPONSE_BYTES = 4_194_304;
+// A complete 4 MiB image expands to about 5.34 MiB as base64 inside the JSON response.
+const MAX_RESPONSE_BYTES = 6 * 1024 * 1024;
 const ACTOR_ID = /^[A-Za-z0-9._:-]{1,256}$/u;
 const AUTHORITY_SCOPES = new Set(["system.read", "search.write", "retrieval.read", "artifacts.read", "browser.read", "browser.write", "browser.control", "browser.debug"]);
 
@@ -27,6 +31,9 @@ interface ActorBinding { readonly secret: string; readonly actor: AuthorityActor
 export interface WebxdRuntimeOptions {
   readonly socketPath: string;
   readonly browserSocketPath: string;
+  readonly browserBackend?: BrowserBackendSelection;
+  readonly browserDescriptorPath?: string;
+  readonly browserRuntimeDirectory?: string;
   readonly cwd?: string;
   readonly sources?: readonly IndexedSource[];
   readonly browserConnectionFactory?: BrowserRpcConnectionFactory;
@@ -41,7 +48,7 @@ export interface WebxdRuntimeOptions {
 
 /** Runnable same-user Unix API for the complete local WebX authority. */
 export class WebxdRuntime {
-  readonly #browser: BrowserDaemonRpcPort;
+  readonly #browser: import("./ports.js").BrowserDaemonPort;
   readonly #authority: WebxAuthority;
   readonly #clients = new Set<Socket>();
   readonly #bindings = new Map<string, ActorBinding>();
@@ -49,10 +56,17 @@ export class WebxdRuntime {
   #started = false;
 
   constructor(private readonly options: WebxdRuntimeOptions) {
-    this.#browser = new BrowserDaemonRpcPort(
-      options.browserConnectionFactory ?? createBrowserRpcConnectionFactory(options.browserSocketPath, options.cwd ?? "."),
-      options.browserDestinationAuthority,
-    );
+    const backend = options.browserBackend ?? "legacy";
+    if (backend === "legacy") {
+      this.#browser = new BrowserDaemonRpcPort(
+        options.browserConnectionFactory ?? createBrowserRpcConnectionFactory(options.browserSocketPath, options.cwd ?? "."),
+        options.browserDestinationAuthority,
+      );
+    } else {
+      if (options.browserConnectionFactory !== undefined) throw new Error("legacy browser connection factory cannot be used with the agentcursor backend");
+      if (options.browserDescriptorPath === undefined || options.browserRuntimeDirectory === undefined) throw new Error("agentcursor backend requires the browserd descriptor and runtime directory");
+      this.#browser = new AgentCursorBrowserPort(new BrowserdClientPool({ descriptorPath: options.browserDescriptorPath, runtimeDirectory: options.browserRuntimeDirectory }), options.browserDestinationAuthority ?? new FailClosedBrowserDestinationAuthority());
+    }
     this.#authority = new WebxAuthority({
       browser: this.#browser,
       sources: options.sources ?? PUBLIC_SOURCES,

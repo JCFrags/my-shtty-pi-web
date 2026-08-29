@@ -1,17 +1,18 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server, type Socket } from "node:net";
-import { setTimeout as sleep } from "node:timers/promises";
 import type { NdjsonConnectionFactory } from "../../../packages/sdk/src/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebxClient, WebxError, WebxFacadeClient, UnixSocketTransport, nodeNdjsonConnectionFactory } from "../../../packages/sdk/src/index.js";
 import { FailClosedBrowserDestinationAuthority, type DestinationResolver } from "../src/destination-authority.js";
 import { WebxdRuntime, sameUserPiActorAuthenticator } from "../src/runtime.js";
 
+const framePayload = "cG5n";
+const frameDigest = createHash("sha256").update(Buffer.from(framePayload, "base64")).digest("hex");
 const paths = [
-  { pathId: "agent-browser/chrome", actions: ["navigate", "click", "mouse-move", "mouse-down", "mouse-up", "double-click", "wheel", "drag", "fill", "type", "press", "hover", "scroll", "semantic-drag", "wait", "tab-new", "tab-close", "tab-focus"], observations: ["main", "visual"], visual: true, touch: false, uploads: false, downloads: true },
-  { pathId: "pinchtab/chrome", actions: ["navigate", "fill"], observations: ["main", "interactive"], visual: false, touch: false, uploads: false, downloads: false },
+  { pathId: "agent-browser/chrome", actions: ["navigate", "mouse-move", "click", "double-click", "wheel", "drag", "key-press", "text-input", "tab-new", "tab-close", "tab-focus"], observations: ["main", "visual"], visual: true, touch: false, uploads: false, downloads: false },
 ];
 
 class FakeBrowserd {
@@ -92,7 +93,7 @@ class FakeBrowserd {
     if (method === "workspace.hide") return { agentId: params.agentId, tabId: params.tabId, visible: false };
     if (method === "workspace.openScoped" || method === "workspace.selectOwnedTab") return { scopeId: "scope-runtime", sessions: [], tabs: [], selected: { browserSessionId: "session-runtime", tabId: "tab-runtime" }, viewportState: "ready", controlState: "agent", events: [] };
     if (method === "workspace.acquireViewportLease") return { leaseId: "lease-runtime", identity: { pathId: "agent-browser/chrome", browserSessionId: "session-runtime", tabId: "tab-runtime", viewportId: "viewport-runtime", viewportGeneration: 2, controlEpoch: 1 } };
-    if (method === "workspace.getFrame") return { viewportId: "viewport-runtime", viewportGeneration: 2, sequence: 7, screenshotSha256: "a".repeat(64), controlEpoch: 1, mediaType: "image/png", width: 640, height: 480, payload: "cG5n", coordinateSpace: "css-viewport" };
+    if (method === "workspace.getFrame") return { viewportId: "viewport-runtime", viewportGeneration: 2, sequence: 7, screenshotSha256: frameDigest, controlEpoch: 1, mediaType: "image/png", width: 640, height: 480, payload: framePayload, coordinateSpace: "css-viewport" };
     if (method === "workspace.compareSetControl") return { controlEpoch: params.control === "human" ? 2 : 3 };
     if (method === "workspace.input") return { accepted: true, bindingSequence: 7, operationId: params.operationId };
     if (method === "workspace.releaseViewportLease") return { released: true };
@@ -141,10 +142,10 @@ describe("actual WebX Unix runtime", () => {
       return { close: () => connection.close(), send: (line, signal) => { const parsed = JSON.parse(line) as { request: unknown }; return connection.send(JSON.stringify({ binding: { bindingId, bindingSecret: "0".repeat(64) }, request: parsed.request }), signal); } };
     };
     const forged = new WebxClient(new UnixSocketTransport(webxPath, forgedFactory));
-    await expect(forged.version()).rejects.toMatchObject<WebxError>({ status: 400 });
+    await expect(forged.version()).rejects.toMatchObject({ status: 400 });
     expect((await client.search({ query: "WebX" }, { idempotencyKey: "runtime-search-001" })).hits).toHaveLength(1);
     const publicPaths = (await client.capabilities()).browserPaths;
-    expect(publicPaths.map((item) => item.pathId)).toEqual(["agent-browser/chrome", "pinchtab/chrome"]);
+    expect(publicPaths.map((item) => item.pathId)).toEqual(["agent-browser/chrome"]);
     expect(publicPaths.every((item) => item.uploads === false && !item.actions.includes("upload"))).toBe(true);
     await client.createBrowserSession({ pathId: "agent-browser/chrome" }, { idempotencyKey: "runtime-browser-001" });
     expect(browser.registrations).toBe(2);
@@ -172,23 +173,14 @@ describe("actual WebX Unix runtime", () => {
     expect(await readFile(join(exportRoot, "fixtures", "webx.md"), "utf8")).toContain("WebX routes search, read");
     await expect(facade.request("web.read", { url: "https://fixture.invalid/webx", save: { path: "fixtures/webx.md" } }, { ...facadeOptions, idempotencyKey: "facade-save-002" })).rejects.toThrow("already exists");
     await expect(facade.request("web.read", { url: "https://fixture.invalid/webx", maxPages: 2, save: { path: "fixtures/crawl.md" } }, { ...facadeOptions, idempotencyKey: "facade-save-003" })).rejects.toThrow("maxPages is not supported");
-    await expect(facade.request("browser.workspace", { action: "show" }, { signal: facadeSignal.signal, idempotencyKey: "facade-workspace-1", ownerId: "facade-owner", cwd: "/deterministic/project" })).resolves.toMatchObject({ summary: "Browser workspace show" });
     await expect(facade.request("browser.tabs", { action: "discard-tab", browserSessionId: "session-runtime", tabId: "tab-runtime" }, { signal: facadeSignal.signal, idempotencyKey: "facade-tabs-0001", ownerId: "facade-owner", cwd: "/deterministic/project" })).rejects.toThrow("no safe Pi 0.84.1 equivalent");
-    await expect(facade.request("browser.act", { browserSessionId: "session-runtime", action: { kind: "hover", ref: "e1" } }, { signal: facadeSignal.signal, idempotencyKey: "facade-action-001", ownerId: "facade-owner", cwd: "/deterministic/project" })).rejects.toBeInstanceOf(WebxError);
-    await expect(facade.request("browser.act", { browserSessionId: "session-runtime", action: { kind: "upload", ref: "e1", uploadHandleIds: ["handle-1"] } }, { signal: facadeSignal.signal, idempotencyKey: "facade-upload-0001", ownerId: "facade-owner", cwd: "/deterministic/project" })).rejects.toThrow("upload is not supported by the frozen daemon action shape");
-    const opened = await facade.request("browser.open", { pathId: "agent-browser/chrome" }, { signal: facadeSignal.signal, idempotencyKey: "facade-open-00001", ownerId: "facade-owner", cwd: "/deterministic/project" });
-    expect(opened).toMatchObject({ data: { sessionId: "session-runtime" } });
-    const active = facade.request("browser.act", { browserSessionId: "session-runtime", action: { kind: "wait", milliseconds: 15_000 } }, { signal: facadeSignal.signal, idempotencyKey: "runtime-active-wait", ownerId: "facade-owner", cwd: "/deterministic/project" });
-    await sleep(20);
-    await expect(facade.request("browser.cancel", { operationId: "op-runtime-active-wait" }, { signal: facadeSignal.signal, idempotencyKey: "runtime-active-cancel", ownerId: "facade-owner", cwd: "/deterministic/project" })).resolves.toMatchObject({ data: { state: "running" } });
-    await expect(active).rejects.toThrow("operation cancelled");
-    await expect(facade.request("browser.cancel", { operationId: "op-runtime-active-wait" }, { signal: facadeSignal.signal, idempotencyKey: "runtime-active-final", ownerId: "facade-owner", cwd: "/deterministic/project" })).resolves.toMatchObject({ data: { state: "cancelled" } });
-    const visual = await facade.request("browser.observe", { browserSessionId: "session-runtime", view: "visual" }, { signal: facadeSignal.signal, idempotencyKey: "facade-observe-01", ownerId: "facade-owner", cwd: "/deterministic/project" });
-    const observation = visual.data as { observationId: string; viewportId: string };
-    await expect(facade.request("browser.act", { browserSessionId: "session-runtime", action: { kind: "mouse-click", observationId: observation.observationId, viewportId: observation.viewportId, x: 10, y: 20 } }, { signal: facadeSignal.signal, idempotencyKey: "facade-visual-act", ownerId: "facade-owner", cwd: "/deterministic/project" })).resolves.toMatchObject({ summary: "Browser action completed" });
-    await expect(facade.request("browser.act", { browserSessionId: "session-runtime", action: { kind: "mouse-click", observationId: observation.observationId, viewportId: observation.viewportId, x: 10, y: 20 } }, { signal: facadeSignal.signal, idempotencyKey: "facade-stale-act", ownerId: "facade-owner", cwd: "/deterministic/project" })).rejects.toThrow("stale or unknown");
-    facade.importObservationBindingForTest("cross-owner", "other-owner", "session-runtime", { address: { sessionId: "session-runtime", tabId: "tab-runtime", pathId: "agent-browser/chrome", hostGeneration: 1, engineGeneration: 1, controlEpoch: 1 }, mediaType: "image/png", width: 1, height: 1, payloadBase64: "", screenshotSha256: "a".repeat(64), screenshotSequence: 1, viewportId: "viewport-runtime", viewportGeneration: 2 });
-    await expect(facade.request("browser.act", { browserSessionId: "session-runtime", action: { kind: "mouse-click", observationId: "cross-owner", viewportId: "viewport-runtime", x: 1, y: 1 } }, { signal: facadeSignal.signal, idempotencyKey: "facade-cross-owner", ownerId: "facade-owner", cwd: "/deterministic/project" })).rejects.toThrow("another owner or session");
+    const opened = await facade.request("browser.open", {}, { signal: facadeSignal.signal, idempotencyKey: "facade-open-00001", ownerId: "facade-owner", cwd: "/deterministic/project" });
+    expect(opened).toMatchObject({ data: { browserSessionId: "session-runtime", tabs: [{ tabId: "tab-runtime" }] } });
+    const visual = await facade.request("browser.observe", { browserSessionId: "session-runtime", tabId: "tab-runtime" }, { signal: facadeSignal.signal, idempotencyKey: "facade-observe-01", ownerId: "facade-owner", cwd: "/deterministic/project" });
+    const observation = visual.data as { observationId: string };
+    expect(visual.artifactPayload).toMatchObject({ dataBase64: framePayload, mediaType: "image/png", complete: true, mode: "image" });
+    await expect(facade.request("browser.act", { browserSessionId: "session-runtime", tabId: "tab-runtime", action: { kind: "click", observationId: observation.observationId, x: 10, y: 20 } }, { signal: facadeSignal.signal, idempotencyKey: "facade-visual-act", ownerId: "facade-owner", cwd: "/deterministic/project" })).resolves.toMatchObject({ summary: "Browser action completed" });
+    await expect(facade.request("browser.act", { browserSessionId: "session-runtime", tabId: "tab-runtime", action: { kind: "click", observationId: observation.observationId, x: 10, y: 20 } }, { signal: facadeSignal.signal, idempotencyKey: "facade-stale-act", ownerId: "facade-owner", cwd: "/deterministic/project" })).rejects.toBeInstanceOf(WebxError);
     await expect(facade.request("browser.debug", { browserSessionId: "session-runtime", operation: "cookies" }, { signal: facadeSignal.signal, idempotencyKey: "facade-debug-0001", ownerId: "facade-owner", cwd: "/deterministic/project" })).rejects.toThrow("secret-bearing or unknown debug operation is refused");
     await facade.stop({ ownerId: "facade-owner" });
 
@@ -203,7 +195,7 @@ describe("actual WebX Unix runtime", () => {
     });
     browser = new FakeBrowserd(browserPath);
     await browser.start();
-    expect((await client.capabilities()).browserPaths).toHaveLength(2);
+    expect((await client.capabilities()).browserPaths).toHaveLength(1);
     expect(browser.registrations).toBe(1);
 
     await runtime.stop();
@@ -320,7 +312,7 @@ describe("actual WebX Unix runtime", () => {
       await expect(client.createBrowserSession(
         { pathId: "agent-browser/chrome", url },
         { idempotencyKey: `ssrf-initial-${index}` },
-      )).rejects.toMatchObject<WebxError>({ status: 403 });
+      )).rejects.toMatchObject({ status: 403 });
     }
     expect(browser.methods).not.toContain("session.create");
 
@@ -329,10 +321,12 @@ describe("actual WebX Unix runtime", () => {
       { idempotencyKey: "ssrf-blank-session" },
     );
     const beforeActions = browser.methods.filter((method) => method === "browser.act").length;
-    await expect(client.actBrowser(session.sessionId, { kind: "navigate", url: "http://127.0.0.1/" }, { idempotencyKey: "ssrf-navigate" }))
-      .rejects.toMatchObject<WebxError>({ status: 403 });
-    await expect(client.actBrowser(session.sessionId, { kind: "tab-new", url: "http://169.254.169.254/" }, { idempotencyKey: "ssrf-new-tab" }))
-      .rejects.toMatchObject<WebxError>({ status: 403 });
+    const tabId = session.tabs[0]?.tabId;
+    if (tabId === undefined) throw new Error("browser fixture did not return a tab");
+    await expect(client.actBrowser(session.browserSessionId, tabId, { kind: "navigate", url: "http://127.0.0.1/" }, { idempotencyKey: "ssrf-navigate" }))
+      .rejects.toMatchObject({ status: 403 });
+    await expect(client.createBrowserTab(session.browserSessionId, "http://169.254.169.254/", { idempotencyKey: "ssrf-new-tab" }))
+      .rejects.toMatchObject({ status: 403 });
     expect(browser.methods.filter((method) => method === "browser.act")).toHaveLength(beforeActions);
   });
 });
