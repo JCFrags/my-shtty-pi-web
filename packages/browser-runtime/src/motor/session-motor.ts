@@ -82,8 +82,8 @@ export class SessionMotor extends EventEmitter {
         await this.moveTo(tab, action.at, context, started);
         context.checkpoint();
         await postPathGuard();
-        await this.command(tab, "Input.dispatchMouseEvent", { type: "mouseWheel", ...action.at, button: "none", buttons: 0, deltaX: action.deltaX, deltaY: action.deltaY });
         context.markDispatched();
+        await this.command(tab, "Input.dispatchMouseEvent", { type: "mouseWheel", ...action.at, button: "none", buttons: 0, deltaX: action.deltaX, deltaY: action.deltaY });
         return { pathDurationMs: 0, pathWallMs: 0, completionAfterPathMs: 0, totalMs: performance.now() - started };
       }
       if (action.kind !== "drag") throw new Error("Unsupported coordinate action.");
@@ -115,7 +115,7 @@ export class SessionMotor extends EventEmitter {
       await sleep(item.delayMs, context.signal);
       context.checkpoint();
       if (item.t === "back") await this.pressKey(tab, "Backspace", context);
-      else { await this.command(tab, "Input.insertText", { text: item.ch }); context.markDispatched(); }
+      else { context.markDispatched(); await this.command(tab, "Input.insertText", { text: item.ch }); }
     }
   }
 
@@ -202,9 +202,9 @@ export class SessionMotor extends EventEmitter {
   private async press(tab: TabRecord, button: MouseButton, at: Point, clickCount: number, context: OperationContext): Promise<void> {
     context.checkpoint();
     const buttons = button === "left" ? 1 : button === "right" ? 2 : 4;
+    context.markDispatched();
     await this.command(tab, "Input.dispatchMouseEvent", { type: "mousePressed", ...at, button, buttons, clickCount });
     this.pressedButtons.add(button);
-    context.markDispatched();
   }
 
   private async release(tab: TabRecord, button: MouseButton, at: Point, clickCount: number): Promise<void> {
@@ -214,9 +214,9 @@ export class SessionMotor extends EventEmitter {
 
   private async key(tab: TabRecord, key: string, code: string, modifiers: number, context: OperationContext): Promise<void> {
     context.checkpoint();
+    context.markDispatched();
     await this.command(tab, "Input.dispatchKeyEvent", { type: "keyDown", key, code, modifiers });
     this.pressedKeys.add(key);
-    context.markDispatched();
     try { await this.command(tab, "Input.dispatchKeyEvent", { type: "keyUp", key, code, modifiers }); } finally { this.pressedKeys.delete(key); }
   }
 

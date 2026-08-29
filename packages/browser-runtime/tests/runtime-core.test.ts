@@ -3,6 +3,8 @@ import { describe, it } from "vitest";
 import { BrowserArtifactStore } from "../src/artifacts/store.js";
 import { validateExtraFlags } from "../src/chrome/host.js";
 import { OperationRegistry } from "../src/operations/registry.js";
+import { bindMotorTab, SessionMotor } from "../src/motor/session-motor.js";
+import type { TabRecord } from "../src/targets/registry.js";
 import { createPersona, generateMove } from "../src/vendor/agentcursor/index.js";
 
 const actor = { principalId: "owner:test", agentSessionId: "agent:test" } as const;
@@ -136,6 +138,61 @@ describe("bounded actor-scoped operations", () => {
     wall += 101;
     registry.prune();
     assert.throws(() => registry.status(actor, "operation:prune"), /not found/i);
+  });
+});
+
+describe("motor cancellation cleanup", () => {
+  function motorFixture() {
+    const tab: TabRecord = {
+      browserSessionId: "session:motor", tabId: "tab:motor", targetId: "target:motor", cdpSessionId: "cdp:motor",
+      documentGeneration: 1, viewportGeneration: 1, state: "open", latestFrameSequence: 0, url: "about:blank", title: "",
+    };
+    const events: Array<{ method: string; params: Readonly<Record<string, unknown>> }> = [];
+    let movedResolve!: () => void;
+    let pressedResolve!: () => void;
+    const moved = new Promise<void>((resolve) => { movedResolve = resolve; });
+    const pressed = new Promise<void>((resolve) => { pressedResolve = resolve; });
+    bindMotorTab(tab, {
+      async send<T>(method: string, params: Readonly<Record<string, unknown>>): Promise<T> {
+        events.push({ method, params });
+        if (method === "Input.dispatchMouseEvent" && params.type === "mouseMoved") movedResolve();
+        if (method === "Input.dispatchMouseEvent" && params.type === "mousePressed") pressedResolve();
+        if (method === "Runtime.evaluate") return { result: { value: true } } as T;
+        return {} as T;
+      },
+    });
+    return { tab, events, moved, pressed };
+  }
+
+  it("stops a click after movement and before press", async () => {
+    const registry = new OperationRegistry();
+    const fixture = motorFixture();
+    const motor = new SessionMotor("session:motor", 123, 500);
+    registry.submit(actor, { operationId: "operation:cancel-before-press", laneKey: "motor", deadline: deadline() }, async (context) => {
+      await motor.coordinate(fixture.tab, { kind: "click", at: { x: 700, y: 430 }, button: "left" }, context, async () => undefined);
+    });
+    await fixture.moved;
+    registry.cancel(actor, "operation:cancel-before-press");
+    const status = await registry.wait(actor, "operation:cancel-before-press");
+    assert.equal(status.state, "cancelled");
+    assert.equal(status.dispatchState, "partially-dispatched");
+    assert.equal(fixture.events.some((event) => event.params.type === "mousePressed"), false);
+  });
+
+  it("releases a held drag button when cancellation stops future samples", async () => {
+    const registry = new OperationRegistry();
+    const fixture = motorFixture();
+    const motor = new SessionMotor("session:motor", 456, 500);
+    registry.submit(actor, { operationId: "operation:cancel-drag", laneKey: "motor", deadline: deadline() }, async (context) => {
+      await motor.coordinate(fixture.tab, { kind: "drag", from: { x: 100, y: 100 }, to: { x: 700, y: 430 } }, context, async () => undefined);
+    });
+    await fixture.pressed;
+    registry.cancel(actor, "operation:cancel-drag");
+    const status = await registry.wait(actor, "operation:cancel-drag");
+    assert.equal(status.state, "cancelled");
+    assert.equal(status.dispatchState, "dispatched");
+    for (let attempt = 0; attempt < 50 && !fixture.events.some((event) => event.params.type === "mouseReleased"); attempt++) await sleep(2);
+    assert.ok(fixture.events.some((event) => event.params.type === "mouseReleased" && event.params.button === "left"));
   });
 });
 

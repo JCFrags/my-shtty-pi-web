@@ -117,7 +117,7 @@ export class BrowserSession {
   async typeText(address: TabAddress, text: string, replace: boolean, context: OperationContext): Promise<void> { await this.motor.typeText(this.resolve(address), text, replace, context); }
   async pressKey(address: TabAddress, key: string, context: OperationContext): Promise<void> { await this.motor.pressKey(this.resolve(address), key, context); }
 
-  async navigate(address: TabAddress, rawUrl: string, signal: AbortSignal): Promise<void> {
+  async navigate(address: TabAddress, rawUrl: string, signal: AbortSignal, markDispatched?: () => void): Promise<void> {
     const tab = this.resolve(address);
     const url = new URL(rawUrl);
     if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Navigation URL is not HTTP(S).");
@@ -127,6 +127,7 @@ export class BrowserSession {
     signal.addEventListener("abort", abort, { once: true });
     const loaded = this.host.cdp.waitForEvent("Page.loadEventFired", (event) => event.sessionId === tab.cdpSessionId, { timeoutMs: 15_000, signal: eventController.signal });
     try {
+      markDispatched?.();
       const result = await this.host.cdp.send<{ errorText?: string }>("Page.navigate", { url: url.href }, tab.cdpSessionId, { timeoutMs: 10_000, signal });
       if (result.errorText) throw new Error("Navigation failed.");
       await loaded;
