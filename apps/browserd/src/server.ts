@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, stat } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { Check } from "typebox/value";
@@ -8,10 +8,11 @@ import {
   type ActorIdentity, type ErrorCode, type FrameEvent,
 } from "@webx/browser-protocol";
 import { BrowserRuntime, type BrowserRuntimeOptions } from "@webx/browser-runtime";
-import { cleanupDescriptor, prepareDescriptor, type BrowserdDescriptor, type DescriptorPaths } from "./descriptor.js";
+import { cleanupDescriptor, prepareDescriptor, publishDescriptor, type BrowserdDescriptor, type DescriptorPaths } from "./descriptor.js";
 import { NdjsonReader, sendJson } from "./transport.js";
 
 interface ConnectionState {
+  readonly connectionId: string;
   readonly socket: Socket;
   readonly reader: NdjsonReader;
   readonly pending: Map<string, AbortController>;
@@ -60,7 +61,8 @@ export class BrowserdServer {
         server.listen(prepared.paths.socketPath);
       });
       await chmod(prepared.paths.socketPath, 0o600);
-      if (((await stat(prepared.paths.socketPath)).mode & 0o777) !== 0o600) throw new Error("browserd socket must have mode 0600.");
+      if (((await stat(prepared.paths.socketPath)).mode & 0o777) !== 0o600) throw new BrowserProtocolError("INTERNAL_ERROR", "browserd socket must have mode 0600.");
+      await publishDescriptor(prepared.paths, prepared.descriptor);
       return prepared.descriptor;
     } catch (error) {
       await this.stop();
@@ -80,7 +82,7 @@ export class BrowserdServer {
   }
 
   private accept(socket: Socket): void {
-    const state: ConnectionState = { socket, reader: new NdjsonReader(), pending: new Map(), chain: Promise.resolve(), closed: false };
+    const state: ConnectionState = { connectionId: randomBytes(18).toString("base64url"), socket, reader: new NdjsonReader(), pending: new Map(), chain: Promise.resolve(), closed: false };
     this.connections.add(state);
     socket.on("data", (chunk: Buffer) => {
       try {
@@ -125,28 +127,27 @@ export class BrowserdServer {
     const controller = new AbortController();
     state.pending.set(request.requestId, controller);
     try {
-      const result = await this.runtime.dispatch(state.actor, request, controller.signal);
+      const result = await this.runtime.dispatch(state.actor, request, controller.signal, state.connectionId);
       this.send(state, { protocolVersion: PROTOCOL_VERSION, kind: "response", requestId: request.requestId, operationId: request.operationId, ok: true, result });
     } catch (error) { this.sendCaught(state, request.requestId, error, request.operationId); }
     finally { state.pending.delete(request.requestId); }
   }
 
   private sendCaught(state: ConnectionState, requestId: string | undefined, error: unknown, operationId?: string): void {
-    if (error instanceof BrowserProtocolError) { this.sendError(state, requestId, error.code, error.message, operationId); return; }
-    const message = error instanceof Error ? error.message : "Browser request failed.";
-    this.sendError(state, requestId, errorCode(message), message, operationId);
+    if (error instanceof BrowserProtocolError) { const safe = error.sanitized(); this.sendError(state, requestId, safe.code, safe.message, operationId, safe.retryable, safe.details); return; }
+    this.sendError(state, requestId, "INTERNAL_ERROR", "Browser request failed.", operationId);
   }
 
-  private sendError(state: ConnectionState, requestId: string | undefined, code: ErrorCode, message: string, operationId?: string): void {
+  private sendError(state: ConnectionState, requestId: string | undefined, code: ErrorCode, message: string, operationId?: string, retryable = false, details?: Readonly<Record<string, string | number | boolean>>): void {
     const safeRequestId = requestId && /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/.test(requestId) ? requestId : "request:error";
-    this.send(state, { protocolVersion: PROTOCOL_VERSION, kind: "response", requestId: safeRequestId, ...(operationId ? { operationId } : {}), ok: false, error: { code, message: sanitizeMessage(message), retryable: false } });
+    this.send(state, { protocolVersion: PROTOCOL_VERSION, kind: "response", requestId: safeRequestId, ...(operationId ? { operationId } : {}), ok: false, error: { code, message: sanitizeMessage(message), retryable, ...(details ? { details } : {}) } });
   }
 
   private send(state: ConnectionState, message: unknown, droppable = false): void {
     if (state.closed) return;
     if (!Check(ServerMessageSchema, message)) {
       if (isRecord(message) && message.kind === "response" && message.ok === false) { this.closeConnection(state); return; }
-      this.sendError(state, isRecord(message) && typeof message.requestId === "string" ? message.requestId : undefined, "CDP_ERROR", "Server produced an invalid response.");
+      this.sendError(state, isRecord(message) && typeof message.requestId === "string" ? message.requestId : undefined, "INTERNAL_ERROR", "Server produced an invalid response.");
       return;
     }
     try { sendJson(state.socket, message, { droppable }); } catch { this.closeConnection(state); }
@@ -155,32 +156,20 @@ export class BrowserdServer {
   private readonly onFrame = (frame: FrameEvent): void => {
     for (const state of this.connections) {
       if (state.actor === undefined || state.closed) continue;
-      if (this.runtime.ownsSession(state.actor, frame.address.browserSessionId)) this.send(state, frame, true);
+      if (this.runtime.shouldDeliverFrame(state.connectionId, state.actor, frame)) this.send(state, frame, true);
     }
   };
 
   private closeConnection(state: ConnectionState, graceful = false): void {
     if (state.closed) return;
     state.closed = true;
-    for (const controller of state.pending.values()) controller.abort(new Error("browserd connection closed."));
+    for (const controller of state.pending.values()) controller.abort(new BrowserProtocolError("OPERATION_CANCELLED", "browserd connection closed."));
     state.pending.clear();
+    this.runtime.releaseConnection(state.connectionId);
     if (graceful) state.socket.end(); else state.socket.destroy();
     this.connections.delete(state);
   }
 }
 
 function secretMatches(received: string, expected: string): boolean { const left = Buffer.from(received); const right = Buffer.from(expected); return left.byteLength === right.byteLength && timingSafeEqual(left, right); }
-function errorCode(message: string): ErrorCode {
-  const lower = message.toLowerCase();
-  if (lower.includes("navigation")) return "NAVIGATION_DENIED";
-  if (lower.includes("deadline")) return "DEADLINE_EXCEEDED";
-  if (lower.includes("epoch")) return "CONTROL_EPOCH_STALE";
-  if (lower.includes("observation")) return "OBSERVATION_STALE";
-  if (lower.includes("handle")) return "HANDLE_STALE";
-  if (lower.includes("session not found")) return "SESSION_NOT_FOUND";
-  if (lower.includes("tab not found")) return "TAB_NOT_FOUND";
-  if (lower.includes("limit") || lower.includes("full")) return "LIMIT_EXCEEDED";
-  if (lower.includes("cancel")) return "OPERATION_CANCELLED";
-  return "CDP_ERROR";
-}
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }

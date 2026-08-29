@@ -172,7 +172,7 @@ describe("browserd actor-bound Unix service", () => {
   it("clears artifacts and operations during service shutdown", async () => {
     const runtime = new BrowserRuntime();
     const actor = { principalId: "owner:cleanup", agentSessionId: "agent:cleanup" };
-    await runtime.artifacts.put(actor, Uint8Array.of(1, 2, 3), "image/png");
+    await runtime.artifacts.put(actor, Uint8Array.of(1, 2, 3), { browserSessionId: "session:cleanup", purpose: "agent-observation", mediaType: "image/png" });
     runtime.operations.submit(actor, { operationId: "operation:cleanup", laneKey: "cleanup", deadline: new Date(Date.now() + 10_000).toISOString() }, async () => "done");
     await runtime.operations.wait(actor, "operation:cleanup");
     const directory = await mkdtemp(join(tmpdir(), "browserd-cleanup-test-"));
