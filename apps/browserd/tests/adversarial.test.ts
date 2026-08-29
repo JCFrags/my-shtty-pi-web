@@ -124,6 +124,18 @@ describe("ready-state atomic descriptor ownership", () => {
     await replacement.lease.release();
   });
 
+  it("recovers a corrupt descriptor only while holding startup ownership", async () => {
+    const runtimeDirectory = await directory();
+    const descriptorPath = join(runtimeDirectory, "browserd.json");
+    await writeFile(descriptorPath, "{partial", { mode: 0o600 });
+    const prepared = await prepareDescriptor(runtimeDirectory);
+    assert.notEqual(await readFile(descriptorPath, "utf8").catch(() => undefined), "{partial");
+    await publishDescriptor(prepared.paths, prepared.descriptor);
+    assert.deepEqual(await readDescriptor(descriptorPath), prepared.descriptor);
+    await cleanupDescriptor(prepared.paths, prepared.descriptor, prepared.lease);
+    assert.equal((await readdir(runtimeDirectory)).filter((name) => name.includes(".tmp") || name.endsWith(".sock") || name === ".browserd-startup.lock").length, 0);
+  });
+
   it("shares one readiness promise for concurrent starts on the same object", async () => {
     const gate = deferred();
     const server = new BrowserdServer({ runtimeDirectory: await directory(), startupHooksForTest: { afterListen: async () => await gate.promise } });

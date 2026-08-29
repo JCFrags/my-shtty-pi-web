@@ -136,6 +136,21 @@ describe("runtime-owned profile lifecycle", () => {
     await Promise.all([first.close(), second.close()]);
   });
 
+  it("does not let a former owner release a successor lock", async () => {
+    const base = await root();
+    const lock = join(base, ".profile-manager.lock");
+    let successor = "";
+    const manager = new ProfileManager(base, { lockHooksForTest: { afterAcquire: async () => {
+      const current = JSON.parse(await readFile(lock, "utf8")) as Record<string, unknown>;
+      successor = `${JSON.stringify({ ...current, runtimeInstanceId: "runtime_successor", nonce: "successor_nonce" })}\n`;
+      await writeFile(lock, successor, { mode: 0o600 });
+    } } });
+    await manager.initialize();
+    assert.equal(await readFile(lock, "utf8"), successor);
+    await rm(lock, { force: true });
+    await manager.close();
+  });
+
   it("does not remove a young malformed lock but recovers an old malformed lock", async () => {
     const base = await root();
     const lock = join(base, ".profile-manager.lock");

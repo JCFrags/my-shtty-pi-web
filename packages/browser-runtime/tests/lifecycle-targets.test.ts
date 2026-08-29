@@ -10,20 +10,22 @@ class FakeCdp extends EventEmitter {
   blockAttach = false;
   abortOnMethod?: string;
   failOnMethod?: string;
+  readonly failOnMethods = new Set<string>();
   controller?: AbortController;
+  createdTargets = 0;
 
   async send<T>(method: string, params: Readonly<Record<string, unknown>> = {}, _sessionId?: string, options: { signal?: AbortSignal; timeoutMs?: number; onDispatch?: () => void } = {}): Promise<T> {
     options.signal?.throwIfAborted();
     options.onDispatch?.();
     this.calls.push({ method, params });
     if (this.abortOnMethod === method) this.controller?.abort(new BrowserProtocolError("OPERATION_CANCELLED", "cancelled"));
-    if (this.failOnMethod === method) throw new BrowserProtocolError("CDP_ERROR", `${method} failed`);
+    if (this.failOnMethod === method || this.failOnMethods.has(method)) throw new BrowserProtocolError("CDP_ERROR", `${method} failed`);
     options.signal?.throwIfAborted();
     if (method === "Target.getTargets") return { targetInfos: [] } as T;
-    if (method === "Target.createTarget") return { targetId: "target_lifecycle01" } as T;
+    if (method === "Target.createTarget") return { targetId: `target_lifecycle${String(++this.createdTargets).padStart(2, "0")}` } as T;
     if (method === "Target.attachToTarget") {
       if (this.blockAttach) return await new Promise<T>((_, reject) => options.signal?.addEventListener("abort", () => reject(options.signal?.reason), { once: true }));
-      return { sessionId: "cdp_lifecycle_01" } as T;
+      return { sessionId: `cdp_${String(params.targetId)}` } as T;
     }
     return {} as T;
   }
@@ -63,6 +65,16 @@ describe("lifecycle cancellation dispatch matrix", () => {
     await targets.close();
   });
 
+  it("publishes no tab or mapping when attachment fails", async () => {
+    const cdp = new FakeCdp();
+    const targets = await registry(cdp);
+    cdp.failOnMethod = "Target.attachToTarget";
+    await assert.rejects(() => targets.createTab(), (error) => error instanceof BrowserProtocolError && error.code === "CDP_ERROR");
+    assert.deepEqual(targets.list(1), []);
+    assert.ok(cdp.calls.some((call) => call.method === "Target.closeTarget"));
+    await targets.close();
+  });
+
   it("publishes no tab or mapping when required domain enablement fails", async () => {
     const cdp = new FakeCdp();
     const targets = await registry(cdp);
@@ -71,6 +83,40 @@ describe("lifecycle cancellation dispatch matrix", () => {
     assert.deepEqual(targets.list(1), []);
     assert.ok(cdp.calls.some((call) => call.method === "Target.detachFromTarget"));
     assert.ok(cdp.calls.some((call) => call.method === "Target.closeTarget"));
+    await targets.close();
+  });
+
+  it("keeps failed popup initialization private and rolls it back", async () => {
+    const cdp = new FakeCdp();
+    const targets = await registry(cdp);
+    const opener = await targets.createTab();
+    cdp.failOnMethod = "Page.enable";
+    cdp.emit("event", { method: "Target.targetCreated", params: { targetInfo: { type: "page", targetId: "target_popup01", openerId: opener.targetId, url: "https://fixture.invalid/popup" } } });
+    for (let attempt = 0; attempt < 100 && !cdp.calls.some((call) => call.method === "Target.closeTarget" && call.params.targetId === "target_popup01"); attempt++) await new Promise((resolve) => setTimeout(resolve, 2));
+    assert.equal(targets.list(1).length, 1);
+    assert.ok(cdp.calls.some((call) => call.method === "Target.detachFromTarget"));
+    assert.ok(cdp.calls.some((call) => call.method === "Target.closeTarget" && call.params.targetId === "target_popup01"));
+    await targets.close();
+  });
+
+  it("keeps rollback authoritative even when target close fails", async () => {
+    const cdp = new FakeCdp();
+    const targets = await registry(cdp);
+    cdp.failOnMethods.add("Page.enable");
+    cdp.failOnMethods.add("Target.closeTarget");
+    await assert.rejects(() => targets.createTab(), (error) => error instanceof BrowserProtocolError && error.code === "CDP_ERROR");
+    assert.deepEqual(targets.list(1), []);
+    assert.ok(cdp.calls.some((call) => call.method === "Target.detachFromTarget"));
+    await targets.close();
+  });
+
+  it("enforces the tab limit before creating another target", async () => {
+    const cdp = new FakeCdp();
+    const targets = await registry(cdp);
+    await Promise.all(Array.from({ length: 8 }, async () => await targets.createTab()));
+    await assert.rejects(() => targets.createTab(), (error) => error instanceof BrowserProtocolError && error.code === "LIMIT_EXCEEDED");
+    assert.equal(cdp.calls.filter((call) => call.method === "Target.createTarget").length, 8);
+    assert.equal(targets.list(1).length, 8);
     await targets.close();
   });
 
