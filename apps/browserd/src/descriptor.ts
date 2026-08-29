@@ -1,11 +1,9 @@
 import { randomBytes } from "node:crypto";
-import { chmod, link, lstat, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readFile, readdir, rename, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { BrowserProtocolError, PROTOCOL_VERSION } from "@webx/browser-protocol";
-
-const STARTUP_LOCK = ".browserd-startup.lock";
-const LOCK_RECOVERY_GRACE_MS = 2_000;
+import { acquireOwnershipSocket, type OwnershipSocketLease } from "@webx/browser-runtime";
 
 export interface BrowserdDescriptor {
   protocolVersion: typeof PROTOCOL_VERSION;
@@ -26,15 +24,21 @@ export interface StartupOwner {
   createdAt: string;
 }
 
-export interface DescriptorPaths { runtimeDirectory: string; socketPath: string; descriptorPath: string; lockPath: string }
+export interface DescriptorPaths { runtimeDirectory: string; socketPath: string; descriptorPath: string; ownershipKeyPath: string }
 
 export interface StartupLease {
   readonly owner: StartupOwner;
-  readonly lockPath: string;
+  readonly abstractName: string;
+  readonly keyPath: string;
   release(): Promise<void>;
 }
 
-export async function prepareDescriptor(runtimeDirectory?: string, options: { allowTemporaryFallback?: boolean } = {}): Promise<{ descriptor: BrowserdDescriptor; paths: DescriptorPaths; lease: StartupLease }> {
+export interface PrepareDescriptorOptions {
+  allowTemporaryFallback?: boolean;
+  ownershipPlatformForTest?: NodeJS.Platform;
+}
+
+export async function prepareDescriptor(runtimeDirectory?: string, options: PrepareDescriptorOptions = {}): Promise<{ descriptor: BrowserdDescriptor; paths: DescriptorPaths; lease: StartupLease }> {
   const directory = resolve(runtimeDirectory ?? defaultRuntimeDirectory(options.allowTemporaryFallback ?? false));
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await chmod(directory, 0o700);
@@ -50,15 +54,18 @@ export async function prepareDescriptor(runtimeDirectory?: string, options: { al
     nonce: randomBytes(24).toString("base64url"),
     createdAt: new Date().toISOString(),
   };
-  const lockPath = join(directory, STARTUP_LOCK);
-  const lease = await acquireStartupLock(lockPath, owner);
+  const kernelLease = await acquireOwnershipSocket(directory, "browserd-service", {
+    ...(options.ownershipPlatformForTest ? { platform: options.ownershipPlatformForTest } : {}),
+  });
+  const lease = startupLease(owner, kernelLease);
   const paths: DescriptorPaths = {
     runtimeDirectory: directory,
     socketPath: join(directory, `browserd-${runtimeInstanceId}.sock`),
     descriptorPath: join(directory, "browserd.json"),
-    lockPath,
+    ownershipKeyPath: kernelLease.keyPath,
   };
   try {
+    await cleanupStaleServiceFiles(directory);
     const existing = await readDescriptor(paths.descriptorPath).catch(() => undefined);
     if (existing !== undefined) {
       const ticks = await readProcessStartTicks(existing.pid).catch(() => undefined);
@@ -106,9 +113,11 @@ export async function readDescriptor(path: string): Promise<BrowserdDescriptor> 
 }
 
 export async function cleanupDescriptor(paths: DescriptorPaths, descriptor: BrowserdDescriptor, lease: StartupLease): Promise<void> {
-  await removeRealSocket(paths.socketPath);
-  await removeDescriptorIfOwned(paths.descriptorPath, descriptor.runtimeInstanceId);
-  await lease.release();
+  const failures: unknown[] = [];
+  try { await removeRealSocket(paths.socketPath); } catch (error) { failures.push(error); }
+  try { await removeDescriptorIfOwned(paths.descriptorPath, descriptor.runtimeInstanceId); } catch (error) { failures.push(error); }
+  try { await lease.release(); } catch (error) { failures.push(error); }
+  if (failures.length > 0) throw new AggregateError(failures, "browserd descriptor cleanup failed.");
 }
 
 export function defaultRuntimeDirectory(allowTemporaryFallback = false): string {
@@ -118,59 +127,26 @@ export function defaultRuntimeDirectory(allowTemporaryFallback = false): string 
   throw new BrowserProtocolError("CAPABILITY_UNAVAILABLE", "XDG_RUNTIME_DIR is required for browserd.");
 }
 
-async function acquireStartupLock(lockPath: string, owner: StartupOwner): Promise<StartupLease> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const temporary = `${lockPath}.${owner.runtimeInstanceId}.${owner.nonce}.tmp`;
-    const handle = await open(temporary, "wx", 0o600);
-    try { await handle.writeFile(`${JSON.stringify(owner)}\n`); await handle.sync(); }
-    finally { await handle.close(); }
-    try {
-      await link(temporary, lockPath);
-      await rm(temporary, { force: true });
-      return {
-        owner,
-        lockPath,
-        release: async (): Promise<void> => {
-          const current = await readStartupOwner(lockPath).catch(() => undefined);
-          if (current !== undefined && sameOwner(current, owner)) await rm(lockPath, { force: true });
-        },
-      };
-    } catch (error) {
-      await rm(temporary, { force: true });
-      if (!isAlreadyExists(error)) throw error;
-    }
-
-    const raw = await readFile(lockPath, "utf8").catch(() => undefined);
-    const current = raw === undefined ? undefined : parseStartupOwner(raw);
-    if (current === undefined) {
-      const info = await lstat(lockPath).catch(() => undefined);
-      if (info === undefined) continue;
-      if (Date.now() - info.mtimeMs < LOCK_RECOVERY_GRACE_MS) throw new BrowserProtocolError("OPERATION_CONFLICT", "browserd startup ownership is initializing.", true);
-      if (await unchangedFile(lockPath, raw)) await rm(lockPath, { force: true });
-      continue;
-    }
-    const ticks = await readProcessStartTicks(current.pid).catch(() => undefined);
-    if (ticks === current.processStartTicks) throw new BrowserProtocolError("OPERATION_CONFLICT", "A live browserd process already owns this runtime directory.");
-    if (await unchangedFile(lockPath, raw)) await rm(lockPath, { force: true });
+async function cleanupStaleServiceFiles(directory: string): Promise<void> {
+  for (const name of await readdir(directory)) {
+    if (!/^browserd-runtime_[A-Za-z0-9_-]+\.sock$/.test(name) && !/^browserd\.json\.tmp-runtime_[A-Za-z0-9_-]+-[a-f0-9]+$/.test(name)) continue;
+    const path = join(directory, name);
+    const info = await lstat(path).catch(() => undefined);
+    if (info === undefined) continue;
+    if (name.endsWith(".sock") && !info.isSocket()) continue;
+    if (!name.endsWith(".sock") && (!info.isFile() || info.isSymbolicLink())) continue;
+    await rm(path, { force: true });
   }
-  throw new BrowserProtocolError("OPERATION_CONFLICT", "browserd startup ownership could not be acquired.", true);
 }
 
-async function unchangedFile(path: string, expected: string | undefined): Promise<boolean> {
-  if (expected === undefined) return (await readFile(path, "utf8").catch(() => undefined)) === undefined;
-  return (await readFile(path, "utf8").catch(() => undefined)) === expected;
+function startupLease(owner: StartupOwner, lease: OwnershipSocketLease): StartupLease {
+  return { owner, abstractName: lease.abstractName, keyPath: lease.keyPath, release: async () => await lease.release() };
 }
-async function readStartupOwner(path: string): Promise<StartupOwner> { const value = parseStartupOwner(await readFile(path, "utf8")); if (value === undefined) throw new Error("Invalid browserd startup lock."); return value; }
-function parseStartupOwner(raw: string): StartupOwner | undefined {
-  try {
-    const value: unknown = JSON.parse(raw);
-    if (!isRecord(value) || value.version !== 1 || typeof value.runtimeInstanceId !== "string" || typeof value.pid !== "number" || typeof value.processStartTicks !== "string" || typeof value.nonce !== "string" || typeof value.createdAt !== "string") return undefined;
-    return { version: 1, runtimeInstanceId: value.runtimeInstanceId, pid: value.pid, processStartTicks: value.processStartTicks, nonce: value.nonce, createdAt: value.createdAt };
-  } catch { return undefined; }
+
+async function removeDescriptorIfOwned(path: string, runtimeInstanceId: string): Promise<void> {
+  const current = await readDescriptor(path).catch(() => undefined);
+  if (current?.runtimeInstanceId === runtimeInstanceId) await rm(path, { force: true });
 }
-function sameOwner(left: StartupOwner, right: StartupOwner): boolean { return left.runtimeInstanceId === right.runtimeInstanceId && left.pid === right.pid && left.processStartTicks === right.processStartTicks && left.nonce === right.nonce; }
-async function removeDescriptorIfOwned(path: string, runtimeInstanceId: string): Promise<void> { const current = await readDescriptor(path).catch(() => undefined); if (current?.runtimeInstanceId === runtimeInstanceId) await rm(path, { force: true }); }
 async function removeRealSocket(path: string): Promise<void> { const info = await lstat(path).catch(() => undefined); if (info === undefined) return; if (!info.isSocket()) throw new BrowserProtocolError("INTERNAL_ERROR", "browserd socket path is not a socket."); await rm(path, { force: true }); }
 export async function readProcessStartTicks(pid: number): Promise<string> { const text = await readFile(`/proc/${pid}/stat`, "utf8"); const end = text.lastIndexOf(")"); const ticks = text.slice(end + 2).split(" ")[19]; if (ticks === undefined || !/^\d+$/.test(ticks)) throw new Error("Invalid process identity."); return ticks; }
-function isAlreadyExists(error: unknown): boolean { return isRecord(error) && error.code === "EEXIST"; }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }

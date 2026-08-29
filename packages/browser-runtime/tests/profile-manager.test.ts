@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, type ChildProcess } from "node:child_process";
 import { afterEach, describe, it } from "vitest";
 import { ChromeHost } from "../src/chrome/host.js";
+import { acquireOwnershipSocket } from "../src/os/ownership-socket.js";
 import { ProfileManager, readProcessStartTicks, type ProfileManifest } from "../src/chrome/profile-manager.js";
 
 const roots: string[] = [];
@@ -17,6 +18,20 @@ async function childExit(child: ChildProcess): Promise<void> { if (child.exitCod
 
 async function manifest(directory: string): Promise<ProfileManifest> {
   return JSON.parse(await readFile(join(directory, "browserd-owned.json"), "utf8")) as ProfileManifest;
+}
+async function deadRuntime(base: string, id: string, profileName = "session-orphan"): Promise<{ runtime: string; profile: string }> {
+  const runtime = join(base, id);
+  const profile = join(runtime, profileName);
+  await mkdir(profile, { recursive: true, mode: 0o700 });
+  await writeFile(join(runtime, "browserd-runtime.json"), `${JSON.stringify({ version: 2, marker: "browserd-runtime", runtimeInstanceId: id, pid: 999_999_999, processStartTicks: "1", createdAt: new Date(0).toISOString() })}\n`, { mode: 0o600 });
+  return { runtime, profile };
+}
+async function writeOrphanManifest(profile: string, value: Partial<ProfileManifest> & Pick<ProfileManifest, "runtimeInstanceId" | "launchId" | "state" | "pid" | "processStartTicks">): Promise<void> {
+  await writeFile(join(profile, "browserd-owned.json"), `${JSON.stringify({ version: 2, marker: "browserd-temporary-profile", createdAt: new Date(0).toISOString(), ...value })}\n`, { mode: 0o600 });
+}
+function keeper(profile: string, includeProfileArgument: boolean): ChildProcess {
+  const args = ["-e", "setInterval(() => undefined, 1000)", "--", ...(includeProfileArgument ? [`--user-data-dir=${profile}`] : [])];
+  return spawn(process.execPath, args, { stdio: "ignore" });
 }
 
 describe("runtime-owned profile lifecycle", () => {
@@ -78,6 +93,64 @@ describe("runtime-owned profile lifecycle", () => {
     assert.equal((await lstat(outside)).isDirectory(), true);
   });
 
+  it("terminates a verified surviving browser process before removing its dead runtime root", async () => {
+    const base = await root();
+    const orphan = await deadRuntime(base, "runtime_surviving_exact");
+    const child = keeper(orphan.profile, true);
+    if (child.pid === undefined) throw new Error("keeper has no pid");
+    const ticks = await readProcessStartTicks(child.pid);
+    await writeOrphanManifest(orphan.profile, { runtimeInstanceId: "runtime_surviving_exact", launchId: "launch_surviving_exact", state: "running", pid: child.pid, processStartTicks: ticks, executable: process.execPath });
+    const manager = new ProfileManager(base);
+    await manager.initialize();
+    await childExit(child);
+    await assert.rejects(() => lstat(orphan.runtime));
+    assert.deepEqual(manager.cleanupDiagnostics, []);
+    await manager.close();
+  });
+
+  it("preserves a profile when a live PID has the wrong command line", async () => {
+    const base = await root();
+    const orphan = await deadRuntime(base, "runtime_wrong_command");
+    const child = keeper(orphan.profile, false);
+    if (child.pid === undefined) throw new Error("keeper has no pid");
+    try {
+      await writeOrphanManifest(orphan.profile, { runtimeInstanceId: "runtime_wrong_command", launchId: "launch_wrong_command", state: "running", pid: child.pid, processStartTicks: await readProcessStartTicks(child.pid), executable: process.execPath });
+      const manager = new ProfileManager(base);
+      await manager.initialize();
+      assert.equal((await lstat(orphan.profile)).isDirectory(), true);
+      assert.equal(manager.cleanupDiagnostics.length, 1);
+      await manager.close();
+    } finally { child.kill("SIGKILL"); await childExit(child); }
+  });
+
+  it("does not signal a reused PID with mismatching process-start ticks", async () => {
+    const base = await root();
+    const orphan = await deadRuntime(base, "runtime_reused_pid");
+    await writeOrphanManifest(orphan.profile, { runtimeInstanceId: "runtime_reused_pid", launchId: "launch_reused_pid", state: "running", pid: process.pid, processStartTicks: "1", executable: process.execPath });
+    let signalled = false;
+    const manager = new ProfileManager(base, { processHooksForTest: { signal: () => { signalled = true; throw new Error("must not signal"); } } });
+    await manager.initialize();
+    assert.equal(signalled, false);
+    await assert.rejects(() => lstat(orphan.runtime));
+    await manager.close();
+  });
+
+  it("retains a starting profile inside grace and removes it after grace expires", async () => {
+    const base = await root();
+    const recent = await deadRuntime(base, "runtime_starting_recent");
+    await writeOrphanManifest(recent.profile, { runtimeInstanceId: "runtime_starting_recent", launchId: "launch_starting_recent", state: "starting", pid: 0, processStartTicks: "pending", createdAt: new Date().toISOString() });
+    const first = new ProfileManager(base, { recentStartingMs: 60_000 });
+    await first.initialize();
+    assert.equal((await lstat(recent.profile)).isDirectory(), true);
+    await first.close();
+    const expired = await deadRuntime(base, "runtime_starting_expired");
+    await writeOrphanManifest(expired.profile, { runtimeInstanceId: "runtime_starting_expired", launchId: "launch_starting_expired", state: "starting", pid: 0, processStartTicks: "pending", createdAt: new Date(0).toISOString() });
+    const second = new ProfileManager(base, { recentStartingMs: 1 });
+    await second.initialize();
+    await assert.rejects(() => lstat(expired.runtime));
+    await second.close();
+  });
+
   it("cleans an allocated profile when cancellation arrives before spawn", async () => {
     const base = await root();
     const manager = new ProfileManager(base);
@@ -119,16 +192,17 @@ describe("runtime-owned profile lifecycle", () => {
     assert.equal((await readdir(base)).filter((name) => name.startsWith("runtime_") || name === ".profile-manager.lock").length, 0);
   });
 
-  it("keeps a live atomic lock while another manager waits, then initializes both", async () => {
+  it("keeps kernel ownership while another manager waits, then initializes both", async () => {
     const base = await root();
+    const acquired = deferred();
     const gate = deferred();
-    const first = new ProfileManager(base, { lockHooksForTest: { afterAcquire: async () => await gate.promise } });
+    const first = new ProfileManager(base, { lockHooksForTest: { afterAcquire: async () => { acquired.resolve(); await gate.promise; } } });
     const second = new ProfileManager(base);
     const firstStart = first.initialize();
-    for (let attempt = 0; attempt < 100 && !(await lstat(join(base, ".profile-manager.lock")).then(() => true, () => false)); attempt++) await new Promise((resolve) => setTimeout(resolve, 2));
+    await acquired.promise;
     const secondStart = second.initialize();
     await new Promise((resolve) => setTimeout(resolve, 30));
-    assert.equal((await lstat(join(base, ".profile-manager.lock"))).isFile(), true);
+    await assert.rejects(() => lstat(second.instanceRoot));
     gate.resolve();
     await Promise.all([firstStart, secondStart]);
     assert.equal((await lstat(first.instanceRoot)).isDirectory(), true);
@@ -136,33 +210,23 @@ describe("runtime-owned profile lifecycle", () => {
     await Promise.all([first.close(), second.close()]);
   });
 
-  it("does not let a former owner release a successor lock", async () => {
+  it("does not let a former owner release a successor kernel lease", async () => {
     const base = await root();
-    const lock = join(base, ".profile-manager.lock");
-    let successor = "";
-    const manager = new ProfileManager(base, { lockHooksForTest: { afterAcquire: async () => {
-      const current = JSON.parse(await readFile(lock, "utf8")) as Record<string, unknown>;
-      successor = `${JSON.stringify({ ...current, runtimeInstanceId: "runtime_successor", nonce: "successor_nonce" })}\n`;
-      await writeFile(lock, successor, { mode: 0o600 });
-    } } });
-    await manager.initialize();
-    assert.equal(await readFile(lock, "utf8"), successor);
-    await rm(lock, { force: true });
-    await manager.close();
+    const former = await acquireOwnershipSocket(base, "profile-cleanup");
+    await former.release();
+    const successor = await acquireOwnershipSocket(base, "profile-cleanup");
+    await former.release();
+    await assert.rejects(() => acquireOwnershipSocket(base, "profile-cleanup"), (error) => error instanceof Error);
+    await successor.release();
+    const next = await acquireOwnershipSocket(base, "profile-cleanup");
+    await next.release();
   });
 
-  it("does not remove a young malformed lock but recovers an old malformed lock", async () => {
+  it("fails closed on an unsupported ownership platform", async () => {
     const base = await root();
-    const lock = join(base, ".profile-manager.lock");
-    await writeFile(lock, "partial", { mode: 0o600 });
-    const blocked = new ProfileManager(base, { lockGraceMs: 10_000, lockTimeoutMs: 30 });
-    await assert.rejects(() => blocked.initialize(), (error) => error instanceof Error);
-    assert.equal(await readFile(lock, "utf8"), "partial");
-    await utimes(lock, new Date(0), new Date(0));
-    const recovered = new ProfileManager(base, { lockGraceMs: 10 });
-    await recovered.initialize();
-    await recovered.close();
-    await assert.rejects(() => lstat(lock));
+    const manager = new ProfileManager(base, { ownershipPlatformForTest: "darwin" });
+    await assert.rejects(() => manager.initialize(), /require Linux/i);
+    await assert.rejects(() => lstat(manager.instanceRoot));
   });
 
   it("rejects close with an active lease and removes only its empty runtime root after release", async () => {

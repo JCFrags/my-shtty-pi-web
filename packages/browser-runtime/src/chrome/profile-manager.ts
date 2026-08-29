@@ -1,18 +1,16 @@
 import { randomBytes } from "node:crypto";
-import { chmod, link, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, rmdir } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, rmdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import { BrowserProtocolError } from "@webx/browser-protocol";
+import { acquireOwnershipSocket } from "../os/ownership-socket.js";
 
 const INSTANCE_MARKER = "browserd-runtime.json";
 const PROFILE_MARKER = "browserd-owned.json";
-const LOCK_FILE = ".profile-manager.lock";
-const LOCK_GRACE_MS = 2_000;
 const RECENT_STARTING_MS = 60_000;
 
 interface ProcessIdentity { pid: number; processStartTicks: string }
 interface RuntimeMarker extends ProcessIdentity { version: 2; marker: "browserd-runtime"; runtimeInstanceId: string; createdAt: string }
-interface LockOwner extends ProcessIdentity { version: 1; runtimeInstanceId: string; nonce: string; createdAt: string }
 export interface ProfileManifest extends ProcessIdentity {
   version: 2;
   marker: "browserd-temporary-profile";
@@ -20,37 +18,55 @@ export interface ProfileManifest extends ProcessIdentity {
   launchId: string;
   state: "allocating" | "starting" | "running";
   createdAt: string;
+  executable?: string;
 }
 
 export class ProfileLease {
   private deleted = false;
   constructor(readonly manager: ProfileManager, readonly directory: string, readonly launchId: string) {}
-  async markStarting(): Promise<void> { await this.manager.transition(this, "starting", { pid: 0, processStartTicks: "pending" }); }
-  async markRunning(pid: number, processStartTicks: string): Promise<void> { await this.manager.transition(this, "running", { pid, processStartTicks }); }
+  async markStarting(executable?: string): Promise<void> { await this.manager.transition(this, "starting", { pid: 0, processStartTicks: "pending" }, executable); }
+  async markRunning(pid: number, processStartTicks: string, executable?: string): Promise<void> { await this.manager.transition(this, "running", { pid, processStartTicks }, executable); }
   async remove(): Promise<void> { if (this.deleted) return; await this.manager.remove(this); this.deleted = true; }
 }
 
-export interface ProfileManagerOptions { lockGraceMs?: number; lockTimeoutMs?: number; lockHooksForTest?: { afterAcquire?: () => Promise<void> } }
+export interface ProfileManagerOptions {
+  lockGraceMs?: number;
+  lockTimeoutMs?: number;
+  ownershipPlatformForTest?: NodeJS.Platform;
+  recentStartingMs?: number;
+  lockHooksForTest?: { afterAcquire?: () => Promise<void> };
+  processHooksForTest?: {
+    readStartTicks?: (pid: number) => Promise<string>;
+    readExecutable?: (pid: number) => Promise<string>;
+    readCommandLine?: (pid: number) => Promise<string[]>;
+    signal?: (pid: number, signal: NodeJS.Signals) => void;
+  };
+}
 
 export class ProfileManager {
   readonly runtimeInstanceId = `runtime_${randomBytes(18).toString("base64url")}`;
   readonly baseRoot: string;
   readonly instanceRoot: string;
+  readonly cleanupDiagnostics: string[] = [];
   private readonly identityPromise = currentProcessIdentity();
   private initialization?: Promise<void>;
   private allocationTail: Promise<void> = Promise.resolve();
   private readonly activeLeases = new Map<string, ProfileLease>();
-  private readonly lockGraceMs: number;
   private readonly lockTimeoutMs: number;
+  private readonly ownershipPlatformForTest: NodeJS.Platform | undefined;
+  private readonly recentStartingMs: number;
   private readonly lockHooksForTest: ProfileManagerOptions["lockHooksForTest"];
+  private readonly processHooksForTest: ProfileManagerOptions["processHooksForTest"];
   private closed = false;
 
   constructor(root = join(tmpdir(), "pi-browserd-profiles"), options: ProfileManagerOptions = {}) {
     this.baseRoot = resolve(root);
     this.instanceRoot = join(this.baseRoot, this.runtimeInstanceId);
-    this.lockGraceMs = options.lockGraceMs ?? LOCK_GRACE_MS;
     this.lockTimeoutMs = options.lockTimeoutMs ?? 5_000;
+    this.ownershipPlatformForTest = options.ownershipPlatformForTest;
+    this.recentStartingMs = options.recentStartingMs ?? RECENT_STARTING_MS;
     this.lockHooksForTest = options.lockHooksForTest;
+    this.processHooksForTest = options.processHooksForTest;
   }
 
   initialize(): Promise<void> { return this.initialization ??= this.initializeOnce(); }
@@ -75,11 +91,11 @@ export class ProfileManager {
     });
   }
 
-  async transition(lease: ProfileLease, state: ProfileManifest["state"], identity: ProcessIdentity): Promise<void> {
+  async transition(lease: ProfileLease, state: ProfileManifest["state"], identity: ProcessIdentity, executable?: string): Promise<void> {
     await this.assertLease(lease);
     const existing = await readProfileManifest(lease.directory);
     if (existing.runtimeInstanceId !== this.runtimeInstanceId || existing.launchId !== lease.launchId) throw new BrowserProtocolError("INTERNAL_ERROR", "Profile ownership changed during launch.");
-    await writeManifestAtomic(lease.directory, { ...existing, state, ...identity });
+    await writeManifestAtomic(lease.directory, { ...existing, state, ...identity, ...(executable !== undefined ? { executable: resolve(executable) } : {}) });
   }
 
   async remove(lease: ProfileLease): Promise<void> {
@@ -109,8 +125,13 @@ export class ProfileManager {
   async cleanupOrphans(): Promise<void> {
     await mkdir(this.baseRoot, { recursive: true, mode: 0o700 });
     await chmod(this.baseRoot, 0o700);
-    const release = await this.acquireLock();
+    const lease = await acquireOwnershipSocket(this.baseRoot, "profile-cleanup", {
+      waitTimeoutMs: this.lockTimeoutMs,
+      ...(this.ownershipPlatformForTest ? { platform: this.ownershipPlatformForTest } : {}),
+    });
     try {
+      await this.lockHooksForTest?.afterAcquire?.();
+      this.cleanupDiagnostics.length = 0;
       for (const entry of await readdir(this.baseRoot, { withFileTypes: true })) {
         if (entry.isDirectory() && entry.name.startsWith("runtime_")) {
           const directory = join(this.baseRoot, entry.name);
@@ -118,14 +139,14 @@ export class ProfileManager {
           if (info === undefined || info.isSymbolicLink() || !info.isDirectory()) continue;
           const marker = await readRuntimeMarker(directory).catch(() => undefined);
           if (marker === undefined) continue;
-          const currentTicks = await readProcessStartTicks(marker.pid).catch(() => undefined);
+          const currentTicks = await this.readStartTicks(marker.pid).catch(() => undefined);
           if (currentTicks === marker.processStartTicks) continue;
-          await safeRemoveRuntimeRoot(this.baseRoot, directory, marker.runtimeInstanceId);
+          await this.settleDeadRuntimeRoot(directory, marker);
           continue;
         }
         if (entry.isDirectory() && entry.name.startsWith("session-")) await cleanupLegacyDirectory(this.baseRoot, join(this.baseRoot, entry.name));
       }
-    } finally { await release(); }
+    } finally { await lease.release(); }
   }
 
   private async initializeOnce(): Promise<void> {
@@ -137,48 +158,89 @@ export class ProfileManager {
     await atomicJson(join(this.instanceRoot, INSTANCE_MARKER), marker);
   }
 
-  private async acquireLock(): Promise<() => Promise<void>> {
-    const lock = join(this.baseRoot, LOCK_FILE);
-    const identity = await this.identityPromise;
-    const owner: LockOwner = { version: 1, runtimeInstanceId: this.runtimeInstanceId, ...identity, nonce: randomBytes(24).toString("base64url"), createdAt: new Date().toISOString() };
-    const deadline = Date.now() + this.lockTimeoutMs;
-    while (true) {
-      const temporary = `${lock}.${owner.runtimeInstanceId}.${owner.nonce}.tmp`;
-      await writeExclusiveJson(temporary, owner);
-      try {
-        await link(temporary, lock);
-        await rm(temporary, { force: true });
-        await this.lockHooksForTest?.afterAcquire?.();
-        return async () => {
-          const current = await readLockOwner(lock).catch(() => undefined);
-          if (current !== undefined && sameLockOwner(current, owner)) await rm(lock, { force: true });
-        };
-      } catch (error) {
-        await rm(temporary, { force: true });
-        if (!isAlreadyExists(error)) throw error;
-      }
-      const raw = await readFile(lock, "utf8").catch(() => undefined);
-      const current = raw === undefined ? undefined : parseLockOwner(raw);
-      if (current === undefined) {
-        const info = await lstat(lock).catch(() => undefined);
-        if (info === undefined) continue;
-        if (Date.now() - info.mtimeMs < this.lockGraceMs) {
-          if (Date.now() >= deadline) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Profile lifecycle lock is initializing.", true);
-          await sleep(20);
-          continue;
-        }
-        if ((await readFile(lock, "utf8").catch(() => undefined)) === raw) await rm(lock, { force: true });
-        continue;
-      }
-      const ticks = await readProcessStartTicks(current.pid).catch(() => undefined);
-      if (ticks !== current.processStartTicks) {
-        if ((await readFile(lock, "utf8").catch(() => undefined)) === raw) await rm(lock, { force: true });
-        continue;
-      }
-      if (Date.now() >= deadline) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Profile lifecycle lock is busy.", true);
-      await sleep(20);
+  private async settleDeadRuntimeRoot(directory: string, marker: RuntimeMarker): Promise<void> {
+    const root = await realpath(this.baseRoot);
+    const absolute = resolve(directory);
+    if (absolute !== join(root, marker.runtimeInstanceId) || !marker.runtimeInstanceId.startsWith("runtime_")) return;
+    let retained = false;
+    for (const entry of await readdir(absolute, { withFileTypes: true })) {
+      if (entry.name === INSTANCE_MARKER) continue;
+      if (!entry.isDirectory() || !entry.name.startsWith("session-")) { retained = true; continue; }
+      const profile = join(absolute, entry.name);
+      const info = await lstat(profile).catch(() => undefined);
+      if (info === undefined) continue;
+      if (!info.isDirectory() || info.isSymbolicLink()) { retained = true; continue; }
+      const manifest = await readProfileManifest(profile).catch(() => undefined);
+      if (manifest === undefined || manifest.runtimeInstanceId !== marker.runtimeInstanceId || !manifest.launchId.startsWith("launch_")) { retained = true; continue; }
+      const settled = await this.settleDeadProfile(profile, manifest);
+      if (!settled) retained = true;
     }
+    if (retained) return;
+    const remaining = await readdir(absolute);
+    if (remaining.some((name) => name !== INSTANCE_MARKER)) return;
+    const current = await readRuntimeMarker(absolute);
+    if (current.runtimeInstanceId !== marker.runtimeInstanceId || current.pid !== marker.pid || current.processStartTicks !== marker.processStartTicks) return;
+    await rm(join(absolute, INSTANCE_MARKER), { force: true });
+    await rmdir(absolute);
   }
+
+  private async settleDeadProfile(directory: string, manifest: ProfileManifest): Promise<boolean> {
+    const ageMs = Date.now() - Date.parse(manifest.createdAt);
+    if ((manifest.state === "allocating" || manifest.state === "starting") && Number.isFinite(ageMs) && ageMs < this.recentStartingMs) {
+      this.diagnostic(manifest.launchId, "startup grace is active");
+      return false;
+    }
+    const currentTicks = await this.readStartTicks(manifest.pid).catch(() => undefined);
+    if (currentTicks !== manifest.processStartTicks) { await safeRemoveProfile(this.baseRoot, directory, manifest); return true; }
+    if (manifest.state !== "running" || manifest.executable === undefined) {
+      this.diagnostic(manifest.launchId, "live process identity is not fully described");
+      return false;
+    }
+    let actualExecutable: string;
+    let expectedExecutable: string;
+    let commandLine: string[];
+    try {
+      [actualExecutable, expectedExecutable, commandLine] = await Promise.all([
+        this.readExecutable(manifest.pid), realpath(manifest.executable), this.readCommandLine(manifest.pid),
+      ]);
+    } catch {
+      this.diagnostic(manifest.launchId, "live process inspection failed");
+      return false;
+    }
+    const expectedArgument = `--user-data-dir=${resolve(directory)}`;
+    if (resolve(actualExecutable) !== resolve(expectedExecutable) || !commandLine.includes(expectedArgument)) {
+      this.diagnostic(manifest.launchId, "live process executable or profile argument did not match");
+      return false;
+    }
+    await this.terminateExactProcess(manifest);
+    if (await this.isExactProcessAlive(manifest)) {
+      this.diagnostic(manifest.launchId, "verified browser process did not settle");
+      return false;
+    }
+    await safeRemoveProfile(this.baseRoot, directory, manifest);
+    return true;
+  }
+
+  private async terminateExactProcess(manifest: ProfileManifest): Promise<void> {
+    if (!await this.isExactProcessAlive(manifest)) return;
+    this.signalProcess(manifest.pid, "SIGTERM");
+    await this.waitForExactProcessExit(manifest, 2_000);
+    if (!await this.isExactProcessAlive(manifest)) return;
+    this.signalProcess(manifest.pid, "SIGKILL");
+    await this.waitForExactProcessExit(manifest, 1_000);
+  }
+
+  private async waitForExactProcessExit(manifest: ProfileManifest, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) { if (!await this.isExactProcessAlive(manifest)) return; await sleep(20); }
+  }
+
+  private async isExactProcessAlive(manifest: ProfileManifest): Promise<boolean> { return await this.readStartTicks(manifest.pid).then((ticks) => ticks === manifest.processStartTicks, () => false); }
+  private async readStartTicks(pid: number): Promise<string> { return await (this.processHooksForTest?.readStartTicks?.(pid) ?? readProcessStartTicks(pid)); }
+  private async readExecutable(pid: number): Promise<string> { return await (this.processHooksForTest?.readExecutable?.(pid) ?? realpath(`/proc/${pid}/exe`)); }
+  private async readCommandLine(pid: number): Promise<string[]> { return await (this.processHooksForTest?.readCommandLine?.(pid) ?? readProcessCommandLine(pid)); }
+  private signalProcess(pid: number, signal: NodeJS.Signals): void { if (this.processHooksForTest?.signal) this.processHooksForTest.signal(pid, signal); else process.kill(pid, signal); }
+  private diagnostic(launchId: string, message: string): void { if (this.cleanupDiagnostics.length < 32) this.cleanupDiagnostics.push(`${launchId}: ${message}`); }
 
   private async assertLease(lease: ProfileLease): Promise<void> {
     const root = await realpath(this.instanceRoot);
@@ -214,6 +276,7 @@ export async function cleanupLegacyOrphanProfiles(profileRoot: string): Promise<
 }
 
 async function currentProcessIdentity(): Promise<ProcessIdentity> { return { pid: process.pid, processStartTicks: await readProcessStartTicks(process.pid) }; }
+async function readProcessCommandLine(pid: number): Promise<string[]> { return (await readFile(`/proc/${pid}/cmdline`)).toString("utf8").split("\0").filter(Boolean); }
 async function readRuntimeMarker(directory: string): Promise<RuntimeMarker> {
   const value = await readPrivateJson(join(directory, INSTANCE_MARKER));
   if (!isRecord(value) || value.version !== 2 || value.marker !== "browserd-runtime" || typeof value.runtimeInstanceId !== "string" || typeof value.pid !== "number" || typeof value.processStartTicks !== "string" || typeof value.createdAt !== "string") throw new Error("Invalid runtime marker.");
@@ -221,7 +284,7 @@ async function readRuntimeMarker(directory: string): Promise<RuntimeMarker> {
 }
 async function readProfileManifest(directory: string): Promise<ProfileManifest> {
   const value = await readPrivateJson(join(directory, PROFILE_MARKER));
-  if (!isRecord(value) || value.version !== 2 || value.marker !== "browserd-temporary-profile" || typeof value.runtimeInstanceId !== "string" || typeof value.launchId !== "string" || !["allocating", "starting", "running"].includes(String(value.state)) || typeof value.pid !== "number" || typeof value.processStartTicks !== "string" || typeof value.createdAt !== "string") throw new Error("Invalid profile manifest.");
+  if (!isRecord(value) || value.version !== 2 || value.marker !== "browserd-temporary-profile" || typeof value.runtimeInstanceId !== "string" || typeof value.launchId !== "string" || !["allocating", "starting", "running"].includes(String(value.state)) || typeof value.pid !== "number" || typeof value.processStartTicks !== "string" || typeof value.createdAt !== "string" || (value.executable !== undefined && typeof value.executable !== "string")) throw new Error("Invalid profile manifest.");
   return value as unknown as ProfileManifest;
 }
 async function cleanupLegacyDirectory(baseRoot: string, directory: string): Promise<void> {
@@ -241,14 +304,19 @@ async function readLegacyManifest(directory: string): Promise<{ pid: number; pro
   if (!isRecord(value) || value.version !== 1 || value.marker !== "browserd-temporary-profile" || typeof value.pid !== "number" || typeof value.processStartTicks !== "string" || typeof value.createdAt !== "string") throw new Error("Invalid legacy manifest.");
   return { pid: value.pid, processStartTicks: value.processStartTicks, createdAt: value.createdAt };
 }
+async function safeRemoveProfile(baseRoot: string, directory: string, expected: ProfileManifest): Promise<void> {
+  const root = await realpath(baseRoot);
+  const absolute = resolve(directory);
+  if (!absolute.startsWith(`${root}${sep}`) || !basename(absolute).startsWith("session-")) throw new Error("Profile deletion escaped its root.");
+  const info = await lstat(absolute);
+  if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Profile is not a real directory.");
+  const current = await readProfileManifest(absolute);
+  if (current.runtimeInstanceId !== expected.runtimeInstanceId || current.launchId !== expected.launchId) throw new Error("Profile marker identity changed.");
+  await rm(absolute, { recursive: true, force: true, maxRetries: 3 });
+}
 async function readPrivateJson(path: string): Promise<unknown> { const info = await lstat(path); if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o077) !== 0) throw new Error("Invalid private marker."); return JSON.parse(await readFile(path, "utf8")); }
 async function writeManifestAtomic(directory: string, value: ProfileManifest): Promise<void> { await atomicJson(join(directory, PROFILE_MARKER), value); }
 async function writeExclusiveJson(path: string, value: unknown): Promise<void> { const handle = await open(path, "wx", 0o600); try { await handle.writeFile(`${JSON.stringify(value)}\n`); await handle.sync(); } finally { await handle.close(); } }
 async function atomicJson(path: string, value: unknown): Promise<void> { const temporary = `${path}.tmp-${randomBytes(8).toString("hex")}`; await writeExclusiveJson(temporary, value); try { await rename(temporary, path); } finally { await rm(temporary, { force: true }).catch(() => undefined); } }
-async function readLockOwner(path: string): Promise<LockOwner> { const value = parseLockOwner(await readFile(path, "utf8")); if (value === undefined) throw new Error("Invalid profile lock owner."); return value; }
-function parseLockOwner(raw: string): LockOwner | undefined { try { const value: unknown = JSON.parse(raw); if (!isRecord(value) || value.version !== 1 || typeof value.runtimeInstanceId !== "string" || typeof value.pid !== "number" || typeof value.processStartTicks !== "string" || typeof value.nonce !== "string" || typeof value.createdAt !== "string") return undefined; return value as unknown as LockOwner; } catch { return undefined; } }
-function sameLockOwner(left: LockOwner, right: LockOwner): boolean { return left.runtimeInstanceId === right.runtimeInstanceId && left.pid === right.pid && left.processStartTicks === right.processStartTicks && left.nonce === right.nonce; }
-async function safeRemoveRuntimeRoot(baseRoot: string, directory: string, runtimeInstanceId: string): Promise<void> { const root = await realpath(baseRoot); const absolute = resolve(directory); if (absolute !== join(root, runtimeInstanceId) || !runtimeInstanceId.startsWith("runtime_")) throw new Error("Runtime profile deletion escaped its root."); const info = await lstat(absolute); if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Runtime profile root is not a real directory."); const marker = await readRuntimeMarker(absolute); if (marker.runtimeInstanceId !== runtimeInstanceId) throw new Error("Runtime profile marker mismatch."); await rm(absolute, { recursive: true, force: true, maxRetries: 3 }); }
-function isAlreadyExists(error: unknown): boolean { return isRecord(error) && error.code === "EEXIST"; }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function sleep(ms: number): Promise<void> { return new Promise((resolvePromise) => setTimeout(resolvePromise, ms)); }
