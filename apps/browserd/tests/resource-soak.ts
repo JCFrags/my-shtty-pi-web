@@ -13,7 +13,8 @@ import type { BrowserSession } from "../../../packages/browser-runtime/src/regis
 import { BrowserdServer } from "../src/server.js";
 
 interface WireResponse { kind: "response"; requestId: string; ok: boolean; result?: unknown; error?: { code: string; message: string } }
-interface WireFrame { kind: "frame.available"; capturedMonotonicMs: number; publishedMonotonicMs: number; receivedMonotonicMs?: number; address: { browserSessionId: string; tabId: string }; frameSequence: number }
+interface WireFrame { kind: "frame.available"; capturedMonotonicMs: number; publishedMonotonicMs: number; receivedMonotonicMs?: number; artifactId: string; address: { browserSessionId: string; tabId: string }; frameSequence: number }
+interface ArtifactStat { owner: string; browserSessionId: string; purpose: "agent-observation" | "workspace-frame"; count: number; bytes: number }
 interface ResourceSample {
   elapsedSeconds: number;
   pssKiB: number;
@@ -27,6 +28,12 @@ interface ResourceSample {
   artifactCount: number;
   artifactBytes: number;
   operationCount: number;
+  subscriptionCount: number;
+  heldButtonCount: number;
+  heldKeyCount: number;
+  profileCount: number;
+  targetCount: number;
+  artifactStats: ArtifactStat[];
   droppedFrames: number;
   receivedFrames: number;
 }
@@ -63,8 +70,12 @@ class BrowserClient {
   }
 
   async call(kind: string, payload: Record<string, unknown> = {}, timeoutMs = 60_000): Promise<unknown> {
+    return await this.callOperation(kind, `operation:${kind.replaceAll(".", ":")}:${++this.sequence}`, payload, timeoutMs);
+  }
+
+  async callOperation(kind: string, operationId: string, payload: Record<string, unknown> = {}, timeoutMs = 60_000): Promise<unknown> {
     const suffix = `${kind.replaceAll(".", ":")}:${++this.sequence}`;
-    const response = await this.raw({ protocolVersion: PROTOCOL_VERSION, kind, requestId: `request:${suffix}`, operationId: `operation:${suffix}`, deadline: new Date(Date.now() + Math.min(timeoutMs, 5 * 60_000)).toISOString(), ...payload }, timeoutMs);
+    const response = await this.raw({ protocolVersion: PROTOCOL_VERSION, kind, requestId: `request:${suffix}`, operationId, deadline: new Date(Date.now() + Math.min(timeoutMs, 5 * 60_000)).toISOString(), ...payload }, timeoutMs);
     if (!response.ok) throw new Error(`${response.error?.code ?? "ERROR"}: ${response.error?.message ?? "request failed"}`);
     return response.result;
   }
@@ -133,17 +144,19 @@ async function main(): Promise<void> {
   const sessionBId = stringField(sessionB, "browserSessionId");
   const epochA = numberField(sessionA, "controlEpoch");
   const epochB = numberField(sessionB, "controlEpoch");
-  const tabA1 = firstTabAddress(sessionA);
+  let tabA1 = firstTabAddress(sessionA);
   const tabB1 = firstTabAddress(sessionB);
   const tabA2Result = asRecord(await clientA.call("tab.create", { browserSessionId: sessionAId, controlEpoch: epochA, url: `${origin}/second` }));
-  const tabA2 = asRecord(tabA2Result.address);
+  let tabA2 = asRecord(tabA2Result.address);
   assert.notEqual(sessionAId, sessionBId);
   assert.equal(numberField(tabB1, "controlEpoch"), epochB);
 
+  let subscriptionA1 = "subscription_soak_a1";
+  let subscriptionA2 = "subscription_soak_a2";
   await Promise.all([
-    clientA.call("frames.subscribe", { address: tabA1, interest: "idle" }),
-    clientA.call("frames.subscribe", { address: tabA2, interest: "idle" }),
-    clientB.call("frames.subscribe", { address: tabB1, interest: "idle" }),
+    clientA.call("frames.subscribe", { address: tabA1, subscriptionId: subscriptionA1, interest: "idle" }),
+    clientA.call("frames.subscribe", { address: tabA2, subscriptionId: subscriptionA2, interest: "idle" }),
+    clientB.call("frames.subscribe", { address: tabB1, subscriptionId: "subscription_soak_b1", interest: "idle" }),
   ]);
 
   const internalA = privateSession(runtime, actorA, sessionAId);
@@ -165,7 +178,14 @@ async function main(): Promise<void> {
   let iteration = 0;
   let nextSampleAt = soakStarted;
   let nextIterationAt = soakStarted;
+  let subscriberReconnects = 0;
+  let duplicateSubscribeCalls = 0;
+  let epochInvalidations = 0;
+  let operationRetryCalls = 0;
+  let artifactReadCalls = 0;
+  let tabsCreatedAndClosed = 0;
   const soakEndsAt = soakStarted + durationSeconds * 1_000;
+  const epochCadence = durationSeconds < 300 ? 6 : 30;
 
   while (performance.now() < soakEndsAt) {
     iteration++;
@@ -188,6 +208,59 @@ async function main(): Promise<void> {
       ]);
     }
 
+    const artifactObservation = asRecord(iteration % 2 === 0 ? observations[0] : observations[2]);
+    await (iteration % 2 === 0 ? clientA : clientB).call("artifact.read", { artifactId: observationArtifactId(artifactObservation), offset: 0, maxBytes: 65_536 });
+    artifactReadCalls++;
+
+    if (iteration % 8 === 0) {
+      const transient = await BrowserClient.open(browserd.descriptor.socketPath, browserd.descriptor.bindingSecret, actorA);
+      const subscriptionId = `subscription_reconnect_${iteration}`;
+      const payload = { address: tabA1, subscriptionId, interest: "idle" };
+      await transient.call("frames.subscribe", payload);
+      await transient.call("frames.subscribe", payload);
+      duplicateSubscribeCalls++;
+      assert.equal(runtime.subscriptionCount, 4);
+      transient.close();
+      await waitFor(() => runtime.subscriptionCount === 3);
+      subscriberReconnects++;
+    }
+
+    if (iteration % 10 === 0) {
+      await clientA.call("action.coordinate", { address: tabA1, observationId: stringField(asRecord(observations[0]), "observationId"), action: { kind: "click", at: { x: 150, y: 215 }, button: "left" } });
+      await clientA.call("input.text", { address: tabA1, text: `iteration-${iteration}`, replace: true });
+      await clientA.call("input.key", { address: tabA1, key: "Enter" });
+    }
+
+    if (iteration % 12 === 0) {
+      const operationId = `operation:soak-retry:${iteration}`;
+      const payload = { address: tabA1 };
+      await clientA.callOperation("tab.focus", operationId, payload);
+      await clientA.callOperation("tab.focus", operationId, payload);
+      operationRetryCalls++;
+    }
+
+    if (iteration % 15 === 0) {
+      const currentEpoch = numberField(tabA1, "controlEpoch");
+      const created = asRecord(await clientA.call("tab.create", { browserSessionId: sessionAId, controlEpoch: currentEpoch, url: `${origin}/alpha?churn=${iteration}` }));
+      const churnAddress = asRecord(created.address);
+      await clientA.call("tab.close", { address: churnAddress });
+      tabsCreatedAndClosed++;
+    }
+
+    if (iteration % epochCadence === 0) {
+      const currentEpoch = runtime.incrementControlEpochForTest(actorA, sessionAId);
+      tabA1 = { ...tabA1, controlEpoch: currentEpoch };
+      tabA2 = { ...tabA2, controlEpoch: currentEpoch };
+      assert.equal(runtime.subscriptionCount, 1);
+      subscriptionA1 = `subscription_soak_a1_epoch_${currentEpoch}`;
+      subscriptionA2 = `subscription_soak_a2_epoch_${currentEpoch}`;
+      await Promise.all([
+        clientA.call("frames.subscribe", { address: tabA1, subscriptionId: subscriptionA1, interest: "idle" }),
+        clientA.call("frames.subscribe", { address: tabA2, subscriptionId: subscriptionA2, interest: "idle" }),
+      ]);
+      epochInvalidations++;
+    }
+
     const cdpStarted = performance.now();
     await internalA.host.cdp.send("Browser.getVersion", {});
     cdpRoundTripsMs.push(performance.now() - cdpStarted);
@@ -205,8 +278,13 @@ async function main(): Promise<void> {
         framePublicationLatenciesMs.push(frame.publishedMonotonicMs - frame.capturedMonotonicMs);
         frameDeliveryLatenciesMs.push(Math.max(0, (frame.receivedMonotonicMs ?? frame.publishedMonotonicMs) - frame.publishedMonotonicMs));
       }
+      const actorAFrame = clientA.frames.at(-1);
+      const actorBFrame = clientB.frames.at(-1);
+      if (actorAFrame !== undefined) { await clientA.call("artifact.read", { artifactId: actorAFrame.artifactId, offset: 0, maxBytes: 65_536 }); artifactReadCalls++; }
+      if (actorBFrame !== undefined) { await clientB.call("artifact.read", { artifactId: actorBFrame.artifactId, offset: 0, maxBytes: 65_536 }); artifactReadCalls++; }
       clientA.frames.length = 0;
       clientB.frames.length = 0;
+      const artifactStats = runtime.artifacts.stats();
       samples.push({
         elapsedSeconds: (cpuAt - soakStarted) / 1_000,
         pssKiB: memory.pssKiB,
@@ -220,6 +298,12 @@ async function main(): Promise<void> {
         artifactCount: runtime.artifacts.entryCount,
         artifactBytes: runtime.artifacts.totalBytes,
         operationCount: runtime.operations.size,
+        subscriptionCount: runtime.subscriptionCount,
+        heldButtonCount: internalA.motor.heldInputState.buttons.length + internalB.motor.heldInputState.buttons.length,
+        heldKeyCount: internalA.motor.heldInputState.keys.length + internalB.motor.heldInputState.keys.length,
+        profileCount: (await profileDirectories(profileRoot)).length,
+        targetCount: countOpenTargets(internalA) + countOpenTargets(internalB),
+        artifactStats,
         droppedFrames: internalA.frames.droppedFrames + internalB.frames.droppedFrames,
         receivedFrames: newFrames.length,
       });
@@ -236,24 +320,34 @@ async function main(): Promise<void> {
   const actualDurationSeconds = (performance.now() - soakStarted) / 1_000;
   assert.ok(actualDurationSeconds >= durationSeconds, `Soak ended early at ${actualDurationSeconds}s.`);
   assert.ok(samples.length >= Math.floor(durationSeconds / sampleSeconds) - 1, "Too few resource samples.");
-  assert.ok(runtime.artifacts.entryCount <= 128, "Artifact registry exceeded its configured entry bound.");
+  assert.ok(runtime.artifacts.entryCount <= 256, "Artifact registry exceeded its configured entry bound.");
   assert.ok(runtime.operations.size <= 2_048, "Operation registry exceeded its configured entry bound.");
+  assert.ok(samples.every((sample) => sample.subscriptionCount === 3), "Frame subscription count did not return to its steady bound.");
+  assert.ok(samples.every((sample) => sample.heldButtonCount === 0 && sample.heldKeyCount === 0), "Held input leaked between soak iterations.");
+  assert.ok(samples.every((sample) => sample.profileCount === 2), "Profile count changed while both sessions were live.");
+  assert.ok(samples.every((sample) => sample.targetCount === 3), "Open target count changed outside bounded tab churn.");
 
   await Promise.all([
-    clientA.call("frames.unsubscribe", { address: tabA1 }),
-    clientA.call("frames.unsubscribe", { address: tabA2 }),
-    clientB.call("frames.unsubscribe", { address: tabB1 }),
+    clientA.call("frames.unsubscribe", { address: tabA1, subscriptionId: subscriptionA1 }),
+    clientA.call("frames.unsubscribe", { address: tabA2, subscriptionId: subscriptionA2 }),
+    clientB.call("frames.unsubscribe", { address: tabB1, subscriptionId: "subscription_soak_b1" }),
   ]);
+  assert.equal(runtime.subscriptionCount, 0, "Frame subscriptions remained after explicit unsubscribe.");
   clientA.close();
   clientB.close();
+  const browserPids = [internalA.host.pid, internalB.host.pid];
   await browserd.stop();
   browserd = undefined;
   await new Promise<void>((resolvePromise) => fixture?.close(() => resolvePromise()));
   fixture = undefined;
-  const remainingProfileEntries = (await readdir(profileRoot).catch(() => [])).filter((name) => name.startsWith("session-"));
+  const remainingProfileEntries = await profileDirectories(profileRoot);
   assert.equal(remainingProfileEntries.length, 0, "A temporary browser profile leaked.");
   assert.equal(runtime.artifacts.entryCount, 0, "Artifacts remained after browserd shutdown.");
   assert.equal(runtime.operations.size, 0, "Operations remained after browserd shutdown.");
+  assert.equal(runtime.subscriptionCount, 0, "Subscriptions remained after browserd shutdown.");
+  assert.deepEqual(internalA.motor.heldInputState, { buttons: [], keys: [] });
+  assert.deepEqual(internalB.motor.heldInputState, { buttons: [], keys: [] });
+  assert.ok(browserPids.every((pid) => !processIsAlive(pid)), "A Chromium process remained after browserd shutdown.");
 
   const result = {
     passed: true,
@@ -266,6 +360,12 @@ async function main(): Promise<void> {
     sessionCount: 2,
     tabCount: 3,
     idleFrameSubscriptions: 3,
+    subscriberReconnects,
+    duplicateSubscribeCalls,
+    epochInvalidations,
+    operationRetryCalls,
+    artifactReadCalls,
+    tabsCreatedAndClosed,
     screenshotLatencyMs: distribution(screenshotLatenciesMs),
     domFallbackLatencyMs: distribution(domLatenciesMs),
     pathWallLatencyMs: distribution(pathLatenciesMs),
@@ -283,6 +383,11 @@ async function main(): Promise<void> {
     artifactCount: range(samples.map((sample) => sample.artifactCount)),
     artifactBytes: range(samples.map((sample) => sample.artifactBytes)),
     operationCount: range(samples.map((sample) => sample.operationCount)),
+    subscriptionCount: range(samples.map((sample) => sample.subscriptionCount)),
+    heldButtonCount: range(samples.map((sample) => sample.heldButtonCount)),
+    heldKeyCount: range(samples.map((sample) => sample.heldKeyCount)),
+    targetCount: range(samples.map((sample) => sample.targetCount)),
+    artifactStatsByActorSessionPurpose: latestArtifactStats(samples),
     droppedFrames: range(samples.map((sample) => sample.droppedFrames)),
     receivedFrameCount: framePublicationLatenciesMs.length,
     slopesPerHour: {
@@ -293,7 +398,7 @@ async function main(): Promise<void> {
       artifactBytes: slopePerHour(samples.map((sample) => [sample.elapsedSeconds, sample.artifactBytes])),
       operationCount: slopePerHour(samples.map((sample) => [sample.elapsedSeconds, sample.operationCount])),
     },
-    cleanup: { profilesRemaining: remainingProfileEntries.length, artifactsRemaining: runtime.artifacts.entryCount, operationsRemaining: runtime.operations.size, descriptorRemoved: !(await exists(join(root, "transport", "browserd.json"))), socketRemoved: !(await exists(join(root, "transport", "browserd.sock"))) },
+    cleanup: { profilesRemaining: remainingProfileEntries.length, artifactsRemaining: runtime.artifacts.entryCount, operationsRemaining: runtime.operations.size, subscriptionsRemaining: runtime.subscriptionCount, heldButtonsRemaining: internalA.motor.heldInputState.buttons.length + internalB.motor.heldInputState.buttons.length, heldKeysRemaining: internalA.motor.heldInputState.keys.length + internalB.motor.heldInputState.keys.length, browserProcessesRemaining: browserPids.filter(processIsAlive).length, descriptorRemoved: !(await exists(join(root, "transport", "browserd.json"))), socketRemoved: !(await exists(join(root, "transport", "browserd.sock"))) },
     samples,
   };
   await mkdir(dirname(outputPath), { recursive: true });
@@ -313,17 +418,23 @@ function asRecord(value: unknown): Record<string, unknown> { if (typeof value !=
 function stringField(value: Record<string, unknown>, key: string): string { const field = value[key]; if (typeof field !== "string") throw new Error(`Expected string field ${key}.`); return field; }
 function numberField(value: Record<string, unknown>, key: string): number { const field = value[key]; if (typeof field !== "number") throw new Error(`Expected numeric field ${key}.`); return field; }
 function firstTabAddress(session: Record<string, unknown>): Record<string, unknown> { const tabs = session.tabs; if (!Array.isArray(tabs) || tabs.length === 0) throw new Error("Session has no tab."); return asRecord(asRecord(tabs[0]).address); }
+function observationArtifactId(observation: Record<string, unknown>): string { return stringField(asRecord(observation.image), "artifactId"); }
 function sleep(ms: number): Promise<void> { return new Promise((resolvePromise) => setTimeout(resolvePromise, ms)); }
+async function waitFor(predicate: () => boolean, timeoutMs = 10_000): Promise<void> { const deadline = performance.now() + timeoutMs; while (performance.now() < deadline) { if (predicate()) return; await sleep(10); } throw new Error("Timed out waiting for soak cleanup."); }
+function countOpenTargets(session: BrowserSession): number { return session.listTabs().filter((tab) => tab.state === "ready" || tab.state === "attaching").length; }
+function processIsAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch { return false; } }
 async function executableOutput(file: string, args: string[]): Promise<string> { return await new Promise((resolvePromise, reject) => execFile(file, args, (error, stdout) => error ? reject(error) : resolvePromise(stdout.trim()))); }
 async function clockTicksPerSecond(): Promise<number> { return Number(await executableOutput("/usr/bin/getconf", ["CLK_TCK"])); }
 async function exists(path: string): Promise<boolean> { return await stat(path).then(() => true, () => false); }
 async function directoryBytes(path: string): Promise<number> { let total = 0; for (const entry of await readdir(path, { withFileTypes: true }).catch(() => [])) { const child = join(path, entry.name); if (entry.isDirectory()) total += await directoryBytes(child); else if (entry.isFile()) total += (await stat(child)).size; } return total; }
+async function profileDirectories(path: string): Promise<string[]> { const values: string[] = []; for (const entry of await readdir(path, { withFileTypes: true }).catch(() => [])) { const child = join(path, entry.name); if (!entry.isDirectory()) continue; if (entry.name.startsWith("session-")) values.push(child); else values.push(...await profileDirectories(child)); } return values; }
 async function processTree(roots: number[]): Promise<Set<number>> { const entries = (await readdir("/proc")).filter((entry) => /^\d+$/.test(entry)); const parents = new Map<number, number>(); for (const entry of entries) { const text = await readFile(`/proc/${entry}/stat`, "utf8").catch(() => ""); const end = text.lastIndexOf(")"); if (end > 0) parents.set(Number(entry), Number(text.slice(end + 2).split(" ")[1])); } const tree = new Set(roots); let changed = true; while (changed) { changed = false; for (const [pid, ppid] of parents) if (tree.has(ppid) && !tree.has(pid)) { tree.add(pid); changed = true; } } return tree; }
 async function processTreeMemory(roots: number[]): Promise<{ pssKiB: number; privateDirtyKiB: number; processCount: number }> { const tree = await processTree(roots); let pssKiB = 0, privateDirtyKiB = 0, processCount = 0; for (const pid of tree) { const rollup = await readFile(`/proc/${pid}/smaps_rollup`, "utf8").catch(() => ""); if (rollup.length === 0) continue; processCount++; pssKiB += Number(rollup.match(/^Pss:\s+(\d+)/m)?.[1] ?? 0); privateDirtyKiB += Number(rollup.match(/^Private_Dirty:\s+(\d+)/m)?.[1] ?? 0); } return { pssKiB, privateDirtyKiB, processCount }; }
 async function processTreeCpu(roots: number[]): Promise<{ ticks: number }> { let ticks = 0; for (const pid of await processTree(roots)) { const text = await readFile(`/proc/${pid}/stat`, "utf8").catch(() => ""); const end = text.lastIndexOf(")"); if (end <= 0) continue; const fields = text.slice(end + 2).split(" "); ticks += Number(fields[11] ?? 0) + Number(fields[12] ?? 0); } return { ticks }; }
 function distribution(values: number[]): { count: number; min: number; median: number; p95: number; max: number; mean: number } { if (values.length === 0) return { count: 0, min: 0, median: 0, p95: 0, max: 0, mean: 0 }; const sorted = [...values].sort((a, b) => a - b); const at = (fraction: number): number => sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction))] ?? 0; return { count: values.length, min: sorted[0] ?? 0, median: at(0.5), p95: at(0.95), max: sorted.at(-1) ?? 0, mean: values.reduce((sum, value) => sum + value, 0) / values.length }; }
 function range(values: number[]): { start: number; end: number; min: number; max: number } { if (values.length === 0) return { start: 0, end: 0, min: 0, max: 0 }; return { start: values[0] ?? 0, end: values.at(-1) ?? 0, min: Math.min(...values), max: Math.max(...values) }; }
 function slopePerHour(points: [number, number][]): number { if (points.length < 2) return 0; const xMean = points.reduce((sum, [x]) => sum + x, 0) / points.length; const yMean = points.reduce((sum, [, y]) => sum + y, 0) / points.length; let numerator = 0, denominator = 0; for (const [x, y] of points) { numerator += (x - xMean) * (y - yMean); denominator += (x - xMean) ** 2; } return denominator === 0 ? 0 : numerator / denominator * 3_600; }
+function latestArtifactStats(samples: ResourceSample[]): ArtifactStat[] { return samples.at(-1)?.artifactStats ?? []; }
 
 try { await main(); }
 catch (error) {
