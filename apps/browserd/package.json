@@ -8,6 +8,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/server.test.ts",
+    "test:adversarial": "vitest run tests/adversarial.test.ts && pnpm --filter @webx/browser-runtime exec vitest run tests/adversarial-cdp.test.ts tests/adversarial-runtime.test.ts tests/profile-manager.test.ts tests/artifacts-frames-observations.test.ts tests/lifecycle-targets.test.ts",
     "test:live": "tsx tests/live-verification.ts",
     "test:soak": "tsx tests/resource-soak.ts",
     "start": "tsx src/main.ts"

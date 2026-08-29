@@ -32,6 +32,17 @@ describe("browser protocol conformance", () => {
     }
   });
 
+  it("requires bounded opaque IDs for connection-scoped frame subscriptions", () => {
+    const address = { browserSessionId: "session:frame", tabId: "tab:frame", targetId: "target_frame_0001", controlEpoch: 3 };
+    const subscribe = { protocolVersion: "browser.v1", kind: "frames.subscribe", requestId: "request:subscribe", operationId: "operation:subscribe", deadline: validDeadline, address, subscriptionId: "subscription_0001", interest: "selected" };
+    const { interest: _interest, ...subscriptionBase } = subscribe;
+    const unsubscribe = { ...subscriptionBase, kind: "frames.unsubscribe" };
+    assert.equal(Check(BrowserRequestSchema, subscribe), true);
+    assert.equal(Check(BrowserRequestSchema, unsubscribe), true);
+    assert.equal(Check(BrowserRequestSchema, { ...subscribe, subscriptionId: "short" }), false);
+    assert.equal(Check(BrowserRequestSchema, { ...subscribe, connectionId: "internal" }), false);
+  });
+
   it("enforces an absolute bounded deadline", () => {
     assert.throws(() => parseBrowserRequest({ ...validRequestFixture, deadline: "2026-08-29T01:59:59.000Z" }, now), (error: unknown) => error instanceof BrowserProtocolError && error.code === "DEADLINE_EXCEEDED");
     assert.throws(() => parseBrowserRequest({ ...validRequestFixture, deadline: "2026-08-29T02:10:00.000Z" }, now), (error: unknown) => error instanceof BrowserProtocolError && error.code === "INVALID_REQUEST");
