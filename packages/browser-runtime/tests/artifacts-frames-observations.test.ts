@@ -13,6 +13,7 @@ const other = { principalId: "owner:other", agentSessionId: "agent:other" } as c
 const address = (tab: TabRecord, controlEpoch = 1): TabAddress => ({ browserSessionId: tab.browserSessionId, tabId: tab.tabId, targetId: tab.targetId, controlEpoch });
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitFor(predicate: () => boolean): Promise<void> { for (let index = 0; index < 500; index++) { if (predicate()) return; await sleep(2); } throw new Error("fixture timeout"); }
+function deferred(): { promise: Promise<void>; resolve: () => void } { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { promise, resolve }; }
 function tab(id = "a"): TabRecord { return { browserSessionId: "session:frame", tabId: `tab:${id}`, targetId: `target:${id}`, cdpSessionId: `cdp:${id}`, documentGeneration: 1, viewportGeneration: 1, state: "open", latestFrameSequence: 0, url: "https://fixture.invalid/", title: "Fixture" }; }
 function layout(overrides: Partial<Layout> = {}): Layout { return { url: "https://fixture.invalid/", title: "Fixture", width: 800, height: 600, dpr: 1, scrollX: 0, scrollY: 0, ...overrides }; }
 function registryFor(tabs: TabRecord[]): TargetRegistry {
@@ -129,6 +130,52 @@ describe("artifact provenance, fairness, and lifetime", () => {
     await assert.rejects(() => store.read(actor, first.artifactId));
   });
 
+  it("commits hundreds of concurrent puts without exceeding count or byte limits", async () => {
+    const store = new BrowserArtifactStore({ maxEntries: 2, maxTotalBytes: 2, maxItemBytes: 1, maxEntriesPerOwner: 2, maxBytesPerOwner: 2, maxEntriesPerSession: 2, maxBytesPerSession: 2 });
+    const gate = deferred();
+    let observedMaxCount = 0;
+    let observedMaxBytes = 0;
+    const puts = Array.from({ length: 200 }, (_, index) => store.put(actor, Uint8Array.of(index % 255), { ...observation, afterDigestForTest: async () => await gate.promise }).then((value) => {
+      observedMaxCount = Math.max(observedMaxCount, store.entryCount);
+      observedMaxBytes = Math.max(observedMaxBytes, store.totalBytes);
+      return value;
+    }));
+    await sleep(10);
+    assert.equal(store.entryCount, 0);
+    gate.resolve();
+    await Promise.all(puts);
+    assert.ok(observedMaxCount <= 2);
+    assert.ok(observedMaxBytes <= 2);
+    assert.ok(store.entryCount <= 2);
+    assert.ok(store.totalBytes <= 2);
+  });
+
+  it("does not admit a concurrent owner by evicting another owner", async () => {
+    const store = new BrowserArtifactStore({ maxEntries: 1, maxTotalBytes: 1, maxItemBytes: 1, maxEntriesPerOwner: 1, maxBytesPerOwner: 1, maxEntriesPerSession: 1, maxBytesPerSession: 1 });
+    const gate = deferred();
+    const results = await Promise.allSettled([
+      store.put(actor, Uint8Array.of(1), { ...observation, afterDigestForTest: async () => await gate.promise }),
+      store.put(other, Uint8Array.of(2), { ...observation, afterDigestForTest: async () => await gate.promise }),
+      Promise.resolve().then(() => { gate.resolve(); }),
+    ]);
+    assert.equal(results.slice(0, 2).filter((result) => result.status === "fulfilled").length, 1);
+    assert.equal(results.slice(0, 2).filter((result) => result.status === "rejected").length, 1);
+    assert.equal(store.entryCount, 1);
+    assert.equal(store.totalBytes, 1);
+  });
+
+  it("does not commit an artifact cancelled around digest completion", async () => {
+    const store = new BrowserArtifactStore({ maxEntries: 1, maxTotalBytes: 1 });
+    const gate = deferred();
+    const controller = new AbortController();
+    const put = store.put(actor, Uint8Array.of(1), { ...observation, signal: controller.signal, afterDigestForTest: async () => await gate.promise });
+    controller.abort(new BrowserProtocolError("OPERATION_CANCELLED", "cancelled"));
+    gate.resolve();
+    await assert.rejects(() => put, (error) => error instanceof BrowserProtocolError && error.code === "OPERATION_CANCELLED");
+    assert.equal(store.entryCount, 0);
+    assert.equal(store.totalBytes, 0);
+  });
+
   it("expires unpinned artifacts and detects digest corruption", async () => {
     let now = 100;
     const store = new BrowserArtifactStore({ retentionMs: 10, now: () => now });
@@ -229,6 +276,48 @@ describe("screenshot consistency transaction", () => {
     assert.equal(events.length, 0);
     assert.equal(target.latestFrameSequence, 0);
     assert.equal(artifacts.entryCount, 0);
+  });
+
+  it("settles an in-flight frame capture before final unsubscribe returns", async () => {
+    const target = tab("frame-unsubscribe");
+    const artifacts = new BrowserArtifactStore();
+    const barrier = deferred();
+    let screenshotComplete = false;
+    bindFrameTab(target, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: layout() } } as T; screenshotComplete = true; return { data: Buffer.from("late-frame").toString("base64") } as T; } });
+    const scheduler = new FrameScheduler(actor, registryFor([target]), artifacts, new FakeMotor() as never, () => 1, { selectedIntervalMs: 10_000, afterScreenshotForTest: async () => await barrier.promise });
+    const events: FrameEvent[] = [];
+    scheduler.on("frame", (event) => events.push(event));
+    const key = "connection\0unsubscribe";
+    scheduler.subscribe(key, address(target));
+    await waitFor(() => screenshotComplete);
+    const stopping = scheduler.unsubscribe(key, address(target));
+    await sleep(5);
+    barrier.resolve();
+    await stopping;
+    assert.equal(events.length, 0);
+    assert.equal(artifacts.entryCount, 0);
+    assert.equal(target.latestFrameSequence, 0);
+    assert.equal(scheduler.timerCount, 0);
+  });
+
+  it("settles a frame already stored before scheduler close returns", async () => {
+    const target = tab("frame-close");
+    const artifacts = new BrowserArtifactStore();
+    const barrier = deferred();
+    let atCommit = false;
+    bindFrameTab(target, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: layout() } } as T; return { data: Buffer.from("late-frame").toString("base64") } as T; } });
+    const scheduler = new FrameScheduler(actor, registryFor([target]), artifacts, new FakeMotor() as never, () => 1, { selectedIntervalMs: 10_000, commitBarrierForTest: async () => { atCommit = true; await barrier.promise; } });
+    const events: FrameEvent[] = [];
+    scheduler.on("frame", (event) => events.push(event));
+    scheduler.subscribe("connection\0close", address(target));
+    await waitFor(() => atCommit && artifacts.entryCount === 1);
+    const closing = scheduler.close();
+    barrier.resolve();
+    await closing;
+    assert.equal(events.length, 0);
+    assert.equal(artifacts.entryCount, 0);
+    assert.equal(target.latestFrameSequence, 0);
+    assert.equal(scheduler.timerCount, 0);
   });
 
   it("deletes an uncommitted artifact when cancellation arrives after storage", async () => {

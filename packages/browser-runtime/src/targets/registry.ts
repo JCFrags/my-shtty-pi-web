@@ -19,6 +19,15 @@ export interface TabRecord {
   title: string;
 }
 
+export interface TerminalTabEvent {
+  readonly tabId: string;
+  readonly targetId: string;
+  readonly cdpSessionId: string;
+  readonly browserSessionId: string;
+  readonly state: Exclude<TabState, "open">;
+  readonly tab: Readonly<TabRecord>;
+}
+
 export class TargetRegistry extends EventEmitter {
   private readonly tabs = new Map<string, TabRecord>();
   private readonly targetToTab = new Map<string, string>();
@@ -213,10 +222,21 @@ export class TargetRegistry extends EventEmitter {
   private readonly onDisconnect = (): void => { for (const tab of this.tabs.values()) if (tab.state === "open") this.markTerminal(tab, "detached"); };
 
   private markTerminal(tab: TabRecord, state: Exclude<TabState, "open">): void {
+    if (tab.state !== "open" && !this.tabs.has(tab.tabId)) return;
     tab.state = state;
-    this.emit("tabTerminal", { tabId: tab.tabId, targetId: tab.targetId, state });
+    const terminalTab = Object.freeze({ ...tab, state });
+    this.tabs.delete(tab.tabId);
     this.targetToTab.delete(tab.targetId);
     this.autoSessions.delete(tab.targetId);
+    const event: TerminalTabEvent = {
+      tabId: terminalTab.tabId,
+      targetId: terminalTab.targetId,
+      cdpSessionId: terminalTab.cdpSessionId,
+      browserSessionId: terminalTab.browserSessionId,
+      state,
+      tab: terminalTab,
+    };
+    this.emit("tabTerminal", event);
   }
 
   private assertTabCapacity(): void {

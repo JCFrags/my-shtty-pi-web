@@ -8,7 +8,7 @@ import { SessionMotor, bindMotorTab, type CoordinateAction, type MouseButton } f
 import { DomObservationStore, bindDomTab } from "../observations/dom-store.js";
 import { bindObservationTab, ObservationStore } from "../observations/store.js";
 import type { OperationContext, OperationRegistry } from "../operations/registry.js";
-import { TargetRegistry, type TabRecord } from "../targets/registry.js";
+import { TargetRegistry, type TabRecord, type TerminalTabEvent } from "../targets/registry.js";
 
 export type DomFallbackAction =
   | { kind: "click" | "doubleClick"; button?: MouseButton }
@@ -17,7 +17,8 @@ export type DomFallbackAction =
   | { kind: "press"; key: string };
 
 export class BrowserSession {
-  private closed = false;
+  private closeState: "open" | "closing" | "closed" | "cleanup-failed" = "open";
+  private closePromise: Promise<void> | undefined;
   readonly motor: SessionMotor;
   readonly observations: ObservationStore;
   readonly dom: DomObservationStore;
@@ -67,7 +68,7 @@ export class BrowserSession {
   get personaId(): string { return this.motor.personaId; }
 
   descriptor(): SessionDescriptor {
-    return { kind: "session", browserSessionId: this.browserSessionId, controlEpoch: this.controlEpoch, state: this.closed ? "closed" : this.host.connected ? "ready" : "degraded", personaId: this.personaId, cursor: this.motor.state, tabs: this.targets.list(this.controlEpoch) };
+    return { kind: "session", browserSessionId: this.browserSessionId, controlEpoch: this.controlEpoch, state: this.closeState === "open" ? this.host.connected ? "ready" : "degraded" : "closed", personaId: this.personaId, cursor: this.motor.state, tabs: this.targets.list(this.controlEpoch) };
   }
 
   async createTab(url?: string, signal = new AbortController().signal, markDispatched?: () => void): Promise<TabRecord> {
@@ -103,11 +104,11 @@ export class BrowserSession {
   async coordinate(address: TabAddress, observationId: string, action: CoordinateAction, context: OperationContext, riskPolicy: "normal" | "newer-observation" | "local-region" = "normal"): Promise<unknown> {
     const tab = this.resolve(address);
     const point = coordinatePoint(action);
-    await this.observations.guard(address, observationId, point, riskPolicy);
+    await this.observations.guard(address, observationId, point, riskPolicy, context.signal);
     return await this.motor.coordinate(tab, action, context, async () => {
       const irreversiblePoint = coordinatePoint(action);
       this.assertEpoch(address);
-      await this.observations.guard(address, observationId, irreversiblePoint, riskPolicy);
+      await this.observations.guard(address, observationId, irreversiblePoint, riskPolicy, context.signal);
     });
   }
 
@@ -152,7 +153,7 @@ export class BrowserSession {
   }
 
   subscribeFrames(consumerKey: string, address: TabAddress, interest: "idle" | "selected" = "selected"): void { this.assertEpoch(address); this.frames.subscribe(consumerKey, address, interest); }
-  unsubscribeFrames(consumerKey: string, address: TabAddress): void { this.frames.unsubscribe(consumerKey, address); }
+  async unsubscribeFrames(consumerKey: string, address: TabAddress): Promise<void> { await this.frames.unsubscribe(consumerKey, address); }
   disconnectFrameConsumer(prefix: string): void { this.frames.removeConsumerPrefix(prefix); }
   onFrame(listener: (frame: FrameEvent) => void): void { this.frames.on("frame", listener); }
   offFrame(listener: (frame: FrameEvent) => void): void { this.frames.off("frame", listener); }
@@ -160,13 +161,24 @@ export class BrowserSession {
   incrementControlEpoch(): number { const epoch = this.operations.incrementEpoch(this.actor, this.browserSessionId); this.frames.invalidateEpoch(epoch); void this.motor.releaseAll(); return epoch; }
 
   async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    this.frames.close();
-    await this.motor.releaseAll();
-    await this.targets.close();
-    await this.host.close();
-    this.artifacts.clearSession(this.actor, this.browserSessionId);
+    if (this.closeState === "closed") return;
+    if (this.closePromise !== undefined) return await this.closePromise;
+    this.closeState = "closing";
+    const promise = this.closeInternal();
+    this.closePromise = promise;
+    try { await promise; this.closeState = "closed"; }
+    catch (error) { this.closeState = "cleanup-failed"; throw error; }
+    finally { if (this.closePromise === promise) this.closePromise = undefined; }
+  }
+
+  private async closeInternal(): Promise<void> {
+    const failures: unknown[] = [];
+    try { await this.frames.close(); } catch (error) { failures.push(error); }
+    try { await this.motor.releaseAll(); } catch (error) { failures.push(error); }
+    try { await this.targets.close(); } catch (error) { failures.push(error); }
+    try { await this.host.close(); } catch (error) { failures.push(error); }
+    try { this.artifacts.clearSession(this.actor, this.browserSessionId); } catch (error) { failures.push(error); }
+    if (failures.length > 0) throw new AggregateError(failures, "Browser session cleanup failed.");
   }
 
   private bindTab(tab: TabRecord): void {
@@ -180,15 +192,14 @@ export class BrowserSession {
     this.assertOpen();
     if (address.browserSessionId !== this.browserSessionId || address.controlEpoch !== this.controlEpoch) throw new BrowserProtocolError("CONTROL_EPOCH_STALE", "Control epoch is stale.");
   }
-  private assertOpen(): void { if (this.closed || !this.host.running || !this.host.connected) throw new BrowserProtocolError("CDP_DISCONNECTED", "Browser session is unavailable.", true); }
+  private assertOpen(): void { if (this.closeState !== "open" || !this.host.running || !this.host.connected) throw new BrowserProtocolError("CDP_DISCONNECTED", "Browser session is unavailable.", true); }
 
-  private readonly onHostExit = (): void => { if (!this.closed) this.operations.failSession(this.actor, this.browserSessionId, "BROWSER_EXITED"); void this.motor.releaseAll(); };
-  private readonly onHostDisconnect = (): void => { if (!this.closed) this.operations.failSession(this.actor, this.browserSessionId, "CDP_DISCONNECTED"); void this.motor.releaseAll(); };
+  private readonly onHostExit = (): void => { if (this.closeState === "open") this.operations.failSession(this.actor, this.browserSessionId, "BROWSER_EXITED"); void this.motor.releaseAll(); };
+  private readonly onHostDisconnect = (): void => { if (this.closeState === "open") this.operations.failSession(this.actor, this.browserSessionId, "CDP_DISCONNECTED"); void this.motor.releaseAll(); };
   private readonly onTabRegistered = (tab: TabRecord): void => { this.bindTab(tab); void this.motor.initializeTab(tab).catch(() => undefined); };
-  private readonly onTabTerminal = ({ tabId }: { tabId: string }): void => {
-    const tab = this.targets.getById(tabId);
-    if (tab !== undefined && this.motor.isActiveTab(tabId)) void this.motor.releaseAll(tab);
-    this.observations.invalidateTab(tabId); this.dom.invalidateTab(tabId); this.frames.stop(tabId);
+  private readonly onTabTerminal = ({ tabId, tab }: TerminalTabEvent): void => {
+    if (this.motor.isActiveTab(tabId)) void this.motor.releaseAll(tab);
+    this.observations.invalidateTab(tabId); this.dom.invalidateTab(tabId); void this.frames.stop(tabId);
     this.artifacts.clearTab(this.actor, this.browserSessionId, tabId);
     this.operations.failTab(this.actor, this.browserSessionId, tabId);
   };

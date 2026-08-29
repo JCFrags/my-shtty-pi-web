@@ -27,7 +27,8 @@ export class ChromeHost extends EventEmitter {
   readonly pid: number;
   private processExited = false;
   private cdpDisconnected = false;
-  private closed = false;
+  private closeState: "open" | "closing" | "closed" | "cleanup-failed" = "open";
+  private closePromise: Promise<void> | undefined;
 
   private constructor(
     readonly hostId: string,
@@ -59,7 +60,7 @@ export class ChromeHost extends EventEmitter {
     let diagnostics = "";
     try {
       signal?.throwIfAborted();
-      await lease.markStarting();
+      await lease.markStarting(executable);
       const size = options.windowSize ?? { width: 900, height: 700 };
       const position = options.windowPosition ?? { x: 40, y: 40 };
       const args = [
@@ -76,7 +77,7 @@ export class ChromeHost extends EventEmitter {
       if (child.pid === undefined) throw new BrowserProtocolError("BROWSER_START_FAILED", "Chrome did not provide a process ID.");
       signal?.throwIfAborted();
       const processStartTicks = await waitForProcessStartTicks(child.pid, 2_000, signal);
-      await lease.markRunning(child.pid, processStartTicks);
+      await lease.markRunning(child.pid, processStartTicks, executable);
       const [port, browserPath] = await waitForActivePort(`${lease.directory}/DevToolsActivePort`, child, options.startupTimeoutMs ?? 20_000, () => diagnostics, signal);
       signal?.throwIfAborted();
       const cdp = await CdpConnection.connect(`ws://127.0.0.1:${port}${browserPath}`, { timeoutMs: 5_000, ...(signal ? { signal } : {}) });
@@ -97,16 +98,35 @@ export class ChromeHost extends EventEmitter {
   get connected(): boolean { return !this.cdpDisconnected && this.cdp.connected; }
 
   async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
+    if (this.closeState === "closed") return;
+    if (this.closePromise !== undefined) return await this.closePromise;
+    this.closeState = "closing";
+    const promise = this.closeInternal();
+    this.closePromise = promise;
+    try { await promise; this.closeState = "closed"; }
+    catch (error) { this.closeState = "cleanup-failed"; throw error; }
+    finally { if (this.closePromise === promise) this.closePromise = undefined; }
+  }
+
+  private async closeInternal(): Promise<void> {
+    const failures: unknown[] = [];
     if (this.connected) {
-      try { await this.cdp.send("Browser.close", {}, undefined, { timeoutMs: 2_000 }); } catch { /* Socket often closes before the response. */ }
+      try { await this.cdp.send("Browser.close", {}, undefined, { timeoutMs: 2_000 }); }
+      catch { /* Process settlement below is authoritative. */ }
     }
     await waitForExit(this.child, 3_000);
-    if (this.running) { this.child.kill("SIGTERM"); await waitForExit(this.child, 2_000); }
-    if (this.running) { this.child.kill("SIGKILL"); await waitForExit(this.child, 1_000); }
-    this.cdp.close();
-    await this.lease.remove();
+    if (this.running) {
+      try { this.child.kill("SIGTERM"); } catch (error) { failures.push(error); }
+      await waitForExit(this.child, 2_000);
+    }
+    if (this.running) {
+      try { this.child.kill("SIGKILL"); } catch (error) { failures.push(error); }
+      await waitForExit(this.child, 1_000);
+    }
+    if (this.running) failures.push(new BrowserProtocolError("BROWSER_EXITED", "Chrome did not settle during cleanup.", true));
+    try { this.cdp.close(); } catch (error) { failures.push(error); }
+    try { await this.lease.remove(); } catch (error) { failures.push(error); }
+    if (failures.length > 0) throw new AggregateError(failures, "Chrome cleanup failed.");
   }
 
   killForTest(signal: NodeJS.Signals = "SIGKILL"): void { if (this.running) this.child.kill(signal); }

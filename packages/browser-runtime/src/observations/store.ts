@@ -67,6 +67,7 @@ export class ObservationStore {
   }
 
   get size(): number { return this.records.size; }
+  hasUsable(observationId: string): boolean { this.prune(); return this.records.has(observationId); }
 
   async capture(address: TabAddress, delivery: "auto" | "inline" | "artifact" = "auto", signal?: AbortSignal): Promise<ScreenshotObservation> {
     signal?.throwIfAborted();
@@ -87,7 +88,7 @@ export class ObservationStore {
     let artifactId: string | undefined;
     const descriptor = inline
       ? { sizeBytes: bytes.byteLength, sha256: await sha256Hex(Uint8Array.from(bytes)) }
-      : await this.artifacts.put(this.actor, bytes, { browserSessionId: captured.address.browserSessionId, tabId: captured.address.tabId, purpose: "agent-observation", mediaType: "image/png" });
+      : await this.artifacts.put(this.actor, bytes, { browserSessionId: captured.address.browserSessionId, tabId: captured.address.tabId, purpose: "agent-observation", mediaType: "image/png", ...(signal ? { signal } : {}) });
     if ("artifactId" in descriptor) artifactId = descriptor.artifactId;
     try {
       await this.commitBarrierForTest?.(inline ? "afterDigest" : "afterArtifactPut");
@@ -119,7 +120,8 @@ export class ObservationStore {
     }
   }
 
-  async guard(address: TabAddress, observationId: string, point: { x: number; y: number }, riskPolicy: "normal" | "newer-observation" | "local-region" = "normal"): Promise<void> {
+  async guard(address: TabAddress, observationId: string, point: { x: number; y: number }, riskPolicy: "normal" | "newer-observation" | "local-region" = "normal", signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     const tab = this.registry.resolve(address);
     const record = this.records.get(observationId);
     if (record === undefined || !sameAddress(record.address, address)) throw new BrowserProtocolError("OBSERVATION_NOT_FOUND", "Observation not found.");
@@ -128,7 +130,8 @@ export class ObservationStore {
     if (performance.now() > record.validUntilMonotonicMs) throw new BrowserProtocolError("OBSERVATION_STALE", "Observation is stale.");
     if (riskPolicy === "newer-observation" && this.latestByTab.get(tab.tabId) !== observationId) throw new BrowserProtocolError("OBSERVATION_STALE", "A newer observation is required.");
     if (riskPolicy === "local-region") throw new BrowserProtocolError("CAPABILITY_UNAVAILABLE", "Local region comparison is not configured.");
-    const layout = await this.layout(tab);
+    const layout = await this.layout(tab, signal);
+    signal?.throwIfAborted();
     if (layout.width !== record.width || layout.height !== record.height || layout.dpr !== record.dpr) throw new BrowserProtocolError("VIEWPORT_CHANGED", "Viewport changed after observation.");
     if (Math.abs(layout.scrollX - record.scrollX) > 2 || Math.abs(layout.scrollY - record.scrollY) > 2) throw new BrowserProtocolError("VIEWPORT_CHANGED", "Scroll changed after observation.");
     if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || point.x < 0 || point.y < 0 || point.x >= layout.width || point.y >= layout.height) throw new BrowserProtocolError("COORDINATE_OUT_OF_BOUNDS", "Coordinate is outside the observed viewport.");

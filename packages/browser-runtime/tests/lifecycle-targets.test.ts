@@ -147,6 +147,41 @@ describe("lifecycle cancellation dispatch matrix", () => {
     await targets.close();
   });
 
+  it("does not retain terminal targets across thousands of close, crash, and popup cycles", async () => {
+    const cdp = new FakeCdp();
+    const targets = await registry(cdp);
+    const terminal: Array<{ tabId: string; targetId: string; cdpSessionId: string; tab: { state: string } }> = [];
+    targets.on("tabTerminal", (event) => terminal.push(event));
+    for (let index = 0; index < 1_000; index++) {
+      const tab = await targets.createTab();
+      const tabAddress = { browserSessionId: tab.browserSessionId, tabId: tab.tabId, targetId: tab.targetId, controlEpoch: 1 };
+      await targets.closeTab(tabAddress);
+      assert.throws(() => targets.resolve(tabAddress), (error) => error instanceof BrowserProtocolError && error.code === "TAB_NOT_FOUND");
+    }
+    for (let index = 0; index < 1_000; index++) {
+      const tab = await targets.createTab();
+      cdp.emit("event", { method: "Target.targetCrashed", params: { targetId: tab.targetId } });
+      assert.throws(() => targets.resolve({ browserSessionId: tab.browserSessionId, tabId: tab.tabId, targetId: tab.targetId, controlEpoch: 1 }), (error) => error instanceof BrowserProtocolError && error.code === "TAB_NOT_FOUND");
+    }
+    const opener = await targets.createTab();
+    for (let index = 0; index < 200; index++) {
+      const popupTarget = `target_popup_cycle_${index}`;
+      cdp.emit("event", { method: "Target.targetCreated", params: { targetInfo: { type: "page", targetId: popupTarget, openerId: opener.targetId, url: "https://fixture.invalid/popup" } } });
+      for (let attempt = 0; attempt < 100 && !targets.list(1).some((item) => item.address.targetId === popupTarget); attempt++) await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(targets.list(1).some((item) => item.address.targetId === popupTarget), true);
+      cdp.emit("event", { method: "Target.targetDestroyed", params: { targetId: popupTarget } });
+    }
+    const internal = targets as unknown as { tabs: Map<string, unknown>; targetToTab: Map<string, unknown>; autoSessions: Map<string, unknown> };
+    assert.equal(internal.tabs.size, 1);
+    assert.equal(internal.targetToTab.size, 1);
+    assert.equal(internal.autoSessions.size, 1);
+    assert.equal(targets.list(1).length, 1);
+    assert.equal(terminal.length, 2_200);
+    assert.ok(terminal.every((event) => event.tabId.length > 0 && event.targetId.length > 0 && event.cdpSessionId.length > 0 && event.tab.state !== "open"));
+    await targets.close();
+    assert.equal(internal.tabs.size, 0);
+  });
+
   it("marks close dispatched and terminal after Target.closeTarget crosses dispatch", async () => {
     const cdp = new FakeCdp();
     const targets = await registry(cdp);

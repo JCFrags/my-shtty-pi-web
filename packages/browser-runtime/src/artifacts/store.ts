@@ -38,6 +38,8 @@ export interface ArtifactPutOptions {
   purpose: ArtifactPurpose;
   mediaType: BrowserMediaType;
   latestFrameKey?: string;
+  signal?: AbortSignal;
+  afterDigestForTest?: () => Promise<void>;
 }
 
 export interface ArtifactRead { descriptor: ArtifactDescriptor; bytes: Uint8Array }
@@ -100,18 +102,25 @@ export class BrowserArtifactStore {
 
   async put(actor: ActorIdentity, bytes: Uint8Array, options: ArtifactPutOptions): Promise<ArtifactDescriptor> {
     if (bytes.byteLength === 0 || bytes.byteLength > this.maxItemBytes) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Artifact size is outside the configured limit.");
+    options.signal?.throwIfAborted();
+    const copy = Uint8Array.from(bytes);
+    const digest = await sha256Hex(copy);
+    await options.afterDigestForTest?.();
+    options.signal?.throwIfAborted();
+
+    // No await is permitted in this commit section. Every concurrent put must
+    // observe capacity after the preceding put has fully committed.
     this.prune();
     const owner = actorKey(actor);
     if (options.latestFrameKey !== undefined) this.releaseOldestFramePinForReplacement(options.latestFrameKey);
-    this.makeRoom(owner, options.browserSessionId, bytes.byteLength);
+    this.makeRoom(owner, options.browserSessionId, copy.byteLength);
     const now = this.now();
     const id = `artifact_${randomBytes(24).toString("base64url")}`;
-    const copy = Uint8Array.from(bytes);
     const record: ArtifactRecord = {
       id, owner, browserSessionId: options.browserSessionId,
       ...(options.tabId !== undefined ? { tabId: options.tabId } : {}),
       purpose: options.purpose, mediaType: options.mediaType, bytes: copy,
-      sha256: await sha256Hex(copy), createdAtMs: now, expiresAtMs: now + this.retentionMs, pinCount: 0,
+      sha256: digest, createdAtMs: now, expiresAtMs: now + this.retentionMs, pinCount: 0,
     };
     this.records.set(id, record);
     this.total += copy.byteLength;

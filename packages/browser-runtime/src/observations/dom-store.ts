@@ -35,6 +35,7 @@ export class DomObservationStore {
 
   get handleCount(): number { return this.handles.size; }
   get observationCount(): number { return this.observations.size; }
+  hasUsable(observationId: string): boolean { this.prune(); return this.observations.has(observationId); }
 
   async observe(address: TabAddress, maxNodes: number, signal?: AbortSignal): Promise<DomObservation> {
     signal?.throwIfAborted();
