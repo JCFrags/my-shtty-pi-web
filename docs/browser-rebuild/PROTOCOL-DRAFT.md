@@ -109,15 +109,15 @@ Its result contains:
 - cursor position, visibility, path sequence, and persona ID;
 - validity timestamp.
 
-The runtime compares target, document generation, viewport generation, CSS dimensions, DPR, and scroll before and after capture. It retries one inconsistent capture when the deadline permits. It otherwise returns `DOCUMENT_CHANGED` or `VIEWPORT_CHANGED` and retains no rejected artifact. `capturedMonotonicMs` records completed capture.
+The runtime compares target, CDP session, document generation, viewport generation, control epoch, CSS dimensions, DPR, and scroll before and after capture. It retries one inconsistent capture when the deadline permits. The immutable captured identity remains bound through digest and artifact insertion. The runtime resolves the exact tab again immediately before commit. It returns `DOCUMENT_CHANGED`, `VIEWPORT_CHANGED`, or `CONTROL_EPOCH_STALE` on a commit-time mismatch and idempotently revokes any new artifact. `capturedMonotonicMs` records completed capture.
 
 The observation record does not retain another full screenshot buffer. It retains bounded binding metadata and an artifact reference.
 
 ## DOM fallback observation
 
-`observe.domFallback` is a separate request. It returns a bounded list of nodes. Each node can contain an opaque handle, role, accessible name, value, selected state fields, CSS viewport bounds, document generation, and a bounded locator description.
+`observe.domFallback` is a separate request. It returns a bounded list of nodes. The store has explicit observation, total-handle, and per-observation-handle limits with deterministic pruning. Each node can contain an opaque handle, role, accessible name, value, selected state fields, top-level CSS viewport bounds, document generation, and a bounded locator description.
 
-A handle is bound to the exact actor, browser session, tab, target, and document generation. Navigation invalidates it. Same-document detach returns `HANDLE_STALE`. The runtime does not search a replacement document.
+A handle is bound to the exact actor, browser session, tab, target, and document generation. Navigation, expiry, detach, target movement, or document mismatch returns `HANDLE_STALE`. AX-tree, resolve, and box-model work accepts the operation cancellation signal. The runtime does not search a replacement document. Same-origin child frame AX trees are supported. Cross-origin out-of-process iframe fallback is unsupported in Phase 1.2 because that target is outside the tab DOM authority.
 
 ## Actions
 
@@ -156,7 +156,7 @@ type DispatchState =
 
 The status record has queue, start, and finish times, terminal result or sanitized error, and dispatch state. It may retain former session and tab IDs for internal correlation. The status request does not require a live tab address.
 
-The operation record stores a bounded SHA-256 fingerprint of canonical mutation semantics. It includes request kind, identity, control epoch, action body, and relevant options. It excludes `requestId` and `deadline`. Same actor, operation ID, and fingerprint reuse the original queued, running, or terminal operation. A different fingerprint returns `OPERATION_CONFLICT` and causes no second side effect. Cancellation is idempotent. Queued cancellation prevents dispatch. Running cancellation stops unsent samples and tries to release held input with an independent bounded cleanup budget. Cancellation after an irreversible event does not claim rollback. Late CDP results cannot change a terminal status.
+The operation record stores a bounded SHA-256 fingerprint of canonical mutation semantics. It includes request kind, identity, control epoch, action body, and relevant options. It excludes `requestId` and `deadline`. The runtime checks existing actor, operation ID, and fingerprint state before current session or tab lookup. An exact retry therefore returns or waits for the original queued, running, or terminal operation even after the resource was closed, rolled back, or crashed. A different fingerprint returns `OPERATION_CONFLICT` before lookup and causes no second side effect. Frame subscribe and unsubscribe fingerprints include the internal browserd connection identity. A reconnect cannot recover another connection's subscription success. Cancellation is idempotent. Queued cancellation prevents dispatch. Running cancellation stops unsent samples and tries to release held input with an independent bounded cleanup budget. Cancellation after an irreversible event does not claim rollback. Late CDP results cannot change a terminal status.
 
 ## Frame event
 
@@ -175,7 +175,7 @@ It does not contain an agent observation ID. A frame does not create a durable m
 
 ## Artifact reads
 
-`artifact.read` supplies an artifact ID, byte offset, and bounded maximum byte count. It returns one base64 chunk with the actual stored media type, total size, digest, and end-of-file state. Phase 1.1 supports truthful `image/png` only. Each record is scoped by actor, browser session, optional tab, and purpose (`agent-observation` or `workspace-frame`). Authorization uses the connection-bound actor. A caller cannot choose a file path.
+`artifact.read` supplies an artifact ID, byte offset, and bounded maximum byte count. It returns one base64 chunk with the actual stored media type, total size, digest, and end-of-file state. Phase 1.2 supports truthful `image/png` only. Each record is scoped by actor, browser session, optional tab, and purpose (`agent-observation` or `workspace-frame`). Authorization uses the connection-bound actor. A caller cannot choose a file path.
 
 ## Responses and errors
 
@@ -184,6 +184,8 @@ A response has the request ID, optional operation ID, `ok`, and either a validat
 The error enum includes request, authentication, deadline, ownership, session, tab, target, epoch, observation, document, viewport, coordinate, handle, operation, browser, CDP, artifact, navigation, limit, and capability failures. Ordinary errors exclude profile paths, CDP endpoints, cookies, headers, storage, and page secrets.
 
 ## Lifecycle behavior
+
+Tab and popup registration are transactions. Capacity is checked before target creation. A tab is not visible to list or action lookup until attachment, required domain enablement, and identity initialization finish. A later overlay, cancellation, authorization, or initial navigation failure closes and unregisters the new target. Failed attachment and popup work leaves no authoritative mapping.
 
 Target close, target crash, Chrome exit, and CDP disconnect settle affected operations and stop frame capture. Operation records remain queryable. The runtime never chooses another browser or tab as a fallback.
 

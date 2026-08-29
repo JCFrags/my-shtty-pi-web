@@ -1,0 +1,78 @@
+{
+  "passed": true,
+  "chromium": "Chromium 151.0.7922.173 Built from source for Fedora release 44 (Forty Four)",
+  "startupMs": 599.9977329999999,
+  "pathWallMs": 908.211045,
+  "parallelMs": 1057.7132789999996,
+  "serialMs": 6344.978749999998,
+  "activeFrameCount": 10,
+  "distinctIntermediateCursorPositions": 10,
+  "actorIsolation": true,
+  "sharedPersonaAcrossTabs": true,
+  "concurrentProfileLaunches": 4,
+  "descriptorReadyStateAtomic": true,
+  "frameSubscriptionIsolation": {
+    "subscribedConnectionFrames": 10,
+    "sameActorUnsubscribedFrames": 0,
+    "otherActorFrames": 0,
+    "duplicateCount": 1,
+    "disconnectCleanup": true,
+    "epochCleanup": true
+  },
+  "operationFingerprint": {
+    "duplicateSideEffects": 1,
+    "conflictCode": "OPERATION_CONFLICT",
+    "sessionCloseRetryAfterDeletion": true,
+    "tabCloseRetryAfterDeletion": true,
+    "reconnectSubscribeConflict": "OPERATION_CONFLICT"
+  },
+  "inputRelease": {
+    "disconnectCleanup": true,
+    "targetTerminalCleanupCoveredByAdversarialTest": true,
+    "epochCleanup": true,
+    "heldButtons": 0,
+    "heldKeys": 0
+  },
+  "artifactProvenance": {
+    "mediaType": "image/png",
+    "crossActorReadDenied": true,
+    "crashedTabCleanup": true
+  },
+  "screenshotConsistency": {
+    "animatedFixture": true,
+    "completedCaptureTimestamp": 1256.883862
+  },
+  "typedErrors": {
+    "artifact": "ARTIFACT_NOT_FOUND",
+    "operationConflict": "OPERATION_CONFLICT",
+    "targetCrash": "failed"
+  },
+  "overlayMutationAndTopLayerDialog": true,
+  "publicWheelAndScrollGuard": true,
+  "domFallbackCoordinates": {
+    "verticalAndHorizontalScroll": true,
+    "sameOriginIframe": true,
+    "crossOriginIframe": "unsupported in Phase 1.2 because out-of-process iframe targets are not registered as tab DOM authority",
+    "staleCodeThroughBrowserd": "HANDLE_STALE"
+  },
+  "cancellation": {
+    "state": "cancelled",
+    "dispatchState": "partially-dispatched"
+  },
+  "navigationCancellation": {
+    "state": "cancelled",
+    "dispatchState": "dispatched"
+  },
+  "postPathRevalidation": {
+    "state": "failed",
+    "dispatchState": "partially-dispatched",
+    "clickPrevented": true
+  },
+  "targetCrash": "failed",
+  "chromeKillFailedClosed": true,
+  "processTreePssKiB": 599190,
+  "processTreePrivateDirtyKiB": 288060,
+  "artifactCount": 50,
+  "artifactBytes": 560799,
+  "operationCount": 74
+}

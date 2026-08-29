@@ -58,7 +58,17 @@ Each phase has one acceptance gate. Keep the old browser production path until t
 
 **Evidence:** `PHASE1-1-RESULTS.md`, `evidence/phase1-1-live-results.json`, and `evidence/phase1-1-soak-results.json`.
 
-**Remaining handoff gate:** complete one fresh independent acceptance review when the reviewer broker is available. Do not route production traffic before that review and the Phase 2 route tests pass.
+**Handoff disposition:** the fresh Phase 1.2 independent audit superseded this gate. It reproduced blocking findings. Phase 1.2 corrected them and reran all acceptance gates.
+
+### Phase 1.2 — independent-audit corrections
+
+**Status:** complete on `rebuild/screenshot-first-browser`. The fresh independent audit reproduced blocking correctness findings. All corrections, deterministic tests, Fedora Chromium live verification, a fresh uninterrupted 30-minute soak, and a fresh uninterrupted two-hour soak passed. Production remains unrouted.
+
+**Completed work:** exclusive nonce-bound browserd startup ownership and unique sockets; atomic ownership-safe profile locking and outer-root cleanup; transactional tab and popup publication; immutable screenshot and frame identity through artifact commit; post-guard cancellation and truthful drag release; typed bounded cancellable DOM fallback; retry resolution before resource lookup; connection-bound frame retry semantics; idempotent artifact rollback; session-before-owner quota order; per-process-tree resource evidence.
+
+**Evidence:** `PHASE1-2-RESULTS.md`, `evidence/phase1-2-live-results.json`, `evidence/phase1-2-soak-results.json`, and `evidence/phase1-2-soak-2h-results.json`.
+
+**Resource decision:** the two-hour run did not prove a PSS plateau. Phase 2 development can begin behind its reversible switch. Production-default routing requires either credible representative plateau evidence or a tested bounded Chrome session recycling and recovery policy. Do not change one-process-per-session isolation only to reduce PSS.
 
 ## Phase 2 — native Pi extension and authority cutover behind one switch
 
@@ -79,7 +89,7 @@ Each phase has one acceptance gate. Keep the old browser production path until t
 
 **Tests:** native Pi tool schema tests; end-to-end Pi extension fixture flow; concurrent Pi sessions; wrong owner/session/target/epoch; old-observation rejection; deadline and cancellation; search/read health with Chrome absent; no MCP process; no per-action process.
 
-**Acceptance gate:** one fresh independent Phase 1.1 review has no reproduced blocker. The new route passes all browser acceptance tests and real Pi uses it by default in a staged installation. Search/read tests pass with browser disabled.
+**Acceptance gate:** Phase 1.2 has no unresolved correctness blocker. The new route passes all browser acceptance tests in a staged installation. Search/read tests pass with browser disabled. Default routing also requires the ADR-012 resource gate: credible representative plateau evidence or a tested bounded Chrome session recycling and recovery policy.
 
 **Deletions enabled:** `components/browser/crates/browserd/`, `backend-core/`, `backend-agent-browser/`, `backend-pinchtab/`, old backend scripts and tests, and browser daemon port code after one release-candidate soak.
 

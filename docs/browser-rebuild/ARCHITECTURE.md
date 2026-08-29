@@ -100,6 +100,8 @@ Pointer actions on two tabs in one browser session serialize through the same mo
 
 The registry creates and adopts only targets that belong to its exact browser session. It closes or hides the browser bootstrap page. A popup is registered only when its opener is an owned tab. Unknown targets are not adopted.
 
+Target registration is transactional. The runtime checks the per-session tab limit before target creation. It does not publish the tab or target mapping until attachment, required domain enablement, and identity setup succeed. Session-level creation then owns rollback if overlay installation, cancellation, authorization, or initial navigation fails. Rollback closes or detaches the target where possible and removes target, auto-session, observation, handle, frame, and listener state. A failed target or popup is not selectable and does not consume tab capacity.
+
 A target close or crash invalidates its observations, DOM handles, and frame schedule. It also settles affected operations. Renderer replacement, prerender activation, or an unproven target swap fails closed. There is no active-tab or last-tab fallback.
 
 ## Two screenshot products
@@ -108,7 +110,7 @@ A target close or crash invalidates its observations, DOM handles, and frame sch
 
 An agent observation exists only after an explicit `observe.screenshot` request. It uses lossless PNG in Phase 1. Its bounded metadata includes the exact actor-owned address, URL, title, wall and monotonic capture time, viewport, DPR, scroll, document and viewport generations, frame sequence, digest, cursor state, and validity time.
 
-Capture is a bounded consistency transaction. The runtime reads layout and scroll before and after PNG capture and confirms the same target, document generation, viewport generation, CSS dimensions, DPR, and scroll tolerance. It retries once when safe. It otherwise returns `DOCUMENT_CHANGED` or `VIEWPORT_CHANGED` and retains no rejected artifact. The completed capture time defines freshness.
+Capture is a bounded consistency transaction. The runtime reads layout and scroll before and after PNG capture and confirms the same target, CDP session, document generation, viewport generation, control epoch, CSS dimensions, DPR, and scroll tolerance. It retries once when safe. The captured identity remains immutable through digest and artifact insertion. The runtime resolves the exact tab again immediately before publication. A commit-time mismatch returns `DOCUMENT_CHANGED`, `VIEWPORT_CHANGED`, or `CONTROL_EPOCH_STALE`, revokes any new artifact idempotently, and retains no observation. The completed capture time defines freshness.
 
 The image is stored as an owner-scoped artifact unless it is below the reviewed inline limit. Observation metadata stores an artifact ID and digest. It does not retain another full image buffer.
 
@@ -136,9 +138,9 @@ A closed-shadow-root overlay has `pointer-events: none`. The runtime installs it
 
 ## DOM fallback
 
-DOM or accessibility inspection is explicit. It does not run for every screenshot. The runtime returns a bounded list of role, name, value, state, bounds, and diagnostic locator text. The public handle is opaque and maps to an internal backend node for one actor, session, tab, target, and document generation.
+DOM or accessibility inspection is explicit. It does not run for every screenshot. The runtime has explicit limits for observations, total handles, and handles per observation. It prunes expired or excess observations and all related handles deterministically. The public handle is opaque and maps to an internal backend node for one actor, session, tab, target, and document generation.
 
-Navigation invalidates all handles. A detached node returns `HANDLE_STALE`. The runtime does not search a replacement document. Pointer-based fallback actions still use the session motor and its human-style path.
+Navigation, expiry, detach, target movement, or document mismatch returns `HANDLE_STALE`. The runtime does not search a replacement document. AX-tree and box-model CDP work accepts the operation cancellation signal. Bounds use top-level CSS viewport coordinates. Vertical and horizontal scroll and same-origin iframe coordinates have deterministic and live coverage. Same-origin child frame accessibility trees are included. Cross-origin out-of-process iframes remain unsupported because those targets are outside the tab DOM authority. Pointer-based fallback actions still use the session motor and its human-style path.
 
 ## Operations and control epoch
 
@@ -146,7 +148,7 @@ Operation status is actor-scoped by operation ID. The record does not depend on 
 
 States are `queued`, `running`, `committed`, `failed`, `cancelled`, and `expired`. Dispatch state is separate: `not-dispatched`, `partially-dispatched`, or `dispatched`. Cancellation after a click or navigation dispatch does not claim rollback.
 
-Each absolute deadline is converted to a monotonic budget at admission. Expired queue entries do not dispatch. Each actor-scoped mutation stores a bounded SHA-256 fingerprint of its canonical semantic request. The fingerprint includes kind, identity, epoch, action, and relevant options. It excludes request ID and deadline. An exact operation-ID retry returns or waits for the original operation. Changed semantics return `OPERATION_CONFLICT` and do not execute. Status, cancellation, count, and retention are bounded.
+Each absolute deadline is converted to a monotonic budget at admission. Expired queue entries do not dispatch. Each actor-scoped mutation stores a bounded SHA-256 fingerprint of its canonical semantic request. The fingerprint includes kind, identity, epoch, action, and relevant options. It excludes request ID and deadline. The runtime checks an existing operation before resolving the current session or tab. An exact operation-ID retry can therefore return its original result after close, rollback, or target failure. Changed semantics return `OPERATION_CONFLICT` before resource lookup and do not execute. Connection-scoped frame mutations include the internal connection identity. A reconnect cannot inherit a disconnected connection's successful subscription. Status, cancellation, count, and retention are bounded.
 
 A control takeover increments the session epoch. It cancels queued old-epoch work and stops running work at the next cancellable boundary. A later epoch cannot make an old action valid again. Phase 1 tests this mechanism but does not expose user takeover.
 
@@ -160,9 +162,9 @@ Artifacts have random IDs, private storage, owner-scoped reads, SHA-256 integrit
 
 Session creation is transactional. Failure closes CDP, stops Chrome, and removes the owned profile. Normal shutdown sends `Browser.close`, then uses TERM and KILL only if needed. The runtime waits for process settlement before profile deletion.
 
-One runtime-owned profile manager allocates under a unique runtime-instance root. Allocation transitions from allocating to starting to running under an atomic cross-process lock where required. Manifests bind runtime ID, launch ID, PID, and process-start ticks. Startup orphan cleanup runs once and removes only a verified dead runtime-owned root. Profile deletion verifies the real owned directory, marker, runtime identity, launch identity, and process identity. Symlinks, foreign directories, live owners, and paths outside the root are rejected.
+One runtime-owned profile manager allocates under a unique runtime-instance root. Allocation transitions from allocating to starting to running under an atomic cross-process lock where required. Lock acquisition publishes a complete nonce-bearing owner record through an atomic no-replace primitive. Release verifies the current nonce, PID, and process-start identity. Young malformed state receives a bounded grace period. Manifests bind runtime ID, launch ID, PID, and process-start ticks. Startup orphan cleanup runs once and removes only a verified dead runtime-owned root. Profile deletion verifies the real owned directory, marker, runtime identity, launch identity, and process identity. Symlinks, foreign directories, live owners, and paths outside the root are rejected. The manager tracks active leases and refuses close while one remains. Normal runtime shutdown closes the manager and removes only its own empty marker and runtime-instance root.
 
-The public descriptor is written atomically only after the Unix socket is listening and verified as `0600`. It includes protocol version, runtime instance ID, PID, process-start ticks, socket path, binding secret, and start time. Startup uses PID plus start ticks to distinguish a live owner from PID reuse. Failed startup and idempotent shutdown remove the socket and descriptor.
+Before inspecting or changing shared service paths, browserd acquires an atomic nonce-bearing startup ownership lock. Each runtime instance uses a unique socket name. The fixed descriptor points to that socket and is written atomically only after the socket is listening and verified as `0600`. It includes protocol version, runtime instance ID, PID, process-start ticks, socket path, binding secret, and start time. Startup uses PID plus start ticks to distinguish a live owner from PID reuse. Cleanup removes the descriptor, unique socket, or owner lock only when their exact instance and nonce still match. Failed startup and idempotent shutdown cannot remove replacement resources. Connections and unbound-client bind time are bounded.
 
 Chrome exit or CDP disconnect stops frames and settles all session operations. A target failure affects only that target. The runtime never falls back to another browser.
 
@@ -175,3 +177,5 @@ Public navigation authority remains in `webxd`. `browserd` has a narrow `Navigat
 The executable comes only from reviewed service configuration. Prefer Google Chrome when it is already installed. Support configured Fedora Chromium. Do not install a browser as a runtime side effect.
 
 Linux resource evidence uses `/proc/<pid>/smaps_rollup` PSS as the primary memory metric. Summed RSS can double-count shared pages and is not the production decision metric. Keep one Chrome process per browser session until PSS evidence and a separate architecture decision justify a change.
+
+The Phase 1.2 two-hour mixed run did not prove a memory plateau. Total PSS slopes were +41,613 KiB/hour over the full run, +61,198 KiB/hour in the final hour, and +29,914 KiB/hour in the final 30 minutes. Browserd, bounded stores, process counts, and one Chrome session were nearly flat late in the run. Most final-hour growth was in the other Chrome tree. Phase 2 development can proceed behind its reversible switch, but production-default routing requires either credible longer plateau evidence or a tested bounded Chrome session recycling and recovery policy.

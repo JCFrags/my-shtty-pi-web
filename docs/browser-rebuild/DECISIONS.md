@@ -90,6 +90,16 @@ These decisions apply to the replacement browser runtime. They supersede conflic
 
 **Consequence:** Direct browserd access is an administrator and developer capability. Hostile same-UID code remains outside the protection boundary unless a later separate-user or sandbox design is adopted. See `ADR-011-BROWSERD-TRUST-BOUNDARY.md`.
 
-## Phase 1.1 confirmations
+## ADR-012: Require plateau or bounded Chrome recycling before default routing
+
+**Decision:** Phase 2 development can proceed behind one reversible service switch after Phase 1.2 correctness gates pass. Production-default browser routing requires either credible representative plateau evidence or a tested bounded Chrome session recycling and recovery policy.
+
+**Reason:** The Phase 1.2 two-hour run kept browserd, artifacts, operations, process counts, and one Chrome session nearly flat in late windows, but total PSS did not plateau. Most final-hour growth was in the other Chrome process tree.
+
+**Consequence:** Do not weaken one-process-per-session isolation to improve the metric. A recycling design must preserve explicit session identity, operation dispatch truth, cleanup, and visible recovery. Resource limits remain a production gate, not a Phase 2 development blocker.
+
+## Phase 1.1 and Phase 1.2 confirmations
 
 Phase 1.1 confirms that frame subscriptions are connection-, actor-, full-address-, epoch-, and subscription-ID-scoped. Operation IDs use canonical semantic fingerprints. Artifacts use actor, session, tab, purpose, media type, size, digest, and lifetime provenance. Screenshot metadata is checked before and after capture. Descriptor and profile ownership use runtime instance identity plus PID start identity.
+
+Phase 1.2 confirms exclusive nonce-bound browserd startup ownership, unique instance sockets, atomic profile locks, outer-root cleanup, transactional target publication, immutable capture identity through artifact commit, typed bounded DOM fallback, retry lookup before resource lookup, connection-bound frame retry semantics, idempotent artifact rollback, and session-before-owner quota order. Same-origin iframe DOM fallback is supported. Cross-origin out-of-process iframe fallback is not supported.
