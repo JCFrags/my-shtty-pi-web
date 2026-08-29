@@ -1,6 +1,8 @@
+import { createServer } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import {
   FailClosedBrowserDestinationAuthority,
+  ProxyBoundBrowserDestinationAuthority,
   type DestinationResolver,
 } from "../src/destination-authority.js";
 import type { AuthorityActor } from "../src/ports.js";
@@ -26,11 +28,26 @@ describe("fail-closed browser destination authority", () => {
     await expect(authority.authorize(request(url))).rejects.toMatchObject({ code, status: 403 });
   });
 
-  it("refuses a public address when connection-bound egress is absent", async () => {
+  it("refuses session readiness and public URLs when connection-bound egress is absent", async () => {
     const authority = new FailClosedBrowserDestinationAuthority(resolver(["93.184.216.34"]));
+    await expect(authority.assertReady()).rejects.toMatchObject({ code: "WEBX_POLICY_EGRESS_REQUIRED", status: 503, retryable: true });
     await expect(authority.authorize(request("https://example.com/"))).rejects.toMatchObject({
       code: "WEBX_POLICY_EGRESS_REQUIRED",
       status: 403,
     });
+  });
+
+  it("requires a live loopback proxy before reporting session readiness", async () => {
+    const server = createServer((socket) => socket.end());
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("proxy fixture did not bind");
+    const authority = new ProxyBoundBrowserDestinationAuthority("127.0.0.1", address.port, resolver(["93.184.216.34"]));
+    await expect(authority.assertReady()).resolves.toBeUndefined();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await expect(authority.assertReady()).rejects.toMatchObject({ code: "WEBX_EGRESS_UNAVAILABLE", status: 503, retryable: true });
   });
 });

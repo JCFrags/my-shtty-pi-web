@@ -107,7 +107,7 @@ describe("BrowserDaemonRpcPort API-v3 legacy adapter", () => {
 
   it("normalizes initial, explicit navigation, and new-tab URLs before dispatch", async () => {
     const connection = rpc();
-    const authority = { authorize: vi.fn(async ({ url }: { url: string }) => ({ mode: "egress-bound" as const, normalizedUrl: `${url}/normalized`, asciiHostname: "example.test", port: 443, resolvedAddresses: ["8.8.8.8"], redirectPolicy: { revalidateEveryHop: true as const, maxRedirects: 10 }, egressBindingId: "proxy-1" })) };
+    const authority = { assertReady: vi.fn(async () => undefined), authorize: vi.fn(async ({ url }: { url: string }) => ({ mode: "egress-bound" as const, normalizedUrl: `${url}/normalized`, asciiHostname: "example.test", port: 443, resolvedAddresses: ["8.8.8.8"], redirectPolicy: { revalidateEveryHop: true as const, maxRedirects: 10 }, egressBindingId: "proxy-1" })) };
     const port = new BrowserDaemonRpcPort(async () => connection, authority);
     await port.createSession(owner, { pathId: "agent-browser/chrome", url: "https://example.test" }, "create-1");
     await port.act(owner, "session-1", { kind: "navigate", url: "https://next.test" }, "navigate-1");

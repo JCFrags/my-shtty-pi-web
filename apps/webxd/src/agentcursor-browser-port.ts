@@ -40,6 +40,7 @@ export class AgentCursorBrowserPort implements BrowserDaemonPort {
 
   async createSession(actor: AuthorityActor, request: BrowserSessionRequest, operationIdValue: string, signal?: AbortSignal): Promise<BrowserSession> {
     if (request.pathId !== "agentcursor/chrome") throw new BrowserPortError("unsupported", "selected browser backend supports only agentcursor/chrome", 400);
+    await this.destinationAuthority.assertReady(signal);
     const descriptor = await this.client.descriptor();
     const authorization = request.url === undefined ? undefined : await this.authorize(actor, descriptor, operationIdValue, "initial", request.url, signal);
     const raw = sessionDescriptor(await this.request(actor, operationIdValue, { kind: "session.create", ...(authorization === undefined ? {} : { initialUrl: authorization.normalizedUrl, navigationAuthorization: authorization.token }) }, signal));

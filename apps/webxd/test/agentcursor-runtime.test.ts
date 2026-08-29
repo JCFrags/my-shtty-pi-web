@@ -269,6 +269,10 @@ describe("actual AgentCursor WebX Unix route", () => {
       browserBackend: "agentcursor",
       browserDescriptorPath: browserd.descriptorPath,
       browserRuntimeDirectory: directory,
+      browserDestinationAuthority: {
+        assertReady: async () => undefined,
+        authorize: async ({ url }) => ({ mode: "egress-bound", normalizedUrl: url, asciiHostname: new URL(url).hostname, port: 443, resolvedAddresses: ["93.184.216.34"], redirectPolicy: { revalidateEveryHop: true, maxRedirects: 10 }, egressBindingId: "test-route-proxy" }),
+      },
       cwd: "/deterministic/agentcursor-route",
       authenticateActor: sameUserPiActorAuthenticator,
     });

@@ -94,6 +94,8 @@ class PiHarness {
 class LoopbackDestinationAuthority implements BrowserDestinationAuthority {
   constructor(private readonly origin: string) {}
 
+  async assertReady(signal?: AbortSignal): Promise<void> { signal?.throwIfAborted(); }
+
   async authorize(request: BrowserDestinationRequest, signal?: AbortSignal) {
     signal?.throwIfAborted();
     const url = new URL(request.url);

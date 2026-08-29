@@ -27,6 +27,7 @@ export interface BrowserDestinationAuthorization {
 }
 
 export interface BrowserDestinationAuthority {
+  assertReady(signal?: AbortSignal): Promise<void>;
   authorize(request: BrowserDestinationRequest, signal?: AbortSignal): Promise<BrowserDestinationAuthorization>;
 }
 
@@ -63,6 +64,10 @@ export class ProxyBoundBrowserDestinationAuthority implements BrowserDestination
     if (!Number.isInteger(proxyPort) || proxyPort < 1 || proxyPort > 65535) throw new Error("browser egress proxy port is invalid");
   }
 
+  async assertReady(signal?: AbortSignal): Promise<void> {
+    await probeProxy(this.proxyHost, this.proxyPort, signal);
+  }
+
   async authorize(request: BrowserDestinationRequest, signal?: AbortSignal): Promise<BrowserDestinationAuthorization> {
     const parsed = parseBrowserUrl(request.url);
     try {
@@ -77,7 +82,7 @@ export class ProxyBoundBrowserDestinationAuthority implements BrowserDestination
     } catch (error) {
       throw policyPortError(error);
     }
-    await probeProxy(this.proxyHost, this.proxyPort, signal);
+    await this.assertReady(signal);
     return Object.freeze({
       mode: "egress-bound",
       normalizedUrl: destination.normalizedUrl,
@@ -92,6 +97,15 @@ export class ProxyBoundBrowserDestinationAuthority implements BrowserDestination
 
 export class FailClosedBrowserDestinationAuthority implements BrowserDestinationAuthority {
   constructor(private readonly resolver: DestinationResolver = new SystemDestinationResolver()) {}
+
+  async assertReady(): Promise<void> {
+    throw new BrowserPortError(
+      "WEBX_POLICY_EGRESS_REQUIRED",
+      "browser session creation requires a healthy connection-bound egress route",
+      503,
+      true,
+    );
+  }
 
   async authorize(request: BrowserDestinationRequest, signal?: AbortSignal): Promise<BrowserDestinationAuthorization> {
     const parsed = parseBrowserUrl(request.url);

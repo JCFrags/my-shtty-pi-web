@@ -136,8 +136,11 @@ class FakeClient {
   });
 }
 
-function destination(egressBindingId: string | null = "proxy-binding-a"): BrowserDestinationAuthority {
+function destination(egressBindingId: string | null = "proxy-binding-a", ready = true): BrowserDestinationAuthority {
   return {
+    assertReady: vi.fn(async () => {
+      if (!ready) throw new Error("test egress is unavailable");
+    }),
     authorize: vi.fn(async ({ url }) => ({
       mode: "egress-bound" as const,
       normalizedUrl: new URL(url).href.replace(/\/$/u, "/normalized"),
@@ -208,10 +211,14 @@ describe("AgentCursorBrowserPort", () => {
     }, descriptor.brokerSigningSecret)).toEqual(expect.objectContaining({ normalizedUrl: create.initialUrl }));
   });
 
-  it("fails closed before session dispatch when navigation has no egress binding", async () => {
-    const value = port(new FakeClient(), destination(null));
-    await expect(opened(value, "https://example.test/")).rejects.toMatchObject({ status: 503, code: "WEBX_POLICY_EGRESS_REQUIRED" });
-    expect(value.client.calls.some((call) => call.fields.kind === "session.create")).toBe(false);
+  it("fails closed before session dispatch when the egress route is unavailable", async () => {
+    const unavailable = port(new FakeClient(), destination("proxy-binding-a", false));
+    await expect(opened(unavailable)).rejects.toThrow("test egress is unavailable");
+    expect(unavailable.client.calls.some((call) => call.fields.kind === "session.create")).toBe(false);
+
+    const unbound = port(new FakeClient(), destination(null));
+    await expect(opened(unbound, "https://example.test/")).rejects.toMatchObject({ status: 503, code: "WEBX_POLICY_EGRESS_REQUIRED" });
+    expect(unbound.client.calls.some((call) => call.fields.kind === "session.create")).toBe(false);
   });
 
   it("returns a real screenshot observation and the exact verified artifact bytes", async () => {
