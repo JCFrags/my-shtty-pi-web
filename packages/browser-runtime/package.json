@@ -6,9 +6,7 @@
   "exports": "./src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run tests",
-    "test:live": "tsx tests/live-verification.ts",
-    "test:soak": "tsx tests/resource-soak.ts"
+    "test": "vitest run tests"
   },
   "dependencies": {
     "@webx/artifacts": "workspace:*",

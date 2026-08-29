@@ -1,16 +1,21 @@
 import assert from "node:assert/strict";
-import { mkdtemp, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect, type Socket } from "node:net";
 import { afterEach, describe, it } from "vitest";
-import { PROTOCOL_VERSION } from "@webx/browser-protocol";
+import { PROTOCOL_VERSION, type ActorIdentity, type BrowserRequest } from "@webx/browser-protocol";
+import { BrowserRuntime } from "@webx/browser-runtime";
 import { BrowserdServer } from "../src/server.js";
 import { readDescriptor } from "../src/descriptor.js";
 import { NdjsonReader } from "../src/transport.js";
 
 const servers: BrowserdServer[] = [];
-afterEach(async () => { await Promise.allSettled(servers.splice(0).map(async (server) => server.stop())); });
+const directories: string[] = [];
+afterEach(async () => {
+  await Promise.allSettled(servers.splice(0).map(async (server) => server.stop()));
+  await Promise.allSettled(directories.splice(0).map(async (directory) => rm(directory, { recursive: true, force: true })));
+});
 
 class Client {
   private readonly lines: unknown[] = [];
@@ -49,6 +54,7 @@ class Client {
 
 async function started(): Promise<{ server: BrowserdServer; directory: string }> {
   const directory = await mkdtemp(join(tmpdir(), "browserd-test-"));
+  directories.push(directory);
   const server = new BrowserdServer({ runtimeDirectory: directory });
   servers.push(server);
   await server.start();
@@ -93,6 +99,36 @@ describe("browserd actor-bound Unix service", () => {
     client.close();
   });
 
+  it("runs independent requests concurrently on one bound connection", async () => {
+    let active = 0;
+    let peak = 0;
+    class ConcurrentRuntime extends BrowserRuntime {
+      override async dispatch(actor: ActorIdentity, requestValue: BrowserRequest): Promise<unknown> {
+        void actor; void requestValue;
+        active++;
+        peak = Math.max(peak, active);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          return { kind: "capabilities", headed: true, screenshotFirst: true, domFallback: true, virtualMouse: true, osMouse: false };
+        } finally { active--; }
+      }
+      override async close(): Promise<void> { /* This fixture owns no browser resources. */ }
+    }
+    const directory = await mkdtemp(join(tmpdir(), "browserd-concurrency-test-"));
+    directories.push(directory);
+    const server = new BrowserdServer({ runtimeDirectory: directory, runtime: new ConcurrentRuntime() });
+    servers.push(server);
+    await server.start();
+    const client = await Client.open(server.descriptor.socketPath);
+    client.send(bind(server.descriptor.bindingSecret));
+    await client.next();
+    client.send(request("capabilities.get", "parallel-a"));
+    client.send(request("capabilities.get", "parallel-b"));
+    await Promise.all([client.next(), client.next()]);
+    assert.equal(peak, 2);
+    client.close();
+  });
+
   it("rejects a wrong secret and normal requests before binding", async () => {
     const { server } = await started();
     const wrong = await Client.open(server.descriptor.socketPath);
@@ -103,6 +139,34 @@ describe("browserd actor-bound Unix service", () => {
     unbound.send(request("session.list", "unbound"));
     assert.equal(((await unbound.next()) as { error: { code: string } }).error.code, "INVALID_REQUEST");
     unbound.close();
+  });
+
+  it("aborts a pending request as soon as its connection closes", async () => {
+    let notifyStarted!: () => void;
+    const startedDispatch = new Promise<void>((resolve) => { notifyStarted = resolve; });
+    let aborted = false;
+    class BlockingRuntime extends BrowserRuntime {
+      override async dispatch(actor: ActorIdentity, requestValue: BrowserRequest, signal?: AbortSignal): Promise<unknown> {
+        void actor; void requestValue;
+        notifyStarted();
+        await new Promise<void>((resolve) => signal?.addEventListener("abort", () => { aborted = true; resolve(); }, { once: true }));
+        throw new Error("connection closed");
+      }
+      override async close(): Promise<void> { /* This fixture owns no browser resources. */ }
+    }
+    const directory = await mkdtemp(join(tmpdir(), "browserd-disconnect-test-"));
+    directories.push(directory);
+    const server = new BrowserdServer({ runtimeDirectory: directory, runtime: new BlockingRuntime() });
+    servers.push(server);
+    await server.start();
+    const client = await Client.open(server.descriptor.socketPath);
+    client.send(bind(server.descriptor.bindingSecret));
+    await client.next();
+    client.send(request("capabilities.get", "pending"));
+    await startedDispatch;
+    client.close();
+    for (let attempt = 0; attempt < 50 && !aborted; attempt++) await new Promise((resolve) => setTimeout(resolve, 2));
+    assert.equal(aborted, true);
   });
 
   it("enforces bounded NDJSON frames", () => {

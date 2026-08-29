@@ -152,7 +152,11 @@ export class SessionMotor extends EventEmitter {
       : samples;
     if (scaled.length <= 16) return scaled;
     const reduced: CursorSample[] = [];
-    for (let index = 0; index < 16; index++) reduced.push(scaled[Math.round(index * (scaled.length - 1) / 15)]!);
+    for (let index = 0; index < 16; index++) {
+      const sample = scaled[Math.round(index * (scaled.length - 1) / 15)];
+      if (sample === undefined) throw new Error("Path sample selection failed.");
+      reduced.push(sample);
+    }
     return reduced;
   }
 
@@ -163,7 +167,8 @@ export class SessionMotor extends EventEmitter {
     let loopError: unknown;
     try {
       for (let index = 0; index < samples.length; index++) {
-        const sample = samples[index]!;
+        const sample = samples[index];
+        if (sample === undefined) throw new Error("Path sample is missing.");
         const elapsed = performance.now() - started;
         if (index < samples.length - 1 && sample.t < elapsed - 50) continue;
         await sleep(Math.max(0, sample.t - elapsed), context.signal);

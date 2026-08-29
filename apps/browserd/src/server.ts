@@ -84,7 +84,12 @@ export class BrowserdServer {
     this.connections.add(state);
     socket.on("data", (chunk: Buffer) => {
       try {
-        for (const line of state.reader.push(chunk)) state.chain = state.chain.then(async () => this.handleLine(state, line)).catch(() => this.closeConnection(state));
+        for (const line of state.reader.push(chunk)) {
+          state.chain = state.chain.then(async () => {
+            if (state.actor === undefined) await this.handleLine(state, line);
+            else void this.handleLine(state, line).catch(() => this.closeConnection(state));
+          }).catch(() => this.closeConnection(state));
+        }
       } catch { this.closeConnection(state); }
     });
     socket.once("error", () => this.closeConnection(state));
@@ -92,6 +97,7 @@ export class BrowserdServer {
   }
 
   private async handleLine(state: ConnectionState, line: string): Promise<void> {
+    if (state.closed) return;
     let value: unknown;
     try { value = JSON.parse(line); } catch { this.sendError(state, undefined, "INVALID_REQUEST", "Request is not valid JSON."); return; }
     if (state.actor === undefined) {
@@ -115,6 +121,7 @@ export class BrowserdServer {
     let request;
     try { request = parseBrowserRequest(value); } catch (error) { this.sendCaught(state, isRecord(value) && typeof value.requestId === "string" ? value.requestId : undefined, error); return; }
     if (state.pending.has(request.requestId)) { this.sendError(state, request.requestId, "OPERATION_CONFLICT", "Request ID is already pending."); return; }
+    if (state.pending.size >= 64) { this.sendError(state, request.requestId, "LIMIT_EXCEEDED", "Connection request limit reached."); return; }
     const controller = new AbortController();
     state.pending.set(request.requestId, controller);
     try {

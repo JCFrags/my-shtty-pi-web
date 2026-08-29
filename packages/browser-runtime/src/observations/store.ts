@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { ActorIdentity, ScreenshotObservation, TabAddress } from "@webx/browser-protocol";
+import { sha256Hex } from "@webx/artifacts";
 import type { BrowserArtifactStore } from "../artifacts/store.js";
 import type { SessionMotor } from "../motor/session-motor.js";
 import type { TargetRegistry, TabRecord } from "../targets/registry.js";
@@ -50,7 +51,11 @@ export class ObservationStore {
     const bytes = Buffer.from(response.data, "base64");
     const capturedMonotonicMs = performance.now();
     const capturedWall = Date.now();
-    const descriptor = await this.artifacts.put(this.actor, bytes, "image/png");
+    const inline = delivery === "inline" || (delivery === "auto" && bytes.byteLength <= this.inlineLimitBytes);
+    if (delivery === "inline" && bytes.byteLength > this.inlineLimitBytes) throw new Error("Screenshot exceeds the reviewed inline limit.");
+    const descriptor = inline
+      ? { sizeBytes: bytes.byteLength, sha256: await sha256Hex(bytes) }
+      : await this.artifacts.put(this.actor, bytes, "image/png");
     const observationId = opaqueId("observation");
     const frameSequence = this.registry.incrementFrame(tab);
     const record: ObservationRecord = {
@@ -61,8 +66,6 @@ export class ObservationStore {
     this.records.set(observationId, record);
     this.latestByTab.set(tab.tabId, observationId);
     this.prune();
-    const inline = delivery === "inline" || (delivery === "auto" && bytes.byteLength <= this.inlineLimitBytes);
-    if (delivery === "inline" && bytes.byteLength > this.inlineLimitBytes) throw new Error("Screenshot exceeds the reviewed inline limit.");
     return {
       kind: "screenshotObservation", observationId, address: { ...address },
       documentGeneration: tab.documentGeneration, viewportGeneration: tab.viewportGeneration,
@@ -72,7 +75,9 @@ export class ObservationStore {
       scroll: { x: layout.scrollX, y: layout.scrollY }, frameSequence,
       mediaType: "image/png", byteLength: descriptor.sizeBytes, sha256: descriptor.sha256,
       cursor: this.motor.state,
-      image: inline ? { kind: "inline", base64: bytes.toString("base64") } : { kind: "artifact", artifactId: descriptor.artifactId },
+      image: inline
+        ? { kind: "inline", base64: bytes.toString("base64") }
+        : { kind: "artifact", artifactId: "artifactId" in descriptor ? descriptor.artifactId : neverReached() },
     };
   }
 
@@ -123,4 +128,5 @@ export function bindObservationTab(tab: TabRecord, connection: { send<T>(method:
 function observationConnection(tab: TabRecord) { const connection = connections.get(tab); if (connection === undefined) throw new Error("Tab has no CDP connection."); return connection; }
 function opaqueId(prefix: string): string { return `${prefix}_${randomBytes(18).toString("base64url")}`; }
 function sameAddress(left: TabAddress, right: TabAddress): boolean { return left.browserSessionId === right.browserSessionId && left.tabId === right.tabId && left.targetId === right.targetId && left.controlEpoch === right.controlEpoch; }
+function neverReached(): never { throw new Error("Artifact descriptor is unavailable."); }
 function isLayout(value: unknown): value is Layout { if (typeof value !== "object" || value === null) return false; const item = value as Partial<Layout>; return typeof item.url === "string" && typeof item.title === "string" && [item.width, item.height, item.dpr, item.scrollX, item.scrollY].every((number) => typeof number === "number" && Number.isFinite(number)); }

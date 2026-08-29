@@ -185,5 +185,4 @@ export class TargetRegistry extends EventEmitter {
 
 function pageUrl(value: string): string { return /^(?:https?:\/\/|about:blank|chrome-error:\/\/)/.test(value) ? value : "about:blank"; }
 function opaqueId(prefix: string): string { return `${prefix}_${randomBytes(18).toString("base64url")}`; }
-function sleep(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }

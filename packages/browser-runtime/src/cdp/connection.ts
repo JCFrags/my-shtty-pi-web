@@ -86,7 +86,7 @@ export class CdpConnection extends EventEmitter {
         reject: (error) => { options.signal?.removeEventListener("abort", abort); reject(error); },
       });
       options.signal?.addEventListener("abort", abort, { once: true });
-      try { this.socket.send(JSON.stringify(message)); } catch (error) { abort(); }
+      try { this.socket.send(JSON.stringify(message)); } catch { abort(); }
     });
   }
 

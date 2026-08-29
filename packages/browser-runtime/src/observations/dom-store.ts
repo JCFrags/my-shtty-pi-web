@@ -67,7 +67,8 @@ export class DomObservationStore {
     const result = await this.command<{ model: { border: number[] } }>(tab, "DOM.getBoxModel", { backendNodeId });
     const quad = result.model.border;
     if (!Array.isArray(quad) || quad.length < 8 || !quad.every((value) => typeof value === "number" && Number.isFinite(value))) throw new Error("DOM handle is stale.");
-    const xs = [quad[0]!, quad[2]!, quad[4]!, quad[6]!]; const ys = [quad[1]!, quad[3]!, quad[5]!, quad[7]!];
+    const xs = quad.filter((_, index) => index % 2 === 0).slice(0, 4);
+    const ys = quad.filter((_, index) => index % 2 === 1).slice(0, 4);
     return { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) };
   }
 

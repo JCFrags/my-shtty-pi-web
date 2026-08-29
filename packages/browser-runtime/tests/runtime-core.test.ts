@@ -23,8 +23,11 @@ describe("AgentCursor selective port", () => {
     assert.deepEqual(first[0], { x: 10, y: 20, t: 0 });
     assert.equal(first.at(-1)?.x, 700);
     for (let index = 1; index < first.length; index++) {
-      assert.ok(first[index]!.t > first[index - 1]!.t);
-      assert.ok(Math.hypot(first[index]!.x - first[index - 1]!.x, first[index]!.y - first[index - 1]!.y) < 200);
+      const current = first[index];
+      const previous = first[index - 1];
+      assert.ok(current !== undefined && previous !== undefined);
+      assert.ok(current.t > previous.t);
+      assert.ok(Math.hypot(current.x - previous.x, current.y - previous.y) < 200);
     }
   });
 });
@@ -80,6 +83,59 @@ describe("bounded actor-scoped operations", () => {
     registry.submit(actor, { operationId: "operation:expires", laneKey: "deadline", deadline: deadline(30) }, async (context) => { context.markDispatched(); });
     assert.equal((await registry.wait(actor, "operation:expires")).state, "expired");
     assert.equal(registry.status(actor, "operation:expires").dispatchState, "not-dispatched");
+  });
+
+  it("rejects an expired deadline before admission and expires running work", async () => {
+    const registry = new OperationRegistry();
+    assert.throws(() => registry.submit(actor, { operationId: "operation:already-expired", laneKey: "deadline-admission", deadline: new Date(Date.now() - 1).toISOString() }, async () => undefined), /expired/i);
+    registry.submit(actor, { operationId: "operation:running-deadline", laneKey: "running-deadline", deadline: deadline(30) }, async (context) => {
+      context.markPartiallyDispatched();
+      await new Promise<void>((resolve) => context.signal.addEventListener("abort", () => resolve(), { once: true }));
+      return "late";
+    });
+    const status = await registry.wait(actor, "operation:running-deadline");
+    assert.equal(status.state, "expired");
+    assert.equal(status.dispatchState, "partially-dispatched");
+    assert.equal(registry.result(actor, "operation:running-deadline"), undefined);
+  });
+
+  it("does not execute a duplicate operation ID twice and makes cancellation idempotent", async () => {
+    const registry = new OperationRegistry();
+    let executions = 0;
+    registry.submit(actor, { operationId: "operation:duplicate", laneKey: "duplicate", deadline: deadline() }, async () => { executions++; await sleep(20); return "first"; });
+    registry.submit(actor, { operationId: "operation:duplicate", laneKey: "other-lane", deadline: deadline() }, async () => { executions++; return "second"; });
+    assert.equal((await registry.wait(actor, "operation:duplicate")).state, "committed");
+    assert.equal(registry.cancel(actor, "operation:duplicate").state, "committed");
+    assert.equal(registry.cancel(actor, "operation:duplicate").state, "committed");
+    assert.equal(executions, 1);
+    assert.equal(registry.result(actor, "operation:duplicate"), "first");
+  });
+
+  it("keeps operation status after tab and browser failure", async () => {
+    const registry = new OperationRegistry();
+    registry.submit(actor, { operationId: "operation:tab-failure", laneKey: "tab-failure", deadline: deadline(), browserSessionId: "session:failure", tabId: "tab:failure", controlEpoch: 1 }, async (context) => {
+      await new Promise<void>((resolve) => context.signal.addEventListener("abort", () => resolve(), { once: true }));
+    });
+    registry.failTab(actor, "session:failure", "tab:failure");
+    assert.equal((await registry.wait(actor, "operation:tab-failure")).state, "failed");
+    assert.equal(registry.status(actor, "operation:tab-failure").error?.code, "TARGET_CRASHED");
+
+    registry.submit(actor, { operationId: "operation:browser-failure", laneKey: "browser-failure", deadline: deadline(), browserSessionId: "session:failure", tabId: "tab:other", controlEpoch: 1 }, async (context) => {
+      await new Promise<void>((resolve) => context.signal.addEventListener("abort", () => resolve(), { once: true }));
+    });
+    registry.failSession(actor, "session:failure");
+    assert.equal((await registry.wait(actor, "operation:browser-failure")).state, "failed");
+    assert.equal(registry.status(actor, "operation:browser-failure").error?.code, "BROWSER_EXITED");
+  });
+
+  it("prunes only terminal records after retention", async () => {
+    let wall = 1_000_000;
+    const registry = new OperationRegistry({ retentionMs: 100, nowWall: () => wall });
+    registry.submit(actor, { operationId: "operation:prune", laneKey: "prune", deadline: new Date(wall + 1_000).toISOString() }, async () => "done");
+    assert.equal((await registry.wait(actor, "operation:prune")).state, "committed");
+    wall += 101;
+    registry.prune();
+    assert.throws(() => registry.status(actor, "operation:prune"), /not found/i);
   });
 });
 
