@@ -10,7 +10,9 @@ Build and start it with:
 pnpm --dir apps/webxd start
 ```
 
-The runtime requires `XDG_RUNTIME_DIR`. It listens at `$XDG_RUNTIME_DIR/pi-web/webxd.sock` by default. It connects to `$XDG_RUNTIME_DIR/pi-web/browserd.sock` by default. `WEBXD_SOCKET` and `BROWSERD_SOCKET` can replace these paths.
+The runtime requires `XDG_RUNTIME_DIR`. It listens at `$XDG_RUNTIME_DIR/pi-web/webxd.sock` by default. `WEBXD_SOCKET` can replace that path.
+
+`WEBX_BROWSER_BACKEND` is read once at startup. It accepts `legacy` or `agentcursor` and defaults to `legacy`. Legacy mode uses `BROWSERD_SOCKET` or `$XDG_RUNTIME_DIR/pi-web/browserd.sock`. AgentCursor mode securely reads `BROWSERD_DESCRIPTOR` or `$XDG_RUNTIME_DIR/pi-browserd/browserd.json` inside `BROWSERD_RUNTIME_DIR`. It never falls back to the other backend.
 
 The server:
 
@@ -21,12 +23,15 @@ The server:
 - requires the binding ID and secret on later requests;
 - rejects forged binding secrets and does not let one request change actor identity;
 - uses one persistent browser connection per bound actor;
-- sends `agent.register` once before protected browser RPCs;
-- reconnects after a browser daemon outage;
+- uses legacy actor registration only in legacy mode;
+- binds AgentCursor browserd connections once from authenticated authority identity;
+- reconnects for new work after a browser daemon replacement but never recreates or remaps old sessions;
 - removes its Unix socket and closes upstream connections during shutdown;
 - fails closed. It has no direct browser-provider fallback.
 
-Browser operations use only `BrowserDaemonPort`. Semantic actions use the frozen `browser.act` shape. Visual CUA uses the frozen scoped workspace lease, frame, control, and input methods.
+Browser operations use only `BrowserDaemonPort`. The selected backend reports only its own path and actions. `agentcursor/chrome` uses explicit sessions and tabs, screenshot observations, image-pixel or CSS-viewport coordinates, explicit DOM fallback, and bounded cancellation. It does not expose legacy workspace, debug, upload, or download operations.
+
+For `agentcursor`, webxd applies destination policy and signs a short-lived browser authorization bound to the actor, operation, runtime, normalized URL, and configured egress route. Browser session creation fails closed unless the destination authority reports a healthy proxy. Search, read, content, cache, and artifacts remain independent of browserd.
 
 ## Search
 
@@ -52,12 +57,12 @@ The cache keeps up to 256 entries and 32 MiB in RAM. It keeps up to 2,048 entrie
 
 Identical eligible search and read work is coalesced under at most 256 in-flight keys. Each caller keeps independent cancellation. The shared operation stops only when no waiter remains.
 
-Successful mutation idempotency records expire after 15 minutes. They use at most 1,024 entries and 16 MiB.
+Successful mutation idempotency records expire after 15 minutes. They use at most 1,024 entries and 16 MiB. Browser screenshot responses do not put multi-megabyte image base64 in this general cache. AgentCursor screenshot bytes come from verified bounded browserd artifact reads and move through the facade image payload.
 
 This cache reduces repeated search-provider and website traffic. It is not a durable research archive and has no Pi-facing recall operations. When a change alters cached search semantics, update the search cache format version so an older response cannot mask the new behavior.
 
 ## Public routes
 
-The Pi-facing authority covers search, read, stored normalized content, capabilities, browser workspace, and browser create/list/get/observe/frame/act/debug/control/cancel/close-session/close-tab. Page-library functions are reserved for a future separate research-archive extension. Internal artifact routes support bounded component transfers and are not Pi tools.
+The Pi-facing authority covers search, read, stored normalized content, capabilities, and browser create/list/get/observe/frame/act/cancel/close-session/close-tab. Legacy backend capabilities can also expose workspace, debug, and control. The AgentCursor backend does not. Page-library functions are reserved for a future separate research-archive extension. Internal artifact routes support bounded component transfers and are not Pi tools.
 
 Page history search returns explicit `501 unavailable`. Safe browser debug permits `console`, `network`, `html`, `pdf`, `record-start`, and `record-stop`. Secret-bearing `evaluate`, `cookies`, and `storage` operations are refused.

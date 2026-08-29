@@ -107,11 +107,11 @@ export interface ReadRequest {
   readonly itemLimit?: number;
   readonly maxChars?: number;
   readonly contentOffset?: number;
-  /** @deprecated Compatibility field. Use search, readBatch, and content. Retained through the current 0.x API line. */
+  /** @deprecated Compatibility field. Use search, readBatch, and content. Retained until a separately announced removal. */
   readonly maxPages?: number;
-  /** @deprecated Compatibility field. Use search, readBatch, and content. Retained through the current 0.x API line. */
+  /** @deprecated Compatibility field. Use search, readBatch, and content. Retained until a separately announced removal. */
   readonly maxDepth?: number;
-  /** @deprecated Compatibility field. Use search, readBatch, and content. Retained through the current 0.x API line. */
+  /** @deprecated Compatibility field. Use search, readBatch, and content. Retained until a separately announced removal. */
   readonly sameDomain?: boolean;
   /** Bypass a fresh traffic-cache hit and validate the canonical source again. */
   readonly refresh?: boolean;

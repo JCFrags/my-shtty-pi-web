@@ -9,10 +9,10 @@ This Pi extension presents the repository's internet capabilities as one small, 
 - `web_content`: retrieve an exact continuation or a focused passage from stored normalized content without a network request.
 - `web_search`: send one complete query for ranked links. The deprecated `output: "extracts"` form remains during a compatibility period and returns migration metadata.
 - `browser_open`: open an owned browser only when direct reading cannot provide required dynamic state, interaction, DOM evidence, or pixels.
-- `browser_tabs`: list or close owned browser tabs and sessions.
-- `browser_observe`: inspect current browser text, semantic controls, DOM state, changes, or screenshot-bound pixels.
-- `browser_act`: perform one action based on the latest observation.
-- `browser_debug`: request bounded advanced diagnostics in explicit debug mode.
+- `browser_tabs`: create, list, focus, or close explicit owned tabs and sessions when the selected backend supports them.
+- `browser_observe`: receive a screenshot by default or request explicit bounded DOM fallback.
+- `browser_act`: perform one screenshot-bound, DOM-bound, text, key, or navigation action on an explicit session and tab.
+- `browser_debug`: request bounded advanced diagnostics only when the selected backend advertises them.
 
 The tool descriptions, field descriptions, active-tool prompt guidelines, and WebX system guidance use the same routing rules. Schema descriptions state parameter purpose, defaults, continuation rules, and incompatible uses. Strict schemas reject unknown fields and unsupported browser operations.
 
@@ -20,11 +20,13 @@ The tool descriptions, field descriptions, active-tool prompt guidelines, and We
 
 Use one normal multi-source research route: `web_search` -> select 1 to 5 sources -> `web_read_batch` -> `web_content`. Use `web_content` for focus or continuation. Each normal `web_read` returns at most 30,000 content characters inside the single 40,000-character agent-output ceiling. WebX stores canonical normalized text and returns an opaque content ID. Direct query reads and stored queries use one deterministic passage selector over that canonical text. Structured API projections return one object per collection row. Use `contentOffset` only for a reported source continuation after the stored body ends. An explicit `save` writes one normal or focused extraction below `${XDG_DATA_HOME:-~/.local/share}/pi-web/exports` and returns compact file metadata. Saved reads do not support structured projection or linked crawling.
 
-The default model schema does not contain `maxPages`, `maxDepth`, or `sameDomain`. The daemon and SDK continue to accept these public fields through the current 0.x API line. Removal cannot occur before the next major version. An administrator can explicitly restore them to the model schema with `PI_WEBX_ADVANCED_LINKED_READ=1`. This advanced route is not the normal research route.
+The default model schema does not contain `maxPages`, `maxDepth`, or `sameDomain`. The daemon and SDK continue to accept these deprecated public fields during the compatibility period. Their removal requires a separate announced contract change. An administrator can explicitly restore them to the model schema with `PI_WEBX_ADVANCED_LINKED_READ=1`. This advanced route is not the normal research route.
 
 Search needs only `query`. It returns links by default. Optional `output: "extracts"` is deprecated. It reads a bounded set of top pages, applies the canonical passage selector, returns up to four short passages, and includes migration metadata. Optional `domains` are strict host requirements. The Pi tool row shows the exact submitted query, output form, and strict domains, so the user can always see what WebX searched for. WebX sends the complete query without product-specific or generic suffix variants. It uses one narrow recovery retry when a `site:` query returns no eligible result. Search removes tracking parameters and duplicate URLs. Link snippets come from search discovery. Extract passages come only from successful page reads. Extracts remain separate by source and do not synthesize a conclusion. Search never follows page links. Read crawling follows linked pages.
 
-Browser work follows open, observe, act, observe, and close. Semantic refs are preferred. Coordinate actions bind to the latest visual observation. The exposed browser schema does not support upload or download.
+Browser work follows open, screenshot observe, one bound action, observe again, and close. Use explicit DOM fallback only when the screenshot is not sufficient. Coordinate actions cite the real browser observation ID and use image-pixel coordinates by default. Pi receives the verified screenshot as one multimodal image item. Image base64 does not appear in model text or compact details. The exposed browser schema does not support upload or download.
+
+Public browser API major 3 supports the new `agentcursor/chrome` route. Backend selection occurs once in webxd. Pi requests cannot select or fall back to another backend. The legacy route can remain selected for rollback, and production still defaults to it.
 
 Only the user changes modes. Run `/web` with no options to open one settings menu for capability modes and browser workspace controls. Direct forms remain under the same command: `/web mode off|read|browser|debug` and `/web workspace show|hide|list|attach|takeover|return [sessionId]`. Browser tools are available by default. There is no separate browser slash command or model-facing upgrade tool.
 

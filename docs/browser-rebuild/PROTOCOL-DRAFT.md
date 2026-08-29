@@ -1,6 +1,6 @@
 # Internal browser protocol
 
-Status: Phase 1 executable internal contract. This is not the current public SDK contract.
+Status: Phase 2A executable internal contract. This is the private browserd protocol, not public WebX API major 3.
 
 The authoritative source is `packages/browser-protocol/src/schema.ts`. The deterministic machine-readable artifact is `packages/browser-protocol/schema/browser-protocol.schema.json`. Conformance fixtures and parser tests are in `packages/browser-protocol/tests/`.
 
@@ -82,7 +82,7 @@ The executable request union includes:
 - `artifact.read`
 - `frames.subscribe`, `frames.unsubscribe`
 
-A normal `session.create` transaction creates the Chrome host and first tab. There is no required public `host.start` step. Host state is an internal diagnostic.
+A normal `session.create` transaction creates the Chrome host and first tab. There is no required public `host.start` step. Host state is an internal diagnostic. Production session creation requires configured healthy egress. An optional initial URL carries a short-lived signed `NavigationAuthorization`.
 
 `frames.subscribe` requires a bounded opaque `subscriptionId` and accepts `interest: "idle" | "selected"`. `frames.unsubscribe` requires the same ID and full address. The ID is bound to one connection, actor, address, epoch, and interest. An identical duplicate is idempotent. Reuse for another address or interest returns `OPERATION_CONFLICT`. Unsubscribing an unknown ID is idempotent and returns `subscribed: false`. Active pointer actions temporarily override either rate with a burst rate.
 
@@ -94,7 +94,7 @@ Tab focus changes presentation only. It does not set request authority.
 
 ## Screenshot observation
 
-`observe.screenshot` accepts the full address and `delivery: "inline" | "artifact" | "auto"`.
+`observe.screenshot` accepts the full address and `delivery: "inline" | "artifact" | "auto"`. Production WebX requests artifact delivery and reconstructs bounded chunks outside browserd.
 
 Its result contains:
 
@@ -121,7 +121,9 @@ A handle is bound to the exact actor, browser session, tab, target, and document
 
 ## Actions
 
-`action.coordinate` cites an observation ID and one action:
+`action.coordinate` cites an observation ID, declares `imagePixels` or `cssViewport`, and contains one action. Browserd resolves the exact observation before it converts image pixels to CSS viewport coordinates. It does not infer dimensions from DPR.
+
+Supported coordinate actions are:
 
 - move or hover;
 - left, right, or middle click;
@@ -133,7 +135,7 @@ The server validates the observation before path replay. Immediately before mous
 
 `action.domFallback` cites a DOM observation and handle. It supports click, double-click, hover, type or fill, and key press. Pointer actions use the session motor. They do not call page `click()`.
 
-`navigate`, `input.text`, and `input.key` also use the exact tab address. Navigation requires the configured `NavigationAuthorization`. The production default denies it.
+`navigate`, `input.text`, and `input.key` also use the exact tab address. Initial URLs, explicit navigation, and URL-bearing new tabs require a signed authorization bound to runtime instance, actor, operation ID, normalized URL, egress binding, expiration, and nonce. Browserd verifies it before dispatch. The production default denies navigation and session creation without configured healthy egress.
 
 ## Operation records
 
@@ -175,7 +177,7 @@ It does not contain an agent observation ID. A frame does not create a durable m
 
 ## Artifact reads
 
-`artifact.read` supplies an artifact ID, byte offset, and bounded maximum byte count. It returns one base64 chunk with the actual stored media type, total size, digest, and end-of-file state. Phase 1.2 supports truthful `image/png` only. Each record is scoped by actor, browser session, optional tab, and purpose (`agent-observation` or `workspace-frame`). Authorization uses the connection-bound actor. A caller cannot choose a file path.
+`artifact.read` supplies an artifact ID, byte offset, and bounded maximum byte count. It returns one base64 chunk with the actual stored media type, total size, digest, and end-of-file state. Phase 2A supports bounded PNG and verified JPEG fallback. The public Pi image remains at or below 4 MiB and is never truncated. Each record is scoped by actor, browser session, optional tab, and purpose (`agent-observation` or `workspace-frame`). Authorization uses the connection-bound actor. A caller cannot choose a file path.
 
 ## Responses and errors
 
@@ -190,3 +192,11 @@ Tab and popup registration are transactions. Capacity is checked before target c
 Target close, target crash, Chrome exit, and CDP disconnect settle affected operations and stop frame capture. Operation records remain queryable. The runtime never chooses another browser or tab as a fallback.
 
 Control-epoch increment cancels queued prior-epoch actions and stops running actions at the next cancellable boundary. An old action remains invalid after an agent-user-agent ABA sequence.
+
+## Public WebX boundary
+
+Trusted webxd parses every browserd response and event through the private protocol parser. It securely discovers the current descriptor, binds one persistent connection per authenticated actor, and generates a new request ID for each wire attempt. The WebX idempotency key supplies the stable mutation operation ID.
+
+The public browser contract is version `3.0.0`. It removes CDP target IDs and private transport details. Public tabs use `tabId`; webxd restores the internal full address from actor-owned session state and confirms ownership with browserd.
+
+A daemon runtime-instance change closes old connections. Old sessions are not recreated. New actor connections can bind to the replacement for new work. Search and read do not use this transport.

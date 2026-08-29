@@ -1,0 +1,3399 @@
+{
+  "passed": true,
+  "chromium": "Chromium 151.0.7922.173 Built from source for Fedora release 44 (Forty Four)",
+  "serviceStartupMs": 4.71850900000004,
+  "agentSessions": [
+    "session_eZ4h6f7mRN0y3ZB8kTCIDBMI",
+    "session_dvCvUo7fCgEFIHWwkqan1IqH"
+  ],
+  "chromePids": [
+    223774,
+    223776
+  ],
+  "distinctProfiles": true,
+  "distinctPersonas": true,
+  "piImageContent": {
+    "agentA": {
+      "mimeType": "image/png",
+      "bytes": 21623
+    },
+    "agentB": {
+      "mimeType": "image/png",
+      "bytes": 21608
+    },
+    "textItems": 1,
+    "imageItems": 1,
+    "base64InTextOrDetails": false
+  },
+  "coordinateProof": {
+    "devicePixelRatio": 2,
+    "cssButtonCenter": [
+      190,
+      126
+    ],
+    "imagePixelClick": [
+      380,
+      252
+    ],
+    "agentAState": "alpha count 1",
+    "agentBState": "beta count 1",
+    "actionWallMs": 1250.275663
+  },
+  "domFallback": {
+    "explicit": true,
+    "typedValue": "alpha isolated",
+    "crossAgentLeak": false,
+    "humanPathSequence": 358
+  },
+  "tabs": {
+    "createdFocusedListedClosed": true
+  },
+  "cancellation": {
+    "settled": true,
+    "heldButtons": 0,
+    "heldKeys": 0
+  },
+  "restart": {
+    "oldSessionRejected": true,
+    "newSessionId": "session_wU6YBsoK7MRijZKfrz7ylxvr"
+  },
+  "searchReadIndependence": {
+    "searchSucceededWhileBrowserdAbsent": true
+  },
+  "cleanup": {
+    "profilesRemaining": 0,
+    "browserdDescriptorRemoved": true,
+    "webxdSocketRemoved": true
+  },
+  "testOnlyEgress": "LoopbackFixtureAuthorization and LoopbackDestinationAuthority exist only in this opt-in live test. Production proxy enforcement is tested separately.",
+  "routedSoak": {
+    "requestedDurationSeconds": 1800,
+    "actualDurationSeconds": 1801.8416567,
+    "iterations": 355,
+    "sampleIntervalSeconds": 15,
+    "sampleCount": 121,
+    "piWebxRequestLatencyMs": {
+      "count": 1774,
+      "min": 0.25601200002711266,
+      "median": 129.7423149999231,
+      "p95": 5259.284860000014,
+      "max": 5331.396822000155,
+      "mean": 1374.9127313579515
+    },
+    "screenshotRouteLatencyMs": {
+      "count": 710,
+      "min": 44.42362200003117,
+      "median": 65.51484199997503,
+      "p95": 211.41134600003716,
+      "max": 1885.7853310001083,
+      "mean": 100.81331887464918
+    },
+    "browserdScreenshotDispatchLatencyMs": {
+      "count": 712,
+      "min": 39.998995000030845,
+      "median": 60.84908600000199,
+      "p95": 207.0470389999682,
+      "max": 1879.7252579999622,
+      "mean": 96.08915239185379
+    },
+    "browserdArtifactReadLatencyMs": {
+      "count": 712,
+      "min": 0.04889400000683963,
+      "median": 0.07554799993522465,
+      "p95": 0.1855369999539107,
+      "max": 0.524282000027597,
+      "mean": 0.08957383988544844
+    },
+    "browserdTransportAndRouteOverheadMs": {
+      "count": 710,
+      "min": 0,
+      "median": 17.42547888410541,
+      "p95": 163.32198288416754,
+      "max": 1837.6959678842386,
+      "mean": 52.77740679941892
+    },
+    "humanPathRouteLatencyMs": {
+      "count": 710,
+      "min": 903.2339789999533,
+      "median": 5214.985359999933,
+      "p95": 5272.467827999964,
+      "max": 5331.396822000155,
+      "mean": 3331.7699814563407
+    },
+    "browserdHumanPathDispatchLatencyMs": {
+      "count": 712,
+      "min": 900.7343380000093,
+      "median": 5211.4609809999965,
+      "p95": 5269.323415999999,
+      "max": 5329.065831999993,
+      "mean": 3323.010266693822
+    },
+    "domFallbackRouteLatencyMs": {
+      "count": 236,
+      "min": 6.320686999941245,
+      "median": 8.07944800000405,
+      "p95": 9.729232000070624,
+      "max": 10.114832999999635,
+      "mean": 8.109925932199715
+    },
+    "searchReadLatencyMs": {
+      "count": 118,
+      "min": 0.25601200002711266,
+      "median": 0.325687000004109,
+      "p95": 0.5653340000135358,
+      "max": 1.9957819999981439,
+      "mean": 0.3991497796733264
+    },
+    "nodeHarnessHeapUsedBytes": {
+      "start": 25930208,
+      "end": 39216104,
+      "min": 24112768,
+      "max": 40805848
+    },
+    "heapMeasurementNote": "The opt-in route harness hosts webxd and browserd in one Node process, so its heap sample is combined. Chrome process-tree memory is separate.",
+    "chrome": [
+      {
+        "pid": 223774,
+        "pssKiB": {
+          "start": 442068,
+          "end": 439810,
+          "min": 428356,
+          "max": 442068
+        },
+        "privateDirtyKiB": {
+          "start": 222748,
+          "end": 227528,
+          "min": 215188,
+          "max": 229264
+        },
+        "processCount": {
+          "start": 12,
+          "end": 12,
+          "min": 12,
+          "max": 12
+        }
+      },
+      {
+        "pid": 223776,
+        "pssKiB": {
+          "start": 405816,
+          "end": 408594,
+          "min": 390162,
+          "max": 409968
+        },
+        "privateDirtyKiB": {
+          "start": 193836,
+          "end": 200440,
+          "min": 181684,
+          "max": 201832
+        },
+        "processCount": {
+          "start": 12,
+          "end": 12,
+          "min": 12,
+          "max": 12
+        }
+      }
+    ],
+    "browserdConnections": {
+      "start": 4,
+      "end": 3,
+      "min": 2,
+      "max": 4
+    },
+    "sessionCount": {
+      "start": 2,
+      "end": 2,
+      "min": 2,
+      "max": 2
+    },
+    "tabCount": {
+      "start": 2,
+      "end": 2,
+      "min": 2,
+      "max": 2
+    },
+    "operationCount": {
+      "start": 20,
+      "end": 618,
+      "min": 20,
+      "max": 624
+    },
+    "artifactCount": {
+      "start": 4,
+      "end": 114,
+      "min": 4,
+      "max": 138
+    },
+    "artifactBytes": {
+      "start": 89593,
+      "end": 2676760,
+      "min": 89593,
+      "max": 3240220
+    },
+    "droppedFrames": {
+      "start": 0,
+      "end": 0,
+      "min": 0,
+      "max": 0
+    },
+    "profileBytes": {
+      "start": 8738276,
+      "end": 17333687,
+      "min": 8738276,
+      "max": 17333687
+    },
+    "tabCycles": 29,
+    "exactRetryCalls": 35,
+    "forcedBrowserdReconnects": 1,
+    "transientActorIdleEvictionExercised": true,
+    "samples": [
+      {
+        "elapsedSeconds": 1.5923110959999995,
+        "nodeHeapUsedBytes": 25930208,
+        "browserdConnections": 4,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 4,
+        "artifactBytes": 89593,
+        "operations": 20,
+        "droppedFrames": 0,
+        "profileBytes": 8738276,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 442068,
+            "privateDirtyKiB": 222748,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 405816,
+            "privateDirtyKiB": 193836,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 16.1357528,
+        "nodeHeapUsedBytes": 24112768,
+        "browserdConnections": 4,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 10,
+        "artifactBytes": 230433,
+        "operations": 34,
+        "droppedFrames": 0,
+        "profileBytes": 8854776,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 440946,
+            "privateDirtyKiB": 222100,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 406017,
+            "privateDirtyKiB": 194116,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 33.745982731,
+        "nodeHeapUsedBytes": 27419832,
+        "browserdConnections": 2,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 16,
+        "artifactBytes": 371354,
+        "operations": 48,
+        "droppedFrames": 0,
+        "profileBytes": 8837728,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 430224,
+            "privateDirtyKiB": 215188,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 394549,
+            "privateDirtyKiB": 185660,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 45.954475386999995,
+        "nodeHeapUsedBytes": 37137552,
+        "browserdConnections": 2,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 20,
+        "artifactBytes": 465275,
+        "operations": 58,
+        "droppedFrames": 0,
+        "profileBytes": 8838111,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 430550,
+            "privateDirtyKiB": 215608,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 394876,
+            "privateDirtyKiB": 186032,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 62.215523141999995,
+        "nodeHeapUsedBytes": 31611120,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 26,
+        "artifactBytes": 606113,
+        "operations": 75,
+        "droppedFrames": 0,
+        "profileBytes": 8855596,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 430502,
+            "privateDirtyKiB": 217192,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 391176,
+            "privateDirtyKiB": 182424,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 78.36649555,
+        "nodeHeapUsedBytes": 31936752,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 32,
+        "artifactBytes": 747032,
+        "operations": 89,
+        "droppedFrames": 0,
+        "profileBytes": 8860917,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 428671,
+            "privateDirtyKiB": 215744,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 391374,
+            "privateDirtyKiB": 182728,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 94.56685347199999,
+        "nodeHeapUsedBytes": 27255440,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 38,
+        "artifactBytes": 887870,
+        "operations": 103,
+        "droppedFrames": 0,
+        "profileBytes": 17249525,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 428356,
+            "privateDirtyKiB": 215384,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 390426,
+            "privateDirtyKiB": 181872,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 105.38387525899999,
+        "nodeHeapUsedBytes": 28116752,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 42,
+        "artifactBytes": 981789,
+        "operations": 112,
+        "droppedFrames": 0,
+        "profileBytes": 17249525,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 428488,
+            "privateDirtyKiB": 215492,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 390162,
+            "privateDirtyKiB": 181684,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 121.552868634,
+        "nodeHeapUsedBytes": 26713496,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 48,
+        "artifactBytes": 1122708,
+        "operations": 126,
+        "droppedFrames": 0,
+        "profileBytes": 17257907,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 428577,
+            "privateDirtyKiB": 215420,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 390604,
+            "privateDirtyKiB": 182096,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 137.768362701,
+        "nodeHeapUsedBytes": 28986448,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 54,
+        "artifactBytes": 1263546,
+        "operations": 142,
+        "droppedFrames": 0,
+        "profileBytes": 17259653,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 429513,
+            "privateDirtyKiB": 216564,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 391104,
+            "privateDirtyKiB": 182692,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 153.960744829,
+        "nodeHeapUsedBytes": 27586928,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 60,
+        "artifactBytes": 1404465,
+        "operations": 156,
+        "droppedFrames": 0,
+        "profileBytes": 17259653,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 430325,
+            "privateDirtyKiB": 217540,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 391716,
+            "privateDirtyKiB": 183200,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 170.174374368,
+        "nodeHeapUsedBytes": 29614776,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 66,
+        "artifactBytes": 1545303,
+        "operations": 171,
+        "droppedFrames": 0,
+        "profileBytes": 17259653,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 430913,
+            "privateDirtyKiB": 218076,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 392212,
+            "privateDirtyKiB": 183792,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 180.981130363,
+        "nodeHeapUsedBytes": 28695872,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 70,
+        "artifactBytes": 1639222,
+        "operations": 181,
+        "droppedFrames": 0,
+        "profileBytes": 17259653,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 431485,
+            "privateDirtyKiB": 218632,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 392616,
+            "privateDirtyKiB": 184272,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 197.182609435,
+        "nodeHeapUsedBytes": 30108640,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 76,
+        "artifactBytes": 1780141,
+        "operations": 197,
+        "droppedFrames": 0,
+        "profileBytes": 17261368,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 432643,
+            "privateDirtyKiB": 219740,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 393076,
+            "privateDirtyKiB": 184824,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 213.36523394799997,
+        "nodeHeapUsedBytes": 29057536,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 82,
+        "artifactBytes": 1920979,
+        "operations": 212,
+        "droppedFrames": 0,
+        "profileBytes": 17261368,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 432793,
+            "privateDirtyKiB": 219832,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 397717,
+            "privateDirtyKiB": 185940,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 229.561667393,
+        "nodeHeapUsedBytes": 31023648,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 88,
+        "artifactBytes": 2061898,
+        "operations": 226,
+        "droppedFrames": 0,
+        "profileBytes": 17261368,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 433581,
+            "privateDirtyKiB": 220560,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 398217,
+            "privateDirtyKiB": 186488,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 240.367769252,
+        "nodeHeapUsedBytes": 30633488,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 92,
+        "artifactBytes": 2155817,
+        "operations": 236,
+        "droppedFrames": 0,
+        "profileBytes": 17261368,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 434474,
+            "privateDirtyKiB": 221428,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 398728,
+            "privateDirtyKiB": 187044,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 256.6533609,
+        "nodeHeapUsedBytes": 31336416,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 98,
+        "artifactBytes": 2296655,
+        "operations": 252,
+        "droppedFrames": 0,
+        "profileBytes": 17261368,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 435828,
+            "privateDirtyKiB": 223392,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 397881,
+            "privateDirtyKiB": 187200,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 273.82731651000006,
+        "nodeHeapUsedBytes": 30498408,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 106,
+        "artifactBytes": 2484493,
+        "operations": 271,
+        "droppedFrames": 0,
+        "profileBytes": 17263116,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 433362,
+            "privateDirtyKiB": 221344,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 398432,
+            "privateDirtyKiB": 187676,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 290.15359117200006,
+        "nodeHeapUsedBytes": 31939888,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 112,
+        "artifactBytes": 2625414,
+        "operations": 285,
+        "droppedFrames": 0,
+        "profileBytes": 17263116,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 433474,
+            "privateDirtyKiB": 221392,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 398860,
+            "privateDirtyKiB": 188104,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 300.983175926,
+        "nodeHeapUsedBytes": 31091024,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2719335,
+        "operations": 295,
+        "droppedFrames": 0,
+        "profileBytes": 17263147,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 433797,
+            "privateDirtyKiB": 221680,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 399504,
+            "privateDirtyKiB": 188760,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 317.22257371800004,
+        "nodeHeapUsedBytes": 32375520,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676619,
+        "operations": 312,
+        "droppedFrames": 0,
+        "profileBytes": 17263147,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 436912,
+            "privateDirtyKiB": 224304,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 399771,
+            "privateDirtyKiB": 189108,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 334.47110935600006,
+        "nodeHeapUsedBytes": 31291048,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723665,
+        "operations": 330,
+        "droppedFrames": 0,
+        "profileBytes": 17264862,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 434148,
+            "privateDirtyKiB": 221892,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 400456,
+            "privateDirtyKiB": 189880,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 345.42849460800005,
+        "nodeHeapUsedBytes": 32538392,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723663,
+        "operations": 340,
+        "droppedFrames": 0,
+        "profileBytes": 17264862,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 434192,
+            "privateDirtyKiB": 221900,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 400760,
+            "privateDirtyKiB": 190240,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 361.83119661800004,
+        "nodeHeapUsedBytes": 31757480,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723640,
+        "operations": 354,
+        "droppedFrames": 0,
+        "profileBytes": 17264862,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 434340,
+            "privateDirtyKiB": 221984,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 401268,
+            "privateDirtyKiB": 190832,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 379.31409307900003,
+        "nodeHeapUsedBytes": 33940632,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723663,
+        "operations": 375,
+        "droppedFrames": 0,
+        "profileBytes": 17266577,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 435995,
+            "privateDirtyKiB": 223576,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 401817,
+            "privateDirtyKiB": 191468,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 390.35108013200005,
+        "nodeHeapUsedBytes": 32315656,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723665,
+        "operations": 385,
+        "droppedFrames": 0,
+        "profileBytes": 17266577,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 435120,
+            "privateDirtyKiB": 222648,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 401336,
+            "privateDirtyKiB": 191048,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 406.60581066900005,
+        "nodeHeapUsedBytes": 32842424,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723665,
+        "operations": 399,
+        "droppedFrames": 0,
+        "profileBytes": 17266577,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 435296,
+            "privateDirtyKiB": 222764,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 401460,
+            "privateDirtyKiB": 191256,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 423.861204308,
+        "nodeHeapUsedBytes": 34564480,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 118,
+        "artifactBytes": 2770584,
+        "operations": 418,
+        "droppedFrames": 0,
+        "profileBytes": 17266577,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 435237,
+            "privateDirtyKiB": 222628,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 401568,
+            "privateDirtyKiB": 191452,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 440.23449232800004,
+        "nodeHeapUsedBytes": 33164240,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 118,
+        "artifactBytes": 2770690,
+        "operations": 434,
+        "droppedFrames": 0,
+        "profileBytes": 17293012,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 436710,
+            "privateDirtyKiB": 224028,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 401836,
+            "privateDirtyKiB": 191824,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 451.16480074200007,
+        "nodeHeapUsedBytes": 34514064,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 118,
+        "artifactBytes": 2770692,
+        "operations": 444,
+        "droppedFrames": 0,
+        "profileBytes": 17293012,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 435514,
+            "privateDirtyKiB": 222784,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 401764,
+            "privateDirtyKiB": 191812,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 467.61113987,
+        "nodeHeapUsedBytes": 33657264,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 118,
+        "artifactBytes": 2770592,
+        "operations": 459,
+        "droppedFrames": 0,
+        "profileBytes": 17293012,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 435642,
+            "privateDirtyKiB": 222848,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 401884,
+            "privateDirtyKiB": 192020,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 485.14463182900005,
+        "nodeHeapUsedBytes": 35757584,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817615,
+        "operations": 477,
+        "droppedFrames": 0,
+        "profileBytes": 17293012,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 434910,
+            "privateDirtyKiB": 223064,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 401080,
+            "privateDirtyKiB": 192324,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 496.04233545100004,
+        "nodeHeapUsedBytes": 34491840,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817617,
+        "operations": 489,
+        "droppedFrames": 0,
+        "profileBytes": 17293012,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437162,
+            "privateDirtyKiB": 224852,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 401288,
+            "privateDirtyKiB": 192588,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 512.199522107,
+        "nodeHeapUsedBytes": 35929856,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817642,
+        "operations": 503,
+        "droppedFrames": 0,
+        "profileBytes": 17294727,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 435598,
+            "privateDirtyKiB": 223668,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 401528,
+            "privateDirtyKiB": 192916,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 529.5674218409999,
+        "nodeHeapUsedBytes": 34613936,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817644,
+        "operations": 522,
+        "droppedFrames": 0,
+        "profileBytes": 17294727,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 435269,
+            "privateDirtyKiB": 223316,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 401511,
+            "privateDirtyKiB": 192984,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 540.408643841,
+        "nodeHeapUsedBytes": 36131248,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817644,
+        "operations": 532,
+        "droppedFrames": 0,
+        "profileBytes": 17294727,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 435373,
+            "privateDirtyKiB": 223376,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 401595,
+            "privateDirtyKiB": 193140,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 556.790300563,
+        "nodeHeapUsedBytes": 35099608,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817644,
+        "operations": 548,
+        "droppedFrames": 0,
+        "profileBytes": 17294725,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438609,
+            "privateDirtyKiB": 225708,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 401786,
+            "privateDirtyKiB": 193420,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 572.961431579,
+        "nodeHeapUsedBytes": 37037576,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817644,
+        "operations": 563,
+        "droppedFrames": 0,
+        "profileBytes": 17296440,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 435814,
+            "privateDirtyKiB": 223688,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 401872,
+            "privateDirtyKiB": 193596,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 589.177536475,
+        "nodeHeapUsedBytes": 35797008,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817665,
+        "operations": 577,
+        "droppedFrames": 0,
+        "profileBytes": 17296440,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 435926,
+            "privateDirtyKiB": 223732,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 401968,
+            "privateDirtyKiB": 193780,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 600.180301971,
+        "nodeHeapUsedBytes": 37215096,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817663,
+        "operations": 585,
+        "droppedFrames": 0,
+        "profileBytes": 17297152,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 436690,
+            "privateDirtyKiB": 224452,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 402356,
+            "privateDirtyKiB": 194224,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 617.774985561,
+        "nodeHeapUsedBytes": 36414904,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817640,
+        "operations": 574,
+        "droppedFrames": 0,
+        "profileBytes": 17297152,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438879,
+            "privateDirtyKiB": 226124,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 402278,
+            "privateDirtyKiB": 194228,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 633.989006925,
+        "nodeHeapUsedBytes": 37863280,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817615,
+        "operations": 574,
+        "droppedFrames": 0,
+        "profileBytes": 17298867,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 436468,
+            "privateDirtyKiB": 224080,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 406442,
+            "privateDirtyKiB": 194984,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 650.1594989509999,
+        "nodeHeapUsedBytes": 36654568,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817636,
+        "operations": 575,
+        "droppedFrames": 0,
+        "profileBytes": 17298867,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 436600,
+            "privateDirtyKiB": 224160,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 406554,
+            "privateDirtyKiB": 195120,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 660.9889859419999,
+        "nodeHeapUsedBytes": 37857760,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817636,
+        "operations": 578,
+        "droppedFrames": 0,
+        "profileBytes": 17298867,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 436504,
+            "privateDirtyKiB": 224020,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 406630,
+            "privateDirtyKiB": 195204,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 677.4534165119999,
+        "nodeHeapUsedBytes": 36870696,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817636,
+        "operations": 577,
+        "droppedFrames": 0,
+        "profileBytes": 17298867,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 436420,
+            "privateDirtyKiB": 223872,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 406851,
+            "privateDirtyKiB": 195444,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 693.883689001,
+        "nodeHeapUsedBytes": 37273504,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 118,
+        "artifactBytes": 2770611,
+        "operations": 579,
+        "droppedFrames": 0,
+        "profileBytes": 17300582,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 436412,
+            "privateDirtyKiB": 223796,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 406975,
+            "privateDirtyKiB": 195656,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 705.8370239309999,
+        "nodeHeapUsedBytes": 38940904,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817636,
+        "operations": 580,
+        "droppedFrames": 0,
+        "profileBytes": 17300582,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 436392,
+            "privateDirtyKiB": 223716,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407199,
+            "privateDirtyKiB": 195936,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 723.309025022,
+        "nodeHeapUsedBytes": 37552232,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817615,
+        "operations": 581,
+        "droppedFrames": 0,
+        "profileBytes": 17300582,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 435812,
+            "privateDirtyKiB": 224068,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 405931,
+            "privateDirtyKiB": 195788,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 739.635147169,
+        "nodeHeapUsedBytes": 39389784,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817594,
+        "operations": 581,
+        "droppedFrames": 0,
+        "profileBytes": 17300582,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438859,
+            "privateDirtyKiB": 226624,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 406000,
+            "privateDirtyKiB": 195940,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 750.368574958,
+        "nodeHeapUsedBytes": 37701032,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817594,
+        "operations": 583,
+        "droppedFrames": 0,
+        "profileBytes": 17302297,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 435798,
+            "privateDirtyKiB": 223892,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 406046,
+            "privateDirtyKiB": 195972,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 766.575823624,
+        "nodeHeapUsedBytes": 39473208,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 120,
+        "artifactBytes": 2817594,
+        "operations": 582,
+        "droppedFrames": 0,
+        "profileBytes": 17302297,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 435878,
+            "privateDirtyKiB": 223908,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 405962,
+            "privateDirtyKiB": 195824,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 782.794514068,
+        "nodeHeapUsedBytes": 37772112,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 118,
+        "artifactBytes": 2770573,
+        "operations": 583,
+        "droppedFrames": 0,
+        "profileBytes": 17302297,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 435882,
+            "privateDirtyKiB": 223856,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 406082,
+            "privateDirtyKiB": 195876,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 798.992815656,
+        "nodeHeapUsedBytes": 39472928,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 118,
+        "artifactBytes": 2770677,
+        "operations": 581,
+        "droppedFrames": 0,
+        "profileBytes": 17302297,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 436298,
+            "privateDirtyKiB": 224204,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 406206,
+            "privateDirtyKiB": 196056,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 815.1714934199999,
+        "nodeHeapUsedBytes": 37521544,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 118,
+        "artifactBytes": 2770552,
+        "operations": 583,
+        "droppedFrames": 0,
+        "profileBytes": 17304012,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437214,
+            "privateDirtyKiB": 225048,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 406370,
+            "privateDirtyKiB": 196304,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 825.985066169,
+        "nodeHeapUsedBytes": 39042304,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723633,
+        "operations": 579,
+        "droppedFrames": 0,
+        "profileBytes": 17304012,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437227,
+            "privateDirtyKiB": 225020,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 406431,
+            "privateDirtyKiB": 196424,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 842.207006829,
+        "nodeHeapUsedBytes": 37867656,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723658,
+        "operations": 585,
+        "droppedFrames": 0,
+        "profileBytes": 17304012,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437300,
+            "privateDirtyKiB": 225052,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 406626,
+            "privateDirtyKiB": 196680,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 858.362904394,
+        "nodeHeapUsedBytes": 39571432,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723639,
+        "operations": 585,
+        "droppedFrames": 0,
+        "profileBytes": 17304012,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437216,
+            "privateDirtyKiB": 224904,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 406690,
+            "privateDirtyKiB": 196828,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 874.5224558030001,
+        "nodeHeapUsedBytes": 37889280,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723641,
+        "operations": 579,
+        "droppedFrames": 0,
+        "profileBytes": 17305727,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437400,
+            "privateDirtyKiB": 225016,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 406842,
+            "privateDirtyKiB": 197056,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 885.399560676,
+        "nodeHeapUsedBytes": 39193496,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723643,
+        "operations": 576,
+        "droppedFrames": 0,
+        "profileBytes": 17305727,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 436913,
+            "privateDirtyKiB": 224476,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407135,
+            "privateDirtyKiB": 197412,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 901.6080649339999,
+        "nodeHeapUsedBytes": 38106032,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723624,
+        "operations": 576,
+        "droppedFrames": 0,
+        "profileBytes": 17305727,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 436949,
+            "privateDirtyKiB": 224444,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407499,
+            "privateDirtyKiB": 197860,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 918.028942817,
+        "nodeHeapUsedBytes": 39578096,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676749,
+        "operations": 573,
+        "droppedFrames": 0,
+        "profileBytes": 17305727,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437053,
+            "privateDirtyKiB": 224484,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407399,
+            "privateDirtyKiB": 197848,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 934.5397431299999,
+        "nodeHeapUsedBytes": 37877424,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676649,
+        "operations": 574,
+        "droppedFrames": 0,
+        "profileBytes": 17305727,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 439910,
+            "privateDirtyKiB": 226856,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407546,
+            "privateDirtyKiB": 198076,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 945.3726522939999,
+        "nodeHeapUsedBytes": 37438576,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676672,
+        "operations": 576,
+        "droppedFrames": 0,
+        "profileBytes": 17307442,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437619,
+            "privateDirtyKiB": 224956,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407597,
+            "privateDirtyKiB": 198188,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 961.588973966,
+        "nodeHeapUsedBytes": 39438216,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676753,
+        "operations": 579,
+        "droppedFrames": 0,
+        "profileBytes": 17307442,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 436727,
+            "privateDirtyKiB": 225020,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407697,
+            "privateDirtyKiB": 198376,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 978.881084438,
+        "nodeHeapUsedBytes": 39085768,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723672,
+        "operations": 572,
+        "droppedFrames": 0,
+        "profileBytes": 17307442,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437041,
+            "privateDirtyKiB": 225244,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407015,
+            "privateDirtyKiB": 198804,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 995.2181205449999,
+        "nodeHeapUsedBytes": 39497656,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723653,
+        "operations": 575,
+        "droppedFrames": 0,
+        "profileBytes": 17307442,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 439541,
+            "privateDirtyKiB": 227244,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407083,
+            "privateDirtyKiB": 198948,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1005.9788893479999,
+        "nodeHeapUsedBytes": 37848624,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676630,
+        "operations": 579,
+        "droppedFrames": 0,
+        "profileBytes": 17311276,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 436877,
+            "privateDirtyKiB": 224968,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407147,
+            "privateDirtyKiB": 199076,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1022.383384922,
+        "nodeHeapUsedBytes": 39505248,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676757,
+        "operations": 579,
+        "droppedFrames": 0,
+        "profileBytes": 17311276,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 436925,
+            "privateDirtyKiB": 224952,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407219,
+            "privateDirtyKiB": 199232,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1038.566000271,
+        "nodeHeapUsedBytes": 38251496,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676655,
+        "operations": 567,
+        "droppedFrames": 0,
+        "profileBytes": 17311276,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437013,
+            "privateDirtyKiB": 224972,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407287,
+            "privateDirtyKiB": 199388,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1054.745427638,
+        "nodeHeapUsedBytes": 39625256,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676780,
+        "operations": 573,
+        "droppedFrames": 0,
+        "profileBytes": 17311276,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437173,
+            "privateDirtyKiB": 225072,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407503,
+            "privateDirtyKiB": 199688,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1065.5900990199998,
+        "nodeHeapUsedBytes": 37949952,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676780,
+        "operations": 575,
+        "droppedFrames": 0,
+        "profileBytes": 17312991,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438317,
+            "privateDirtyKiB": 226180,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407023,
+            "privateDirtyKiB": 199260,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1081.837603117,
+        "nodeHeapUsedBytes": 39676488,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676655,
+        "operations": 570,
+        "droppedFrames": 0,
+        "profileBytes": 17312991,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437321,
+            "privateDirtyKiB": 225112,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407067,
+            "privateDirtyKiB": 199268,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1098.2710697629998,
+        "nodeHeapUsedBytes": 37897896,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676780,
+        "operations": 571,
+        "droppedFrames": 0,
+        "profileBytes": 17312991,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437429,
+            "privateDirtyKiB": 225152,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407139,
+            "privateDirtyKiB": 199272,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1114.584595462,
+        "nodeHeapUsedBytes": 39690024,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676674,
+        "operations": 569,
+        "droppedFrames": 0,
+        "profileBytes": 17312991,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437421,
+            "privateDirtyKiB": 225080,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407087,
+            "privateDirtyKiB": 199156,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1125.427144327,
+        "nodeHeapUsedBytes": 37881384,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676672,
+        "operations": 560,
+        "droppedFrames": 0,
+        "profileBytes": 17312991,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 440110,
+            "privateDirtyKiB": 227292,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407340,
+            "privateDirtyKiB": 199356,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1141.5771539779998,
+        "nodeHeapUsedBytes": 38465120,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676772,
+        "operations": 561,
+        "droppedFrames": 0,
+        "profileBytes": 17314706,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437642,
+            "privateDirtyKiB": 225192,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407398,
+            "privateDirtyKiB": 199356,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1158.886801217,
+        "nodeHeapUsedBytes": 39820104,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676768,
+        "operations": 571,
+        "droppedFrames": 0,
+        "profileBytes": 17314706,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437596,
+            "privateDirtyKiB": 225252,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408698,
+            "privateDirtyKiB": 200288,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1175.1535895159998,
+        "nodeHeapUsedBytes": 38028728,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676666,
+        "operations": 568,
+        "droppedFrames": 0,
+        "profileBytes": 17314706,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437600,
+            "privateDirtyKiB": 225192,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408514,
+            "privateDirtyKiB": 200040,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1185.994679767,
+        "nodeHeapUsedBytes": 38891464,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676666,
+        "operations": 566,
+        "droppedFrames": 0,
+        "profileBytes": 17314706,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 440405,
+            "privateDirtyKiB": 227524,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408535,
+            "privateDirtyKiB": 200012,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1202.170098191,
+        "nodeHeapUsedBytes": 38539104,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676791,
+        "operations": 562,
+        "droppedFrames": 0,
+        "profileBytes": 17316421,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437236,
+            "privateDirtyKiB": 225744,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408762,
+            "privateDirtyKiB": 200184,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1218.4437784269999,
+        "nodeHeapUsedBytes": 38785928,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676666,
+        "operations": 559,
+        "droppedFrames": 0,
+        "profileBytes": 17316421,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437272,
+            "privateDirtyKiB": 225712,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408558,
+            "privateDirtyKiB": 199916,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1234.8254667400001,
+        "nodeHeapUsedBytes": 39579352,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676791,
+        "operations": 559,
+        "droppedFrames": 0,
+        "profileBytes": 17316421,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437358,
+            "privateDirtyKiB": 225732,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407680,
+            "privateDirtyKiB": 199988,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1245.789961441,
+        "nodeHeapUsedBytes": 37939304,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676770,
+        "operations": 562,
+        "droppedFrames": 0,
+        "profileBytes": 17316421,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437350,
+            "privateDirtyKiB": 225680,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407720,
+            "privateDirtyKiB": 199984,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1262.1427342369998,
+        "nodeHeapUsedBytes": 39597272,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676670,
+        "operations": 565,
+        "droppedFrames": 0,
+        "profileBytes": 17318136,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437258,
+            "privateDirtyKiB": 225524,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407784,
+            "privateDirtyKiB": 199984,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1277.981003143,
+        "nodeHeapUsedBytes": 38091480,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676751,
+        "operations": 564,
+        "droppedFrames": 0,
+        "profileBytes": 17318136,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 437394,
+            "privateDirtyKiB": 225592,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408112,
+            "privateDirtyKiB": 200236,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1290.211637035,
+        "nodeHeapUsedBytes": 39747440,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 130,
+        "artifactBytes": 3052329,
+        "operations": 604,
+        "droppedFrames": 0,
+        "profileBytes": 17319851,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 440232,
+            "privateDirtyKiB": 228180,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 409968,
+            "privateDirtyKiB": 201832,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1311.140451294,
+        "nodeHeapUsedBytes": 39287360,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 136,
+        "artifactBytes": 3193220,
+        "operations": 617,
+        "droppedFrames": 0,
+        "profileBytes": 17319851,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438385,
+            "privateDirtyKiB": 226128,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408726,
+            "privateDirtyKiB": 200516,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1321.11194566,
+        "nodeHeapUsedBytes": 39172408,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 136,
+        "artifactBytes": 3193197,
+        "operations": 615,
+        "droppedFrames": 0,
+        "profileBytes": 17321566,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 441174,
+            "privateDirtyKiB": 228924,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 409374,
+            "privateDirtyKiB": 201160,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1337.1666295389998,
+        "nodeHeapUsedBytes": 39548584,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 136,
+        "artifactBytes": 3193197,
+        "operations": 611,
+        "droppedFrames": 0,
+        "profileBytes": 17321566,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 439082,
+            "privateDirtyKiB": 226792,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408834,
+            "privateDirtyKiB": 200596,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1353.228823061,
+        "nodeHeapUsedBytes": 39526768,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 136,
+        "artifactBytes": 3193197,
+        "operations": 610,
+        "droppedFrames": 0,
+        "profileBytes": 17321566,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 439005,
+            "privateDirtyKiB": 226572,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408642,
+            "privateDirtyKiB": 200260,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1369.247969917,
+        "nodeHeapUsedBytes": 38125360,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 136,
+        "artifactBytes": 3193197,
+        "operations": 610,
+        "droppedFrames": 0,
+        "profileBytes": 17321566,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 439089,
+            "privateDirtyKiB": 226596,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408642,
+            "privateDirtyKiB": 200196,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1385.345796746,
+        "nodeHeapUsedBytes": 39040040,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 136,
+        "artifactBytes": 3193197,
+        "operations": 611,
+        "droppedFrames": 0,
+        "profileBytes": 17321566,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 441763,
+            "privateDirtyKiB": 228800,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408771,
+            "privateDirtyKiB": 200260,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1396.015057785,
+        "nodeHeapUsedBytes": 39489592,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 136,
+        "artifactBytes": 3193197,
+        "operations": 613,
+        "droppedFrames": 0,
+        "profileBytes": 17323281,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438217,
+            "privateDirtyKiB": 226636,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408854,
+            "privateDirtyKiB": 200304,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1412.060873835,
+        "nodeHeapUsedBytes": 39060144,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 136,
+        "artifactBytes": 3193197,
+        "operations": 612,
+        "droppedFrames": 0,
+        "profileBytes": 17323281,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438421,
+            "privateDirtyKiB": 226772,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408902,
+            "privateDirtyKiB": 200284,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1427.376079074,
+        "nodeHeapUsedBytes": 40498600,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 138,
+        "artifactBytes": 3240220,
+        "operations": 613,
+        "droppedFrames": 0,
+        "profileBytes": 17323281,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438297,
+            "privateDirtyKiB": 226556,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407850,
+            "privateDirtyKiB": 200164,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1443.4554378799999,
+        "nodeHeapUsedBytes": 38392784,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 138,
+        "artifactBytes": 3240118,
+        "operations": 615,
+        "droppedFrames": 0,
+        "profileBytes": 17323300,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 440745,
+            "privateDirtyKiB": 228948,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407935,
+            "privateDirtyKiB": 200180,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1459.4782822119998,
+        "nodeHeapUsedBytes": 40268144,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 136,
+        "artifactBytes": 3193201,
+        "operations": 616,
+        "droppedFrames": 0,
+        "profileBytes": 17325015,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438668,
+            "privateDirtyKiB": 226788,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407996,
+            "privateDirtyKiB": 200188,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1470.145452282,
+        "nodeHeapUsedBytes": 38780296,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 136,
+        "artifactBytes": 3193201,
+        "operations": 620,
+        "droppedFrames": 0,
+        "profileBytes": 17325015,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438679,
+            "privateDirtyKiB": 226756,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408020,
+            "privateDirtyKiB": 200168,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1486.203815191,
+        "nodeHeapUsedBytes": 40102816,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 136,
+        "artifactBytes": 3193201,
+        "operations": 618,
+        "droppedFrames": 0,
+        "profileBytes": 17325015,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438727,
+            "privateDirtyKiB": 226732,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408124,
+            "privateDirtyKiB": 200212,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1502.2531346479998,
+        "nodeHeapUsedBytes": 38465528,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 136,
+        "artifactBytes": 3193201,
+        "operations": 618,
+        "droppedFrames": 0,
+        "profileBytes": 17325015,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438479,
+            "privateDirtyKiB": 226420,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408236,
+            "privateDirtyKiB": 200260,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1518.383690654,
+        "nodeHeapUsedBytes": 40554984,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 137,
+        "artifactBytes": 3219080,
+        "operations": 621,
+        "droppedFrames": 0,
+        "profileBytes": 17326749,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438598,
+            "privateDirtyKiB": 226460,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408225,
+            "privateDirtyKiB": 200200,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1534.3758498710001,
+        "nodeHeapUsedBytes": 38523680,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 138,
+        "artifactBytes": 3240220,
+        "operations": 622,
+        "droppedFrames": 0,
+        "profileBytes": 17326749,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438530,
+            "privateDirtyKiB": 226328,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408485,
+            "privateDirtyKiB": 200392,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1545.061231963,
+        "nodeHeapUsedBytes": 39867120,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 138,
+        "artifactBytes": 3240218,
+        "operations": 621,
+        "droppedFrames": 0,
+        "profileBytes": 17326749,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438567,
+            "privateDirtyKiB": 226320,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408699,
+            "privateDirtyKiB": 200568,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1561.102635923,
+        "nodeHeapUsedBytes": 38342192,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 138,
+        "artifactBytes": 3240112,
+        "operations": 618,
+        "droppedFrames": 0,
+        "profileBytes": 17326749,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438635,
+            "privateDirtyKiB": 226320,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408767,
+            "privateDirtyKiB": 200568,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1577.142269442,
+        "nodeHeapUsedBytes": 40421696,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 138,
+        "artifactBytes": 3240214,
+        "operations": 624,
+        "droppedFrames": 0,
+        "profileBytes": 17328485,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 439570,
+            "privateDirtyKiB": 227196,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408830,
+            "privateDirtyKiB": 200560,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1593.19417763,
+        "nodeHeapUsedBytes": 38702272,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 124,
+        "artifactBytes": 2911455,
+        "operations": 619,
+        "droppedFrames": 0,
+        "profileBytes": 17328485,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438950,
+            "privateDirtyKiB": 226504,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408813,
+            "privateDirtyKiB": 200484,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1609.241401966,
+        "nodeHeapUsedBytes": 40805848,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723666,
+        "operations": 617,
+        "droppedFrames": 0,
+        "profileBytes": 17328485,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438986,
+            "privateDirtyKiB": 226472,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 409017,
+            "privateDirtyKiB": 200624,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1625.288545478,
+        "nodeHeapUsedBytes": 38547168,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723666,
+        "operations": 618,
+        "droppedFrames": 0,
+        "profileBytes": 17328485,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 439110,
+            "privateDirtyKiB": 226528,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 409137,
+            "privateDirtyKiB": 200676,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1636.112329935,
+        "nodeHeapUsedBytes": 38491264,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 115,
+        "artifactBytes": 2697971,
+        "operations": 616,
+        "droppedFrames": 0,
+        "profileBytes": 17328504,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 440822,
+            "privateDirtyKiB": 228808,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 409370,
+            "privateDirtyKiB": 200860,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1652.15731695,
+        "nodeHeapUsedBytes": 38238360,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723666,
+        "operations": 615,
+        "droppedFrames": 0,
+        "profileBytes": 17330219,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438814,
+            "privateDirtyKiB": 227144,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 409477,
+            "privateDirtyKiB": 200908,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1668.2105036219998,
+        "nodeHeapUsedBytes": 39692064,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723685,
+        "operations": 614,
+        "droppedFrames": 0,
+        "profileBytes": 17330219,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438874,
+            "privateDirtyKiB": 227136,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408577,
+            "privateDirtyKiB": 200964,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1684.229291219,
+        "nodeHeapUsedBytes": 38779160,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723660,
+        "operations": 614,
+        "droppedFrames": 0,
+        "profileBytes": 17330219,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438990,
+            "privateDirtyKiB": 227184,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408713,
+            "privateDirtyKiB": 201032,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1700.26250268,
+        "nodeHeapUsedBytes": 38554656,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723679,
+        "operations": 615,
+        "droppedFrames": 0,
+        "profileBytes": 17330238,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 441126,
+            "privateDirtyKiB": 229264,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408330,
+            "privateDirtyKiB": 200580,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1710.960723017,
+        "nodeHeapUsedBytes": 39701672,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 116,
+        "artifactBytes": 2723635,
+        "operations": 619,
+        "droppedFrames": 0,
+        "profileBytes": 17331953,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438894,
+            "privateDirtyKiB": 226980,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 407869,
+            "privateDirtyKiB": 200080,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1726.9329672969998,
+        "nodeHeapUsedBytes": 38819280,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676718,
+        "operations": 620,
+        "droppedFrames": 0,
+        "profileBytes": 17331953,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 438906,
+            "privateDirtyKiB": 226928,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408053,
+            "privateDirtyKiB": 200200,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1742.936051009,
+        "nodeHeapUsedBytes": 38226888,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676618,
+        "operations": 618,
+        "droppedFrames": 0,
+        "profileBytes": 17331953,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 439154,
+            "privateDirtyKiB": 227116,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408129,
+            "privateDirtyKiB": 200216,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1759.0663072549999,
+        "nodeHeapUsedBytes": 40520520,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676766,
+        "operations": 612,
+        "droppedFrames": 0,
+        "profileBytes": 17331953,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 439266,
+            "privateDirtyKiB": 227160,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408249,
+            "privateDirtyKiB": 200272,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1775.092389707,
+        "nodeHeapUsedBytes": 39263088,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676662,
+        "operations": 614,
+        "droppedFrames": 0,
+        "profileBytes": 17333687,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 439618,
+            "privateDirtyKiB": 227448,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408322,
+            "privateDirtyKiB": 200276,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1785.770045671,
+        "nodeHeapUsedBytes": 39364024,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676660,
+        "operations": 620,
+        "droppedFrames": 0,
+        "profileBytes": 17333687,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 439574,
+            "privateDirtyKiB": 227360,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408422,
+            "privateDirtyKiB": 200332,
+            "processCount": 12
+          }
+        ]
+      },
+      {
+        "elapsedSeconds": 1801.765477896,
+        "nodeHeapUsedBytes": 39216104,
+        "browserdConnections": 3,
+        "sessions": 2,
+        "tabs": 2,
+        "artifacts": 114,
+        "artifactBytes": 2676760,
+        "operations": 618,
+        "droppedFrames": 0,
+        "profileBytes": 17333687,
+        "chrome": [
+          {
+            "pid": 223774,
+            "pssKiB": 439810,
+            "privateDirtyKiB": 227528,
+            "processCount": 12
+          },
+          {
+            "pid": 223776,
+            "pssKiB": 408594,
+            "privateDirtyKiB": 200440,
+            "processCount": 12
+          }
+        ]
+      }
+    ]
+  }
+}

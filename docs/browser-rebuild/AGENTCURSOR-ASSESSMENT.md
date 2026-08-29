@@ -115,6 +115,22 @@ Keep an `UPSTREAM.md` or the existing `third_party/agentcursor/README.md` with r
 
 A fork is justified only if local changes become large enough to benefit AgentCursor upstream. An exact Git dependency is not recommended because it still imports package-level code and complicates builds. A full vendored tree is unnecessary.
 
+## Phase 2A integration evidence
+
+The selected AgentCursor path and persona port now runs behind the truthful public path `agentcursor/chrome`. Trusted webxd connects to the separate long-lived browserd process. The native Pi extension does not connect to AgentCursor, MCP, Chrome, or CDP directly.
+
+The full headed route proves:
+
+- one stable persona and visible sampled virtual cursor per browser session;
+- real screenshot delivery to Pi as a multimodal image;
+- image-pixel grounding with conversion inside browserd;
+- screenshot move, click, double-click, drag, and wheel through the human motor;
+- explicit DOM pointer actions through the same motor;
+- no Node, MCP, CLI, or browser process launch for warm actions;
+- two isolated actors with separate Chrome processes, profiles, sessions, personas, and tabs.
+
+The integration still does not import or install the AgentCursor package. It does not use AgentCursor server, MCP, extension, transport, macOS driver, active-tab lookup, or selector-first action service.
+
 ## Extension decision
 
-Do not use the AgentCursor extension in Phase 1. Reconsider only after a deterministic fixture reproduces a required capability that CDP cannot implement cleanly. The decision must name that capability and compare an extension with a smaller CDP or preload-script solution. Current evidence does not show such a gap.
+Do not use the AgentCursor extension in Phase 2A. Reconsider only after a deterministic fixture reproduces a required capability that CDP cannot implement cleanly. The decision must name that capability and compare an extension with a smaller CDP or preload-script solution. Current evidence does not show such a gap.

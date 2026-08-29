@@ -98,8 +98,26 @@ These decisions apply to the replacement browser runtime. They supersede conflic
 
 **Consequence:** Do not weaken one-process-per-session isolation to improve the metric. A recycling design must preserve explicit session identity, operation dispatch truth, cleanup, and visible recovery. Resource limits remain a production gate, not a Phase 2 development blocker.
 
-## Phase 1.1 and Phase 1.2 confirmations
+## ADR-013: Public screenshot-first contract
+
+**Decision:** Move the bundled SDK, webxd, and native Pi extension together to public API major 3. Use `agentcursor/chrome` for the new route. Make screenshot observation the default, deliver one real Pi image item, use the real browserd observation ID, default coordinates to image pixels, and keep DOM fallback explicit.
+
+**Reason:** The old semantic and workspace browser shapes are not compatible with explicit screenshot grounding. The model points into image pixels, which can differ from CSS viewport pixels.
+
+**Consequence:** Browserd converts coordinates from the exact cited observation. Base64 stays out of model text and compact details. Unsupported workspace, debug, upload, download, selector, and arbitrary-evaluation operations are not advertised. See `ADR-013-PUBLIC-SCREENSHOT-CONTRACT.md`.
+
+## ADR-014: Signed navigation plus connection-bound egress
+
+**Decision:** Keep destination policy in trusted webxd. Sign each explicit browser URL authorization for one runtime, actor, operation, normalized URL, egress binding, expiration, and nonce. Require production Chrome to use the reviewed loopback forward proxy, which validates and pins each public destination connection.
+
+**Reason:** Explicit URL checks cannot constrain redirects, clicks, forms, scripts, or popups. A broker token alone cannot constrain page-driven network connections.
+
+**Consequence:** Session creation fails closed without healthy egress. Redirects and page-driven navigation remain on the proxy path. Browserd quarantines unexpected committed protocols as defense in depth. Test-only loopback fixture policy cannot be enabled in production. See `ADR-014-BROWSER-EGRESS-BOUNDARY.md`.
+
+## Phase 1.1, Phase 1.2, and Phase 2A confirmations
 
 Phase 1.1 confirms that frame subscriptions are connection-, actor-, full-address-, epoch-, and subscription-ID-scoped. Operation IDs use canonical semantic fingerprints. Artifacts use actor, session, tab, purpose, media type, size, digest, and lifetime provenance. Screenshot metadata is checked before and after capture. Descriptor and profile ownership use runtime instance identity plus PID start identity.
 
 Phase 1.2 confirms exclusive nonce-bound browserd startup ownership, unique instance sockets, atomic profile locks, outer-root cleanup, transactional target publication, immutable capture identity through artifact commit, typed bounded DOM fallback, retry lookup before resource lookup, connection-bound frame retry semantics, idempotent artifact rollback, and session-before-owner quota order. Same-origin iframe DOM fallback is supported. Cross-origin out-of-process iframe fallback is not supported.
+
+Phase 2A Gate 0 replaces stale filesystem ownership recovery with kernel-owned abstract AF_UNIX lifetime locks. It also makes artifact admission atomic, bounds terminal target history, settles in-flight captures, makes cleanup retryable, adds global capacity, validates operation-result resources, and reports truthful health. The routed integration binds trusted webxd actors, delivers verified screenshots as Pi image items, converts image pixels inside browserd, and rejects old sessions after daemon replacement. Production-default routing remains disabled.

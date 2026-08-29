@@ -29,9 +29,23 @@
 | BR-23 | Production navigation fails closed. | Start the runtime without `NavigationAuthorization` and reject navigation. Permit only deterministic loopback fixture URLs in live tests. |
 | BR-24 | Browser failures cannot disable search and read. | Run `browserd` as a separate process from `webxd`. Kill Chrome and `browserd` while independent search/read service tests remain healthy. |
 
+## Phase 2A route acceptance criteria
+
+| ID | Criterion | Acceptance test |
+|---|---|---|
+| BR-25 | Trusted webxd is the only production browserd client. | Verify descriptor modes and process identity. Bind one persistent browserd connection per authenticated actor. Confirm Pi receives no descriptor, secret, socket, profile, proxy, or CDP value. |
+| BR-26 | Backend selection is immutable and reversible. | Start webxd in `legacy` and `agentcursor` modes. Confirm the default is `legacy`, each mode reports only its own path, and no request can select, fall back, or retry on the other backend. |
+| BR-27 | The public browser contract is coherently versioned. | Confirm WebX API and browser protocol major 3 across SDK, webxd, Pi schemas, tests, and guidance. Confirm the new path is exactly `agentcursor/chrome`. |
+| BR-28 | Pi receives a real screenshot image. | Run native `browser_observe`. Confirm one bounded text item and one real PNG or JPEG image item. Verify bytes, size, digest, and media type. Confirm no base64 in text or compact details. |
+| BR-29 | Image coordinates work at non-1 DPR. | Capture at DPR 2, point at image pixel `[380,252]`, convert from exact `760x520` image and `380x260` CSS dimensions, and click CSS `[190,126]`. Cover DPR 1, 1.25, 2, fractional viewport, bounds, stale observation, and drag. |
+| BR-30 | Public egress is fail closed. | Require a healthy structured loopback proxy before session creation. Deny local, private, reserved, and mixed DNS destinations. Keep redirects, clicks, forms, scripts, and popups on the validated proxy path. |
+| BR-31 | Browserd replacement is truthful. | Restart browserd. Reject every old session without recreation or remapping. Reconnect only for new work. Confirm search and read remain healthy while browserd is absent. |
+| BR-32 | The complete native route is isolated and bounded. | Run two Pi actors through SDK, webxd, browserd, and headed Chromium. Confirm distinct processes, profiles, sessions, personas, and tabs; explicit DOM fallback; tabs; cancellation; retry truth; no warm process spawn; and complete cleanup. |
+| BR-33 | The actual routed workload passes for 30 minutes. | Run two actors through repeated screenshot, image action, DOM fallback, tab, retry, pool eviction, artifact, search, and read work. Record separate Chrome process-tree PSS/private dirty, route latency, combined test-process heap, counts, profile bytes, and cleanup. Do not claim this resolves ADR-012. |
+
 ## Phase 1 delivery boundary
 
-Phase 1 implements BR-01, BR-02, BR-04 through BR-11, BR-13, BR-14, BR-16 through BR-23 in the parallel runtime. It does not connect the native Pi tools, `webxd`, or Tauri workspace to that runtime. BR-03, BR-12, BR-15, and the full service-containment part of BR-24 remain later cutover gates.
+Phase 1 implements BR-01, BR-02, BR-04 through BR-11, BR-13, BR-14, BR-16 through BR-23 in the parallel runtime. Phase 2A adds BR-12, BR-24, and BR-25 through BR-33 behind the non-default reversible startup switch. BR-03 and BR-15 remain Phase 3 Tauri workspace gates.
 
 ## Required pointer operations
 

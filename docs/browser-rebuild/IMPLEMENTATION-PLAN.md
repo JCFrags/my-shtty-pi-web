@@ -70,30 +70,33 @@ Each phase has one acceptance gate. Keep the old browser production path until t
 
 **Resource decision:** the two-hour run did not prove a PSS plateau. Phase 2 development can begin behind its reversible switch. Production-default routing requires either credible representative plateau evidence or a tested bounded Chrome session recycling and recovery policy. Do not change one-process-per-session isolation only to reduce PSS.
 
-## Phase 2 — native Pi extension and authority cutover behind one switch
+## Phase 2A — native Pi screenshot route behind one switch
 
-**Goal:** make the new runtime serve real native Pi browser tools while keeping search and read independent.
+**Status:** implementation and deterministic integration are complete on `rebuild/screenshot-first-browser`. The required 30-minute routed soak and final acceptance record close this development gate. Production-default routing remains disabled.
 
-**Files/modules:** `apps/webxd/src/authority.ts`; `apps/webxd/src/runtime.ts`; `apps/webxd/src/browser-daemon-port.ts`; `apps/pi-webx/src/index.ts`; `apps/pi-webx/src/schemas.ts`; `apps/pi-webx/skills/webx/SKILL.md`; `packages/sdk/`.
+**Goal:** make the replacement runtime serve real native Pi browser tools while search and read remain independent.
 
-**Tasks:**
+**Files/modules:** `apps/webxd/src/browserd-client.ts`; `apps/webxd/src/agentcursor-browser-port.ts`; `apps/webxd/src/browser-backend-selection.ts`; `apps/webxd/src/authority.ts`; `apps/webxd/src/runtime.ts`; `apps/pi-webx/`; `packages/sdk/`; `packages/browser-protocol/`; `packages/browser-runtime/`; `apps/browserd/`.
 
-- Connect `webxd` to the separate long-lived `browserd` Unix service. Do not import the full runtime into `webxd`.
-- Implement ADR-011. Make trusted `webxd` the only production browserd client. Authenticate and scope the Pi connection in `webxd`, then bind one browserd connection to one actor. Never give the descriptor or binding secret to Pi/model requests.
-- Replace browser SDK types with full target-aware messages.
-- Make screenshot observation the primary `browser_observe` response.
-- Expose DOM fallback as an explicit observe mode or separate internal operation.
-- Return operation IDs and support status/cancel.
-- Pass authenticated Pi owner and lifecycle session context to every call.
-- Add one temporary deployment switch that selects old or new runtime at service start. Do not select per operation.
+**Completed work:**
 
-**Tests:** native Pi tool schema tests; end-to-end Pi extension fixture flow; concurrent Pi sessions; wrong owner/session/target/epoch; old-observation rejection; deadline and cancellation; search/read health with Chrome absent; no MCP process; no per-action process.
+- Corrected the Phase 2A Gate 0 lifecycle, capacity, capture, cleanup, health, and resource races before route integration.
+- Added the secure trusted webxd browserd descriptor and persistent actor-bound Unix transport.
+- Added immutable `WEBX_BROWSER_BACKEND=legacy|agentcursor`, with `legacy` as the default and no per-request fallback.
+- Moved the public browser contract to major 3 and added the truthful `agentcursor/chrome` path.
+- Added signed explicit navigation authorization and fail-closed proxy egress.
+- Made Pi observation screenshot-first with one verified multimodal image and no base64 in model text or compact details.
+- Added image-pixel coordinate conversion inside browserd against the exact cited observation.
+- Added explicit bounded DOM fallback, explicit tabs, cancellation, actor isolation, and browserd restart truth.
+- Added CI-safe route fixtures and an opt-in native Pi to headed Chromium route and routed soak.
 
-**Acceptance gate:** Phase 1.2 has no unresolved correctness blocker. The new route passes all browser acceptance tests in a staged installation. Search/read tests pass with browser disabled. Default routing also requires the ADR-012 resource gate: credible representative plateau evidence or a tested bounded Chrome session recycling and recovery policy.
+**Tests:** protocol, runtime, browserd, Gate 0, browserd client, webxd authority and backend selection, SDK contract, Pi schema and presentation, two-actor native Pi headed route, and 30-minute integrated routed soak.
 
-**Deletions enabled:** `components/browser/crates/browserd/`, `backend-core/`, `backend-agent-browser/`, `backend-pinchtab/`, old backend scripts and tests, and browser daemon port code after one release-candidate soak.
+**Acceptance gate:** all Phase 2A deterministic and headed tests pass. Search and read stay healthy without browserd. Old sessions fail explicitly after browserd replacement. The branch contains the requested evidence and remains clean. This gate permits later staged development. It does not satisfy ADR-012 or enable production-default routing.
 
-**Rollback:** switch service selection back to the old route and restore the prior package set. Do not keep runtime fallback inside a request.
+**Deletions enabled:** none in Phase 2A. Keep the legacy stack installed and selectable until a later release-candidate and resource gate authorizes deletion.
+
+**Rollback:** start webxd with `WEBX_BROWSER_BACKEND=legacy`. Selection is immutable for the process. No request can switch or fall back to the other backend.
 
 ## Phase 3 — production Tauri workspace and human control
 

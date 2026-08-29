@@ -18,7 +18,7 @@ flowchart LR
   Artifacts --> Workspace
 ```
 
-Phase 1 adds `packages/browser-protocol`, `packages/browser-runtime`, and `apps/browserd` in parallel with the current production stack. It does not connect `webxd`, the Pi tools, or the current workspace to the new runtime.
+Phase 2A connects `packages/browser-protocol`, `packages/browser-runtime`, and `apps/browserd` to trusted webxd, the public SDK, and native Pi tools. The immutable `WEBX_BROWSER_BACKEND` startup switch defaults to `legacy`. The new `agentcursor` selection has no request-level fallback. It does not connect the Tauri workspace and it is not the production default.
 
 ## Process responsibilities
 
@@ -28,7 +28,9 @@ The extension supplies model-facing tools. It uses `webxd` as the policy boundar
 
 ### webxd
 
-`webxd` remains healthy when Chrome or `browserd` fails. It owns public navigation policy and attestation. It also owns search, direct read, cache, content, and destination policy. In a later phase, it will authenticate to `browserd` and bind each connection to one principal and Pi agent session.
+`webxd` remains healthy when Chrome or `browserd` fails. It owns public navigation policy and attestation. It also owns search, direct read, cache, content, and destination policy.
+
+In AgentCursor mode, webxd securely reads the owner-only browserd descriptor. It keeps one bounded persistent browserd connection per authority actor and binds that connection exactly once. It multiplexes requests, routes only matching frame subscriptions, supports caller cancellation, evicts idle connections, and detects daemon replacement. A replacement permits new work but makes old browser sessions unavailable. Webxd does not recreate or remap them.
 
 ### browserd
 
@@ -164,13 +166,19 @@ Session creation is transactional. Failure closes CDP, stops Chrome, and removes
 
 One runtime-owned profile manager allocates under a unique runtime-instance root. Allocation transitions from allocating to starting to running under an atomic cross-process lock where required. Lock acquisition publishes a complete nonce-bearing owner record through an atomic no-replace primitive. Release verifies the current nonce, PID, and process-start identity. Young malformed state receives a bounded grace period. Manifests bind runtime ID, launch ID, PID, and process-start ticks. Startup orphan cleanup runs once and removes only a verified dead runtime-owned root. Profile deletion verifies the real owned directory, marker, runtime identity, launch identity, and process identity. Symlinks, foreign directories, live owners, and paths outside the root are rejected. The manager tracks active leases and refuses close while one remains. Normal runtime shutdown closes the manager and removes only its own empty marker and runtime-instance root.
 
-Before inspecting or changing shared service paths, browserd acquires an atomic nonce-bearing startup ownership lock. Each runtime instance uses a unique socket name. The fixed descriptor points to that socket and is written atomically only after the socket is listening and verified as `0600`. It includes protocol version, runtime instance ID, PID, process-start ticks, socket path, binding secret, and start time. Startup uses PID plus start ticks to distinguish a live owner from PID reuse. Cleanup removes the descriptor, unique socket, or owner lock only when their exact instance and nonce still match. Failed startup and idempotent shutdown cannot remove replacement resources. Connections and unbound-client bind time are bounded.
+Before inspecting or changing shared service paths, browserd acquires a process-held abstract AF_UNIX lifetime socket. Its name is derived from the UID, canonical private root, and an owner-only persistent random key. The kernel releases ownership on process death, so stale filesystem ownership does not need check-then-unlink recovery. Profile orphan cleanup uses a separate kernel-held ownership socket. Unsupported platforms fail with `CAPABILITY_UNAVAILABLE`.
+
+Each runtime instance uses a unique filesystem request socket. The fixed descriptor points to that socket and is written atomically only after the socket is listening and verified as `0600`. It includes protocol version, runtime instance ID, PID, process-start ticks, socket path, binding secret, broker signing secret, and start time. Startup uses PID plus start ticks as defense in depth. Cleanup removes the descriptor and unique socket only when they still name the exact runtime instance. Failed startup and idempotent shutdown cannot remove replacement resources. Connections and unbound-client bind time are bounded.
 
 Chrome exit or CDP disconnect stops frames and settles all session operations. A target failure affects only that target. The runtime never falls back to another browser.
 
-## Navigation policy
+## Navigation and egress policy
 
-Public navigation authority remains in `webxd`. `browserd` has a narrow `NavigationAuthorization` interface. Production defaults to deny when no authorizer is configured. Phase 1 live tests use an authorizer that permits only their deterministic loopback fixture.
+Public navigation authority remains in `webxd`. For an initial URL, explicit navigation, or URL-bearing new tab, webxd applies destination policy and signs a short-lived authorization bound to the runtime instance, actor, operation, normalized URL, egress binding, expiration, and nonce. Browserd verifies that token before dispatch.
+
+The token does not replace network confinement. Production Chrome uses a structured loopback forward proxy. Browserd disables implicit loopback bypass, QUIC, and non-proxied WebRTC UDP. The reviewed proxy rejects local names, credentials, non-public or mixed DNS answers, and pins each validated public connection to one resolved IP. Redirects, links, forms, scripts, and popups stay on that proxy path. Session creation fails closed unless egress is configured and healthy.
+
+Browserd also monitors top-level commits. It permits HTTP(S), `about:blank`, and bounded Chromium error state. It quarantines file and external-protocol targets. The opt-in live route uses separate source-level loopback fixture authority that production cannot enable. See `ADR-014-BROWSER-EGRESS-BOUNDARY.md`.
 
 ## Fedora deployment and resources
 
@@ -178,4 +186,4 @@ The executable comes only from reviewed service configuration. Prefer Google Chr
 
 Linux resource evidence uses `/proc/<pid>/smaps_rollup` PSS as the primary memory metric. Summed RSS can double-count shared pages and is not the production decision metric. Keep one Chrome process per browser session until PSS evidence and a separate architecture decision justify a change.
 
-The Phase 1.2 two-hour mixed run did not prove a memory plateau. Total PSS slopes were +41,613 KiB/hour over the full run, +61,198 KiB/hour in the final hour, and +29,914 KiB/hour in the final 30 minutes. Browserd, bounded stores, process counts, and one Chrome session were nearly flat late in the run. Most final-hour growth was in the other Chrome tree. Phase 2 development can proceed behind its reversible switch, but production-default routing requires either credible longer plateau evidence or a tested bounded Chrome session recycling and recovery policy.
+The Phase 1.2 two-hour mixed run did not prove a memory plateau. Total PSS slopes were +41,613 KiB/hour over the full run, +61,198 KiB/hour in the final hour, and +29,914 KiB/hour in the final 30 minutes. Browserd, bounded stores, process counts, and one Chrome session were nearly flat late in the run. Most final-hour growth was in the other Chrome tree. The Phase 2A routed soak is a development-route gate only. Production-default routing still requires either credible longer plateau evidence or a tested bounded Chrome session recycling and recovery policy.
