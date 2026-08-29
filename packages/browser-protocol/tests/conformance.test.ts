@@ -35,8 +35,7 @@ describe("browser protocol conformance", () => {
   it("requires bounded opaque IDs for connection-scoped frame subscriptions", () => {
     const address = { browserSessionId: "session:frame", tabId: "tab:frame", targetId: "target_frame_0001", controlEpoch: 3 };
     const subscribe = { protocolVersion: "browser.v1", kind: "frames.subscribe", requestId: "request:subscribe", operationId: "operation:subscribe", deadline: validDeadline, address, subscriptionId: "subscription_0001", interest: "selected" };
-    const { interest: _interest, ...subscriptionBase } = subscribe;
-    const unsubscribe = { ...subscriptionBase, kind: "frames.unsubscribe" };
+    const unsubscribe = { protocolVersion: subscribe.protocolVersion, kind: "frames.unsubscribe", requestId: subscribe.requestId, operationId: subscribe.operationId, deadline: subscribe.deadline, address: subscribe.address, subscriptionId: subscribe.subscriptionId };
     assert.equal(Check(BrowserRequestSchema, subscribe), true);
     assert.equal(Check(BrowserRequestSchema, unsubscribe), true);
     assert.equal(Check(BrowserRequestSchema, { ...subscribe, subscriptionId: "short" }), false);

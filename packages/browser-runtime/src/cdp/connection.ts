@@ -38,7 +38,6 @@ export class CdpConnection extends EventEmitter {
     try {
       await new Promise<void>((resolve, reject) => {
         let settled = false;
-        let timer: NodeJS.Timeout;
         const cleanup = (): void => {
           clearTimeout(timer);
           socket.removeEventListener("open", opened);
@@ -58,7 +57,7 @@ export class CdpConnection extends EventEmitter {
           fail(abortError(options.signal, "CDP connect cancelled."));
         };
         const errored = (): void => fail(new BrowserProtocolError("CDP_DISCONNECTED", "CDP connection failed.", true));
-        timer = setTimeout(() => fail(new BrowserProtocolError("CDP_DISCONNECTED", "CDP connection timed out.", true)), timeoutMs);
+        const timer = setTimeout(() => fail(new BrowserProtocolError("CDP_DISCONNECTED", "CDP connection timed out.", true)), timeoutMs);
         socket.addEventListener("open", opened, { once: true });
         socket.addEventListener("error", errored, { once: true });
         options.signal?.addEventListener("abort", aborted, { once: true });
@@ -118,7 +117,6 @@ export class CdpConnection extends EventEmitter {
     options.signal?.throwIfAborted();
     return await new Promise<CdpEvent>((resolve, reject) => {
       let settled = false;
-      let timer: NodeJS.Timeout;
       const cleanup = (): void => { clearTimeout(timer); this.off("event", listener); options.signal?.removeEventListener("abort", abort); };
       const finish = (error: Error | undefined, event?: CdpEvent): void => {
         if (settled) return;
@@ -128,7 +126,7 @@ export class CdpConnection extends EventEmitter {
       };
       const listener = (event: CdpEvent): void => { if (event.method === method && predicate(event)) finish(undefined, event); };
       const abort = (): void => finish(abortError(options.signal, `CDP event cancelled: ${method}`));
-      timer = setTimeout(() => finish(new BrowserProtocolError("CDP_ERROR", `CDP event timed out: ${method}`, true)), options.timeoutMs ?? 10_000);
+      const timer = setTimeout(() => finish(new BrowserProtocolError("CDP_ERROR", `CDP event timed out: ${method}`, true)), options.timeoutMs ?? 10_000);
       this.on("event", listener);
       options.signal?.addEventListener("abort", abort, { once: true });
       if (options.signal?.aborted) abort();

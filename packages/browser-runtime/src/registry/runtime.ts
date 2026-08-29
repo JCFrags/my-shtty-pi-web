@@ -164,7 +164,7 @@ export class BrowserRuntime extends EventEmitter {
   private readonly onFrame = (frame: FrameEvent): void => { this.emit("frame", frame); };
 }
 
-function requestFingerprint(request: BrowserRequest): string { const { requestId: _requestId, deadline: _deadline, ...semantics } = request; return canonicalOperationFingerprint(semantics); }
+function requestFingerprint(request: BrowserRequest): string { const semantics = { ...request } as Record<string, unknown>; delete semantics.requestId; delete semantics.deadline; return canonicalOperationFingerprint(semantics); }
 function requireConnectionId(connectionId: string | undefined): string { if (connectionId === undefined) throw new BrowserProtocolError("AUTH_FAILED", "Frame operations require a bound connection."); return connectionId; }
 function ensureRequestLive(request: BrowserRequest): void { if (Date.parse(request.deadline) <= Date.now()) throw new BrowserProtocolError("DEADLINE_EXCEEDED", "Request deadline has expired."); }
 function sameAddress(left: TabAddress, right: TabAddress): boolean { return left.browserSessionId === right.browserSessionId && left.tabId === right.tabId && left.targetId === right.targetId && left.controlEpoch === right.controlEpoch; }
