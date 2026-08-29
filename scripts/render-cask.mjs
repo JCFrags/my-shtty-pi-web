@@ -33,7 +33,7 @@ process.stdout.write(`cask "terminal-browser" do
   url "https://terminal-browser.sh/install/dl/stable/v#{version}/terminal-browser-#{os}-#{arch}.tar.gz"
   name "terminal-browser"
   desc "Terminal-based web browser"
-  homepage "https://terminal-browser.sh/"
+  homepage "https://terminal-browser.com/"
 
   livecheck do
     url "https://terminal-browser.sh/install/latest.json"
