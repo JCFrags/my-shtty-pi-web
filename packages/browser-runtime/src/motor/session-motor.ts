@@ -31,7 +31,7 @@ export class SessionMotor extends EventEmitter {
   private sampleSequence = 0;
   private pressedButtons = new Set<MouseButton>();
   private pressedKeys = new Set<string>();
-  private activeTabId?: string;
+  private activeTab?: TabRecord;
 
   constructor(readonly browserSessionId: string, personaSeed: number, private readonly minimumPathDurationMs = 0) {
     super();
@@ -43,6 +43,12 @@ export class SessionMotor extends EventEmitter {
   get state(): CursorState {
     return { ...this.cursor, pathSequence: this.pathSequence, sampleSequence: this.sampleSequence, personaId: this.personaId, visible: true };
   }
+
+  get heldInputState(): { buttons: readonly MouseButton[]; keys: readonly string[] } {
+    return { buttons: [...this.pressedButtons], keys: [...this.pressedKeys] };
+  }
+
+  isActiveTab(tabId: string): boolean { return this.activeTab?.tabId === tabId; }
 
   async initializeTab(tab: TabRecord): Promise<void> {
     await this.command(tab, "Page.addScriptToEvaluateOnNewDocument", { source: overlayInstallSource(this.overlay) });
@@ -70,10 +76,14 @@ export class SessionMotor extends EventEmitter {
         const count = action.kind === "doubleClick" ? 2 : 1;
         for (let index = 1; index <= count; index++) {
           context.checkpoint();
-          await this.press(tab, action.button, action.at, index, context);
-          await sleep(samplePressMs(this.persona.rng, this.persona.traits().pressScale), context.signal);
-          await this.release(tab, action.button, action.at, index);
-          context.markDispatched();
+          let possiblyPressed = false;
+          try {
+            possiblyPressed = true;
+            await this.press(tab, action.button, action.at, index, context);
+            await sleep(samplePressMs(this.persona.rng, this.persona.traits().pressScale), context.signal);
+          } finally {
+            if (possiblyPressed) await this.releaseWithCleanup(tab, action.button, action.at, index);
+          }
           if (index < count) await sleep(70, context.signal);
         }
         return { ...move, completionAfterPathMs: performance.now() - afterPath, totalMs: performance.now() - started };
@@ -100,7 +110,7 @@ export class SessionMotor extends EventEmitter {
         context.markDispatched();
         return { pathDurationMs: nominal, pathWallMs: performance.now() - moveStarted, completionAfterPathMs: 0, totalMs: performance.now() - started };
       } finally {
-        await this.release(tab, "left", this.cursor, 1).catch(() => undefined);
+        await this.releaseWithCleanup(tab, "left", this.cursor, 1).catch(() => undefined);
       }
     } finally { this.emit("actionEnd", { tabId: tab.tabId }); }
   }
@@ -124,13 +134,22 @@ export class SessionMotor extends EventEmitter {
     await this.key(tab, key, keyCode(key), 0, context);
   }
 
-  async releaseAll(tab?: TabRecord): Promise<void> {
-    if (tab !== undefined) {
-      for (const button of [...this.pressedButtons]) await this.release(tab, button, this.cursor, 1).catch(() => undefined);
-      for (const key of [...this.pressedKeys]) await this.command(tab, "Input.dispatchKeyEvent", { type: "keyUp", key, code: keyCode(key) }).catch(() => undefined);
+  async releaseAll(tab = this.activeTab): Promise<void> {
+    if (tab === undefined || motorConnection(tab).connected === false) {
+      if (this.pressedButtons.size > 0 || this.pressedKeys.size > 0) this.emit("cleanupUnavailable", { reason: "CDP disconnected" });
+      this.pressedButtons.clear();
+      this.pressedKeys.clear();
+      return;
     }
-    this.pressedButtons.clear();
-    this.pressedKeys.clear();
+    for (const button of [...this.pressedButtons]) await this.releaseWithCleanup(tab, button, this.cursor, 1).catch(() => undefined);
+    for (const key of [...this.pressedKeys]) {
+      const cleanup = cleanupBudget();
+      try {
+        await this.cleanupCommand(tab, "Input.dispatchKeyEvent", { type: "keyUp", key, code: keyCode(key) }, cleanup.signal);
+        this.pressedKeys.delete(key);
+      } catch { /* Keep ambiguous held state while CDP remains available. */ }
+      finally { cleanup.dispose(); }
+    }
   }
 
   private async moveTo(tab: TabRecord, to: Point, context: OperationContext, totalStarted: number): Promise<ActionTimings> {
@@ -190,7 +209,7 @@ export class SessionMotor extends EventEmitter {
   }
 
   private async activate(tab: TabRecord): Promise<void> {
-    if (this.activeTabId !== tab.tabId) { this.activeTabId = tab.tabId; await this.installOverlay(tab); }
+    if (this.activeTab?.tabId !== tab.tabId) { this.activeTab = tab; await this.installOverlay(tab); }
     else if (!(await this.evaluate<boolean>(tab, overlayVerifySource(this.overlay)))) await this.installOverlay(tab);
   }
 
@@ -202,22 +221,32 @@ export class SessionMotor extends EventEmitter {
   private async press(tab: TabRecord, button: MouseButton, at: Point, clickCount: number, context: OperationContext): Promise<void> {
     context.checkpoint();
     const buttons = button === "left" ? 1 : button === "right" ? 2 : 4;
-    context.markDispatched();
-    await this.command(tab, "Input.dispatchMouseEvent", { type: "mousePressed", ...at, button, buttons, clickCount });
     this.pressedButtons.add(button);
+    context.markDispatched();
+    await this.command(tab, "Input.dispatchMouseEvent", { type: "mousePressed", ...at, button, buttons, clickCount }, context.signal);
   }
 
-  private async release(tab: TabRecord, button: MouseButton, at: Point, clickCount: number): Promise<void> {
-    await this.command(tab, "Input.dispatchMouseEvent", { type: "mouseReleased", ...at, button, buttons: 0, clickCount });
-    this.pressedButtons.delete(button);
+  private async releaseWithCleanup(tab: TabRecord, button: MouseButton, at: Point, clickCount: number): Promise<void> {
+    const cleanup = cleanupBudget();
+    try {
+      await this.cleanupCommand(tab, "Input.dispatchMouseEvent", { type: "mouseReleased", ...at, button, buttons: 0, clickCount }, cleanup.signal);
+      this.pressedButtons.delete(button);
+    } finally { cleanup.dispose(); }
   }
 
   private async key(tab: TabRecord, key: string, code: string, modifiers: number, context: OperationContext): Promise<void> {
     context.checkpoint();
-    context.markDispatched();
-    await this.command(tab, "Input.dispatchKeyEvent", { type: "keyDown", key, code, modifiers });
     this.pressedKeys.add(key);
-    try { await this.command(tab, "Input.dispatchKeyEvent", { type: "keyUp", key, code, modifiers }); } finally { this.pressedKeys.delete(key); }
+    context.markDispatched();
+    try {
+      await this.command(tab, "Input.dispatchKeyEvent", { type: "keyDown", key, code, modifiers }, context.signal);
+    } finally {
+      const cleanup = cleanupBudget();
+      try {
+        await this.cleanupCommand(tab, "Input.dispatchKeyEvent", { type: "keyUp", key, code, modifiers }, cleanup.signal);
+        this.pressedKeys.delete(key);
+      } finally { cleanup.dispose(); }
+    }
   }
 
   private async evaluate<T>(tab: TabRecord, expression: string): Promise<T> {
@@ -226,16 +255,20 @@ export class SessionMotor extends EventEmitter {
     return response.result?.value as T;
   }
 
-  private async command<T = Record<string, unknown>>(tab: TabRecord, method: string, params: Readonly<Record<string, unknown>> = {}): Promise<T> {
+  private async command<T = Record<string, unknown>>(tab: TabRecord, method: string, params: Readonly<Record<string, unknown>> = {}, signal?: AbortSignal): Promise<T> {
     if (tab.state !== "open") throw new Error("Browser target is not open.");
-    const connection = (tab as TabRecord & { __connection?: never });
-    void connection;
-    return await motorConnection(tab).send<T>(method, params, tab.cdpSessionId);
+    return await motorConnection(tab).send<T>(method, params, tab.cdpSessionId, signal === undefined ? undefined : { signal });
+  }
+
+  private async cleanupCommand<T = Record<string, unknown>>(tab: TabRecord, method: string, params: Readonly<Record<string, unknown>>, signal: AbortSignal): Promise<T> {
+    return await motorConnection(tab).send<T>(method, params, tab.cdpSessionId, { signal, timeoutMs: 750 });
   }
 }
 
-const connections = new WeakMap<TabRecord, { send<T>(method: string, params: Readonly<Record<string, unknown>>, sessionId: string): Promise<T> }>();
-export function bindMotorTab(tab: TabRecord, connection: { send<T>(method: string, params: Readonly<Record<string, unknown>>, sessionId: string): Promise<T> }): void { connections.set(tab, connection); }
-function motorConnection(tab: TabRecord) { const connection = connections.get(tab); if (connection === undefined) throw new Error("Tab has no CDP connection."); return connection; }
+interface MotorConnection { connected?: boolean; send<T>(method: string, params: Readonly<Record<string, unknown>>, sessionId: string, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<T> }
+const connections = new WeakMap<TabRecord, MotorConnection>();
+export function bindMotorTab(tab: TabRecord, connection: MotorConnection): void { connections.set(tab, connection); }
+function motorConnection(tab: TabRecord): MotorConnection { const connection = connections.get(tab); if (connection === undefined) throw new Error("Tab has no CDP connection."); return connection; }
+function cleanupBudget(timeoutMs = 750): { signal: AbortSignal; dispose(): void } { const controller = new AbortController(); const timer = setTimeout(() => controller.abort(new Error("Input cleanup timed out.")), timeoutMs); return { signal: controller.signal, dispose: () => clearTimeout(timer) }; }
 function keyCode(key: string): string { const fixed: Record<string, string> = { Backspace: "Backspace", Enter: "Enter", Escape: "Escape", Tab: "Tab", ArrowDown: "ArrowDown", ArrowLeft: "ArrowLeft", ArrowRight: "ArrowRight", ArrowUp: "ArrowUp", Home: "Home", End: "End", PageDown: "PageDown", PageUp: "PageUp", " ": "Space" }; return fixed[key] ?? (/^[a-z]$/i.test(key) ? `Key${key.toUpperCase()}` : key); }
-async function sleep(ms: number, signal?: AbortSignal): Promise<void> { if (ms <= 0) return; await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => { cleanup(); resolve(); }, ms); const abort = () => { cleanup(); reject(signal?.reason ?? new Error("Cancelled")); }; const cleanup = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); }; signal?.addEventListener("abort", abort, { once: true }); }); }
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> { signal?.throwIfAborted(); if (ms <= 0) return; await new Promise<void>((resolve, reject) => { const abort = () => { cleanup(); reject(signal?.reason ?? new Error("Cancelled")); }; const timer = setTimeout(() => { cleanup(); resolve(); }, ms); const cleanup = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); }; signal?.addEventListener("abort", abort, { once: true }); if (signal?.aborted) abort(); }); }
