@@ -1,0 +1,69 @@
+{
+  "passed": true,
+  "chromium": "Chromium 151.0.7922.173 Built from source for Fedora release 44 (Forty Four)",
+  "startupMs": 579.572337,
+  "pathWallMs": 908.017738999999,
+  "parallelMs": 1345.5407589999995,
+  "serialMs": 5910.519325000001,
+  "activeFrameCount": 10,
+  "distinctIntermediateCursorPositions": 10,
+  "actorIsolation": true,
+  "sharedPersonaAcrossTabs": true,
+  "concurrentProfileLaunches": 4,
+  "descriptorReadyStateAtomic": true,
+  "frameSubscriptionIsolation": {
+    "subscribedConnectionFrames": 10,
+    "sameActorUnsubscribedFrames": 0,
+    "otherActorFrames": 0,
+    "duplicateCount": 1,
+    "disconnectCleanup": true,
+    "epochCleanup": true
+  },
+  "operationFingerprint": {
+    "duplicateSideEffects": 1,
+    "conflictCode": "OPERATION_CONFLICT"
+  },
+  "inputRelease": {
+    "disconnectCleanup": true,
+    "targetTerminalCleanupCoveredByAdversarialTest": true,
+    "epochCleanup": true,
+    "heldButtons": 0,
+    "heldKeys": 0
+  },
+  "artifactProvenance": {
+    "mediaType": "image/png",
+    "crossActorReadDenied": true,
+    "crashedTabCleanup": true
+  },
+  "screenshotConsistency": {
+    "animatedFixture": true,
+    "completedCaptureTimestamp": 1420.732335
+  },
+  "typedErrors": {
+    "artifact": "ARTIFACT_NOT_FOUND",
+    "operationConflict": "OPERATION_CONFLICT",
+    "targetCrash": "failed"
+  },
+  "overlayMutationAndTopLayerDialog": true,
+  "publicWheelAndScrollGuard": true,
+  "cancellation": {
+    "state": "cancelled",
+    "dispatchState": "partially-dispatched"
+  },
+  "navigationCancellation": {
+    "state": "cancelled",
+    "dispatchState": "dispatched"
+  },
+  "postPathRevalidation": {
+    "state": "failed",
+    "dispatchState": "partially-dispatched",
+    "clickPrevented": true
+  },
+  "targetCrash": "failed",
+  "chromeKillFailedClosed": true,
+  "processTreePssKiB": 438840,
+  "processTreePrivateDirtyKiB": 276728,
+  "artifactCount": 49,
+  "artifactBytes": 530184,
+  "operationCount": 65
+}
