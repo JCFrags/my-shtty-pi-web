@@ -3,19 +3,14 @@ import { Type } from "typebox";
 
 const strict = { additionalProperties: false } as const;
 const id = () => Type.String({ minLength: 1, maxLength: 256 });
-const target = {
-  ref: Type.String({ minLength: 1, maxLength: 256, description: "Current semantic element ref from the latest interactive observation." }),
-  selector: Type.Optional(Type.String({ minLength: 1, maxLength: 4096, description: "Optional selector fallback for the same observed target. Prefer ref." })),
+const screenshotBinding = {
+  observationId: Type.String({ minLength: 1, maxLength: 256, description: "Real browser observation ID from the exact screenshot used for this action." }),
+  coordinateSpace: Type.Optional(StringEnum(["imagePixels", "cssViewport"] as const, { description: "Coordinate space. Omit for imagePixels because the model points into the returned image." })),
 };
-const binding = {
-  observationId: Type.String({ minLength: 1, maxLength: 256, description: "Identifier from the latest visual observation of this session." }),
-  viewportId: Type.String({ minLength: 1, maxLength: 256, description: "Viewport identifier paired with the latest visual observation." }),
-};
-const point = {
-  ...binding,
-  x: Type.Number({ minimum: 0 }),
-  y: Type.Number({ minimum: 0 }),
-  coordinateSpace: Type.Optional(StringEnum(["viewport", "image"] as const)),
+const imagePoint = { x: Type.Number({ minimum: 0, maximum: 32_768 }), y: Type.Number({ minimum: 0, maximum: 32_768 }) };
+const domBinding = {
+  domObservationId: Type.String({ minLength: 1, maxLength: 256, description: "DOM fallback observation ID from the exact explicit DOM observation." }),
+  handle: Type.String({ minLength: 1, maxLength: 256, description: "Opaque handle from that DOM fallback observation." }),
 };
 
 export const WebSearchSchema = Type.Object({
@@ -85,48 +80,45 @@ export const WebContentSchema = Type.Union([
 ], { description: "Retrieve normalized content by opaque ID without a network request. Exact offset mode and focused findText or query mode are mutually exclusive." });
 
 export const BrowserOpenSchema = Type.Object({
-  url: Type.Optional(Type.String({ minLength: 1, maxLength: 8192, pattern: "^https?://", description: "Optional initial public HTTP(S) URL. Omit to open a blank owned session." })),
-  pathId: Type.Optional(StringEnum(["agent-browser/chrome", "pinchtab/chrome"] as const, { description: "Browser path. Omit for the required agent-browser/chrome default. Use pinchtab/chrome only when capabilities report it." })),
-  visible: Type.Optional(Type.Boolean({ description: "Request a visible browser window for human observation or takeover. Omit unless visibility is useful." })),
-  label: Type.Optional(Type.String({ maxLength: 256, description: "Short human-readable session label." })),
-}, strict);
+  url: Type.Optional(Type.String({ minLength: 1, maxLength: 8192, pattern: "^https?://", description: "Optional initial public HTTP(S) URL. Omit to open about:blank." })),
+}, { ...strict, description: "Open the only browser path selected when webxd started. A request cannot choose or change the backend." });
 
 export const BrowserTabsSchema = Type.Union([
-  Type.Object({ action: Type.Literal("list", { description: "List this agent's owned sessions and tabs." }) }, strict),
-  Type.Object({ action: Type.Literal("close-session", { description: "Close one complete owned session." }), browserSessionId: Type.String({ minLength: 1, maxLength: 256, description: "Owned session identifier." }) }, strict),
-  Type.Object({ action: Type.Literal("close-tab", { description: "Close one owned tab." }), browserSessionId: Type.String({ minLength: 1, maxLength: 256, description: "Owned session identifier." }), tabId: Type.String({ minLength: 1, maxLength: 256, description: "Owned tab identifier." }) }, strict),
-], { description: "List owned browser state or close one tab or session. Identifiers are required for close actions." });
+  Type.Object({ action: Type.Literal("list"), browserSessionId: Type.Optional(id()) }, strict),
+  Type.Object({ action: Type.Literal("create-tab"), browserSessionId: id(), url: Type.Optional(Type.String({ minLength: 1, maxLength: 8192, pattern: "^https?://" })) }, strict),
+  Type.Object({ action: Type.Literal("focus-tab"), browserSessionId: id(), tabId: id() }, strict),
+  Type.Object({ action: Type.Literal("close-tab"), browserSessionId: id(), tabId: id() }, strict),
+  Type.Object({ action: Type.Literal("close-session"), browserSessionId: id() }, strict),
+], { description: "List, create, focus, and close explicit owned tabs or close the complete session." });
 
 export const BrowserObserveSchema = Type.Object({
-  browserSessionId: Type.String({ minLength: 1, maxLength: 256, description: "Owned session identifier returned by browser_open or browser_tabs list." }),
-  view: Type.Optional(StringEnum(["main", "interactive", "visual", "full", "diff"] as const, { description: "Observation form: interactive for semantic refs; main for compact text; visual for screenshot-bound pixels; full for more DOM; diff after a state change." })),
-  maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000, description: "Explicit text bound. Omit for the normal view default." })),
+  browserSessionId: id(),
+  tabId: id(),
+  mode: Type.Optional(StringEnum(["screenshot", "dom"] as const, { description: "Screenshot is the default. Use dom only as an explicit bounded fallback." })),
+  maxNodes: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, description: "DOM node bound. Valid only with mode=dom." })),
 }, strict);
 
 const pointerButton = Type.Optional(StringEnum(["left", "right", "middle"] as const));
 const action = Type.Union([
-  Type.Object({ kind: Type.Literal("navigate"), url: Type.String({ minLength: 1, maxLength: 8192 }) }, strict),
-  Type.Object({ kind: Type.Literal("click"), ...target }, strict),
-  Type.Object({ kind: Type.Literal("fill"), ...target, text: Type.String({ maxLength: 100_000 }) }, strict),
-  Type.Object({ kind: Type.Literal("type"), ...target, text: Type.String({ maxLength: 100_000 }) }, strict),
-  Type.Object({ kind: Type.Literal("press"), key: Type.String({ minLength: 1, maxLength: 128 }) }, strict),
-  Type.Object({ kind: Type.Literal("select"), ...target, values: Type.Array(Type.String({ maxLength: 4096 }), { minItems: 1, maxItems: 100 }) }, strict),
-  Type.Object({ kind: Type.Literal("hover"), ...target }, strict),
-  Type.Object({ kind: Type.Literal("scroll"), direction: StringEnum(["up", "down", "left", "right"] as const), amount: Type.Optional(Type.Number()) }, strict),
-  Type.Object({ kind: Type.Literal("drag"), ref: id(), targetRef: id() }, strict),
-  Type.Object({ kind: Type.Literal("mouse-move"), ...point }, strict),
-  Type.Object({ kind: StringEnum(["mouse-down", "mouse-up", "mouse-click", "mouse-double-click"] as const), ...point, button: pointerButton }, strict),
-  Type.Object({ kind: Type.Literal("mouse-wheel"), ...point, deltaX: Type.Number(), deltaY: Type.Number() }, strict),
-  Type.Object({ kind: Type.Literal("coordinate-drag"), ...binding, startX: Type.Number({ minimum: 0 }), startY: Type.Number({ minimum: 0 }), endX: Type.Number({ minimum: 0 }), endY: Type.Number({ minimum: 0 }), coordinateSpace: Type.Optional(StringEnum(["viewport", "image"] as const)), button: pointerButton }, strict),
-  Type.Object({ kind: StringEnum(["key-press", "key-down", "key-up"] as const), ...binding, key: Type.String({ minLength: 1, maxLength: 128 }) }, strict),
-  Type.Object({ kind: Type.Literal("text-input"), ...binding, text: Type.String({ maxLength: 100_000 }) }, strict),
-  Type.Object({ kind: StringEnum(["back", "forward", "reload"] as const) }, strict),
-  Type.Object({ kind: Type.Literal("wait"), milliseconds: Type.Optional(Type.Integer({ minimum: 0, maximum: 30_000 })), selector: Type.Optional(Type.String({ maxLength: 4096 })), text: Type.Optional(Type.String({ maxLength: 4096 })) }, strict),
+  Type.Object({ kind: Type.Literal("move"), ...screenshotBinding, ...imagePoint }, strict),
+  Type.Object({ kind: Type.Literal("click"), ...screenshotBinding, ...imagePoint, button: pointerButton }, strict),
+  Type.Object({ kind: Type.Literal("double-click"), ...screenshotBinding, ...imagePoint, button: pointerButton }, strict),
+  Type.Object({ kind: Type.Literal("drag"), ...screenshotBinding, from: Type.Object(imagePoint, strict), to: Type.Object(imagePoint, strict) }, strict),
+  Type.Object({ kind: Type.Literal("wheel"), ...screenshotBinding, ...imagePoint, deltaX: Type.Number({ minimum: -100_000, maximum: 100_000 }), deltaY: Type.Number({ minimum: -100_000, maximum: 100_000 }) }, strict),
+  Type.Object({ kind: Type.Literal("dom-click"), ...domBinding, button: pointerButton }, strict),
+  Type.Object({ kind: Type.Literal("dom-double-click"), ...domBinding, button: pointerButton }, strict),
+  Type.Object({ kind: Type.Literal("dom-hover"), ...domBinding }, strict),
+  Type.Object({ kind: StringEnum(["dom-type", "dom-fill"] as const), ...domBinding, text: Type.String({ maxLength: 65_536 }) }, strict),
+  Type.Object({ kind: Type.Literal("dom-key-press"), ...domBinding, key: Type.String({ minLength: 1, maxLength: 64 }) }, strict),
+  Type.Object({ kind: Type.Literal("text-input"), text: Type.String({ maxLength: 65_536 }), replace: Type.Optional(Type.Boolean()) }, strict),
+  Type.Object({ kind: Type.Literal("key-press"), key: Type.String({ minLength: 1, maxLength: 64 }) }, strict),
+  Type.Object({ kind: Type.Literal("navigate"), url: Type.String({ minLength: 1, maxLength: 8192, pattern: "^https?://" }) }, strict),
 ]);
 
 export const BrowserActSchema = Type.Object({
-  browserSessionId: Type.String({ minLength: 1, maxLength: 256, description: "Owned session identifier from browser_open or browser_tabs list." }),
-  action: Type.Unsafe({ ...action, description: "One smallest suitable action. Semantic ref/selector actions use current interactive evidence. Coordinate actions require the latest observationId and viewportId." }),
+  browserSessionId: id(),
+  tabId: id(),
+  action: Type.Unsafe({ ...action, description: "One screenshot-bound, explicit DOM fallback, text, key, or navigation action." }),
 }, strict);
 
 export const BrowserDebugSchema = Type.Object({

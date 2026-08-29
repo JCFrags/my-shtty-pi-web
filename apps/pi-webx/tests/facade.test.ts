@@ -19,10 +19,10 @@ import {
 import type { WebxCapabilities, WebxRequestOptions, WebxResult, WebxSdk } from "../src/sdk.js";
 
 const readyCapabilities: WebxCapabilities = {
-  apiVersion: "2.0.0",
+  apiVersion: "3.0.0",
   daemon: "ready",
-  groups: { search: true, read: true, browser: true, browserDebug: true },
-  browserPathIds: ["agent-browser/chrome", "pinchtab/chrome"],
+  groups: { search: true, read: true, browser: true, browserDebug: false },
+  browserPathIds: ["agentcursor/chrome"],
 };
 
 class MockSdk implements WebxSdk {
@@ -140,7 +140,7 @@ test("registers one stable inventory and preserves unrelated active tools", asyn
   assert.ok(fx.active.includes("browser_open"));
   assert.ok(!fx.active.includes("browser_debug"));
   await fx.commands.get("web")?.handler("debug", fx.ctx);
-  assert.ok(fx.active.includes("browser_debug"));
+  assert.ok(!fx.active.includes("browser_debug"));
 
   await fx.commands.get("web")?.handler("off", fx.ctx);
   assert.ok(!fx.active.includes("web_search"));
@@ -240,29 +240,31 @@ test("strict schemas reject unknown, excessive, and incomplete inputs", () => {
   assert.equal(Value.Check(WebContentSchema, { contentId, query: "topic", limit: 100 }), true);
   assert.equal(Value.Check(WebContentSchema, { contentId, offset: 10, query: "topic" }), false);
   assert.equal(Value.Check(WebContentSchema, { contentId, limit: 30_001 }), false);
-  assert.equal(Value.Check(BrowserOpenSchema, { pathId: "agent-browser/chrome" }), true);
+  assert.equal(Value.Check(BrowserOpenSchema, {}), true);
+  assert.equal(Value.Check(BrowserOpenSchema, { pathId: "agent-browser/chrome" }), false);
   assert.equal(Value.Check(BrowserOpenSchema, { newTab: true }), false);
   assert.equal(Value.Check(BrowserTabsSchema, { action: "discard-tab" }), false);
   assert.equal(Value.Check(BrowserTabsSchema, { action: "restore-tab" }), false);
   assert.equal(Value.Check(BrowserTabsSchema, { action: "close-tab", browserSessionId: "s" }), false);
   assert.equal(Value.Check(BrowserTabsSchema, { action: "close-session", browserSessionId: "s" }), true);
-  assert.equal(Value.Check(BrowserObserveSchema, { browserSessionId: "s", view: "hybrid" }), false);
-  assert.equal(Value.Check(BrowserObserveSchema, { view: "main" }), false);
+  assert.equal(Value.Check(BrowserObserveSchema, { browserSessionId: "s", tabId: "t", view: "hybrid" }), false);
+  assert.equal(Value.Check(BrowserObserveSchema, { browserSessionId: "s", tabId: "t" }), true);
+  assert.equal(Value.Check(BrowserObserveSchema, { browserSessionId: "s" }), false);
   assert.equal(Value.Check(BrowserDebugSchema, { browserSessionId: "s", operation: "cookies" }), false);
   assert.equal(Value.Check(BrowserDebugSchema, { browserSessionId: "s", operation: "console" }), true);
-  assert.equal(Value.Check(BrowserOpenSchema, { pathId: "pinchtab/chrome" }), true);
+  assert.equal(Value.Check(BrowserOpenSchema, { pathId: "pinchtab/chrome" }), false);
   for (const pathId of ["agent-browser", "rustwright", "other"]) {
     assert.equal(Value.Check(BrowserOpenSchema, { pathId }), false, `legacy or unknown path must fail: ${pathId}`);
   }
   assert.equal(Value.Check(BrowserActSchema, {
-    browserSessionId: "s", action: { kind: "mouse-click", observationId: "o", viewportId: "v", x: 1, y: 2, extra: true },
+    browserSessionId: "s", tabId: "t", action: { kind: "click", observationId: "o", x: 1, y: 2, extra: true },
   }), false);
   assert.equal(Value.Check(BrowserActSchema, { action: { kind: "reload" } }), false);
   assert.equal(Value.Check(BrowserActSchema, { browserSessionId: "s", action: { kind: "tab-new" } }), false);
   assert.equal(Value.Check(BrowserActSchema, { browserSessionId: "s", action: { kind: "reload" }, feedback: "delta" }), false);
   assert.equal(Value.Check(BrowserActSchema, { action: { kind: "mouse-click", x: 1, y: 2 } }), false);
-  assert.equal(Value.Check(BrowserActSchema, { browserSessionId: "s", action: { kind: "click", selector: "button" } }), false);
-  assert.equal(Value.Check(BrowserActSchema, { browserSessionId: "s", action: { kind: "click", ref: "e1" } }), true);
+  assert.equal(Value.Check(BrowserActSchema, { browserSessionId: "s", tabId: "t", action: { kind: "click", selector: "button" } }), false);
+  assert.equal(Value.Check(BrowserActSchema, { browserSessionId: "s", tabId: "t", action: { kind: "click", observationId: "o", x: 1, y: 2 } }), true);
   assert.equal(Value.Check(BrowserActSchema, { action: { kind: "upload", ref: "e1", uploadHandle: "handle-1" } }), false);
   assert.equal(Value.Check(BrowserActSchema, { action: { kind: "upload", ref: "e1", uploadHandleIds: ["handle-1"] } }), false);
   assert.equal(Value.Check(BrowserActSchema, { action: { kind: "download", ref: "e1" } }), false);
@@ -290,6 +292,55 @@ test("tool calls use only the SDK seam with owner, idempotency, cancellation, an
   assert.ok(JSON.stringify(result.details).length < 25_000);
   caller.abort();
   assert.equal(sdk.calls[0]?.options.signal.aborted, true);
+  await fx.events.get("session_shutdown")?.();
+});
+
+test("browser_observe emits exactly one bounded text item and one real image without base64 in text or details", async () => {
+  const sdk = new MockSdk();
+  const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(256, 7)]);
+  const base64 = png.toString("base64");
+  sdk.result = {
+    summary: "Browser screenshot observation",
+    trust: "untrusted-external",
+    data: {
+      kind: "screenshot",
+      observationId: "observation_identifier_a",
+      browserSessionId: "session-a",
+      tabId: "tab-a",
+      url: "https://example.test/",
+      title: "Fixture",
+      capturedAt: "2026-08-29T00:00:00.000Z",
+      documentGeneration: 2,
+      viewportGeneration: 3,
+      frameSequence: 4,
+      cssViewportWidth: 800,
+      cssViewportHeight: 600,
+      imagePixelWidth: 1600,
+      imagePixelHeight: 1200,
+      devicePixelRatio: 2,
+      captureScale: 2,
+      scroll: { x: 0, y: 0 },
+      digest: "a".repeat(64),
+      mediaType: "image/png",
+      cursor: { x: 10, y: 20, coordinateSpace: "cssViewport", pathSequence: 5, sampleSequence: 6, visible: true },
+      validUntil: "2026-08-29T00:00:30.000Z",
+    },
+    artifactPayload: { artifactId: "artifact_identifier_a", mediaType: "image/png", dataBase64: base64, size: png.byteLength, complete: true, mode: "image" },
+  };
+  const fx = harness(sdk);
+  await fx.events.get("session_start")?.({}, fx.ctx);
+  const result = await fx.execute("browser_observe", { browserSessionId: "session-a", tabId: "tab-a" });
+  assert.deepEqual(result.content.map((item: { type: string }) => item.type), ["text", "image"]);
+  const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+  const image = result.content[1]?.type === "image" ? result.content[1] : undefined;
+  assert.match(text, /^\[UNTRUSTED EXTERNAL CONTENT\]/);
+  assert.match(text, /observation_identifier_a/);
+  assert.match(text, /1600/);
+  assert.equal(image?.data, base64);
+  assert.equal(image?.mimeType, "image/png");
+  assert.doesNotMatch(text, new RegExp(base64));
+  assert.doesNotMatch(JSON.stringify(result.details), new RegExp(base64));
+  assert.match(JSON.stringify(result.details), /emitted as complete image/);
   await fx.events.get("session_shutdown")?.();
 });
 

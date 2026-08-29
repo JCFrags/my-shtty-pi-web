@@ -36,6 +36,18 @@ export function compactUnknown(value: unknown, depth = 0): unknown {
 function renderData(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const data = value as Record<string, unknown>;
+  if (data.kind === "screenshot" && typeof data.observationId === "string") {
+    const cursor = typeof data.cursor === "object" && data.cursor !== null ? data.cursor as Record<string, unknown> : {};
+    return [
+      `Observation: ${clip(data.observationId, 256)}`,
+      `Session: ${clip(String(data.browserSessionId ?? "unknown"), 256)}; tab: ${clip(String(data.tabId ?? "unknown"), 256)}`,
+      `URL: ${clip(String(data.url ?? "unknown"), MAX_PRESENTATION_HEADING_CHARS)}`,
+      `Title: ${clip(String(data.title ?? ""), MAX_PRESENTATION_HEADING_CHARS)}`,
+      `CSS viewport: ${String(data.cssViewportWidth ?? "unknown")} x ${String(data.cssViewportHeight ?? "unknown")}; image: ${String(data.imagePixelWidth ?? "unknown")} x ${String(data.imagePixelHeight ?? "unknown")}`,
+      `Cursor: (${String(cursor.x ?? "unknown")}, ${String(cursor.y ?? "unknown")}) ${String(cursor.coordinateSpace ?? "cssViewport")}; path sequence ${String(cursor.pathSequence ?? "unknown")}`,
+      `Valid until: ${clip(String(data.validUntil ?? "unknown"), 64)}`,
+    ].join("\n");
+  }
   if (Array.isArray(data.hits)) {
     const output = data.output === "extracts" ? "extracts" : "links";
     const hits = data.hits.slice(0, 10).map((item, index) => {
