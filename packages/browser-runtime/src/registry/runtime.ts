@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { BrowserProtocolError, type ActorIdentity, type BrowserRequest, type FrameEvent, type OperationStatus, type SessionDescriptor, type TabAddress } from "@webx/browser-protocol";
 import { actorKey, DenyNavigationAuthorization, type NavigationAuthorization } from "../actor/identity.js";
 import { BrowserArtifactStore } from "../artifacts/store.js";
-import type { ChromeHostOptions } from "../chrome/host.js";
+import { findChromeExecutable, type ChromeHostOptions } from "../chrome/host.js";
 import { ProfileManager } from "../chrome/profile-manager.js";
 import type { CoordinateAction } from "../motor/session-motor.js";
 import { canonicalOperationFingerprint, OperationRegistry, type OperationContext } from "../operations/registry.js";
@@ -14,11 +14,13 @@ export interface BrowserRuntimeOptions {
   navigationAuthorization?: NavigationAuthorization;
   chrome?: Omit<ChromeHostOptions, "hostId" | "profileManager">;
   maxSessionsPerActor?: number;
+  maxSessionsGlobal?: number;
   maxSubscriptionsPerConnection?: number;
   maxSubscriptionsPerActor?: number;
   personaSeedForTest?: number;
   motorMinimumPathMsForTest?: number;
   observationFreshnessMsForTest?: number;
+  egressConfigured?: boolean;
 }
 
 export class BrowserRuntime extends EventEmitter {
@@ -30,11 +32,16 @@ export class BrowserRuntime extends EventEmitter {
   private readonly chrome: Omit<ChromeHostOptions, "hostId" | "profileManager">;
   private readonly profileManager: ProfileManager;
   private readonly maxSessionsPerActor: number;
+  private readonly maxSessionsGlobal: number;
+  private creatingSessions = 0;
+  private closeState: "open" | "closing" | "closed" | "cleanup-failed" = "open";
+  private closePromise: Promise<void> | undefined;
   private readonly maxSubscriptionsPerConnection: number;
   private readonly maxSubscriptionsPerActor: number;
   private readonly personaSeedForTest: number | undefined;
   private readonly motorMinimumPathMsForTest: number;
   private readonly observationFreshnessMsForTest: number | undefined;
+  private readonly egressConfigured: boolean;
 
   constructor(options: BrowserRuntimeOptions = {}) {
     super();
@@ -42,11 +49,14 @@ export class BrowserRuntime extends EventEmitter {
     this.chrome = options.chrome ?? {};
     this.profileManager = new ProfileManager(this.chrome.profileRoot);
     this.maxSessionsPerActor = options.maxSessionsPerActor ?? 4;
+    this.maxSessionsGlobal = options.maxSessionsGlobal ?? 16;
+    if (!Number.isInteger(this.maxSessionsGlobal) || this.maxSessionsGlobal < 1 || this.maxSessionsGlobal > 256) throw new BrowserProtocolError("INVALID_REQUEST", "Global browser session limit is invalid.");
     this.maxSubscriptionsPerConnection = options.maxSubscriptionsPerConnection ?? 64;
     this.maxSubscriptionsPerActor = options.maxSubscriptionsPerActor ?? 256;
     this.personaSeedForTest = options.personaSeedForTest;
     this.motorMinimumPathMsForTest = options.motorMinimumPathMsForTest ?? 0;
     this.observationFreshnessMsForTest = options.observationFreshnessMsForTest;
+    this.egressConfigured = options.egressConfigured ?? false;
   }
 
   get subscriptionCount(): number { let count = 0; for (const values of this.subscriptions.values()) count += values.size; return count; }
@@ -73,9 +83,10 @@ export class BrowserRuntime extends EventEmitter {
   }
 
   async dispatch(actor: ActorIdentity, request: BrowserRequest, signal?: AbortSignal, connectionId?: string): Promise<unknown> {
+    if (this.closeState !== "open") throw new BrowserProtocolError("CAPABILITY_UNAVAILABLE", "Browser runtime is closing.", true);
     ensureRequestLive(request);
     signal?.throwIfAborted();
-    if (request.kind === "capabilities.get") return { kind: "capabilities", headed: true, screenshotFirst: true, domFallback: true, virtualMouse: true, osMouse: false };
+    if (request.kind === "capabilities.get") return await this.capabilities();
     if (request.kind === "session.list") return { kind: "sessions", sessions: this.listSessions(actor) };
     if (request.kind === "operation.status") return this.operations.status(actor, request.targetOperationId);
     if (request.kind === "operation.cancel") return this.operations.cancel(actor, request.targetOperationId);
@@ -97,18 +108,22 @@ export class BrowserRuntime extends EventEmitter {
       return await this.execute(actor, request, `actor:${actorKey(actor)}:sessions`, undefined, undefined, async (context) => {
         context.checkpoint();
         if (this.listSessions(actor).length >= this.maxSessionsPerActor) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Browser session limit reached.", true);
-        const session = await BrowserSession.create(actor, this.operations, this.artifacts, this.navigationAuthorization, {
-          ...this.chrome, profileManager: this.profileManager,
-          ...(request.initialUrl !== undefined ? { initialUrl: request.initialUrl } : {}),
-          ...(this.personaSeedForTest !== undefined ? { personaSeed: this.personaSeedForTest } : {}),
-          motorMinimumPathMs: this.motorMinimumPathMsForTest,
-          ...(this.observationFreshnessMsForTest !== undefined ? { observationFreshnessMs: this.observationFreshnessMsForTest } : {}),
-        }, context.signal, () => context.markDispatched());
-        if (context.signal.aborted) { await session.close(); throw context.signal.reason; }
-        this.sessions.set(session.browserSessionId, session);
-        session.onFrame(this.onFrame);
-        session.targets.on("tabTerminal", ({ tabId }: { tabId: string }) => this.removeTabSubscriptions(session.browserSessionId, tabId));
-        return session.descriptor();
+        if (this.sessions.size + this.creatingSessions >= this.maxSessionsGlobal) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Global browser session limit reached.", true);
+        this.creatingSessions++;
+        try {
+          const session = await BrowserSession.create(actor, this.operations, this.artifacts, this.navigationAuthorization, {
+            ...this.chrome, profileManager: this.profileManager,
+            ...(request.initialUrl !== undefined ? { initialUrl: request.initialUrl } : {}),
+            ...(this.personaSeedForTest !== undefined ? { personaSeed: this.personaSeedForTest } : {}),
+            motorMinimumPathMs: this.motorMinimumPathMsForTest,
+            ...(this.observationFreshnessMsForTest !== undefined ? { observationFreshnessMs: this.observationFreshnessMsForTest } : {}),
+          }, context.signal, () => context.markDispatched());
+          if (context.signal.aborted) { await session.close(); throw context.signal.reason; }
+          this.sessions.set(session.browserSessionId, session);
+          session.onFrame(this.onFrame);
+          session.targets.on("tabTerminal", ({ tabId }: { tabId: string }) => this.removeTabSubscriptions(session.browserSessionId, tabId));
+          return session.descriptor();
+        } finally { this.creatingSessions--; }
       }, signal);
     }
 
@@ -129,14 +144,70 @@ export class BrowserRuntime extends EventEmitter {
     if (request.kind === "navigate") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); await session.navigate(request.address, request.url, context.signal, () => context.markDispatched()); return { kind: "ack", operationId: request.operationId }; }, signal);
     if (request.kind === "input.text") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { await session.typeText(request.address, request.text, request.replace ?? false, context); return { kind: "ack", operationId: request.operationId }; }, signal);
     if (request.kind === "input.key") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { await session.pressKey(request.address, request.key, context); return { kind: "ack", operationId: request.operationId }; }, signal);
-    if (request.kind === "frames.subscribe") return await this.execute(actor, request, `frames:${browserSessionId}`, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const id = requireConnectionId(connectionId); const subscription = this.addSubscription(actor, id, request.subscriptionId, request.address, request.interest ?? "selected"); session.subscribeFrames(subscription.consumerKey, request.address, subscription.interest); context.markDispatched(); return { kind: "subscription", operationId: request.operationId, subscriptionId: request.subscriptionId, subscribed: true }; }, signal, connectionId);
-    if (request.kind === "frames.unsubscribe") return await this.execute(actor, request, `frames:${browserSessionId}`, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const id = requireConnectionId(connectionId); const subscription = this.findSubscription(actor, id, request.subscriptionId); if (subscription !== undefined) { if (!sameAddress(subscription.address, request.address)) throw new BrowserProtocolError("OPERATION_CONFLICT", "Frame subscription address does not match."); session.unsubscribeFrames(subscription.consumerKey, request.address); this.subscriptions.get(id)?.delete(request.subscriptionId); } context.markDispatched(); return { kind: "subscription", operationId: request.operationId, subscriptionId: request.subscriptionId, subscribed: false }; }, signal, connectionId);
+    if (request.kind === "frames.subscribe") return await this.execute(actor, request, `frames:${browserSessionId}`, browserSessionId, controlEpoch, async (context) => {
+      context.checkpoint();
+      const id = requireConnectionId(connectionId);
+      const prior = this.findSubscription(actor, id, request.subscriptionId);
+      const subscription = this.addSubscription(actor, id, request.subscriptionId, request.address, request.interest ?? "selected");
+      try { session.subscribeFrames(subscription.consumerKey, request.address, subscription.interest); }
+      catch (error) { if (prior === undefined) this.removeSubscription(id, request.subscriptionId, subscription); throw error; }
+      context.markDispatched();
+      return { kind: "subscription", operationId: request.operationId, subscriptionId: request.subscriptionId, subscribed: true };
+    }, signal, connectionId);
+    if (request.kind === "frames.unsubscribe") return await this.execute(actor, request, `frames:${browserSessionId}`, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const id = requireConnectionId(connectionId); const subscription = this.findSubscription(actor, id, request.subscriptionId); if (subscription !== undefined) { if (!sameAddress(subscription.address, request.address)) throw new BrowserProtocolError("OPERATION_CONFLICT", "Frame subscription address does not match."); await session.unsubscribeFrames(subscription.consumerKey, request.address); this.removeSubscription(id, request.subscriptionId, subscription); } context.markDispatched(); return { kind: "subscription", operationId: request.operationId, subscriptionId: request.subscriptionId, subscribed: false }; }, signal, connectionId);
     throw new BrowserProtocolError("INVALID_REQUEST", "Unsupported browser request.");
   }
 
   incrementControlEpochForTest(actor: ActorIdentity, browserSessionId: string): number { const session = this.getSession(actor, browserSessionId); const epoch = session.incrementControlEpoch(); this.removeSessionSubscriptions(browserSessionId); return epoch; }
 
-  async close(): Promise<void> { const sessions = [...this.sessions.values()]; this.sessions.clear(); this.subscriptions.clear(); await Promise.allSettled(sessions.map(async (session) => { session.offFrame(this.onFrame); await session.close(); })); this.artifacts.clear(); this.operations.clear(); await this.profileManager.close(); }
+  async close(): Promise<void> {
+    if (this.closeState === "closed") return;
+    if (this.closePromise !== undefined) return await this.closePromise;
+    this.closeState = "closing";
+    const promise = this.closeInternal();
+    this.closePromise = promise;
+    try { await promise; this.closeState = "closed"; }
+    catch (error) { this.closeState = "cleanup-failed"; throw error; }
+    finally { if (this.closePromise === promise) this.closePromise = undefined; }
+  }
+
+  private async closeInternal(): Promise<void> {
+    const failures: unknown[] = [];
+    this.subscriptions.clear();
+    for (const [id, session] of [...this.sessions]) {
+      session.offFrame(this.onFrame);
+      try { await session.close(); this.sessions.delete(id); }
+      catch (error) { failures.push(error); }
+    }
+    this.artifacts.clear();
+    this.operations.clear();
+    try { await this.profileManager.close(); } catch (error) { failures.push(error); }
+    if (failures.length > 0) throw new AggregateError(failures, "Browser runtime cleanup failed.");
+  }
+
+  private async capabilities(): Promise<unknown> {
+    const executableAvailable = await findChromeExecutable(this.chrome.executable).then(() => true, () => false);
+    const displayAvailable = Boolean(process.env.WAYLAND_DISPLAY || process.env.DISPLAY);
+    const profileRootUsable = await this.profileManager.initialize().then(() => true, () => false);
+    const current = this.sessions.size + this.creatingSessions;
+    const availableCapacity = Math.max(0, this.maxSessionsGlobal - current);
+    const runtimeState = this.closeState === "open" ? "open" : this.closeState === "cleanup-failed" ? "cleanup-failed" : "closing";
+    return {
+      kind: "capabilities",
+      available: executableAvailable && displayAvailable && profileRootUsable && this.egressConfigured && runtimeState === "open" && availableCapacity > 0,
+      headed: displayAvailable,
+      screenshotFirst: true,
+      domFallback: true,
+      virtualMouse: true,
+      osMouse: false,
+      executableAvailable,
+      displayAvailable,
+      profileRootUsable,
+      egressConfigured: this.egressConfigured,
+      runtimeState,
+      sessionCapacity: { current, limit: this.maxSessionsGlobal, available: availableCapacity },
+    };
+  }
 
   private async execute<T>(actor: ActorIdentity, request: BrowserRequest, laneKey: string, browserSessionId: string | undefined, controlEpoch: number | undefined, task: (context: OperationContext) => Promise<T>, signal?: AbortSignal, connectionId?: string): Promise<T> {
     this.operations.submit(actor, {
@@ -150,7 +221,9 @@ export class BrowserRuntime extends EventEmitter {
     try {
       const status: OperationStatus = await this.operations.wait(actor, request.operationId);
       if (status.state !== "committed") { const error = status.error; throw new BrowserProtocolError(error?.code ?? "INTERNAL_ERROR", error?.message ?? `Operation ${status.state}.`, error?.retryable ?? false, error?.details); }
-      return this.operations.result(actor, request.operationId) as T;
+      const result = this.operations.result(actor, request.operationId);
+      await this.validateResultResources(actor, result);
+      return result as T;
     } finally { signal?.removeEventListener("abort", abort); }
   }
 
@@ -160,7 +233,23 @@ export class BrowserRuntime extends EventEmitter {
       const error = status.error;
       throw new BrowserProtocolError(error?.code ?? "INTERNAL_ERROR", error?.message ?? `Operation ${status.state}.`, error?.retryable ?? false, error?.details);
     }
-    return this.operations.result(actor, operationId);
+    const result = this.operations.result(actor, operationId);
+    await this.validateResultResources(actor, result);
+    return result;
+  }
+
+  private async validateResultResources(actor: ActorIdentity, result: unknown): Promise<void> {
+    if (!isRecord(result)) return;
+    if (result.kind === "screenshotObservation" && typeof result.observationId === "string" && isRecord(result.address) && typeof result.address.browserSessionId === "string") {
+      const session = this.sessions.get(result.address.browserSessionId);
+      if (session === undefined || actorKey(session.actor) !== actorKey(actor) || !session.observations.hasUsable(result.observationId)) throw new BrowserProtocolError("OBSERVATION_STALE", "Screenshot observation is stale.");
+      if (isRecord(result.image) && result.image.kind === "artifact" && typeof result.image.artifactId === "string") await this.artifacts.read(actor, result.image.artifactId);
+      return;
+    }
+    if (result.kind === "domObservation" && typeof result.observationId === "string" && isRecord(result.address) && typeof result.address.browserSessionId === "string") {
+      const session = this.sessions.get(result.address.browserSessionId);
+      if (session === undefined || actorKey(session.actor) !== actorKey(actor) || !session.dom.hasUsable(result.observationId)) throw new BrowserProtocolError("OBSERVATION_STALE", "DOM observation is stale.");
+    }
   }
 
   private addSubscription(actor: ActorIdentity, connectionId: string, subscriptionId: string, address: TabAddress, interest: "idle" | "selected"): RuntimeSubscription {
@@ -174,6 +263,7 @@ export class BrowserRuntime extends EventEmitter {
     values.set(subscriptionId, subscription); this.subscriptions.set(connectionId, values); return subscription;
   }
   private findSubscription(actor: ActorIdentity, connectionId: string, subscriptionId: string): RuntimeSubscription | undefined { const value = this.subscriptions.get(connectionId)?.get(subscriptionId); return value?.actor === actorKey(actor) ? value : undefined; }
+  private removeSubscription(connectionId: string, subscriptionId: string, expected: RuntimeSubscription): void { const values = this.subscriptions.get(connectionId); if (values?.get(subscriptionId) !== expected) return; values.delete(subscriptionId); if (values.size === 0) this.subscriptions.delete(connectionId); }
   private removeTabSubscriptions(sessionId: string, tabId: string): void { for (const [connectionId, values] of this.subscriptions) { for (const [id, subscription] of values) if (subscription.address.browserSessionId === sessionId && subscription.address.tabId === tabId) values.delete(id); if (values.size === 0) this.subscriptions.delete(connectionId); } }
   private removeSessionSubscriptions(sessionId: string): void { for (const [connectionId, values] of this.subscriptions) { for (const [id, subscription] of values) if (subscription.address.browserSessionId === sessionId) values.delete(id); if (values.size === 0) this.subscriptions.delete(connectionId); } }
   private readonly onFrame = (frame: FrameEvent): void => { this.emit("frame", frame); };
@@ -192,3 +282,4 @@ function isExecutedRequest(request: BrowserRequest): boolean {
 function requireConnectionId(connectionId: string | undefined): string { if (connectionId === undefined) throw new BrowserProtocolError("AUTH_FAILED", "Frame operations require a bound connection."); return connectionId; }
 function ensureRequestLive(request: BrowserRequest): void { if (Date.parse(request.deadline) <= Date.now()) throw new BrowserProtocolError("DEADLINE_EXCEEDED", "Request deadline has expired."); }
 function sameAddress(left: TabAddress, right: TabAddress): boolean { return left.browserSessionId === right.browserSessionId && left.tabId === right.tabId && left.targetId === right.targetId && left.controlEpoch === right.controlEpoch; }
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }

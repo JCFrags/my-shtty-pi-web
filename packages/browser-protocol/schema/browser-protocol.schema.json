@@ -1918,20 +1918,29 @@
                   "type": "object",
                   "required": [
                     "kind",
+                    "available",
                     "headed",
                     "screenshotFirst",
                     "domFallback",
                     "virtualMouse",
-                    "osMouse"
+                    "osMouse",
+                    "executableAvailable",
+                    "displayAvailable",
+                    "profileRootUsable",
+                    "egressConfigured",
+                    "runtimeState",
+                    "sessionCapacity"
                   ],
                   "properties": {
                     "kind": {
                       "type": "string",
                       "const": "capabilities"
                     },
+                    "available": {
+                      "type": "boolean"
+                    },
                     "headed": {
-                      "type": "boolean",
-                      "const": true
+                      "type": "boolean"
                     },
                     "screenshotFirst": {
                       "type": "boolean",
@@ -1948,6 +1957,60 @@
                     "osMouse": {
                       "type": "boolean",
                       "const": false
+                    },
+                    "executableAvailable": {
+                      "type": "boolean"
+                    },
+                    "displayAvailable": {
+                      "type": "boolean"
+                    },
+                    "profileRootUsable": {
+                      "type": "boolean"
+                    },
+                    "egressConfigured": {
+                      "type": "boolean"
+                    },
+                    "runtimeState": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "open"
+                        },
+                        {
+                          "type": "string",
+                          "const": "closing"
+                        },
+                        {
+                          "type": "string",
+                          "const": "cleanup-failed"
+                        }
+                      ]
+                    },
+                    "sessionCapacity": {
+                      "type": "object",
+                      "required": [
+                        "current",
+                        "limit",
+                        "available"
+                      ],
+                      "properties": {
+                        "current": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 256
+                        },
+                        "limit": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 256
+                        },
+                        "available": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 256
+                        }
+                      },
+                      "additionalProperties": false
                     }
                   },
                   "additionalProperties": false

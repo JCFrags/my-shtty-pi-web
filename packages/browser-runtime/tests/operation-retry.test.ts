@@ -65,6 +65,41 @@ describe("operation retry before resource lookup", () => {
     await runtime.close();
   });
 
+  it("does not replay screenshot or DOM success after its resource lifetime ended", async () => {
+    const runtime = new BrowserRuntime();
+    const internal = runtime as unknown as { sessions: Map<string, unknown> };
+    const fakeSession = {
+      actor,
+      observations: { hasUsable: () => false },
+      dom: { hasUsable: () => false },
+      offFrame: () => undefined,
+      close: async () => undefined,
+    };
+    internal.sessions.set(address.browserSessionId, fakeSession);
+    const screenshotRequest = { ...base, operationId: "operation:expired-screenshot", kind: "observe.screenshot", address, delivery: "artifact" } as BrowserRequest;
+    const screenshotResult = { kind: "screenshotObservation", observationId: "observation_expired", address, image: { kind: "inline", base64: "AA==" } };
+    await seed(runtime, screenshotRequest, screenshotResult);
+    await assert.rejects(() => runtime.dispatch(actor, { ...screenshotRequest, requestId: "request:expired-screenshot", deadline: deadline() }), (error) => error instanceof BrowserProtocolError && error.code === "OBSERVATION_STALE");
+
+    const domRequest = { ...base, operationId: "operation:expired-dom", kind: "observe.domFallback", address, maxNodes: 10 } as BrowserRequest;
+    const domResult = { kind: "domObservation", observationId: "domObservation_expired", address, nodes: [] };
+    await seed(runtime, domRequest, domResult);
+    await assert.rejects(() => runtime.dispatch(actor, { ...domRequest, requestId: "request:expired-dom", deadline: deadline() }), (error) => error instanceof BrowserProtocolError && error.code === "OBSERVATION_STALE");
+    await runtime.close();
+  });
+
+  it("does not replay an artifact screenshot after the artifact was revoked", async () => {
+    const runtime = new BrowserRuntime();
+    const internal = runtime as unknown as { sessions: Map<string, unknown> };
+    internal.sessions.set(address.browserSessionId, { actor, observations: { hasUsable: () => true }, dom: { hasUsable: () => true }, offFrame: () => undefined, close: async () => undefined });
+    const artifact = await runtime.artifacts.put(actor, Uint8Array.of(1), { browserSessionId: address.browserSessionId, tabId: address.tabId, purpose: "agent-observation", mediaType: "image/png" });
+    const request = { ...base, operationId: "operation:revoked-artifact", kind: "observe.screenshot", address, delivery: "artifact" } as BrowserRequest;
+    await seed(runtime, request, { kind: "screenshotObservation", observationId: "observation_valid", address, image: { kind: "artifact", artifactId: artifact.artifactId } });
+    runtime.artifacts.revoke(actor, artifact.artifactId);
+    await assert.rejects(() => runtime.dispatch(actor, { ...request, requestId: "request:revoked-artifact", deadline: deadline() }), (error) => error instanceof BrowserProtocolError && error.code === "ARTIFACT_NOT_FOUND");
+    await runtime.close();
+  });
+
   it("binds frame-operation retry semantics to one connection and never returns false success after reconnect", async () => {
     const runtime = new BrowserRuntime();
     const request = { ...base, operationId: "operation:subscribe-lost", kind: "frames.subscribe", address, subscriptionId: "subscription_retry", interest: "selected" } as BrowserRequest;

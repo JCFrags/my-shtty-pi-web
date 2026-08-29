@@ -242,7 +242,21 @@ export const FrameEventSchema = Type.Object({
   cursor,
 }, strict);
 
-const capabilityResult = Type.Object({ kind: Type.Literal("capabilities"), headed: Type.Literal(true), screenshotFirst: Type.Literal(true), domFallback: Type.Literal(true), virtualMouse: Type.Literal(true), osMouse: Type.Literal(false) }, strict);
+const capabilityResult = Type.Object({
+  kind: Type.Literal("capabilities"),
+  available: Type.Boolean(),
+  headed: Type.Boolean(),
+  screenshotFirst: Type.Literal(true),
+  domFallback: Type.Literal(true),
+  virtualMouse: Type.Literal(true),
+  osMouse: Type.Literal(false),
+  executableAvailable: Type.Boolean(),
+  displayAvailable: Type.Boolean(),
+  profileRootUsable: Type.Boolean(),
+  egressConfigured: Type.Boolean(),
+  runtimeState: Type.Union([Type.Literal("open"), Type.Literal("closing"), Type.Literal("cleanup-failed")]),
+  sessionCapacity: Type.Object({ current: Type.Integer({ minimum: 0, maximum: 256 }), limit: Type.Integer({ minimum: 1, maximum: 256 }), available: Type.Integer({ minimum: 0, maximum: 256 }) }, strict),
+}, strict);
 const sessionsResult = Type.Object({ kind: Type.Literal("sessions"), sessions: Type.Array(SessionDescriptorSchema, { maxItems: 32 }) }, strict);
 const tabsResult = Type.Object({ kind: Type.Literal("tabs"), tabs: Type.Array(TabDescriptorSchema, { maxItems: 16 }) }, strict);
 const artifactResult = Type.Object({ kind: Type.Literal("artifact"), artifactId: OpaqueIdSchema, mediaType: Type.Literal("image/png"), byteLength: Type.Integer({ minimum: 1, maximum: 16 * 1024 * 1024 }), sha256: Sha256Schema, offset: Type.Integer({ minimum: 0, maximum: 16 * 1024 * 1024 }), totalBytes: Type.Integer({ minimum: 1, maximum: 16 * 1024 * 1024 }), eof: Type.Boolean(), base64: Type.String({ maxLength: 1_500_000 }) }, strict);

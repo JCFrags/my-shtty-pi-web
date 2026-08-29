@@ -45,6 +45,8 @@ export class BrowserdServer {
   private startPromise: Promise<BrowserdDescriptor> | undefined;
   private stopPromise: Promise<void> | undefined;
   private stopRequested = false;
+  private everStopped = false;
+  private stopState: "open" | "stopping" | "stopped" | "cleanup-failed" = "open";
   private readonly connections = new Set<ConnectionState>();
 
   constructor(options: BrowserdServerOptions = {}) {
@@ -65,9 +67,9 @@ export class BrowserdServer {
   }
 
   start(): Promise<BrowserdDescriptor> {
+    if (this.everStopped) return Promise.reject(new BrowserProtocolError("OPERATION_CONFLICT", "A stopped browserd server object cannot restart."));
     if (this.descriptorValue !== undefined) return Promise.resolve(this.descriptorValue);
     if (this.startPromise !== undefined) return this.startPromise;
-    if (this.stopPromise !== undefined) return this.stopPromise.then(() => this.start());
     this.stopRequested = false;
     const promise = this.startInternal();
     this.startPromise = promise;
@@ -78,10 +80,14 @@ export class BrowserdServer {
 
   async stop(): Promise<void> {
     this.stopRequested = true;
+    this.everStopped = true;
+    if (this.stopState === "stopped") return;
     if (this.stopPromise !== undefined) return await this.stopPromise;
+    this.stopState = "stopping";
     const promise = this.stopInternal();
     this.stopPromise = promise;
-    try { await promise; }
+    try { await promise; this.stopState = "stopped"; }
+    catch (error) { this.stopState = "cleanup-failed"; throw error; }
     finally { if (this.stopPromise === promise) this.stopPromise = undefined; }
   }
 
@@ -121,19 +127,23 @@ export class BrowserdServer {
 
   private async stopInternal(): Promise<void> {
     await this.startPromise?.catch(() => undefined);
+    const failures: unknown[] = [];
     const server = this.server;
     this.server = undefined;
-    for (const state of this.connections) this.closeConnection(state);
-    if (server !== undefined) await closeNetServer(server);
-    await this.runtime.close();
+    for (const state of [...this.connections]) this.closeConnection(state);
+    if (server !== undefined) { try { await closeNetServer(server); } catch (error) { failures.push(error); } }
+    try { await this.runtime.close(); } catch (error) { failures.push(error); }
     const paths = this.paths;
     const descriptor = this.descriptorValue;
     const lease = this.lease;
     this.paths = undefined;
     this.descriptorValue = undefined;
     this.lease = undefined;
-    if (paths !== undefined && descriptor !== undefined && lease !== undefined) await cleanupDescriptor(paths, descriptor, lease);
-    else await lease?.release();
+    try {
+      if (paths !== undefined && descriptor !== undefined && lease !== undefined) await cleanupDescriptor(paths, descriptor, lease);
+      else await lease?.release();
+    } catch (error) { failures.push(error); }
+    if (failures.length > 0) throw new AggregateError(failures, "browserd shutdown cleanup failed.");
   }
 
   private checkStopDuringStart(): void {
