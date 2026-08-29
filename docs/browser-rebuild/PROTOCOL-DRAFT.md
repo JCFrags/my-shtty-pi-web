@@ -84,7 +84,7 @@ The executable request union includes:
 
 A normal `session.create` transaction creates the Chrome host and first tab. There is no required public `host.start` step. Host state is an internal diagnostic.
 
-`frames.subscribe` accepts `interest: "idle" | "selected"`. Active pointer actions temporarily override either rate with a burst rate.
+`frames.subscribe` requires a bounded opaque `subscriptionId` and accepts `interest: "idle" | "selected"`. `frames.unsubscribe` requires the same ID and full address. The ID is bound to one connection, actor, address, epoch, and interest. An identical duplicate is idempotent. Reuse for another address or interest returns `OPERATION_CONFLICT`. Unsubscribing an unknown ID is idempotent and returns `subscribed: false`. Active pointer actions temporarily override either rate with a burst rate.
 
 ## Session and tab records
 
@@ -108,6 +108,8 @@ Its result contains:
 - bounded inline bytes or an owner-scoped artifact ID;
 - cursor position, visibility, path sequence, and persona ID;
 - validity timestamp.
+
+The runtime compares target, document generation, viewport generation, CSS dimensions, DPR, and scroll before and after capture. It retries one inconsistent capture when the deadline permits. It otherwise returns `DOCUMENT_CHANGED` or `VIEWPORT_CHANGED` and retains no rejected artifact. `capturedMonotonicMs` records completed capture.
 
 The observation record does not retain another full screenshot buffer. It retains bounded binding metadata and an artifact reference.
 
@@ -154,28 +156,30 @@ type DispatchState =
 
 The status record has queue, start, and finish times, terminal result or sanitized error, and dispatch state. It may retain former session and tab IDs for internal correlation. The status request does not require a live tab address.
 
-Duplicate mutation operation IDs do not execute twice. Cancellation is idempotent. Queued cancellation prevents dispatch. Running cancellation stops unsent samples and tries to release held input. Cancellation after an irreversible event does not claim rollback. Late CDP results cannot change a terminal status.
+The operation record stores a bounded SHA-256 fingerprint of canonical mutation semantics. It includes request kind, identity, control epoch, action body, and relevant options. It excludes `requestId` and `deadline`. Same actor, operation ID, and fingerprint reuse the original queued, running, or terminal operation. A different fingerprint returns `OPERATION_CONFLICT` and causes no second side effect. Cancellation is idempotent. Queued cancellation prevents dispatch. Running cancellation stops unsent samples and tries to release held input with an independent bounded cleanup budget. Cancellation after an irreversible event does not claim rollback. Late CDP results cannot change a terminal status.
 
 ## Frame event
 
 A workspace frame event contains:
 
-- exact full address;
+- exact current full address;
+- current URL and title;
 - document and viewport generations;
+- CSS width and height plus DPR;
 - increasing frame sequence;
-- monotonic capture and publication times;
-- media type, artifact ID, and digest;
+- completed-capture and publication monotonic times;
+- media type, byte length, artifact ID, and digest;
 - current session cursor state.
 
 It does not contain an agent observation ID. A frame does not create a durable model observation. The server sends frame events on the same bound socket. Frame writes are droppable when the socket is slow.
 
 ## Artifact reads
 
-`artifact.read` supplies an artifact ID, byte offset, and bounded maximum byte count. It returns one base64 chunk with total size, digest, and end-of-file state. Authorization uses the connection-bound actor. A caller cannot choose a file path.
+`artifact.read` supplies an artifact ID, byte offset, and bounded maximum byte count. It returns one base64 chunk with the actual stored media type, total size, digest, and end-of-file state. Phase 1.1 supports truthful `image/png` only. Each record is scoped by actor, browser session, optional tab, and purpose (`agent-observation` or `workspace-frame`). Authorization uses the connection-bound actor. A caller cannot choose a file path.
 
 ## Responses and errors
 
-A response has the request ID, optional operation ID, `ok`, and either a validated result or a sanitized error. Ownership failures do not reveal whether a foreign session, tab, target, observation, artifact, or operation exists.
+A response has the request ID, optional operation ID, `ok`, and either a validated result or a sanitized error. Runtime and transport failures use a typed `BrowserProtocolError` with a finite code, safe message, retry flag, and bounded safe details. Unknown failures become `INTERNAL_ERROR`; they are not inferred from message text. CDP disconnect is `CDP_DISCONNECTED`, target crash is `TARGET_CRASHED`, missing operation is `OPERATION_NOT_FOUND`, and missing or foreign artifact is `ARTIFACT_NOT_FOUND`. Ownership failures do not reveal whether a foreign session, tab, target, observation, artifact, or operation exists.
 
 The error enum includes request, authentication, deadline, ownership, session, tab, target, epoch, observation, document, viewport, coordinate, handle, operation, browser, CDP, artifact, navigation, limit, and capability failures. Ordinary errors exclude profile paths, CDP endpoints, cookies, headers, storage, and page secrets.
 

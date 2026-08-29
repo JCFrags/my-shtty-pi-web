@@ -1,0 +1,6389 @@
+{
+  "passed": true,
+  "requestedDurationSeconds": 1800,
+  "actualDurationSeconds": 1800.2954245459998,
+  "sampleIntervalSeconds": 15,
+  "sampleCount": 121,
+  "chromium": "Chromium 151.0.7922.173 Built from source for Fedora release 44 (Forty Four)",
+  "startupMs": 481.36461399999996,
+  "sessionCount": 2,
+  "tabCount": 3,
+  "idleFrameSubscriptions": 3,
+  "subscriberReconnects": 15,
+  "duplicateSubscribeCalls": 15,
+  "epochInvalidations": 4,
+  "operationRetryCalls": 10,
+  "artifactReadCalls": 363,
+  "tabsCreatedAndClosed": 8,
+  "screenshotLatencyMs": {
+    "count": 363,
+    "min": 45.578619000007166,
+    "median": 194.04297299997415,
+    "p95": 268.11186700011604,
+    "max": 391.4247019998729,
+    "mean": 180.45318187052217
+  },
+  "domFallbackLatencyMs": {
+    "count": 120,
+    "min": 5.256430000066757,
+    "median": 6.377763000084087,
+    "p95": 7.05467400001362,
+    "max": 7.669126000022516,
+    "mean": 6.28824175833923
+  },
+  "pathWallLatencyMs": {
+    "count": 120,
+    "min": 704.0610450000095,
+    "median": 812.6604979999829,
+    "p95": 1097.791658999864,
+    "max": 1367.8541810000315,
+    "mean": 844.1564655499911
+  },
+  "cdpRoundTripMs": {
+    "count": 121,
+    "min": 0.11404100013896823,
+    "median": 0.20765200001187623,
+    "p95": 0.36675600000307895,
+    "max": 1.542414000025019,
+    "mean": 0.24448410744293714
+  },
+  "framePublicationLatencyMs": {
+    "count": 3556,
+    "min": 0.07688499987125397,
+    "median": 0.1903060000622645,
+    "p95": 0.28586099995300174,
+    "max": 1.3983980000000429,
+    "mean": 0.2027254471319261
+  },
+  "frameDeliveryLatencyMs": {
+    "count": 3556,
+    "min": 0.06049400009214878,
+    "median": 0.15202199999475852,
+    "p95": 0.30790099990554154,
+    "max": 1.3401209999574348,
+    "mean": 0.1759269055092784
+  },
+  "pssKiB": {
+    "start": 755398,
+    "end": 840340,
+    "min": 737328,
+    "max": 840931
+  },
+  "privateDirtyKiB": {
+    "start": 502396,
+    "end": 578316,
+    "min": 483368,
+    "max": 578460
+  },
+  "cpuPercent": {
+    "count": 120,
+    "min": 2.8807589751359433,
+    "median": 4.698856032311125,
+    "p95": 7.0870760776408455,
+    "max": 8.055995830797498,
+    "mean": 4.781181718416801
+  },
+  "eventLoopMeanMs": {
+    "count": 121,
+    "min": 19.99979276190476,
+    "median": 20.063882077051925,
+    "p95": 20.077548735166427,
+    "max": 20.087264653061226,
+    "mean": 20.064272799486588
+  },
+  "eventLoopMaxMs": {
+    "start": 20.774911,
+    "end": 21.135359,
+    "min": 20.643839,
+    "max": 21.938175
+  },
+  "browserdHeapUsedBytes": {
+    "start": 20696016,
+    "end": 19082024,
+    "min": 16545960,
+    "max": 20696016
+  },
+  "profileBytes": {
+    "start": 13606000,
+    "end": 17416664,
+    "min": 7546520,
+    "max": 17473482
+  },
+  "processCount": {
+    "start": 26,
+    "end": 26,
+    "min": 26,
+    "max": 26
+  },
+  "artifactCount": {
+    "start": 6,
+    "end": 192,
+    "min": 6,
+    "max": 192
+  },
+  "artifactBytes": {
+    "start": 61346,
+    "end": 2045300,
+    "min": 61346,
+    "max": 2058567
+  },
+  "operationCount": {
+    "start": 9,
+    "end": 239,
+    "min": 9,
+    "max": 240
+  },
+  "subscriptionCount": {
+    "start": 3,
+    "end": 3,
+    "min": 3,
+    "max": 3
+  },
+  "heldButtonCount": {
+    "start": 0,
+    "end": 0,
+    "min": 0,
+    "max": 0
+  },
+  "heldKeyCount": {
+    "start": 0,
+    "end": 0,
+    "min": 0,
+    "max": 0
+  },
+  "targetCount": {
+    "start": 3,
+    "end": 3,
+    "min": 3,
+    "max": 3
+  },
+  "artifactStatsByActorSessionPurpose": [
+    {
+      "owner": "soak:owner-b\u0000soak:agent-b",
+      "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+      "purpose": "workspace-frame",
+      "count": 88,
+      "bytes": 789277
+    },
+    {
+      "owner": "soak:owner-b\u0000soak:agent-b",
+      "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+      "purpose": "agent-observation",
+      "count": 8,
+      "bytes": 71372
+    },
+    {
+      "owner": "soak:owner-a\u0000soak:agent-a",
+      "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+      "purpose": "workspace-frame",
+      "count": 86,
+      "bytes": 1061319
+    },
+    {
+      "owner": "soak:owner-a\u0000soak:agent-a",
+      "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+      "purpose": "agent-observation",
+      "count": 10,
+      "bytes": 123332
+    }
+  ],
+  "droppedFrames": {
+    "start": 0,
+    "end": 1336,
+    "min": 0,
+    "max": 1336
+  },
+  "receivedFrameCount": 3556,
+  "slopesPerHour": {
+    "pssKiB": 136838.03630747632,
+    "privateDirtyKiB": 126054.34064516432,
+    "browserdHeapBytes": 2994629.5628129714,
+    "profileBytes": 5679627.926949791,
+    "artifactBytes": 810955.0654651552,
+    "operationCount": 354.88347370562354
+  },
+  "cleanup": {
+    "profilesRemaining": 0,
+    "artifactsRemaining": 0,
+    "operationsRemaining": 0,
+    "subscriptionsRemaining": 0,
+    "heldButtonsRemaining": 0,
+    "heldKeysRemaining": 0,
+    "browserProcessesRemaining": 0,
+    "descriptorRemoved": true,
+    "socketRemoved": true
+  },
+  "samples": [
+    {
+      "elapsedSeconds": 0.44335454900000015,
+      "pssKiB": 755398,
+      "privateDirtyKiB": 502396,
+      "cpuPercent": 184.66451323728222,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 20696016,
+      "eventLoopMeanMs": 19.99979276190476,
+      "eventLoopMaxMs": 20.774911,
+      "profileBytes": 13606000,
+      "artifactCount": 6,
+      "artifactBytes": 61346,
+      "operationCount": 9,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 1,
+          "bytes": 8897
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 1,
+          "bytes": 8897
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 2,
+          "bytes": 21776
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 2,
+          "bytes": 21776
+        }
+      ],
+      "droppedFrames": 0,
+      "receivedFrames": 3
+    },
+    {
+      "elapsedSeconds": 16.016514726999997,
+      "pssKiB": 767213,
+      "privateDirtyKiB": 514272,
+      "cpuPercent": 6.2286651451149035,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 17252264,
+      "eventLoopMeanMs": 20.058043292903225,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 7546520,
+      "artifactCount": 42,
+      "artifactBytes": 415660,
+      "operationCount": 16,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 14,
+          "bytes": 125557
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 2,
+          "bytes": 17794
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 22,
+          "bytes": 228757
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 4,
+          "bytes": 43552
+        }
+      ],
+      "droppedFrames": 17,
+      "receivedFrames": 33
+    },
+    {
+      "elapsedSeconds": 30.271642249,
+      "pssKiB": 756309,
+      "privateDirtyKiB": 502824,
+      "cpuPercent": 3.36720944277218,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 17003976,
+      "eventLoopMeanMs": 20.072653088857546,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 7685938,
+      "artifactCount": 64,
+      "artifactBytes": 639531,
+      "operationCount": 19,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 21,
+          "bytes": 188011
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 3,
+          "bytes": 26716
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 34,
+          "bytes": 359467
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 6,
+          "bytes": 65337
+        }
+      ],
+      "droppedFrames": 17,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 46.116156143,
+      "pssKiB": 755110,
+      "privateDirtyKiB": 501564,
+      "cpuPercent": 5.55397285071168,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 16666568,
+      "eventLoopMeanMs": 20.055263512690352,
+      "eventLoopMaxMs": 20.873215,
+      "profileBytes": 7686568,
+      "artifactCount": 105,
+      "artifactBytes": 1074089,
+      "operationCount": 26,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 36,
+          "bytes": 322608
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 4,
+          "bytes": 35638
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 57,
+          "bytes": 628721
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 87122
+        }
+      ],
+      "droppedFrames": 35,
+      "receivedFrames": 38
+    },
+    {
+      "elapsedSeconds": 60.27430429899999,
+      "pssKiB": 748724,
+      "privateDirtyKiB": 495064,
+      "cpuPercent": 3.0371203582706747,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 16821440,
+      "eventLoopMeanMs": 20.08008357325747,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 7704046,
+      "artifactCount": 126,
+      "artifactBytes": 1289094,
+      "operationCount": 29,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 42,
+          "bytes": 376134
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 5,
+          "bytes": 44559
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 69,
+          "bytes": 759485
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 108916
+        }
+      ],
+      "droppedFrames": 35,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 76.15121217,
+      "pssKiB": 749205,
+      "privateDirtyKiB": 495456,
+      "cpuPercent": 5.542640967309294,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 17441560,
+      "eventLoopMeanMs": 20.072362342205324,
+      "eventLoopMaxMs": 21.233663,
+      "profileBytes": 7707239,
+      "artifactCount": 160,
+      "artifactBytes": 1610407,
+      "operationCount": 36,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 58,
+          "bytes": 519807
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 6,
+          "bytes": 53480
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 928186
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 108934
+        }
+      ],
+      "droppedFrames": 54,
+      "receivedFrames": 39
+    },
+    {
+      "elapsedSeconds": 90.26837432,
+      "pssKiB": 748925,
+      "privateDirtyKiB": 495164,
+      "cpuPercent": 2.9751021879422126,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 17025928,
+      "eventLoopMeanMs": 20.06631566951567,
+      "eventLoopMaxMs": 21.200895,
+      "profileBytes": 16095847,
+      "artifactCount": 167,
+      "artifactBytes": 1684055,
+      "operationCount": 39,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 64,
+          "bytes": 573339
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 7,
+          "bytes": 62402
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 939362
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 108952
+        }
+      ],
+      "droppedFrames": 54,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 106.374387521,
+      "pssKiB": 737468,
+      "privateDirtyKiB": 483692,
+      "cpuPercent": 5.5258864431126975,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 16545960,
+      "eventLoopMeanMs": 20.07128976779026,
+      "eventLoopMaxMs": 21.233663,
+      "profileBytes": 16095847,
+      "artifactCount": 184,
+      "artifactBytes": 1857545,
+      "operationCount": 48,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 80,
+          "bytes": 717171
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71324
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 960089
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 108961
+        }
+      ],
+      "droppedFrames": 75,
+      "receivedFrames": 40
+    },
+    {
+      "elapsedSeconds": 120.272770207,
+      "pssKiB": 737328,
+      "privateDirtyKiB": 483368,
+      "cpuPercent": 2.9499835287525773,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 17600136,
+      "eventLoopMeanMs": 20.069439722141826,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 16104229,
+      "artifactCount": 191,
+      "artifactBytes": 1911379,
+      "operationCount": 51,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 770697
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80245
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 951467
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 108970
+        }
+      ],
+      "droppedFrames": 75,
+      "receivedFrames": 17
+    },
+    {
+      "elapsedSeconds": 137.69989041800002,
+      "pssKiB": 738272,
+      "privateDirtyKiB": 484016,
+      "cpuPercent": 5.738182716894321,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18248824,
+      "eventLoopMeanMs": 20.060924460829494,
+      "eventLoopMaxMs": 21.397503,
+      "profileBytes": 16112469,
+      "artifactCount": 192,
+      "artifactBytes": 1891126,
+      "operationCount": 61,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788995
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 108970
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 921789
+        }
+      ],
+      "droppedFrames": 99,
+      "receivedFrames": 43
+    },
+    {
+      "elapsedSeconds": 150.27103224,
+      "pssKiB": 740697,
+      "privateDirtyKiB": 486272,
+      "cpuPercent": 3.2614380285049713,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 17539944,
+      "eventLoopMeanMs": 20.072221900800002,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17046829,
+      "artifactCount": 192,
+      "artifactBytes": 1916211,
+      "operationCount": 64,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779814
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 945611
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 110492
+        }
+      ],
+      "droppedFrames": 99,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 166.14035712100002,
+      "pssKiB": 746579,
+      "privateDirtyKiB": 490236,
+      "cpuPercent": 5.54528946000472,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 16905760,
+      "eventLoopMeanMs": 20.083741850443598,
+      "eventLoopMaxMs": 21.151743,
+      "profileBytes": 17046877,
+      "artifactCount": 192,
+      "artifactBytes": 1943782,
+      "operationCount": 72,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788953
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 971430
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 112027
+        }
+      ],
+      "droppedFrames": 119,
+      "receivedFrames": 37
+    },
+    {
+      "elapsedSeconds": 180.258436684,
+      "pssKiB": 743218,
+      "privateDirtyKiB": 488904,
+      "cpuPercent": 3.5415581685088124,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 17572592,
+      "eventLoopMeanMs": 20.071450256410255,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17055395,
+      "artifactCount": 192,
+      "artifactBytes": 1935030,
+      "operationCount": 75,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779933
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 961255
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 113549
+        }
+      ],
+      "droppedFrames": 119,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 196.047299735,
+      "pssKiB": 743634,
+      "privateDirtyKiB": 489292,
+      "cpuPercent": 5.510213098877302,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18435104,
+      "eventLoopMeanMs": 20.071892300636943,
+      "eventLoopMaxMs": 21.348351,
+      "profileBytes": 17055395,
+      "artifactCount": 192,
+      "artifactBytes": 1942217,
+      "operationCount": 82,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789094
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 966667
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 115084
+        }
+      ],
+      "droppedFrames": 139,
+      "receivedFrames": 37
+    },
+    {
+      "elapsedSeconds": 210.31754030400003,
+      "pssKiB": 807387,
+      "privateDirtyKiB": 546172,
+      "cpuPercent": 4.484857819358036,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18060016,
+      "eventLoopMeanMs": 20.061077273239437,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17105024,
+      "artifactCount": 192,
+      "artifactBytes": 1975543,
+      "operationCount": 87,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779916
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 998587
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 116746
+        }
+      ],
+      "droppedFrames": 139,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 226.25290551200004,
+      "pssKiB": 808930,
+      "privateDirtyKiB": 546192,
+      "cpuPercent": 5.710568839320698,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 17667880,
+      "eventLoopMeanMs": 20.065864958385877,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17182525,
+      "artifactCount": 192,
+      "artifactBytes": 1998150,
+      "operationCount": 96,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788862
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1021008
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 116908
+        }
+      ],
+      "droppedFrames": 157,
+      "receivedFrames": 38
+    },
+    {
+      "elapsedSeconds": 240.28109395600003,
+      "pssKiB": 809207,
+      "privateDirtyKiB": 546484,
+      "cpuPercent": 3.279111924082733,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 17960144,
+      "eventLoopMeanMs": 20.08385744619799,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17182681,
+      "artifactCount": 192,
+      "artifactBytes": 1991093,
+      "operationCount": 99,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779543
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1014222
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 117035
+        }
+      ],
+      "droppedFrames": 157,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 256.368605026,
+      "pssKiB": 809304,
+      "privateDirtyKiB": 546700,
+      "cpuPercent": 5.780881802992296,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 17382328,
+      "eventLoopMeanMs": 20.067014791510612,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17182681,
+      "artifactCount": 192,
+      "artifactBytes": 1980226,
+      "operationCount": 106,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788905
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1002752
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 117197
+        }
+      ],
+      "droppedFrames": 179,
+      "receivedFrames": 39
+    },
+    {
+      "elapsedSeconds": 270.27344380400007,
+      "pssKiB": 809404,
+      "privateDirtyKiB": 546864,
+      "cpuPercent": 3.5239531203717975,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18079856,
+      "eventLoopMeanMs": 20.07354164978292,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17182681,
+      "artifactCount": 192,
+      "artifactBytes": 1988527,
+      "operationCount": 109,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779657
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1011252
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 117324
+        }
+      ],
+      "droppedFrames": 179,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 287.85420532800003,
+      "pssKiB": 807397,
+      "privateDirtyKiB": 544964,
+      "cpuPercent": 6.086198248803468,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 17745784,
+      "eventLoopMeanMs": 20.059923602285714,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17190952,
+      "artifactCount": 192,
+      "artifactBytes": 1988106,
+      "operationCount": 119,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788982
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1033884
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 93868
+        }
+      ],
+      "droppedFrames": 208,
+      "receivedFrames": 45
+    },
+    {
+      "elapsedSeconds": 300.270935178,
+      "pssKiB": 810913,
+      "privateDirtyKiB": 548104,
+      "cpuPercent": 3.7852156379161284,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18112384,
+      "eventLoopMeanMs": 20.072564175040515,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17245711,
+      "artifactCount": 192,
+      "artifactBytes": 1983619,
+      "operationCount": 122,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779653
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1005740
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 117933
+        }
+      ],
+      "droppedFrames": 208,
+      "receivedFrames": 17
+    },
+    {
+      "elapsedSeconds": 316.046789846,
+      "pssKiB": 811478,
+      "privateDirtyKiB": 548756,
+      "cpuPercent": 5.578144693390245,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 17737096,
+      "eventLoopMeanMs": 20.06124913994911,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17245742,
+      "artifactCount": 192,
+      "artifactBytes": 1986403,
+      "operationCount": 129,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789024
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 107898
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 1018109
+        }
+      ],
+      "droppedFrames": 231,
+      "receivedFrames": 36
+    },
+    {
+      "elapsedSeconds": 330.275382485,
+      "pssKiB": 811229,
+      "privateDirtyKiB": 548580,
+      "cpuPercent": 3.0220838484151122,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18275632,
+      "eventLoopMeanMs": 20.069960316384183,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17245742,
+      "artifactCount": 192,
+      "artifactBytes": 1997477,
+      "operationCount": 132,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779415
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1018779
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 118989
+        }
+      ],
+      "droppedFrames": 231,
+      "receivedFrames": 20
+    },
+    {
+      "elapsedSeconds": 346.048008363,
+      "pssKiB": 812962,
+      "privateDirtyKiB": 550356,
+      "cpuPercent": 5.642687570757586,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 17969432,
+      "eventLoopMeanMs": 20.07917714285714,
+      "eventLoopMaxMs": 21.168127,
+      "profileBytes": 17245742,
+      "artifactCount": 192,
+      "artifactBytes": 2009677,
+      "operationCount": 142,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788836
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1030073
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 119451
+        }
+      ],
+      "droppedFrames": 249,
+      "receivedFrames": 36
+    },
+    {
+      "elapsedSeconds": 360.27437058500004,
+      "pssKiB": 811765,
+      "privateDirtyKiB": 549688,
+      "cpuPercent": 3.374017844545777,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18348208,
+      "eventLoopMeanMs": 20.069368758132956,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17245772,
+      "artifactCount": 192,
+      "artifactBytes": 2004321,
+      "operationCount": 145,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779447
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1024669
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 119912
+        }
+      ],
+      "droppedFrames": 249,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 376.10214572700005,
+      "pssKiB": 812314,
+      "privateDirtyKiB": 550316,
+      "cpuPercent": 5.559846485719048,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 17722440,
+      "eventLoopMeanMs": 20.070358416243653,
+      "eventLoopMaxMs": 21.397503,
+      "profileBytes": 17245772,
+      "artifactCount": 192,
+      "artifactBytes": 2003722,
+      "operationCount": 152,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788993
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1023592
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 119765
+        }
+      ],
+      "droppedFrames": 267,
+      "receivedFrames": 38
+    },
+    {
+      "elapsedSeconds": 390.273659984,
+      "pssKiB": 812572,
+      "privateDirtyKiB": 550348,
+      "cpuPercent": 3.245948115761755,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18238960,
+      "eventLoopMeanMs": 20.05916359716312,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17254492,
+      "artifactCount": 192,
+      "artifactBytes": 2006841,
+      "operationCount": 155,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779332
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1027562
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 119653
+        }
+      ],
+      "droppedFrames": 267,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 406.14475867400006,
+      "pssKiB": 813132,
+      "privateDirtyKiB": 551004,
+      "cpuPercent": 5.922715360545712,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18334616,
+      "eventLoopMeanMs": 20.07950568314322,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17254492,
+      "artifactCount": 192,
+      "artifactBytes": 2015145,
+      "operationCount": 162,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788831
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1035310
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 119632
+        }
+      ],
+      "droppedFrames": 289,
+      "receivedFrames": 39
+    },
+    {
+      "elapsedSeconds": 420.28000126600006,
+      "pssKiB": 813244,
+      "privateDirtyKiB": 551176,
+      "cpuPercent": 3.254277363873064,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18244952,
+      "eventLoopMeanMs": 20.063769490753913,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17254492,
+      "artifactCount": 192,
+      "artifactBytes": 2010431,
+      "operationCount": 165,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779361
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1031124
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 119653
+        }
+      ],
+      "droppedFrames": 289,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 438.089849953,
+      "pssKiB": 817774,
+      "privateDirtyKiB": 555376,
+      "cpuPercent": 7.1308859627034105,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18374568,
+      "eventLoopMeanMs": 20.076502392776522,
+      "eventLoopMaxMs": 21.741567,
+      "profileBytes": 17316084,
+      "artifactCount": 192,
+      "artifactBytes": 1998940,
+      "operationCount": 179,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788601
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1043253
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 95714
+        }
+      ],
+      "droppedFrames": 318,
+      "receivedFrames": 51
+    },
+    {
+      "elapsedSeconds": 450.28156502700006,
+      "pssKiB": 815736,
+      "privateDirtyKiB": 553768,
+      "cpuPercent": 3.444962398241163,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18449736,
+      "eventLoopMeanMs": 20.072346613861384,
+      "eventLoopMaxMs": 21.463039,
+      "profileBytes": 17283500,
+      "artifactCount": 192,
+      "artifactBytes": 2004801,
+      "operationCount": 182,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779473
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1024849
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 120185
+        }
+      ],
+      "droppedFrames": 318,
+      "receivedFrames": 16
+    },
+    {
+      "elapsedSeconds": 466.803656198,
+      "pssKiB": 816480,
+      "privateDirtyKiB": 554492,
+      "cpuPercent": 6.173552666204455,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18055688,
+      "eventLoopMeanMs": 20.071655708029194,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17283500,
+      "artifactCount": 192,
+      "artifactBytes": 2017653,
+      "operationCount": 191,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788873
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1060638
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 96770
+        }
+      ],
+      "droppedFrames": 343,
+      "receivedFrames": 44
+    },
+    {
+      "elapsedSeconds": 480.455963309,
+      "pssKiB": 816276,
+      "privateDirtyKiB": 554268,
+      "cpuPercent": 3.515889263971011,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18382944,
+      "eventLoopMeanMs": 20.076130780559648,
+      "eventLoopMaxMs": 21.168127,
+      "profileBytes": 17283500,
+      "artifactCount": 192,
+      "artifactBytes": 2019275,
+      "operationCount": 194,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779751
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121241
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1037990
+        }
+      ],
+      "droppedFrames": 343,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 496.16500617,
+      "pssKiB": 816928,
+      "privateDirtyKiB": 554868,
+      "cpuPercent": 5.41089617948812,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 17936736,
+      "eventLoopMeanMs": 20.069529403329067,
+      "eventLoopMaxMs": 21.282815,
+      "profileBytes": 17283500,
+      "artifactCount": 192,
+      "artifactBytes": 2025098,
+      "operationCount": 201,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788971
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1066929
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97826
+        }
+      ],
+      "droppedFrames": 364,
+      "receivedFrames": 37
+    },
+    {
+      "elapsedSeconds": 510.275023428,
+      "pssKiB": 816164,
+      "privateDirtyKiB": 554088,
+      "cpuPercent": 3.685325045971682,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18507712,
+      "eventLoopMeanMs": 20.065008683760684,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17283500,
+      "artifactCount": 192,
+      "artifactBytes": 2035939,
+      "operationCount": 204,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779749
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1053774
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 122122
+        }
+      ],
+      "droppedFrames": 364,
+      "receivedFrames": 20
+    },
+    {
+      "elapsedSeconds": 526.3655192990001,
+      "pssKiB": 818075,
+      "privateDirtyKiB": 555556,
+      "cpuPercent": 5.77980944438227,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18814408,
+      "eventLoopMeanMs": 20.07646208,
+      "eventLoopMaxMs": 21.299199,
+      "profileBytes": 17283500,
+      "artifactCount": 192,
+      "artifactBytes": 2041844,
+      "operationCount": 212,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788597
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121909
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1059966
+        }
+      ],
+      "droppedFrames": 384,
+      "receivedFrames": 40
+    },
+    {
+      "elapsedSeconds": 540.265476127,
+      "pssKiB": 816991,
+      "privateDirtyKiB": 554900,
+      "cpuPercent": 3.237420127043284,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18505120,
+      "eventLoopMeanMs": 20.077548735166427,
+      "eventLoopMaxMs": 21.938175,
+      "profileBytes": 17283530,
+      "artifactCount": 192,
+      "artifactBytes": 2031563,
+      "operationCount": 215,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779589
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1049918
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121763
+        }
+      ],
+      "droppedFrames": 384,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 556.028542373,
+      "pssKiB": 817631,
+      "privateDirtyKiB": 555532,
+      "cpuPercent": 5.582670187808839,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18533408,
+      "eventLoopMeanMs": 20.087264653061226,
+      "eventLoopMaxMs": 21.725183,
+      "profileBytes": 17283530,
+      "artifactCount": 192,
+      "artifactBytes": 2024843,
+      "operationCount": 222,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788803
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1043118
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121550
+        }
+      ],
+      "droppedFrames": 400,
+      "receivedFrames": 36
+    },
+    {
+      "elapsedSeconds": 570.271198541,
+      "pssKiB": 817507,
+      "privateDirtyKiB": 555380,
+      "cpuPercent": 3.440369508469352,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18498680,
+      "eventLoopMeanMs": 20.06745365303244,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17283530,
+      "artifactCount": 192,
+      "artifactBytes": 2027504,
+      "operationCount": 225,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779611
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1046195
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121404
+        }
+      ],
+      "droppedFrames": 400,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 588.379466252,
+      "pssKiB": 818303,
+      "privateDirtyKiB": 556124,
+      "cpuPercent": 7.179041202324958,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19257544,
+      "eventLoopMeanMs": 20.06000770699223,
+      "eventLoopMaxMs": 20.987903,
+      "profileBytes": 17291770,
+      "artifactCount": 192,
+      "artifactBytes": 2023799,
+      "operationCount": 237,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788733
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1066586
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97108
+        }
+      ],
+      "droppedFrames": 432,
+      "receivedFrames": 54
+    },
+    {
+      "elapsedSeconds": 600.265550136,
+      "pssKiB": 819531,
+      "privateDirtyKiB": 557352,
+      "cpuPercent": 3.5335439670366813,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18704208,
+      "eventLoopMeanMs": 20.054279363790187,
+      "eventLoopMaxMs": 20.742143,
+      "profileBytes": 17293735,
+      "artifactCount": 192,
+      "artifactBytes": 2019904,
+      "operationCount": 234,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779812
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1038300
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121499
+        }
+      ],
+      "droppedFrames": 432,
+      "receivedFrames": 17
+    },
+    {
+      "elapsedSeconds": 616.112483235,
+      "pssKiB": 820235,
+      "privateDirtyKiB": 558024,
+      "cpuPercent": 5.868643441541919,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18110928,
+      "eventLoopMeanMs": 20.060131447401773,
+      "eventLoopMaxMs": 20.955135,
+      "profileBytes": 17293735,
+      "artifactCount": 192,
+      "artifactBytes": 2017890,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788867
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1060281
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97370
+        }
+      ],
+      "droppedFrames": 448,
+      "receivedFrames": 37
+    },
+    {
+      "elapsedSeconds": 630.282892153,
+      "pssKiB": 820157,
+      "privateDirtyKiB": 557940,
+      "cpuPercent": 3.4579100916246537,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18618440,
+      "eventLoopMeanMs": 20.061069253900712,
+      "eventLoopMaxMs": 20.922367,
+      "profileBytes": 17293735,
+      "artifactCount": 192,
+      "artifactBytes": 2021219,
+      "operationCount": 234,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779771
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1039533
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121621
+        }
+      ],
+      "droppedFrames": 448,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 646.6157180710001,
+      "pssKiB": 820763,
+      "privateDirtyKiB": 558528,
+      "cpuPercent": 6.183865578870216,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18315208,
+      "eventLoopMeanMs": 20.062611546798028,
+      "eventLoopMaxMs": 21.037055,
+      "profileBytes": 17293735,
+      "artifactCount": 192,
+      "artifactBytes": 2024813,
+      "operationCount": 233,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788896
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1067189
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97356
+        }
+      ],
+      "droppedFrames": 471,
+      "receivedFrames": 42
+    },
+    {
+      "elapsedSeconds": 660.337861779,
+      "pssKiB": 822381,
+      "privateDirtyKiB": 559640,
+      "cpuPercent": 4.080995010083753,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18848608,
+      "eventLoopMeanMs": 20.055419314787702,
+      "eventLoopMaxMs": 20.889599,
+      "profileBytes": 17347599,
+      "artifactCount": 192,
+      "artifactBytes": 2026189,
+      "operationCount": 233,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788896
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1044314
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121607
+        }
+      ],
+      "droppedFrames": 471,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 676.101893978,
+      "pssKiB": 821972,
+      "privateDirtyKiB": 559620,
+      "cpuPercent": 5.96294138538761,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18110608,
+      "eventLoopMeanMs": 20.059700244897957,
+      "eventLoopMaxMs": 20.955135,
+      "profileBytes": 17322000,
+      "artifactCount": 192,
+      "artifactBytes": 2022063,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789068
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1040118
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121505
+        }
+      ],
+      "droppedFrames": 488,
+      "receivedFrames": 36
+    },
+    {
+      "elapsedSeconds": 690.276984061,
+      "pssKiB": 822048,
+      "privateDirtyKiB": 559692,
+      "cpuPercent": 3.033490422157478,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18764160,
+      "eventLoopMeanMs": 20.06137137021277,
+      "eventLoopMaxMs": 21.004287,
+      "profileBytes": 17322000,
+      "artifactCount": 192,
+      "artifactBytes": 2024615,
+      "operationCount": 236,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789068
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1042844
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121331
+        }
+      ],
+      "droppedFrames": 488,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 706.314088369,
+      "pssKiB": 822832,
+      "privateDirtyKiB": 560000,
+      "cpuPercent": 5.736696490407356,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18835440,
+      "eventLoopMeanMs": 20.06033964912281,
+      "eventLoopMaxMs": 21.020671,
+      "profileBytes": 17322000,
+      "artifactCount": 192,
+      "artifactBytes": 2035031,
+      "operationCount": 237,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788623
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1053667
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121369
+        }
+      ],
+      "droppedFrames": 506,
+      "receivedFrames": 40
+    },
+    {
+      "elapsedSeconds": 720.272513483,
+      "pssKiB": 822708,
+      "privateDirtyKiB": 560312,
+      "cpuPercent": 3.367142039029895,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18683360,
+      "eventLoopMeanMs": 20.05817102017291,
+      "eventLoopMaxMs": 20.971519,
+      "profileBytes": 17330750,
+      "artifactCount": 192,
+      "artifactBytes": 2029906,
+      "operationCount": 237,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779702
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1048580
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121331
+        }
+      ],
+      "droppedFrames": 506,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 738.094917424,
+      "pssKiB": 823187,
+      "privateDirtyKiB": 560764,
+      "cpuPercent": 6.508661815993569,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19360896,
+      "eventLoopMeanMs": 20.059975495495493,
+      "eventLoopMaxMs": 21.004287,
+      "profileBytes": 17338990,
+      "artifactCount": 192,
+      "artifactBytes": 2020939,
+      "operationCount": 234,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788621
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1063866
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97080
+        }
+      ],
+      "droppedFrames": 533,
+      "receivedFrames": 51
+    },
+    {
+      "elapsedSeconds": 750.274243028,
+      "pssKiB": 823780,
+      "privateDirtyKiB": 561356,
+      "cpuPercent": 3.94110491505667,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18765240,
+      "eventLoopMeanMs": 20.06231614521452,
+      "eventLoopMaxMs": 20.905983,
+      "profileBytes": 17340269,
+      "artifactCount": 192,
+      "artifactBytes": 2022713,
+      "operationCount": 237,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788621
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1041272
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121448
+        }
+      ],
+      "droppedFrames": 533,
+      "receivedFrames": 17
+    },
+    {
+      "elapsedSeconds": 766.24915229,
+      "pssKiB": 823749,
+      "privateDirtyKiB": 561260,
+      "cpuPercent": 6.134620134157228,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18665112,
+      "eventLoopMeanMs": 20.055056744654088,
+      "eventLoopMaxMs": 21.020671,
+      "profileBytes": 17340269,
+      "artifactCount": 192,
+      "artifactBytes": 2026962,
+      "operationCount": 236,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788882
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1069425
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97283
+        }
+      ],
+      "droppedFrames": 556,
+      "receivedFrames": 39
+    },
+    {
+      "elapsedSeconds": 780.269080047,
+      "pssKiB": 822777,
+      "privateDirtyKiB": 560276,
+      "cpuPercent": 3.4236980983039818,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18737400,
+      "eventLoopMeanMs": 20.059598783357245,
+      "eventLoopMaxMs": 20.889599,
+      "profileBytes": 17340269,
+      "artifactCount": 192,
+      "artifactBytes": 2022654,
+      "operationCount": 236,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779870
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1040840
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121651
+        }
+      ],
+      "droppedFrames": 556,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 796.14162919,
+      "pssKiB": 823044,
+      "privateDirtyKiB": 560508,
+      "cpuPercent": 5.733168578037255,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18178016,
+      "eventLoopMeanMs": 20.064572273417724,
+      "eventLoopMaxMs": 21.004287,
+      "profileBytes": 17340269,
+      "artifactCount": 192,
+      "artifactBytes": 2019723,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789004
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1061861
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97486
+        }
+      ],
+      "droppedFrames": 575,
+      "receivedFrames": 37
+    },
+    {
+      "elapsedSeconds": 810.4464102659999,
+      "pssKiB": 823633,
+      "privateDirtyKiB": 561096,
+      "cpuPercent": 3.914775046362281,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18629216,
+      "eventLoopMeanMs": 20.064005400843882,
+      "eventLoopMaxMs": 21.004287,
+      "profileBytes": 17340269,
+      "artifactCount": 192,
+      "artifactBytes": 2028042,
+      "operationCount": 236,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779655
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1046384
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121709
+        }
+      ],
+      "droppedFrames": 575,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 826.345570337,
+      "pssKiB": 824773,
+      "privateDirtyKiB": 562192,
+      "cpuPercent": 5.975158409360186,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19118648,
+      "eventLoopMeanMs": 20.0678762020202,
+      "eventLoopMaxMs": 20.971519,
+      "profileBytes": 17340269,
+      "artifactCount": 192,
+      "artifactBytes": 2033126,
+      "operationCount": 231,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788809
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1051388
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121557
+        }
+      ],
+      "droppedFrames": 598,
+      "receivedFrames": 41
+    },
+    {
+      "elapsedSeconds": 840.2699152160001,
+      "pssKiB": 824685,
+      "privateDirtyKiB": 562092,
+      "cpuPercent": 3.375383216116911,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18511096,
+      "eventLoopMeanMs": 20.066090913294797,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17340269,
+      "artifactCount": 192,
+      "artifactBytes": 2027267,
+      "operationCount": 234,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788809
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1045681
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121405
+        }
+      ],
+      "droppedFrames": 598,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 856.1646826489999,
+      "pssKiB": 825237,
+      "privateDirtyKiB": 562636,
+      "cpuPercent": 6.102637261531332,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 17867992,
+      "eventLoopMeanMs": 20.058355378002528,
+      "eventLoopMaxMs": 20.987903,
+      "profileBytes": 17340269,
+      "artifactCount": 192,
+      "artifactBytes": 2019125,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788826
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1037674
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121253
+        }
+      ],
+      "droppedFrames": 616,
+      "receivedFrames": 38
+    },
+    {
+      "elapsedSeconds": 870.284343582,
+      "pssKiB": 825387,
+      "privateDirtyKiB": 562764,
+      "cpuPercent": 3.611984752466993,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18707848,
+      "eventLoopMeanMs": 20.06533543019943,
+      "eventLoopMaxMs": 20.955135,
+      "profileBytes": 17340269,
+      "artifactCount": 192,
+      "artifactBytes": 2023564,
+      "operationCount": 234,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788826
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1042265
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121101
+        }
+      ],
+      "droppedFrames": 616,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 888.035097555,
+      "pssKiB": 829171,
+      "privateDirtyKiB": 566132,
+      "cpuPercent": 8.055995830797498,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18007000,
+      "eventLoopMeanMs": 20.05668488687783,
+      "eventLoopMaxMs": 20.905983,
+      "profileBytes": 17401861,
+      "artifactCount": 192,
+      "artifactBytes": 2019455,
+      "operationCount": 236,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788896
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1062309
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 96878
+        }
+      ],
+      "droppedFrames": 646,
+      "receivedFrames": 51
+    },
+    {
+      "elapsedSeconds": 900.460996071,
+      "pssKiB": 828783,
+      "privateDirtyKiB": 566164,
+      "cpuPercent": 3.6214684951801637,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18812424,
+      "eventLoopMeanMs": 20.06133312621359,
+      "eventLoopMaxMs": 20.643839,
+      "profileBytes": 17344637,
+      "artifactCount": 192,
+      "artifactBytes": 2019231,
+      "operationCount": 239,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779824
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1037734
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121380
+        }
+      ],
+      "droppedFrames": 646,
+      "receivedFrames": 16
+    },
+    {
+      "elapsedSeconds": 916.082169614,
+      "pssKiB": 830091,
+      "privateDirtyKiB": 567424,
+      "cpuPercent": 6.465583377713578,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18841952,
+      "eventLoopMeanMs": 20.05207856041131,
+      "eventLoopMaxMs": 20.856831,
+      "profileBytes": 17344637,
+      "artifactCount": 192,
+      "artifactBytes": 2020074,
+      "operationCount": 238,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788829
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1062458
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97415
+        }
+      ],
+      "droppedFrames": 666,
+      "receivedFrames": 38
+    },
+    {
+      "elapsedSeconds": 930.2842440860001,
+      "pssKiB": 830395,
+      "privateDirtyKiB": 567720,
+      "cpuPercent": 3.520612435780218,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18806968,
+      "eventLoopMeanMs": 20.06162865063649,
+      "eventLoopMaxMs": 20.938751,
+      "profileBytes": 17344637,
+      "artifactCount": 192,
+      "artifactBytes": 2024270,
+      "operationCount": 239,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779770
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1042463
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121743
+        }
+      ],
+      "droppedFrames": 666,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 946.464033811,
+      "pssKiB": 830287,
+      "privateDirtyKiB": 567592,
+      "cpuPercent": 5.995133536879125,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18288384,
+      "eventLoopMeanMs": 20.063571637267078,
+      "eventLoopMaxMs": 20.905983,
+      "profileBytes": 17344637,
+      "artifactCount": 192,
+      "artifactBytes": 2029147,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788897
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1071283
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97595
+        }
+      ],
+      "droppedFrames": 688,
+      "receivedFrames": 42
+    },
+    {
+      "elapsedSeconds": 960.2904597820001,
+      "pssKiB": 829679,
+      "privateDirtyKiB": 566968,
+      "cpuPercent": 3.9055646132457813,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18774904,
+      "eventLoopMeanMs": 20.06656595348837,
+      "eventLoopMaxMs": 20.742143,
+      "profileBytes": 17344637,
+      "artifactCount": 192,
+      "artifactBytes": 2032300,
+      "operationCount": 238,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779845
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1050239
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121923
+        }
+      ],
+      "droppedFrames": 688,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 976.42940412,
+      "pssKiB": 822667,
+      "privateDirtyKiB": 559912,
+      "cpuPercent": 6.258154057957229,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18390344,
+      "eventLoopMeanMs": 20.06532585074627,
+      "eventLoopMaxMs": 20.922367,
+      "profileBytes": 17344637,
+      "artifactCount": 192,
+      "artifactBytes": 2024710,
+      "operationCount": 237,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788975
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1042651
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121712
+        }
+      ],
+      "droppedFrames": 713,
+      "receivedFrames": 41
+    },
+    {
+      "elapsedSeconds": 990.317529024,
+      "pssKiB": 823007,
+      "privateDirtyKiB": 560224,
+      "cpuPercent": 3.7442059572075754,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18569952,
+      "eventLoopMeanMs": 20.06336981765557,
+      "eventLoopMaxMs": 20.955135,
+      "profileBytes": 17344637,
+      "artifactCount": 192,
+      "artifactBytes": 2028484,
+      "operationCount": 238,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 780053
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1046571
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121566
+        }
+      ],
+      "droppedFrames": 713,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 1006.185831044,
+      "pssKiB": 824671,
+      "privateDirtyKiB": 561716,
+      "cpuPercent": 5.545646905956754,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18375664,
+      "eventLoopMeanMs": 20.060258511392405,
+      "eventLoopMaxMs": 20.905983,
+      "profileBytes": 17344637,
+      "artifactCount": 192,
+      "artifactBytes": 2036508,
+      "operationCount": 237,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788891
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1054716
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121529
+        }
+      ],
+      "droppedFrames": 730,
+      "receivedFrames": 38
+    },
+    {
+      "elapsedSeconds": 1020.280975052,
+      "pssKiB": 824578,
+      "privateDirtyKiB": 561596,
+      "cpuPercent": 3.405428137006367,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18868536,
+      "eventLoopMeanMs": 20.054622814814813,
+      "eventLoopMaxMs": 20.905983,
+      "profileBytes": 17344637,
+      "artifactCount": 192,
+      "artifactBytes": 2029314,
+      "operationCount": 238,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779807
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1047648
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121566
+        }
+      ],
+      "droppedFrames": 730,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 1037.968997863,
+      "pssKiB": 825394,
+      "privateDirtyKiB": 562380,
+      "cpuPercent": 6.331968315325122,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18129688,
+      "eventLoopMeanMs": 20.074253963636366,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17352877,
+      "artifactCount": 192,
+      "artifactBytes": 2022351,
+      "operationCount": 237,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789013
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1064728
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97238
+        }
+      ],
+      "droppedFrames": 764,
+      "receivedFrames": 47
+    },
+    {
+      "elapsedSeconds": 1050.280714461,
+      "pssKiB": 825469,
+      "privateDirtyKiB": 562440,
+      "cpuPercent": 3.4926080094294174,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18779488,
+      "eventLoopMeanMs": 20.068686640522873,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17362924,
+      "artifactCount": 192,
+      "artifactBytes": 2028882,
+      "operationCount": 234,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789013
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1046836
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121661
+        }
+      ],
+      "droppedFrames": 764,
+      "receivedFrames": 17
+    },
+    {
+      "elapsedSeconds": 1066.3571191849999,
+      "pssKiB": 827009,
+      "privateDirtyKiB": 563520,
+      "cpuPercent": 5.784875511448332,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18454576,
+      "eventLoopMeanMs": 20.059978466916355,
+      "eventLoopMaxMs": 21.020671,
+      "profileBytes": 17362924,
+      "artifactCount": 192,
+      "artifactBytes": 2036288,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788778
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1078701
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97437
+        }
+      ],
+      "droppedFrames": 787,
+      "receivedFrames": 42
+    },
+    {
+      "elapsedSeconds": 1080.2787987119998,
+      "pssKiB": 825921,
+      "privateDirtyKiB": 562860,
+      "cpuPercent": 3.4478598582095197,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18858544,
+      "eventLoopMeanMs": 20.06367593063584,
+      "eventLoopMaxMs": 20.922367,
+      "profileBytes": 17362954,
+      "artifactCount": 192,
+      "artifactBytes": 2030294,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779857
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1048284
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121860
+        }
+      ],
+      "droppedFrames": 787,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 1096.0762660669998,
+      "pssKiB": 825701,
+      "privateDirtyKiB": 562608,
+      "cpuPercent": 5.443910600820452,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19212328,
+      "eventLoopMeanMs": 20.059685781170483,
+      "eventLoopMaxMs": 20.971519,
+      "profileBytes": 17362954,
+      "artifactCount": 192,
+      "artifactBytes": 2025797,
+      "operationCount": 234,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788827
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1067962
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97636
+        }
+      ],
+      "droppedFrames": 805,
+      "receivedFrames": 36
+    },
+    {
+      "elapsedSeconds": 1110.335055768,
+      "pssKiB": 829062,
+      "privateDirtyKiB": 565536,
+      "cpuPercent": 4.698856032311125,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19439432,
+      "eventLoopMeanMs": 20.065415571830986,
+      "eventLoopMaxMs": 20.987903,
+      "profileBytes": 17416009,
+      "artifactCount": 192,
+      "artifactBytes": 2032542,
+      "operationCount": 234,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779564
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1050804
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121880
+        }
+      ],
+      "droppedFrames": 805,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 1126.0594210979998,
+      "pssKiB": 827937,
+      "privateDirtyKiB": 564828,
+      "cpuPercent": 5.596410294036352,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18480984,
+      "eventLoopMeanMs": 20.05597245466156,
+      "eventLoopMaxMs": 20.938751,
+      "profileBytes": 17357482,
+      "artifactCount": 192,
+      "artifactBytes": 2037061,
+      "operationCount": 239,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788693
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1055331
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121665
+        }
+      ],
+      "droppedFrames": 822,
+      "receivedFrames": 35
+    },
+    {
+      "elapsedSeconds": 1140.291781512,
+      "pssKiB": 828357,
+      "privateDirtyKiB": 565228,
+      "cpuPercent": 2.8807589751359433,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18902792,
+      "eventLoopMeanMs": 20.058088858757063,
+      "eventLoopMaxMs": 20.856831,
+      "profileBytes": 17357458,
+      "artifactCount": 192,
+      "artifactBytes": 2031183,
+      "operationCount": 236,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779554
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1049822
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121514
+        }
+      ],
+      "droppedFrames": 822,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 1156.2162355809999,
+      "pssKiB": 828525,
+      "privateDirtyKiB": 565344,
+      "cpuPercent": 5.6516851133504415,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18130312,
+      "eventLoopMeanMs": 20.062662537200502,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17357458,
+      "artifactCount": 192,
+      "artifactBytes": 2022131,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788580
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1040880
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121299
+        }
+      ],
+      "droppedFrames": 842,
+      "receivedFrames": 37
+    },
+    {
+      "elapsedSeconds": 1170.281207389,
+      "pssKiB": 828593,
+      "privateDirtyKiB": 565412,
+      "cpuPercent": 3.341634852994651,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18916880,
+      "eventLoopMeanMs": 20.068082834285715,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17357458,
+      "artifactCount": 192,
+      "artifactBytes": 2020535,
+      "operationCount": 236,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779333
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1039760
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121148
+        }
+      ],
+      "droppedFrames": 842,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 1188.683722203,
+      "pssKiB": 828001,
+      "privateDirtyKiB": 565796,
+      "cpuPercent": 6.5751882948055895,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18367720,
+      "eventLoopMeanMs": 20.055768873362446,
+      "eventLoopMaxMs": 21.217279,
+      "profileBytes": 17365698,
+      "artifactCount": 192,
+      "artifactBytes": 2021297,
+      "operationCount": 233,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788478
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1064543
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 96904
+        }
+      ],
+      "droppedFrames": 874,
+      "receivedFrames": 56
+    },
+    {
+      "elapsedSeconds": 1200.2805687,
+      "pssKiB": 828185,
+      "privateDirtyKiB": 565968,
+      "cpuPercent": 3.621674220734504,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18919848,
+      "eventLoopMeanMs": 20.06314503986135,
+      "eventLoopMaxMs": 21.053439,
+      "profileBytes": 17367049,
+      "artifactCount": 192,
+      "artifactBytes": 2021998,
+      "operationCount": 236,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779235
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1041137
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121333
+        }
+      ],
+      "droppedFrames": 874,
+      "receivedFrames": 15
+    },
+    {
+      "elapsedSeconds": 1216.2698525639998,
+      "pssKiB": 828289,
+      "privateDirtyKiB": 566036,
+      "cpuPercent": 5.503686140574024,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18099040,
+      "eventLoopMeanMs": 20.061816924623116,
+      "eventLoopMaxMs": 21.282815,
+      "profileBytes": 17367049,
+      "artifactCount": 192,
+      "artifactBytes": 2022013,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788927
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1064404
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97310
+        }
+      ],
+      "droppedFrames": 899,
+      "receivedFrames": 37
+    },
+    {
+      "elapsedSeconds": 1230.270540509,
+      "pssKiB": 825967,
+      "privateDirtyKiB": 563700,
+      "cpuPercent": 3.214127775490506,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18932832,
+      "eventLoopMeanMs": 20.06806951724138,
+      "eventLoopMaxMs": 21.020671,
+      "profileBytes": 17367049,
+      "artifactCount": 192,
+      "artifactBytes": 2023017,
+      "operationCount": 236,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779587
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1041563
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121573
+        }
+      ],
+      "droppedFrames": 899,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 1246.36273504,
+      "pssKiB": 827509,
+      "privateDirtyKiB": 564776,
+      "cpuPercent": 5.654915482453167,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19499224,
+      "eventLoopMeanMs": 20.071801128589264,
+      "eventLoopMaxMs": 21.020671,
+      "profileBytes": 17367049,
+      "artifactCount": 192,
+      "artifactBytes": 2026742,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788912
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1069112
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97346
+        }
+      ],
+      "droppedFrames": 923,
+      "receivedFrames": 39
+    },
+    {
+      "elapsedSeconds": 1260.2824158849999,
+      "pssKiB": 826547,
+      "privateDirtyKiB": 564248,
+      "cpuPercent": 3.592036380486462,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18873872,
+      "eventLoopMeanMs": 20.058803532467532,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17367079,
+      "artifactCount": 192,
+      "artifactBytes": 2030180,
+      "operationCount": 237,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779589
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1048689
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121609
+        }
+      ],
+      "droppedFrames": 923,
+      "receivedFrames": 20
+    },
+    {
+      "elapsedSeconds": 1276.0217227409998,
+      "pssKiB": 826395,
+      "privateDirtyKiB": 564080,
+      "cpuPercent": 5.654632749349546,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19448400,
+      "eventLoopMeanMs": 20.059048378033207,
+      "eventLoopMaxMs": 20.971519,
+      "profileBytes": 17367079,
+      "artifactCount": 192,
+      "artifactBytes": 2025250,
+      "operationCount": 236,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788902
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1043571
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121405
+        }
+      ],
+      "droppedFrames": 944,
+      "receivedFrames": 36
+    },
+    {
+      "elapsedSeconds": 1290.3539513009998,
+      "pssKiB": 827525,
+      "privateDirtyKiB": 565176,
+      "cpuPercent": 3.2793225284707663,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18719096,
+      "eventLoopMeanMs": 20.06328649859944,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17367079,
+      "artifactCount": 192,
+      "artifactBytes": 2027533,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779585
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1046415
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121239
+        }
+      ],
+      "droppedFrames": 944,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 1306.2518120749999,
+      "pssKiB": 828041,
+      "privateDirtyKiB": 565672,
+      "cpuPercent": 5.912745201148805,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18048552,
+      "eventLoopMeanMs": 20.061358766118836,
+      "eventLoopMaxMs": 20.987903,
+      "profileBytes": 17367079,
+      "artifactCount": 192,
+      "artifactBytes": 2035949,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788841
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1054535
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121201
+        }
+      ],
+      "droppedFrames": 965,
+      "receivedFrames": 40
+    },
+    {
+      "elapsedSeconds": 1320.345710893,
+      "pssKiB": 827681,
+      "privateDirtyKiB": 565296,
+      "cpuPercent": 3.334776317534882,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18879736,
+      "eventLoopMeanMs": 20.06657862482168,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17367079,
+      "artifactCount": 192,
+      "artifactBytes": 2029162,
+      "operationCount": 234,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779728
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1047902
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121239
+        }
+      ],
+      "droppedFrames": 965,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 1338.349791764,
+      "pssKiB": 831878,
+      "privateDirtyKiB": 569016,
+      "cpuPercent": 7.165042243716344,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18040168,
+      "eventLoopMeanMs": 20.06917485714286,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17429480,
+      "artifactCount": 192,
+      "artifactBytes": 2018842,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788826
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1061668
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 96976
+        }
+      ],
+      "droppedFrames": 995,
+      "receivedFrames": 55
+    },
+    {
+      "elapsedSeconds": 1350.46630161,
+      "pssKiB": 830602,
+      "privateDirtyKiB": 568180,
+      "cpuPercent": 3.5488767430990458,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19026000,
+      "eventLoopMeanMs": 20.068930338870434,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17380536,
+      "artifactCount": 192,
+      "artifactBytes": 2020250,
+      "operationCount": 238,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779551
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121527
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1038878
+        }
+      ],
+      "droppedFrames": 995,
+      "receivedFrames": 15
+    },
+    {
+      "elapsedSeconds": 1366.67195866,
+      "pssKiB": 831286,
+      "privateDirtyKiB": 568840,
+      "cpuPercent": 5.738736770318102,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18250504,
+      "eventLoopMeanMs": 20.066349680297396,
+      "eventLoopMaxMs": 20.987903,
+      "profileBytes": 17380560,
+      "artifactCount": 192,
+      "artifactBytes": 2028282,
+      "operationCount": 237,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789149
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1070171
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97590
+        }
+      ],
+      "droppedFrames": 1020,
+      "receivedFrames": 48
+    },
+    {
+      "elapsedSeconds": 1380.4582120869998,
+      "pssKiB": 830910,
+      "privateDirtyKiB": 568460,
+      "cpuPercent": 3.1915850258365257,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19046944,
+      "eventLoopMeanMs": 20.064070903790086,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17389280,
+      "artifactCount": 192,
+      "artifactBytes": 2030331,
+      "operationCount": 238,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789149
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1071932
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97878
+        }
+      ],
+      "droppedFrames": 1020,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 1396.4091483999998,
+      "pssKiB": 831514,
+      "privateDirtyKiB": 568996,
+      "cpuPercent": 5.642302008732229,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19267608,
+      "eventLoopMeanMs": 20.064601632241814,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17389280,
+      "artifactCount": 192,
+      "artifactBytes": 2035049,
+      "operationCount": 237,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789270
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1076230
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 98177
+        }
+      ],
+      "droppedFrames": 1041,
+      "receivedFrames": 37
+    },
+    {
+      "elapsedSeconds": 1410.2833454779998,
+      "pssKiB": 828778,
+      "privateDirtyKiB": 566272,
+      "cpuPercent": 3.2434309349227357,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18954376,
+      "eventLoopMeanMs": 20.065556034782606,
+      "eventLoopMaxMs": 20.987903,
+      "profileBytes": 17389280,
+      "artifactCount": 192,
+      "artifactBytes": 2040266,
+      "operationCount": 238,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789270
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1057104
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 122520
+        }
+      ],
+      "droppedFrames": 1041,
+      "receivedFrames": 20
+    },
+    {
+      "elapsedSeconds": 1426.207652214,
+      "pssKiB": 830798,
+      "privateDirtyKiB": 567828,
+      "cpuPercent": 5.651737403207438,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19627680,
+      "eventLoopMeanMs": 20.05593987878788,
+      "eventLoopMaxMs": 20.758527,
+      "profileBytes": 17389280,
+      "artifactCount": 192,
+      "artifactBytes": 2045668,
+      "operationCount": 240,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789143
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 122312
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1062841
+        }
+      ],
+      "droppedFrames": 1059,
+      "receivedFrames": 38
+    },
+    {
+      "elapsedSeconds": 1440.280029937,
+      "pssKiB": 829942,
+      "privateDirtyKiB": 567408,
+      "cpuPercent": 3.624121026587083,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18955296,
+      "eventLoopMeanMs": 20.065227337142858,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17389310,
+      "artifactCount": 192,
+      "artifactBytes": 2036070,
+      "operationCount": 239,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 780222
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1053414
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 122141
+        }
+      ],
+      "droppedFrames": 1059,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 1456.2773293249998,
+      "pssKiB": 831608,
+      "privateDirtyKiB": 568944,
+      "cpuPercent": 6.501097308837917,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18164296,
+      "eventLoopMeanMs": 20.065542432160804,
+      "eventLoopMaxMs": 21.004287,
+      "profileBytes": 17389310,
+      "artifactCount": 192,
+      "artifactBytes": 2028298,
+      "operationCount": 238,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789279
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1045677
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121970
+        }
+      ],
+      "droppedFrames": 1081,
+      "receivedFrames": 39
+    },
+    {
+      "elapsedSeconds": 1470.2833181589997,
+      "pssKiB": 831560,
+      "privateDirtyKiB": 568880,
+      "cpuPercent": 3.7126975193474694,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19028312,
+      "eventLoopMeanMs": 20.066133578192254,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17389310,
+      "artifactCount": 192,
+      "artifactBytes": 2032131,
+      "operationCount": 239,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789279
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1049691
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121789
+        }
+      ],
+      "droppedFrames": 1081,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 1488.203261251,
+      "pssKiB": 831520,
+      "privateDirtyKiB": 568772,
+      "cpuPercent": 7.0870760776408455,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19647144,
+      "eventLoopMeanMs": 20.064265183856502,
+      "eventLoopMaxMs": 21.004287,
+      "profileBytes": 17397550,
+      "artifactCount": 192,
+      "artifactBytes": 2029636,
+      "operationCount": 231,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788859
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1071922
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97483
+        }
+      ],
+      "droppedFrames": 1112,
+      "receivedFrames": 49
+    },
+    {
+      "elapsedSeconds": 1500.27878384,
+      "pssKiB": 833412,
+      "privateDirtyKiB": 570684,
+      "cpuPercent": 3.8921710968280667,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18924864,
+      "eventLoopMeanMs": 20.057164672212977,
+      "eventLoopMaxMs": 20.905983,
+      "profileBytes": 17398949,
+      "artifactCount": 192,
+      "artifactBytes": 2024014,
+      "operationCount": 234,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779779
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80293
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1042228
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121714
+        }
+      ],
+      "droppedFrames": 1112,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 1516.212890654,
+      "pssKiB": 832795,
+      "privateDirtyKiB": 570132,
+      "cpuPercent": 6.338604427532718,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19227128,
+      "eventLoopMeanMs": 20.06222866078184,
+      "eventLoopMaxMs": 20.987903,
+      "profileBytes": 17398949,
+      "artifactCount": 192,
+      "artifactBytes": 2017960,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788856
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1060547
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97185
+        }
+      ],
+      "droppedFrames": 1130,
+      "receivedFrames": 39
+    },
+    {
+      "elapsedSeconds": 1530.276048801,
+      "pssKiB": 833759,
+      "privateDirtyKiB": 571100,
+      "cpuPercent": 3.839820290403221,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18993784,
+      "eventLoopMeanMs": 20.057924754285715,
+      "eventLoopMaxMs": 20.873215,
+      "profileBytes": 17398949,
+      "artifactCount": 192,
+      "artifactBytes": 2019377,
+      "operationCount": 234,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788856
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1037881
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121268
+        }
+      ],
+      "droppedFrames": 1130,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 1546.143355839,
+      "pssKiB": 834263,
+      "privateDirtyKiB": 571556,
+      "cpuPercent": 5.798085319687431,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19372048,
+      "eventLoopMeanMs": 20.06598732572877,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17398949,
+      "artifactCount": 192,
+      "artifactBytes": 2021910,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789060
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1064889
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 96589
+        }
+      ],
+      "droppedFrames": 1154,
+      "receivedFrames": 37
+    },
+    {
+      "elapsedSeconds": 1560.326034843,
+      "pssKiB": 836477,
+      "privateDirtyKiB": 572912,
+      "cpuPercent": 4.160003902179541,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19004232,
+      "eventLoopMeanMs": 20.062393654390934,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17452301,
+      "artifactCount": 192,
+      "artifactBytes": 2017808,
+      "operationCount": 233,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789060
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1036704
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 120672
+        }
+      ],
+      "droppedFrames": 1154,
+      "receivedFrames": 20
+    },
+    {
+      "elapsedSeconds": 1576.153765864,
+      "pssKiB": 834334,
+      "privateDirtyKiB": 571560,
+      "cpuPercent": 5.686222483853745,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19565848,
+      "eventLoopMeanMs": 20.060357522842637,
+      "eventLoopMaxMs": 20.889599,
+      "profileBytes": 17393774,
+      "artifactCount": 192,
+      "artifactBytes": 2011480,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788822
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1030801
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 120485
+        }
+      ],
+      "droppedFrames": 1176,
+      "receivedFrames": 36
+    },
+    {
+      "elapsedSeconds": 1590.2796669549998,
+      "pssKiB": 835280,
+      "privateDirtyKiB": 572508,
+      "cpuPercent": 3.398013315453744,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19113480,
+      "eventLoopMeanMs": 20.064678418207684,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17393774,
+      "artifactCount": 192,
+      "artifactBytes": 2014159,
+      "operationCount": 236,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 779900
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1033628
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 120337
+        }
+      ],
+      "droppedFrames": 1176,
+      "receivedFrames": 20
+    },
+    {
+      "elapsedSeconds": 1606.331739133,
+      "pssKiB": 836819,
+      "privateDirtyKiB": 573592,
+      "cpuPercent": 5.606752760764924,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18144520,
+      "eventLoopMeanMs": 20.05872204255319,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17393774,
+      "artifactCount": 192,
+      "artifactBytes": 2022900,
+      "operationCount": 234,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789043
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1042187
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 120298
+        }
+      ],
+      "droppedFrames": 1196,
+      "receivedFrames": 40
+    },
+    {
+      "elapsedSeconds": 1620.2716503699999,
+      "pssKiB": 835904,
+      "privateDirtyKiB": 573108,
+      "cpuPercent": 3.443350476479072,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19088792,
+      "eventLoopMeanMs": 20.06043483982684,
+      "eventLoopMaxMs": 20.987903,
+      "profileBytes": 17393804,
+      "artifactCount": 192,
+      "artifactBytes": 2019119,
+      "operationCount": 237,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789043
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1038367
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 120337
+        }
+      ],
+      "droppedFrames": 1196,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 1638.144431558,
+      "pssKiB": 836664,
+      "privateDirtyKiB": 573828,
+      "cpuPercent": 7.105777140340608,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19400680,
+      "eventLoopMeanMs": 20.059870058426966,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17402044,
+      "artifactCount": 192,
+      "artifactBytes": 2008007,
+      "operationCount": 234,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 788925
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1051456
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 96254
+        }
+      ],
+      "droppedFrames": 1224,
+      "receivedFrames": 54
+    },
+    {
+      "elapsedSeconds": 1650.2746114459999,
+      "pssKiB": 837432,
+      "privateDirtyKiB": 574600,
+      "cpuPercent": 3.8746333882892823,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19119192,
+      "eventLoopMeanMs": 20.05887152317881,
+      "eventLoopMaxMs": 21.118975,
+      "profileBytes": 17403467,
+      "artifactCount": 192,
+      "artifactBytes": 2013700,
+      "operationCount": 237,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 9,
+          "bytes": 80294
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 87,
+          "bytes": 780003
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1032245
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 121158
+        }
+      ],
+      "droppedFrames": 1224,
+      "receivedFrames": 16
+    },
+    {
+      "elapsedSeconds": 1666.40701139,
+      "pssKiB": 836348,
+      "privateDirtyKiB": 574504,
+      "cpuPercent": 6.570628075671042,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18326656,
+      "eventLoopMeanMs": 20.056352199252803,
+      "eventLoopMaxMs": 20.873215,
+      "profileBytes": 17403467,
+      "artifactCount": 192,
+      "artifactBytes": 2024159,
+      "operationCount": 233,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789019
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1065859
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 97909
+        }
+      ],
+      "droppedFrames": 1247,
+      "receivedFrames": 41
+    },
+    {
+      "elapsedSeconds": 1680.2846710559998,
+      "pssKiB": 835583,
+      "privateDirtyKiB": 573724,
+      "cpuPercent": 3.819087747903866,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19017816,
+      "eventLoopMeanMs": 20.057963808972502,
+      "eventLoopMaxMs": 21.037055,
+      "profileBytes": 17403467,
+      "artifactCount": 192,
+      "artifactBytes": 2029021,
+      "operationCount": 236,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789019
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 122813
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1045817
+        }
+      ],
+      "droppedFrames": 1247,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 1696.40775277,
+      "pssKiB": 835755,
+      "privateDirtyKiB": 573844,
+      "cpuPercent": 6.1402653510113865,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19631072,
+      "eventLoopMeanMs": 20.060351282689915,
+      "eventLoopMaxMs": 20.922367,
+      "profileBytes": 17403467,
+      "artifactCount": 192,
+      "artifactBytes": 2039325,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789372
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1079017
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 99564
+        }
+      ],
+      "droppedFrames": 1267,
+      "receivedFrames": 41
+    },
+    {
+      "elapsedSeconds": 1710.268921477,
+      "pssKiB": 836935,
+      "privateDirtyKiB": 575044,
+      "cpuPercent": 3.7514874177773514,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18831304,
+      "eventLoopMeanMs": 20.064440023188403,
+      "eventLoopMaxMs": 20.856831,
+      "profileBytes": 17412187,
+      "artifactCount": 192,
+      "artifactBytes": 2054953,
+      "operationCount": 236,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789372
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1069886
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 124323
+        }
+      ],
+      "droppedFrames": 1267,
+      "receivedFrames": 19
+    },
+    {
+      "elapsedSeconds": 1726.1794345469998,
+      "pssKiB": 837464,
+      "privateDirtyKiB": 575536,
+      "cpuPercent": 5.970894815398984,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19292568,
+      "eventLoopMeanMs": 20.066097131313132,
+      "eventLoopMaxMs": 20.873215,
+      "profileBytes": 17412187,
+      "artifactCount": 192,
+      "artifactBytes": 2058567,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789238
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1073808
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 124149
+        }
+      ],
+      "droppedFrames": 1289,
+      "receivedFrames": 38
+    },
+    {
+      "elapsedSeconds": 1740.288004735,
+      "pssKiB": 836588,
+      "privateDirtyKiB": 574648,
+      "cpuPercent": 3.6148241331625175,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19110968,
+      "eventLoopMeanMs": 20.061391133903136,
+      "eventLoopMaxMs": 20.873215,
+      "profileBytes": 17412187,
+      "artifactCount": 192,
+      "artifactBytes": 2053303,
+      "operationCount": 234,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789238
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1068663
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 124030
+        }
+      ],
+      "droppedFrames": 1289,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 1756.1174681719997,
+      "pssKiB": 838164,
+      "privateDirtyKiB": 576204,
+      "cpuPercent": 6.127813515982606,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19078584,
+      "eventLoopMeanMs": 20.064640649746195,
+      "eventLoopMaxMs": 20.971519,
+      "profileBytes": 17412187,
+      "artifactCount": 192,
+      "artifactBytes": 2048723,
+      "operationCount": 235,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789355
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1064140
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 123856
+        }
+      ],
+      "droppedFrames": 1307,
+      "receivedFrames": 37
+    },
+    {
+      "elapsedSeconds": 1770.272804941,
+      "pssKiB": 838220,
+      "privateDirtyKiB": 576244,
+      "cpuPercent": 3.2496577616393325,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19086416,
+      "eventLoopMeanMs": 20.064465454545452,
+      "eventLoopMaxMs": 20.971519,
+      "profileBytes": 17412187,
+      "artifactCount": 192,
+      "artifactBytes": 2049496,
+      "operationCount": 234,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789355
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1065032
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 123737
+        }
+      ],
+      "droppedFrames": 1307,
+      "receivedFrames": 18
+    },
+    {
+      "elapsedSeconds": 1788.279208927,
+      "pssKiB": 840931,
+      "privateDirtyKiB": 578460,
+      "cpuPercent": 7.3307252299032175,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 18716720,
+      "eventLoopMeanMs": 20.063322185061317,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17473482,
+      "artifactCount": 192,
+      "artifactBytes": 2049073,
+      "operationCount": 238,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789277
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 1089446
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 98978
+        }
+      ],
+      "droppedFrames": 1336,
+      "receivedFrames": 55
+    },
+    {
+      "elapsedSeconds": 1800.2902650009999,
+      "pssKiB": 840340,
+      "privateDirtyKiB": 578316,
+      "cpuPercent": 3.8298047829095614,
+      "processCount": 26,
+      "browserdHeapUsedBytes": 19082024,
+      "eventLoopMeanMs": 20.063882077051925,
+      "eventLoopMaxMs": 21.135359,
+      "profileBytes": 17416664,
+      "artifactCount": 192,
+      "artifactBytes": 2045300,
+      "operationCount": 239,
+      "subscriptionCount": 3,
+      "heldButtonCount": 0,
+      "heldKeyCount": 0,
+      "profileCount": 2,
+      "targetCount": 3,
+      "artifactStats": [
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "workspace-frame",
+          "count": 88,
+          "bytes": 789277
+        },
+        {
+          "owner": "soak:owner-b\u0000soak:agent-b",
+          "browserSessionId": "session_haLBz2JN2swVfYvvT01fuO99",
+          "purpose": "agent-observation",
+          "count": 8,
+          "bytes": 71372
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "workspace-frame",
+          "count": 86,
+          "bytes": 1061319
+        },
+        {
+          "owner": "soak:owner-a\u0000soak:agent-a",
+          "browserSessionId": "session_jAhW0Uh03EPp-K08TAcauwVu",
+          "purpose": "agent-observation",
+          "count": 10,
+          "bytes": 123332
+        }
+      ],
+      "droppedFrames": 1336,
+      "receivedFrames": 16
+    }
+  ]
+}

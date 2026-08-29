@@ -50,6 +50,16 @@ Each phase has one acceptance gate. Keep the old browser production path until t
 
 **Rollback:** stop and remove the new parallel packages and daemon. Production behavior is unchanged.
 
+### Phase 1.1 — pre-cutover adversarial hardening
+
+**Status:** implementation, deterministic tests, Fedora Chromium live gate, and uninterrupted 30-minute soak passed on `rebuild/screenshot-first-browser`. Production remains unrouted.
+
+**Completed work:** abort-safe CDP state; bounded pressed-input cleanup; one runtime profile manager; PID-start-safe profile and descriptor identity; connection- and epoch-scoped frame subscriptions; canonical operation fingerprints; typed sanitized errors; artifact provenance and fair quotas; pre/post screenshot consistency; lifecycle rollback and dispatch truth; adversarial live and resource gates; ADR-011 trust boundary.
+
+**Evidence:** `PHASE1-1-RESULTS.md`, `evidence/phase1-1-live-results.json`, and `evidence/phase1-1-soak-results.json`.
+
+**Remaining handoff gate:** complete one fresh independent acceptance review when the reviewer broker is available. Do not route production traffic before that review and the Phase 2 route tests pass.
+
 ## Phase 2 — native Pi extension and authority cutover behind one switch
 
 **Goal:** make the new runtime serve real native Pi browser tools while keeping search and read independent.
@@ -59,7 +69,7 @@ Each phase has one acceptance gate. Keep the old browser production path until t
 **Tasks:**
 
 - Connect `webxd` to the separate long-lived `browserd` Unix service. Do not import the full runtime into `webxd`.
-- Add actor-specific trusted-service attestation and bind one `webxd` connection to one actor.
+- Implement ADR-011. Make trusted `webxd` the only production browserd client. Authenticate and scope the Pi connection in `webxd`, then bind one browserd connection to one actor. Never give the descriptor or binding secret to Pi/model requests.
 - Replace browser SDK types with full target-aware messages.
 - Make screenshot observation the primary `browser_observe` response.
 - Expose DOM fallback as an explicit observe mode or separate internal operation.
@@ -69,7 +79,7 @@ Each phase has one acceptance gate. Keep the old browser production path until t
 
 **Tests:** native Pi tool schema tests; end-to-end Pi extension fixture flow; concurrent Pi sessions; wrong owner/session/target/epoch; old-observation rejection; deadline and cancellation; search/read health with Chrome absent; no MCP process; no per-action process.
 
-**Acceptance gate:** the new route passes all browser acceptance tests and real Pi uses it by default in a staged installation. Search/read tests pass with browser disabled.
+**Acceptance gate:** one fresh independent Phase 1.1 review has no reproduced blocker. The new route passes all browser acceptance tests and real Pi uses it by default in a staged installation. Search/read tests pass with browser disabled.
 
 **Deletions enabled:** `components/browser/crates/browserd/`, `backend-core/`, `backend-agent-browser/`, `backend-pinchtab/`, old backend scripts and tests, and browser daemon port code after one release-candidate soak.
 

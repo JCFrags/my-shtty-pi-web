@@ -81,3 +81,15 @@ These decisions apply to the replacement browser runtime. They supersede conflic
 **Reason:** This gives deterministic ownership and cleanup while persistence policy is still undefined.
 
 **Consequence:** Profile deletion requires an owned manifest under the configured root and a settled exact process. Persistent owner-scoped profiles remain a later design.
+
+## ADR-011: Trust webxd, not arbitrary same-user clients
+
+**Decision:** In production, `browserd` accepts only trusted `webxd` as its client. `webxd` authenticates and scopes the Pi connection before it supplies actor identity. The Pi extension and model requests do not receive the descriptor or binding secret.
+
+**Reason:** Owner-only Unix permissions and a random descriptor secret isolate Unix users. They cannot isolate hostile processes that already run under the same Unix user ID.
+
+**Consequence:** Direct browserd access is an administrator and developer capability. Hostile same-UID code remains outside the protection boundary unless a later separate-user or sandbox design is adopted. See `ADR-011-BROWSERD-TRUST-BOUNDARY.md`.
+
+## Phase 1.1 confirmations
+
+Phase 1.1 confirms that frame subscriptions are connection-, actor-, full-address-, epoch-, and subscription-ID-scoped. Operation IDs use canonical semantic fingerprints. Artifacts use actor, session, tab, purpose, media type, size, digest, and lifetime provenance. Screenshot metadata is checked before and after capture. Descriptor and profile ownership use runtime instance identity plus PID start identity.

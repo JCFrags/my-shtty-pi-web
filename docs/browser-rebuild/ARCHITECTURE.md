@@ -68,7 +68,7 @@ ActorIdentity
 
 The connection binds once. It cannot bind again. Ordinary requests contain no principal or agent-session fields. They cannot replace the actor identity. Browser session lookup compares the bound actor to the session owner. Ownership failures use a not-found result and do not reveal whether another actor's object exists.
 
-The Phase 1 binding secret authenticates access to the owner-only descriptor. `webxd` is the intended trusted caller. The same-user boundary does not defend against a process that already runs as the same Unix user and can read that descriptor. A future multi-principal deployment must add an actor-specific attestation rather than treating the shared descriptor secret as actor proof.
+The binding secret authenticates access to the owner-only descriptor. Production trusts `webxd` as the only browserd client. `webxd` authenticates and scopes each Pi connection before it supplies actor identity. The Pi extension and model requests do not receive the descriptor or binding secret. Direct browserd access is an administrator and developer capability. The same-user boundary does not defend against hostile code that already runs as the same Unix user. See `ADR-011-BROWSERD-TRUST-BOUNDARY.md`.
 
 All tab work uses this full address:
 
@@ -108,11 +108,15 @@ A target close or crash invalidates its observations, DOM handles, and frame sch
 
 An agent observation exists only after an explicit `observe.screenshot` request. It uses lossless PNG in Phase 1. Its bounded metadata includes the exact actor-owned address, URL, title, wall and monotonic capture time, viewport, DPR, scroll, document and viewport generations, frame sequence, digest, cursor state, and validity time.
 
+Capture is a bounded consistency transaction. The runtime reads layout and scroll before and after PNG capture and confirms the same target, document generation, viewport generation, CSS dimensions, DPR, and scroll tolerance. It retries once when safe. It otherwise returns `DOCUMENT_CHANGED` or `VIEWPORT_CHANGED` and retains no rejected artifact. The completed capture time defines freshness.
+
 The image is stored as an owner-scoped artifact unless it is below the reviewed inline limit. Observation metadata stores an artifact ID and digest. It does not retain another full image buffer.
 
 ### Workspace live frame
 
-A workspace frame is a separate, short-lived product. A bounded scheduler keeps at most one capture in flight per tab and one latest frame per tab. An idle subscription uses a low rate. A selected subscription uses a higher rate. An active pointer action temporarily uses a burst rate. Slow clients drop replaceable frames.
+A workspace frame is a separate, short-lived product. A bounded scheduler keeps at most one capture in flight per tab and a two-artifact pinned frame ring per tab. An idle subscription uses a low rate. A selected subscription uses a higher rate. An active pointer action temporarily uses a burst rate. Slow clients drop replaceable frames.
+
+Each frame subscription has a bounded opaque ID. It belongs to one browserd connection, actor, full tab address, control epoch, and interest level. An identical duplicate is idempotent. Conflicting ID reuse fails. Disconnect, epoch change, tab close, and session close remove the subscription and stop an unused schedule. A frame is sent only to a connection that owns a matching live subscription.
 
 A workspace frame does not create an agent observation. Frame bytes use owner-scoped artifacts in Phase 1. A later Tauri bridge can use a more direct bounded byte channel after review.
 
@@ -142,7 +146,7 @@ Operation status is actor-scoped by operation ID. The record does not depend on 
 
 States are `queued`, `running`, `committed`, `failed`, `cancelled`, and `expired`. Dispatch state is separate: `not-dispatched`, `partially-dispatched`, or `dispatched`. Cancellation after a click or navigation dispatch does not claim rollback.
 
-Each absolute deadline is converted to a monotonic budget at admission. Expired queue entries do not dispatch. Duplicate mutation operation IDs do not run twice. Actor-scoped status, cancellation, count, and retention are bounded.
+Each absolute deadline is converted to a monotonic budget at admission. Expired queue entries do not dispatch. Each actor-scoped mutation stores a bounded SHA-256 fingerprint of its canonical semantic request. The fingerprint includes kind, identity, epoch, action, and relevant options. It excludes request ID and deadline. An exact operation-ID retry returns or waits for the original operation. Changed semantics return `OPERATION_CONFLICT` and do not execute. Status, cancellation, count, and retention are bounded.
 
 A control takeover increments the session epoch. It cancels queued old-epoch work and stops running work at the next cancellable boundary. A later epoch cannot make an old action valid again. Phase 1 tests this mechanism but does not expose user takeover.
 
@@ -150,13 +154,15 @@ A control takeover increments the session epoch. It cancels queued old-epoch wor
 
 `browserd` listens only on a Unix-domain socket in a `0700` runtime directory. The descriptor and socket use mode `0600`. The descriptor contains a random per-start secret. The protocol uses bounded newline-delimited JSON. Request and response frames have size limits. A disconnect cancels its pending requests. Events share the same authenticated connection and use droppable backpressure.
 
-Artifacts have random IDs, private storage, owner-scoped reads, SHA-256 integrity, item and total byte limits, entry limits, expiry, and pruning. Callers cannot choose a storage path. Profile paths, CDP URLs, cookies, headers, storage, and page secrets do not appear in ordinary errors.
+Artifacts have random IDs, private storage, owner-scoped reads, SHA-256 integrity, item and total byte limits, entry limits, expiry, and pruning. Each record carries actor owner, browser session, optional tab, purpose, actual media type, size, digest, and creation and expiry times. Owner and session quotas apply before the global bound so ordinary pressure cannot evict another actor's artifacts. A bounded frame ring keeps recent published frames readable. Tab and session termination revoke their scoped artifacts. Callers cannot choose a storage path. Profile paths, CDP URLs, cookies, headers, storage, and page secrets do not appear in ordinary errors.
 
 ## Recovery and cleanup
 
 Session creation is transactional. Failure closes CDP, stops Chrome, and removes the owned profile. Normal shutdown sends `Browser.close`, then uses TERM and KILL only if needed. The runtime waits for process settlement before profile deletion.
 
-Profile deletion requires a runtime-owned manifest under the configured root. Startup orphan cleanup checks the exact recorded process identity and removes only a verified dead runtime-owned profile. Symlinks and paths outside the root are rejected.
+One runtime-owned profile manager allocates under a unique runtime-instance root. Allocation transitions from allocating to starting to running under an atomic cross-process lock where required. Manifests bind runtime ID, launch ID, PID, and process-start ticks. Startup orphan cleanup runs once and removes only a verified dead runtime-owned root. Profile deletion verifies the real owned directory, marker, runtime identity, launch identity, and process identity. Symlinks, foreign directories, live owners, and paths outside the root are rejected.
+
+The public descriptor is written atomically only after the Unix socket is listening and verified as `0600`. It includes protocol version, runtime instance ID, PID, process-start ticks, socket path, binding secret, and start time. Startup uses PID plus start ticks to distinguish a live owner from PID reuse. Failed startup and idempotent shutdown remove the socket and descriptor.
 
 Chrome exit or CDP disconnect stops frames and settles all session operations. A target failure affects only that target. The runtime never falls back to another browser.
 
