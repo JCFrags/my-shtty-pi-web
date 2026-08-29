@@ -95,9 +95,9 @@ export class BrowserSession {
     return await this.observations.capture(address, delivery, signal);
   }
 
-  async observeDom(address: TabAddress, maxNodes: number): Promise<DomObservation> {
+  async observeDom(address: TabAddress, maxNodes: number, signal?: AbortSignal): Promise<DomObservation> {
     this.assertEpoch(address);
-    return await this.dom.observe(address, maxNodes);
+    return await this.dom.observe(address, maxNodes, signal);
   }
 
   async coordinate(address: TabAddress, observationId: string, action: CoordinateAction, context: OperationContext, riskPolicy: "normal" | "newer-observation" | "local-region" = "normal"): Promise<unknown> {
@@ -113,13 +113,19 @@ export class BrowserSession {
 
   async domAction(address: TabAddress, observationId: string, handle: string, action: DomFallbackAction, context: OperationContext): Promise<void> {
     this.assertEpoch(address);
-    const resolved = await this.dom.resolve(address, observationId, handle);
-    const revalidate = async (): Promise<void> => { const current = await this.dom.resolve(address, observationId, handle); if (Math.abs(current.center.x - resolved.center.x) > 2 || Math.abs(current.center.y - resolved.center.y) > 2) throw new Error("DOM handle moved before dispatch."); };
+    const resolved = await this.dom.resolve(address, observationId, handle, context.signal);
+    context.checkpoint();
+    const revalidate = async (): Promise<void> => {
+      const current = await this.dom.resolve(address, observationId, handle, context.signal);
+      context.checkpoint();
+      assertDomHandleUnmoved(resolved.center, current.center);
+    };
     if (action.kind === "hover") { await this.motor.coordinate(resolved.tab, { kind: "hover", to: resolved.center }, context, revalidate); return; }
     if (action.kind === "click" || action.kind === "doubleClick") { await this.motor.coordinate(resolved.tab, { kind: action.kind, at: resolved.center, button: action.button ?? "left" }, context, revalidate); return; }
     if (action.kind === "press") { await this.motor.pressKey(resolved.tab, action.key, context); return; }
     if (action.kind !== "type") throw new Error("Unsupported DOM fallback action.");
     await this.motor.coordinate(resolved.tab, { kind: "click", at: resolved.center, button: "left" }, context, revalidate);
+    context.checkpoint();
     await this.motor.typeText(resolved.tab, action.text, action.replace ?? false, context);
   }
 
@@ -186,6 +192,10 @@ export class BrowserSession {
     this.artifacts.clearTab(this.actor, this.browserSessionId, tabId);
     this.operations.failTab(this.actor, this.browserSessionId, tabId);
   };
+}
+
+export function assertDomHandleUnmoved(initial: { x: number; y: number }, current: { x: number; y: number }): void {
+  if (Math.abs(current.x - initial.x) > 2 || Math.abs(current.y - initial.y) > 2) throw new BrowserProtocolError("HANDLE_STALE", "DOM target moved before dispatch.");
 }
 
 function coordinatePoint(action: CoordinateAction): { x: number; y: number } {
