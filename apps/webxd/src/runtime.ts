@@ -49,6 +49,8 @@ export interface WebxdRuntimeOptions {
   readonly maxLiveBindings?: number;
   readonly maxQueuedRequestsPerClient?: number;
   readonly maxOutboundBytesPerClient?: number;
+  /** Test-only fault injection. Production entry points never set this option. */
+  readonly dropResponseForIdempotencyKeyForTest?: string;
 }
 
 /** Runnable same-user Unix API for the complete local WebX authority. */
@@ -64,6 +66,7 @@ export class WebxdRuntime {
   readonly #maxOutboundBytesPerClient: number;
   #server?: Server;
   #started = false;
+  #testResponseDropped = false;
 
   constructor(private readonly options: WebxdRuntimeOptions) {
     this.#maxClientConnections = boundedInteger(options.maxClientConnections ?? 64, 1, 1024, "client connection");
@@ -93,6 +96,22 @@ export class WebxdRuntime {
       cacheDirectory: options.cacheDirectory,
       contentDirectory: options.contentDirectory,
     });
+  }
+
+  get diagnostics(): {
+    readonly clientConnections: number;
+    readonly liveBindings: number;
+    readonly idempotency: WebxAuthority["idempotencyStats"];
+    readonly browser?: AgentCursorBrowserPort["diagnostics"];
+    readonly testResponseDropped: boolean;
+  } {
+    return {
+      clientConnections: this.#clients.size,
+      liveBindings: this.#bindings.size,
+      idempotency: this.#authority.idempotencyStats,
+      ...(this.#browser instanceof AgentCursorBrowserPort ? { browser: this.#browser.diagnostics } : {}),
+      testResponseDropped: this.#testResponseDropped,
+    };
   }
 
   async start(): Promise<void> {
@@ -167,6 +186,7 @@ export class WebxdRuntime {
             }
             const wire = parseWireRequest(parsed);
             const response = await this.#authority.handle(this.authenticate(wire, socket), { ...wire.request, signal: controller.signal });
+            if (this.shouldDropTestResponse(wire.request)) { socket.destroy(); return; }
             writeResponse(response);
           } catch (error) {
             writeResponse(failure(400, "invalid-wire-request", safeError(error)));
@@ -202,6 +222,15 @@ export class WebxdRuntime {
     const binding = this.#bindings.get(wire.binding.bindingId);
     if (binding === undefined || binding.client !== client || !constantTimeEqual(binding.secret, wire.binding.bindingSecret)) throw new Error("runtime actor binding is invalid");
     return binding.actor;
+  }
+
+  private shouldDropTestResponse(request: TransportRequest): boolean {
+    const key = this.options.dropResponseForIdempotencyKeyForTest;
+    if (key === undefined || this.#testResponseDropped) return false;
+    const actual = Object.entries(request.headers ?? {}).find(([name]) => name.toLowerCase() === "idempotency-key")?.[1];
+    if (actual !== key) return false;
+    this.#testResponseDropped = true;
+    return true;
   }
 }
 

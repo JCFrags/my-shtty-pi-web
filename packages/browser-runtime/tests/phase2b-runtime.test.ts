@@ -113,8 +113,35 @@ describe("Phase 2B human motor timing", () => {
     operations.submit(actor, { operationId: "operation:motor-metrics", laneKey: "motor", deadline: new Date(Date.now() + 5_000).toISOString() }, async (context) => await motor.coordinate(target, { kind: "move", to: { x: 760, y: 540 } }, context, async () => undefined));
     assert.equal((await operations.wait(actor, "operation:motor-metrics")).state, "committed");
     assert.ok(timings !== undefined);
-    for (const key of ["generatedNominalPathDurationMs", "sampleReplayWallMs", "cdpInputLatencyMs", "overlayUpdateLatencyMs", "postPathGuardMs", "sampleCount"]) assert.equal(typeof timings[key], "number", key);
+    for (const key of ["generatedNominalPathDurationMs", "sampleReplayWallMs", "cdpInputLatencyMs", "cdpInputMaxLatencyMs", "overlayUpdateLatencyMs", "postPathGuardMs", "sampleCount"]) assert.equal(typeof timings[key], "number", key);
     assert.ok((timings.sampleCount as number) >= 6);
     assert.ok((timings.generatedNominalPathDurationMs as number) >= 400 && (timings.generatedNominalPathDurationMs as number) <= 2_500);
+  });
+
+  it("does not add every delayed CDP mouse acknowledgement to the visible path wall time", async () => {
+    const target = tab("motor-pipelined-input");
+    bindMotorTab(target, { connected: true, async send<T>(method: string): Promise<T> {
+      if (method === "Runtime.evaluate") return { result: { value: true } } as T;
+      if (method === "Input.dispatchMouseEvent") await new Promise((resolve) => setTimeout(resolve, 100));
+      return {} as T;
+    } });
+    const motor = new SessionMotor(target.browserSessionId, 424_242);
+    const operations = new OperationRegistry();
+    let timings: Record<string, number> | undefined;
+    motor.once("actionEnd", (event: { timings?: Record<string, number> }) => { timings = event.timings; });
+    operations.submit(actor, { operationId: "operation:motor-pipelined-input", laneKey: "motor", deadline: new Date(Date.now() + 5_000).toISOString() }, async (context) => await motor.coordinate(target, { kind: "move", to: { x: 760, y: 540 } }, context, async () => undefined));
+    assert.equal((await operations.wait(actor, "operation:motor-pipelined-input")).state, "committed");
+    assert.ok(timings !== undefined);
+    const sampleCount = Number(timings.sampleCount);
+    const inputTotal = Number(timings.cdpInputLatencyMs);
+    const inputMax = Number(timings.cdpInputMaxLatencyMs);
+    const replayWall = Number(timings.sampleReplayWallMs);
+    const nominal = Number(timings.generatedNominalPathDurationMs);
+    assert.ok([sampleCount, inputTotal, inputMax, replayWall, nominal].every(Number.isFinite));
+    assert.ok(sampleCount >= 6);
+    assert.ok(inputTotal >= sampleCount * 90);
+    assert.ok(inputMax >= 90 && inputMax < 250);
+    assert.ok(replayWall <= nominal + 250, `delayed acknowledgements serialized the path: nominal ${nominal}ms, wall ${replayWall}ms`);
+    assert.ok(replayWall < inputTotal, `path wall ${replayWall}ms should be below cumulative CDP latency ${inputTotal}ms`);
   });
 });

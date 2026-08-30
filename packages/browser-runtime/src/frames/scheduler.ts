@@ -18,6 +18,7 @@ interface TabSchedule {
   capturePromise?: Promise<void>;
   closed: boolean;
   timer?: NodeJS.Timeout;
+  timerDueMs?: number;
 }
 
 export interface FrameSchedulerOptions {
@@ -94,7 +95,7 @@ export class FrameScheduler extends EventEmitter {
       schedule.closed = true;
       schedule.generation++;
       schedule.controller.abort(new BrowserProtocolError("OPERATION_CANCELLED", "Frame capture was stopped."));
-      if (schedule.timer !== undefined) { clearTimeout(schedule.timer); delete schedule.timer; }
+      if (schedule.timer !== undefined) { clearTimeout(schedule.timer); delete schedule.timer; delete schedule.timerDueMs; }
       for (const key of schedule.consumers.keys()) this.consumerAddresses.delete(key);
       schedule.consumers.clear();
       schedule.captureRequested = false;
@@ -117,7 +118,7 @@ export class FrameScheduler extends EventEmitter {
 
   private readonly onActionStart = ({ tabId }: { tabId: string }): void => { const schedule = this.schedules.get(tabId); if (schedule === undefined) return; schedule.activeActions++; this.arm(schedule, 0); };
   private readonly onActionEnd = ({ tabId }: { tabId: string }): void => { const schedule = this.schedules.get(tabId); if (schedule === undefined) return; schedule.activeActions = Math.max(0, schedule.activeActions - 1); if (schedule.consumers.size === 0 && schedule.activeActions === 0) void this.stop(tabId); };
-  private readonly onSample = ({ tabId }: { tabId: string }): void => { const schedule = this.schedules.get(tabId); if (schedule !== undefined && schedule.activeActions > 0) this.arm(schedule, 0); };
+  private readonly onSample = ({ tabId }: { tabId: string }): void => { const schedule = this.schedules.get(tabId); if (schedule !== undefined && schedule.activeActions > 0) this.arm(schedule, this.burstIntervalMs); };
 
   private schedule(tab: TabRecord): TabSchedule {
     const existing = this.schedules.get(tab.tabId);
@@ -139,11 +140,16 @@ export class FrameScheduler extends EventEmitter {
 
   private arm(schedule: TabSchedule, delay?: number): void {
     if (!this.isCurrent(schedule, schedule.generation)) return;
+    const waitMs = Math.max(0, delay ?? this.interval(schedule));
+    const dueMs = performance.now() + waitMs;
+    if (schedule.timer !== undefined && schedule.timerDueMs !== undefined && schedule.timerDueMs <= dueMs) return;
     if (schedule.timer !== undefined) clearTimeout(schedule.timer);
+    schedule.timerDueMs = dueMs;
     schedule.timer = setTimeout(() => {
       delete schedule.timer;
+      delete schedule.timerDueMs;
       this.runCapture(schedule);
-    }, delay ?? this.interval(schedule));
+    }, waitMs);
   }
 
   private runCapture(schedule: TabSchedule): void {
@@ -155,7 +161,7 @@ export class FrameScheduler extends EventEmitter {
     void promise.catch(() => undefined).finally(() => {
       if (schedule.capturePromise === promise) delete schedule.capturePromise;
       if (!this.isCurrent(schedule, generation)) return;
-      if (schedule.captureRequested) { schedule.captureRequested = false; this.arm(schedule, 0); }
+      if (schedule.captureRequested) { schedule.captureRequested = false; this.arm(schedule); }
       else this.arm(schedule);
     });
   }

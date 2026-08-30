@@ -27,13 +27,14 @@ export interface ActionTimings {
   generatedNominalPathDurationMs: number;
   sampleReplayWallMs: number;
   cdpInputLatencyMs: number;
+  cdpInputMaxLatencyMs: number;
   overlayUpdateLatencyMs: number;
   postPathGuardMs: number;
   sampleCount: number;
   completionAfterPathMs: number;
   totalMs: number;
 }
-interface ReplayTimings { sampleReplayWallMs: number; cdpInputLatencyMs: number; overlayUpdateLatencyMs: number; sampleCount: number }
+interface ReplayTimings { sampleReplayWallMs: number; cdpInputLatencyMs: number; cdpInputMaxLatencyMs: number; overlayUpdateLatencyMs: number; sampleCount: number }
 export type PostPathGuard = () => Promise<void>;
 
 export class SessionMotor extends EventEmitter {
@@ -141,6 +142,7 @@ export class SessionMotor extends EventEmitter {
           generatedNominalPathDurationMs: approach.generatedNominalPathDurationMs + nominal,
           sampleReplayWallMs: approach.sampleReplayWallMs + replay.sampleReplayWallMs,
           cdpInputLatencyMs: approach.cdpInputLatencyMs + replay.cdpInputLatencyMs,
+          cdpInputMaxLatencyMs: Math.max(approach.cdpInputMaxLatencyMs, replay.cdpInputMaxLatencyMs),
           overlayUpdateLatencyMs: approach.overlayUpdateLatencyMs + replay.overlayUpdateLatencyMs,
           postPathGuardMs,
           sampleCount: approach.sampleCount + replay.sampleCount,
@@ -204,6 +206,7 @@ export class SessionMotor extends EventEmitter {
       generatedNominalPathDurationMs: nominal,
       sampleReplayWallMs: replay.sampleReplayWallMs,
       cdpInputLatencyMs: replay.cdpInputLatencyMs,
+      cdpInputMaxLatencyMs: replay.cdpInputMaxLatencyMs,
       overlayUpdateLatencyMs: replay.overlayUpdateLatencyMs,
       postPathGuardMs: 0,
       sampleCount: replay.sampleCount,
@@ -232,29 +235,38 @@ export class SessionMotor extends EventEmitter {
   private async replay(tab: TabRecord, samples: CursorSample[], buttons: number, context: OperationContext): Promise<ReplayTimings> {
     this.pathSequence++;
     const started = performance.now();
-    let cdpInputLatencyMs = 0;
     let overlayUpdateLatencyMs = 0;
     let sampleCount = 0;
-    for (let index = 0; index < samples.length; index++) {
-      const sample = samples[index];
-      if (sample === undefined) throw new Error("Path sample is missing.");
-      const elapsed = performance.now() - started;
-      if (index < samples.length - 1 && sample.t < elapsed - 50) continue;
-      await sleep(Math.max(0, sample.t - elapsed), context.signal);
-      context.checkpoint();
-      context.markPartiallyDispatched();
-      this.sampleSequence++;
-      const cdpStarted = performance.now();
-      await this.command(tab, "Input.dispatchMouseEvent", { type: "mouseMoved", x: sample.x, y: sample.y, button: "none", buttons }, context.signal);
-      cdpInputLatencyMs += performance.now() - cdpStarted;
-      const overlayStarted = performance.now();
-      await this.evaluate(tab, overlayUpdateSource(this.overlay, sample.x, sample.y, this.pathSequence, this.sampleSequence));
-      overlayUpdateLatencyMs += performance.now() - overlayStarted;
-      sampleCount++;
-      this.cursor = { x: sample.x, y: sample.y };
-      this.emit("sample", { tabId: tab.tabId, cursor: this.state });
-    }
-    return { sampleReplayWallMs: performance.now() - started, cdpInputLatencyMs, overlayUpdateLatencyMs, sampleCount };
+    const inputResponses: Array<Promise<number>> = [];
+    let replayError: unknown;
+    try {
+      for (let index = 0; index < samples.length; index++) {
+        const sample = samples[index];
+        if (sample === undefined) throw new Error("Path sample is missing.");
+        const elapsed = performance.now() - started;
+        if (index < samples.length - 1 && sample.t < elapsed - 50) continue;
+        await sleep(Math.max(0, sample.t - elapsed), context.signal);
+        context.checkpoint();
+        context.markPartiallyDispatched();
+        this.sampleSequence++;
+        const cdpStarted = performance.now();
+        const input = this.command(tab, "Input.dispatchMouseEvent", { type: "mouseMoved", x: sample.x, y: sample.y, button: "none", buttons }, context.signal).then(() => performance.now() - cdpStarted);
+        void input.catch(() => undefined);
+        inputResponses.push(input);
+        const overlayStarted = performance.now();
+        await this.evaluate(tab, overlayUpdateSource(this.overlay, sample.x, sample.y, this.pathSequence, this.sampleSequence));
+        overlayUpdateLatencyMs += performance.now() - overlayStarted;
+        sampleCount++;
+        this.cursor = { x: sample.x, y: sample.y };
+        this.emit("sample", { tabId: tab.tabId, cursor: this.state });
+      }
+    } catch (error) { replayError = error; }
+    const settled = await Promise.allSettled(inputResponses);
+    if (replayError !== undefined) throw replayError;
+    const failed = settled.find((item): item is PromiseRejectedResult => item.status === "rejected");
+    if (failed !== undefined) throw failed.reason;
+    const latencies = settled.map((item) => (item as PromiseFulfilledResult<number>).value);
+    return { sampleReplayWallMs: performance.now() - started, cdpInputLatencyMs: latencies.reduce((sum, value) => sum + value, 0), cdpInputMaxLatencyMs: Math.max(0, ...latencies), overlayUpdateLatencyMs, sampleCount };
   }
 
   private async activate(tab: TabRecord): Promise<void> {

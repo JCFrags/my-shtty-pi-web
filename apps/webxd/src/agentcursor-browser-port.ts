@@ -49,6 +49,17 @@ export class AgentCursorBrowserPort implements BrowserDaemonPort {
     private readonly destinationAuthority: BrowserDestinationAuthority,
   ) {}
 
+  get diagnostics(): { readonly runtimeInstanceId?: string; readonly sessions: number; readonly observationMetadata: { readonly count: number; readonly bytes: number }; readonly imageBytesRetained: 0; readonly actorConnections: number } {
+    this.pruneObservations();
+    return {
+      ...(this.#runtimeInstanceId === undefined ? {} : { runtimeInstanceId: this.#runtimeInstanceId }),
+      sessions: this.#sessions.size,
+      observationMetadata: { count: this.#observations.size, bytes: this.#observationMetadataBytes },
+      imageBytesRetained: 0,
+      actorConnections: this.client.connectionCount,
+    };
+  }
+
   async capabilities(signal?: AbortSignal): Promise<readonly BrowserPathCapability[]> {
     try {
       const result = record(await this.client.request(healthActor(), operationId("capabilities"), { kind: "capabilities.get" }, signal));

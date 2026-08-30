@@ -72,6 +72,7 @@ export class ChromeHost extends EventEmitter {
       const args = [
         `--user-data-dir=${lease.directory}`, "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0",
         "--no-first-run", "--no-default-browser-check", "--disable-sync", "--disable-background-networking",
+        "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
         "--disable-component-update", "--disable-default-apps", "--password-store=basic",
         `--window-size=${size.width},${size.height}`, `--window-position=${position.x},${position.y}`,
         ...egressFlags, ...extraFlags, "about:blank",

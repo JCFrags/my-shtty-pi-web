@@ -92,7 +92,11 @@ class PiHarness {
 }
 
 class LoopbackDestinationAuthority implements BrowserDestinationAuthority {
-  constructor(private readonly origin: string) {}
+  readonly egressBindingId: string;
+
+  constructor(private readonly origin: string) {
+    this.egressBindingId = loopbackBindingId(origin);
+  }
 
   async assertReady(signal?: AbortSignal): Promise<void> { signal?.throwIfAborted(); }
 
@@ -107,7 +111,7 @@ class LoopbackDestinationAuthority implements BrowserDestinationAuthority {
       port: Number(url.port),
       resolvedAddresses: ["127.0.0.1"],
       redirectPolicy: { revalidateEveryHop: true as const, maxRedirects: 0 },
-      egressBindingId: `test-loopback-fixture://${url.host}`,
+      egressBindingId: this.egressBindingId,
     };
   }
 }
@@ -201,7 +205,7 @@ async function main(): Promise<void> {
     piB.execute("browser_act", { browserSessionId: identityB.browserSessionId, tabId: identityB.tabId, action: { kind: "click", observationId: observationB.observationId, coordinateSpace: "imagePixels", x: 380, y: 252 } }),
   ]);
   const actionWallMs = performance.now() - actionStarted;
-  assert.ok(actionWallMs >= 800, `human cursor path completed too quickly: ${actionWallMs}ms`);
+  assert.ok(actionWallMs >= 400 && actionWallMs <= 2_500, `ordinary human cursor path missed its 400..2500 ms development target: ${actionWallMs}ms`);
   assert.ok(sessionA.motor.state.pathSequence > 0 && sessionB.motor.state.pathSequence > 0);
 
   const [domA, domB] = await Promise.all([
@@ -315,9 +319,8 @@ function makeBrowserRuntime(origin: string, executable: string, profileRoot: str
     navigationAuthorization: new LoopbackFixtureAuthorization(new Set([origin])),
     chrome: { executable, profileRoot, windowSize: { width: 900, height: 700 } },
     personaSeedForTest: personaSeed,
-    motorMinimumPathMsForTest: 900,
-    observationFreshnessMsForTest: 30_000,
     egressConfigured: true,
+    egressBindingId: loopbackBindingId(origin),
   });
 }
 
@@ -567,6 +570,8 @@ function numberArgument(name: string, fallback: number): number {
   if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be a non-negative number`);
   return value;
 }
+
+function loopbackBindingId(origin: string): string { return `test-loopback-fixture://${new URL(origin).host}`; }
 
 function privateSession(runtime: BrowserRuntime, actorId: string, browserSessionId: string): BrowserSession {
   const actor = { principalId: actorId, agentSessionId: actorId };
