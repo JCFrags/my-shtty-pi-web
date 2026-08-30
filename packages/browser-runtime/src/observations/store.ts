@@ -3,6 +3,8 @@ import type { ActorIdentity, ScreenshotObservation, TabAddress } from "@webx/bro
 import { BrowserProtocolError } from "@webx/browser-protocol";
 import { sha256Hex } from "@webx/artifacts";
 import type { BrowserArtifactStore } from "../artifacts/store.js";
+import type { SessionCaptureCoordinator } from "../capture/coordinator.js";
+import { CdpCommandTimeoutError } from "../cdp/connection.js";
 import type { SessionMotor } from "../motor/session-motor.js";
 import type { TargetRegistry, TabRecord } from "../targets/registry.js";
 
@@ -33,6 +35,7 @@ export interface ObservationStoreOptions {
   monotonicNow?: () => number;
   wallNow?: () => number;
   commitBarrierForTest?: (stage: "afterDigest" | "afterArtifactPut") => Promise<void>;
+  captureCoordinator?: SessionCaptureCoordinator;
 }
 
 interface CapturedObservation {
@@ -63,6 +66,7 @@ export class ObservationStore {
   private readonly monotonicNow: () => number;
   private readonly wallNow: () => number;
   private readonly commitBarrierForTest: ((stage: "afterDigest" | "afterArtifactPut") => Promise<void>) | undefined;
+  private readonly captureCoordinator: SessionCaptureCoordinator | undefined;
 
   constructor(
     private readonly actor: ActorIdentity,
@@ -78,6 +82,7 @@ export class ObservationStore {
     this.monotonicNow = options.monotonicNow ?? (() => performance.now());
     this.wallNow = options.wallNow ?? Date.now;
     this.commitBarrierForTest = options.commitBarrierForTest;
+    this.captureCoordinator = options.captureCoordinator;
   }
 
   get size(): number { return this.records.size; }
@@ -85,16 +90,39 @@ export class ObservationStore {
 
   async capture(address: TabAddress, delivery: "auto" | "inline" | "artifact" = "auto", signal?: AbortSignal): Promise<ScreenshotObservation> {
     signal?.throwIfAborted();
+    if (this.captureCoordinator === undefined) return await this.captureTransaction(address, delivery, signal);
+    return await this.captureCoordinator.runAgent(address.tabId, signal, async (captureSignal) => await this.captureTransaction(address, delivery, captureSignal));
+  }
+
+  private async captureTransaction(address: TabAddress, delivery: "auto" | "inline" | "artifact", signal?: AbortSignal): Promise<ScreenshotObservation> {
+    signal?.throwIfAborted();
     let captured: CapturedObservation | undefined;
-    let lastError: unknown;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try { captured = await this.captureConsistent(address, signal); break; }
-      catch (error) {
-        lastError = error;
-        if (signal?.aborted || !(error instanceof BrowserProtocolError) || (error.code !== "DOCUMENT_CHANGED" && error.code !== "VIEWPORT_CHANGED") || attempt === 1) throw error;
+    let consistencyRetries = 0;
+    let timeoutRetries = 0;
+    let timeoutSeen = false;
+    let screenshotAttempts = 0;
+    const claimScreenshotAttempt = (): void => {
+      if (screenshotAttempts >= 2) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Agent screenshot attempt limit was reached.", true);
+      screenshotAttempts++;
+    };
+    for (;;) {
+      try {
+        captured = await this.captureConsistent(address, signal, claimScreenshotAttempt);
+        if (timeoutSeen) this.captureCoordinator?.recordRecoveredAgentScreenshotTimeout();
+        break;
+      } catch (error) {
+        if (error instanceof CdpCommandTimeoutError && error.method === "Page.captureScreenshot") {
+          this.captureCoordinator?.recordAgentScreenshotTimeout();
+          timeoutSeen = true;
+          if (!signal?.aborted && timeoutRetries < 1 && screenshotAttempts < 2) { timeoutRetries++; continue; }
+        } else if (!signal?.aborted && error instanceof BrowserProtocolError && (error.code === "DOCUMENT_CHANGED" || error.code === "VIEWPORT_CHANGED") && consistencyRetries < 1) {
+          consistencyRetries++;
+          continue;
+        }
+        if (timeoutSeen) this.captureCoordinator?.recordUnrecoveredAgentScreenshotTimeout();
+        throw error;
       }
     }
-    if (captured === undefined) throw lastError;
     const { tab, layout, bytes, mediaType, imagePixelWidth, imagePixelHeight, captureScale, capturedMonotonicMs, capturedWall } = captured;
     signal?.throwIfAborted();
     const inline = delivery === "inline" || (delivery === "auto" && bytes.byteLength <= this.inlineLimitBytes);
@@ -167,38 +195,43 @@ export class ObservationStore {
 
   async readLayout(tab: TabRecord, signal?: AbortSignal): Promise<Layout> { return await this.layout(tab, signal); }
 
-  private async captureConsistent(address: TabAddress, signal?: AbortSignal): Promise<CapturedObservation> {
-    const tab = this.registry.resolve(address);
-    const targetId = tab.targetId;
-    const documentGeneration = tab.documentGeneration;
-    const viewportGeneration = tab.viewportGeneration;
-    await this.motor.ensureOverlay(tab);
-    signal?.throwIfAborted();
-    const before = await this.layout(tab, signal);
-    const png = await this.command<{ data: string }>(tab, "Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false }, signal);
-    let after = await this.layout(tab, signal);
-    assertCaptureIdentity(tab, targetId, documentGeneration, viewportGeneration, before, after);
-    let bytes = decodeCanonicalBase64(png.data);
-    let mediaType: "image/png" | "image/jpeg" = "image/png";
-    if (bytes.byteLength > MAX_MODEL_IMAGE_BYTES) {
-      const jpegBefore = after;
-      const jpeg = await this.command<{ data: string }>(tab, "Page.captureScreenshot", { format: "jpeg", quality: 82, fromSurface: true, captureBeyondViewport: false }, signal);
-      after = await this.layout(tab, signal);
-      assertCaptureIdentity(tab, targetId, documentGeneration, viewportGeneration, jpegBefore, after);
-      bytes = decodeCanonicalBase64(jpeg.data);
-      mediaType = "image/jpeg";
-    }
-    if (bytes.byteLength > MAX_MODEL_IMAGE_BYTES) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Screenshot exceeds the model image byte limit.");
-    const dimensions = decodeImageDimensions(bytes, mediaType);
-    const captureScaleX = dimensions.width / after.width;
-    const captureScaleY = dimensions.height / after.height;
-    if (!Number.isFinite(captureScaleX) || !Number.isFinite(captureScaleY) || captureScaleX <= 0 || captureScaleY <= 0 || Math.abs(captureScaleX - captureScaleY) > 0.02) throw new BrowserProtocolError("CDP_ERROR", "Screenshot dimensions do not match the captured viewport.");
-    return {
-      tab, address: { ...address }, targetId, cdpSessionId: tab.cdpSessionId,
-      documentGeneration, viewportGeneration, controlEpoch: address.controlEpoch,
-      layout: after, bytes, mediaType, imagePixelWidth: dimensions.width, imagePixelHeight: dimensions.height,
-      captureScale: (captureScaleX + captureScaleY) / 2, capturedMonotonicMs: this.monotonicNow(), capturedWall: this.wallNow(),
+  private async captureConsistent(address: TabAddress, signal: AbortSignal | undefined, claimScreenshotAttempt: () => void): Promise<CapturedObservation> {
+    const transaction = async (captureSignal?: AbortSignal): Promise<CapturedObservation> => {
+      const tab = this.registry.resolve(address);
+      const targetId = tab.targetId;
+      const documentGeneration = tab.documentGeneration;
+      const viewportGeneration = tab.viewportGeneration;
+      await this.motor.ensureOverlay(tab);
+      captureSignal?.throwIfAborted();
+      const before = await this.layout(tab, captureSignal);
+      claimScreenshotAttempt();
+      const png = await this.command<{ data: string }>(tab, "Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false }, captureSignal);
+      let after = await this.layout(tab, captureSignal);
+      assertCaptureIdentity(tab, targetId, documentGeneration, viewportGeneration, before, after);
+      let bytes = decodeCanonicalBase64(png.data);
+      let mediaType: "image/png" | "image/jpeg" = "image/png";
+      if (bytes.byteLength > MAX_MODEL_IMAGE_BYTES) {
+        const jpegBefore = after;
+        claimScreenshotAttempt();
+        const jpeg = await this.command<{ data: string }>(tab, "Page.captureScreenshot", { format: "jpeg", quality: 82, fromSurface: true, captureBeyondViewport: false }, captureSignal);
+        after = await this.layout(tab, captureSignal);
+        assertCaptureIdentity(tab, targetId, documentGeneration, viewportGeneration, jpegBefore, after);
+        bytes = decodeCanonicalBase64(jpeg.data);
+        mediaType = "image/jpeg";
+      }
+      if (bytes.byteLength > MAX_MODEL_IMAGE_BYTES) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Screenshot exceeds the model image byte limit.");
+      const dimensions = decodeImageDimensions(bytes, mediaType);
+      const captureScaleX = dimensions.width / after.width;
+      const captureScaleY = dimensions.height / after.height;
+      if (!Number.isFinite(captureScaleX) || !Number.isFinite(captureScaleY) || captureScaleX <= 0 || captureScaleY <= 0 || Math.abs(captureScaleX - captureScaleY) > 0.02) throw new BrowserProtocolError("CDP_ERROR", "Screenshot dimensions do not match the captured viewport.");
+      return {
+        tab, address: { ...address }, targetId, cdpSessionId: tab.cdpSessionId,
+        documentGeneration, viewportGeneration, controlEpoch: address.controlEpoch,
+        layout: after, bytes, mediaType, imagePixelWidth: dimensions.width, imagePixelHeight: dimensions.height,
+        captureScale: (captureScaleX + captureScaleY) / 2, capturedMonotonicMs: this.monotonicNow(), capturedWall: this.wallNow(),
+      };
     };
+    return await transaction(signal);
   }
 
   private validateCaptured(captured: CapturedObservation, signal?: AbortSignal): void {

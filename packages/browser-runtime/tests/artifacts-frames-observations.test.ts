@@ -3,6 +3,8 @@ import { EventEmitter } from "node:events";
 import { describe, it } from "vitest";
 import { BrowserProtocolError, PROTOCOL_VERSION, type FrameEvent, type TabAddress } from "@webx/browser-protocol";
 import { BrowserArtifactStore } from "../src/artifacts/store.js";
+import { SessionCaptureCoordinator } from "../src/capture/coordinator.js";
+import { CdpCommandTimeoutError } from "../src/cdp/connection.js";
 import { bindFrameTab, FrameScheduler } from "../src/frames/scheduler.js";
 import { bindObservationTab, ObservationStore, type Layout } from "../src/observations/store.js";
 import { BrowserRuntime } from "../src/registry/runtime.js";
@@ -235,6 +237,111 @@ describe("screenshot consistency transaction", () => {
     assert.equal((await artifacts.read(actor, result.image.kind === "artifact" ? result.image.artifactId : "missing")).descriptor.purpose, "agent-observation");
   });
 
+  it("retries one typed agent screenshot timeout as a fresh complete transaction", async () => {
+    const target = tab("timeout-recovery");
+    const artifacts = new BrowserArtifactStore();
+    const captureCoordinator = new SessionCaptureCoordinator();
+    let screenshots = 0;
+    let layouts = 0;
+    bindObservationTab(target, { async send<T>(method: string): Promise<T> {
+      if (method === "Page.captureScreenshot") {
+        screenshots++;
+        if (screenshots === 1) { target.documentGeneration++; throw new CdpCommandTimeoutError(method, 10_000); }
+        return { data: fakePngBase64() } as T;
+      }
+      layouts++;
+      return { result: { value: layout() } } as T;
+    } });
+    const store = new ObservationStore(actor, registryFor([target]), artifacts, new FakeMotor() as never, { captureCoordinator });
+    const observation = await store.capture(address(target), "artifact");
+    assert.equal(screenshots, 2);
+    assert.equal(layouts, 3);
+    assert.equal(observation.documentGeneration, 2);
+    assert.equal(store.size, 1);
+    assert.equal(artifacts.entryCount, 1);
+    assert.equal(captureCoordinator.diagnostics.agentScreenshotTimeouts, 1);
+    assert.equal(captureCoordinator.diagnostics.recoveredAgentScreenshotTimeouts, 1);
+    assert.equal(captureCoordinator.diagnostics.unrecoveredAgentScreenshotTimeouts, 0);
+  });
+
+  it("never dispatches a third screenshot when the JPEG fallback times out", async () => {
+    const target = tab("jpeg-timeout");
+    const artifacts = new BrowserArtifactStore();
+    const captureCoordinator = new SessionCaptureCoordinator();
+    let screenshots = 0;
+    bindObservationTab(target, { async send<T>(method: string, params: Readonly<Record<string, unknown>>): Promise<T> {
+      if (method === "Page.captureScreenshot") {
+        screenshots++;
+        if (params.format === "png") return { data: oversizedPngBase64(1600, 1200) } as T;
+        throw new CdpCommandTimeoutError(method, 10_000);
+      }
+      return { result: { value: layout({ dpr: 2 }) } } as T;
+    } });
+    const store = new ObservationStore(actor, registryFor([target]), artifacts, new FakeMotor() as never, { captureCoordinator });
+    await assert.rejects(() => store.capture(address(target), "artifact"), (error) => error instanceof CdpCommandTimeoutError);
+    assert.equal(screenshots, 2);
+    assert.equal(store.size, 0);
+    assert.equal(artifacts.entryCount, 0);
+    assert.equal(captureCoordinator.diagnostics.agentScreenshotTimeouts, 1);
+    assert.equal(captureCoordinator.diagnostics.unrecoveredAgentScreenshotTimeouts, 1);
+  });
+
+  it("does not retry a timeout-shaped generic error", async () => {
+    const target = tab("timeout-message");
+    let screenshots = 0;
+    bindObservationTab(target, { async send<T>(method: string): Promise<T> {
+      if (method === "Page.captureScreenshot") { screenshots++; throw new BrowserProtocolError("CDP_ERROR", "CDP command timed out: Page.captureScreenshot", true); }
+      return { result: { value: layout() } } as T;
+    } });
+    const store = new ObservationStore(actor, registryFor([target]), new BrowserArtifactStore(), new FakeMotor() as never, { captureCoordinator: new SessionCaptureCoordinator() });
+    await assert.rejects(() => store.capture(address(target), "artifact"), (error) => error instanceof BrowserProtocolError && !(error instanceof CdpCommandTimeoutError));
+    assert.equal(screenshots, 1);
+  });
+
+  it("fails after the second typed screenshot timeout without an artifact or observation", async () => {
+    const target = tab("timeout-exhausted");
+    const artifacts = new BrowserArtifactStore();
+    const captureCoordinator = new SessionCaptureCoordinator();
+    let screenshots = 0;
+    bindObservationTab(target, { async send<T>(method: string): Promise<T> {
+      if (method === "Page.captureScreenshot") { screenshots++; throw new CdpCommandTimeoutError(method, 10_000); }
+      return { result: { value: layout() } } as T;
+    } });
+    const store = new ObservationStore(actor, registryFor([target]), artifacts, new FakeMotor() as never, { captureCoordinator });
+    await assert.rejects(() => store.capture(address(target), "artifact"), (error) => error instanceof CdpCommandTimeoutError && error.method === "Page.captureScreenshot");
+    assert.equal(screenshots, 2);
+    assert.equal(store.size, 0);
+    assert.equal(artifacts.entryCount, 0);
+    assert.equal(target.latestFrameSequence, 0);
+    assert.equal(captureCoordinator.diagnostics.agentScreenshotTimeouts, 2);
+    assert.equal(captureCoordinator.diagnostics.recoveredAgentScreenshotTimeouts, 0);
+    assert.equal(captureCoordinator.diagnostics.unrecoveredAgentScreenshotTimeouts, 1);
+  });
+
+  it("does not retry a frame screenshot timeout or publish partial state", async () => {
+    const target = tab("frame-timeout");
+    const artifacts = new BrowserArtifactStore();
+    const motor = new FakeMotor();
+    const captureCoordinator = new SessionCaptureCoordinator();
+    let screenshots = 0;
+    bindFrameTab(target, { async send<T>(method: string): Promise<T> {
+      if (method === "Page.captureScreenshot") { screenshots++; throw new CdpCommandTimeoutError(method, 10_000); }
+      return { result: { value: layout() } } as T;
+    } });
+    const scheduler = new FrameScheduler(actor, registryFor([target]), artifacts, motor as never, () => 1, { selectedIntervalMs: 10_000, captureCoordinator });
+    const events: FrameEvent[] = [];
+    scheduler.on("frame", (event) => events.push(event));
+    scheduler.subscribe("connection\0frame-timeout", address(target));
+    await waitFor(() => captureCoordinator.diagnostics.frameScreenshotTimeouts === 1);
+    await sleep(10);
+    assert.equal(screenshots, 1);
+    assert.equal(events.length, 0);
+    assert.equal(artifacts.entryCount, 0);
+    assert.equal(target.latestFrameSequence, 0);
+    await scheduler.close();
+    await captureCoordinator.close();
+  });
+
   it("rejects repeated inconsistency without retaining an artifact", async () => {
     const target = tab("unstable");
     const artifacts = new BrowserArtifactStore();
@@ -355,18 +462,19 @@ describe("screenshot consistency transaction", () => {
   });
 });
 
-describe("same-session screenshot overlap reproduction", () => {
+describe("same-session screenshot overlap correction", () => {
   for (const ordering of ["frame-first", "observation-first"] as const) {
-    it(`proves independent frame and observation transactions overlap when ${ordering}`, async () => {
+    it(`serializes frame and observation transactions when ${ordering}`, async () => {
       const target = tab(`overlap-${ordering}`);
       const registry = registryFor([target]);
       const artifacts = new BrowserArtifactStore();
       const motor = new FakeMotor();
       const connection = new BlockingCaptureConnection();
+      const captureCoordinator = new SessionCaptureCoordinator();
       bindObservationTab(target, connection);
       bindFrameTab(target, connection);
-      const store = new ObservationStore(actor, registry, artifacts, motor as never);
-      const scheduler = new FrameScheduler(actor, registry, artifacts, motor as never, () => 1, { selectedIntervalMs: 10_000 });
+      const store = new ObservationStore(actor, registry, artifacts, motor as never, { captureCoordinator });
+      const scheduler = new FrameScheduler(actor, registry, artifacts, motor as never, () => 1, { selectedIntervalMs: 10_000, captureCoordinator });
       const events: FrameEvent[] = [];
       scheduler.on("frame", (event) => events.push(event));
       let observation: Promise<unknown>;
@@ -379,13 +487,16 @@ describe("same-session screenshot overlap reproduction", () => {
         await waitFor(() => connection.activeScreenshots === 1);
         scheduler.subscribe(`connection\0${ordering}`, address(target));
       }
-      await waitFor(() => connection.activeScreenshots === 2);
-      assert.equal(connection.maxActiveScreenshots, 2);
+      await waitFor(() => ordering === "frame-first" ? captureCoordinator.diagnostics.agentQueued === 1 : captureCoordinator.diagnostics.frameQueued === 1);
+      assert.equal(connection.activeScreenshots, 1);
+      assert.equal(connection.maxActiveScreenshots, 1);
       connection.release.resolve();
       await observation;
       await waitFor(() => events.length === 1);
       assert.equal(connection.screenshotCalls, 2);
+      assert.equal(captureCoordinator.diagnostics.maxObservedConcurrent, 1);
       await scheduler.close();
+      await captureCoordinator.close();
     });
   }
 });

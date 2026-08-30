@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { BrowserProtocolError, type ActorIdentity, type DomObservation, type FrameEvent, type ScreenshotObservation, type SessionDescriptor, type TabAddress, type TabDescriptor } from "@webx/browser-protocol";
 import type { NavigationAuthorization, NavigationAuthorizationContext } from "../actor/identity.js";
 import type { BrowserArtifactStore } from "../artifacts/store.js";
+import { SessionCaptureCoordinator } from "../capture/coordinator.js";
 import { ChromeHost, type ChromeHostOptions } from "../chrome/host.js";
 import { bindFrameTab, FrameScheduler } from "../frames/scheduler.js";
 import { SessionMotor, bindMotorTab, type CoordinateAction, type MouseButton } from "../motor/session-motor.js";
@@ -19,6 +20,7 @@ export type DomFallbackAction =
 export class BrowserSession {
   private closeState: "open" | "closing" | "closed" | "cleanup-failed" = "open";
   private closePromise: Promise<void> | undefined;
+  readonly captureCoordinator: SessionCaptureCoordinator;
   readonly motor: SessionMotor;
   readonly observations: ObservationStore;
   readonly dom: DomObservationStore;
@@ -37,10 +39,11 @@ export class BrowserSession {
     screenshotObservationTtlMs: number,
     domObservationTtlMs: number,
   ) {
+    this.captureCoordinator = new SessionCaptureCoordinator();
     this.motor = new SessionMotor(browserSessionId, personaSeed, motorMinimumPathMs);
-    this.observations = new ObservationStore(actor, targets, artifacts, this.motor, { freshnessMs: screenshotObservationTtlMs, currentEpoch: () => this.controlEpoch });
+    this.observations = new ObservationStore(actor, targets, artifacts, this.motor, { freshnessMs: screenshotObservationTtlMs, currentEpoch: () => this.controlEpoch, captureCoordinator: this.captureCoordinator });
     this.dom = new DomObservationStore(targets, { retentionMs: domObservationTtlMs });
-    this.frames = new FrameScheduler(actor, targets, artifacts, this.motor, () => this.controlEpoch);
+    this.frames = new FrameScheduler(actor, targets, artifacts, this.motor, () => this.controlEpoch, { captureCoordinator: this.captureCoordinator });
     host.on("exit", this.onHostExit);
     host.on("disconnect", this.onHostDisconnect);
     targets.on("tabTerminal", this.onTabTerminal);
@@ -176,6 +179,7 @@ export class BrowserSession {
   private async closeInternal(): Promise<void> {
     const failures: unknown[] = [];
     try { await this.frames.close(); } catch (error) { failures.push(error); }
+    try { await this.captureCoordinator.close(); } catch (error) { failures.push(error); }
     try { await this.motor.releaseAll(); } catch (error) { failures.push(error); }
     try { await this.targets.close(); } catch (error) { failures.push(error); }
     try { await this.host.close(); } catch (error) { failures.push(error); }
@@ -200,6 +204,7 @@ export class BrowserSession {
   private readonly onHostDisconnect = (): void => { if (this.closeState === "open") this.operations.failSession(this.actor, this.browserSessionId, "CDP_DISCONNECTED"); void this.motor.releaseAll(); };
   private readonly onTabRegistered = (tab: TabRecord): void => { this.bindTab(tab); void this.motor.initializeTab(tab).catch(() => undefined); };
   private readonly onTabTerminal = ({ tabId, tab }: TerminalTabEvent): void => {
+    this.captureCoordinator.cancelTab(tabId);
     if (this.motor.isActiveTab(tabId)) void this.motor.releaseAll(tab);
     this.observations.invalidateTab(tabId); this.dom.invalidateTab(tabId); void this.frames.stop(tabId);
     this.artifacts.clearTab(this.actor, this.browserSessionId, tabId);

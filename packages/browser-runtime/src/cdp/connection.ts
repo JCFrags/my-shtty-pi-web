@@ -19,6 +19,13 @@ export class CdpDisconnectedError extends BrowserProtocolError {
   constructor(message = "The CDP connection is unavailable.") { super("CDP_DISCONNECTED", message, true); this.name = "CdpDisconnectedError"; }
 }
 
+export class CdpCommandTimeoutError extends BrowserProtocolError {
+  constructor(readonly method: string, readonly timeoutMs: number) {
+    super("CDP_ERROR", `CDP command timed out: ${method}`, true);
+    this.name = "CdpCommandTimeoutError";
+  }
+}
+
 export class CdpConnection extends EventEmitter {
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
@@ -99,7 +106,8 @@ export class CdpConnection extends EventEmitter {
       };
       const abort = (): void => finish(abortError(options.signal, `CDP command cancelled: ${method}`));
       const removeAbort = (): void => options.signal?.removeEventListener("abort", abort);
-      const timer = setTimeout(() => finish(new BrowserProtocolError("CDP_ERROR", `CDP command timed out: ${method}`, true)), options.timeoutMs ?? 10_000);
+      const timeoutMs = options.timeoutMs ?? 10_000;
+      const timer = setTimeout(() => finish(new CdpCommandTimeoutError(method, timeoutMs)), timeoutMs);
       this.pending.set(id, { method, timer, removeAbort, resolve: (value) => finish(undefined, value), reject: (error) => finish(error) });
       options.signal?.addEventListener("abort", abort, { once: true });
       if (options.signal?.aborted) { abort(); return; }

@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
 import { BrowserProtocolError, PROTOCOL_VERSION, type ActorIdentity, type FrameEvent, type TabAddress } from "@webx/browser-protocol";
 import type { BrowserArtifactStore } from "../artifacts/store.js";
+import type { SessionCaptureCoordinator } from "../capture/coordinator.js";
+import { CdpCommandTimeoutError } from "../cdp/connection.js";
 import type { SessionMotor } from "../motor/session-motor.js";
 import type { Layout } from "../observations/store.js";
 import type { TargetRegistry, TabRecord } from "../targets/registry.js";
@@ -27,6 +29,7 @@ export interface FrameSchedulerOptions {
   burstIntervalMs?: number;
   commitBarrierForTest?: () => Promise<void>;
   afterScreenshotForTest?: () => Promise<void>;
+  captureCoordinator?: SessionCaptureCoordinator;
 }
 
 export class FrameScheduler extends EventEmitter {
@@ -38,6 +41,7 @@ export class FrameScheduler extends EventEmitter {
   private readonly burstIntervalMs: number;
   private readonly commitBarrierForTest: (() => Promise<void>) | undefined;
   private readonly afterScreenshotForTest: (() => Promise<void>) | undefined;
+  private readonly captureCoordinator: SessionCaptureCoordinator | undefined;
   droppedFrames = 0;
   private closed = false;
 
@@ -48,6 +52,7 @@ export class FrameScheduler extends EventEmitter {
     this.burstIntervalMs = options.burstIntervalMs ?? 100;
     this.commitBarrierForTest = options.commitBarrierForTest;
     this.afterScreenshotForTest = options.afterScreenshotForTest;
+    this.captureCoordinator = options.captureCoordinator;
     motor.on("actionStart", this.onActionStart);
     motor.on("actionEnd", this.onActionEnd);
     motor.on("sample", this.onSample);
@@ -178,52 +183,60 @@ export class FrameScheduler extends EventEmitter {
     if (tab === undefined || tab.state !== "open") throw new BrowserProtocolError("TAB_NOT_FOUND", "Frame tab is no longer available.");
     schedule.lastCaptureStartedMs = performance.now();
     let artifactId: string | undefined;
-    try {
-      await this.motor.ensureOverlay(tab);
-      this.assertCurrent(schedule, generation, signal);
-      const targetId = tab.targetId;
-      const cdpSessionId = tab.cdpSessionId;
-      const documentGeneration = tab.documentGeneration;
-      const viewportGeneration = tab.viewportGeneration;
-      const controlEpoch = this.currentEpoch();
-      const address: TabAddress = { browserSessionId: tab.browserSessionId, tabId: tab.tabId, targetId, controlEpoch };
-      const before = await layout(tab, signal);
-      this.assertCurrent(schedule, generation, signal);
-      const result = await frameConnection(tab).send<{ data: string }>("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false }, tab.cdpSessionId, { signal });
-      await this.afterScreenshotForTest?.();
-      this.assertCurrent(schedule, generation, signal);
-      const after = await layout(tab, signal);
-      const capturedMonotonicMs = performance.now();
-      if (tab.targetId !== targetId || tab.documentGeneration !== documentGeneration || tab.viewportGeneration !== viewportGeneration) throw new BrowserProtocolError("DOCUMENT_CHANGED", "Frame target changed during capture.");
-      if (before.width !== after.width || before.height !== after.height || before.dpr !== after.dpr || Math.abs(before.scrollX - after.scrollX) > 2 || Math.abs(before.scrollY - after.scrollY) > 2) throw new BrowserProtocolError("VIEWPORT_CHANGED", "Frame viewport changed during capture.");
-      const bytes = Buffer.from(result.data, "base64");
-      for (const [key, consumer] of schedule.consumers) if (!sameAddress(consumer.address, address)) { schedule.consumers.delete(key); this.consumerAddresses.delete(key); }
-      this.assertCurrent(schedule, generation, signal);
-      if (schedule.consumers.size === 0 && schedule.activeActions === 0) throw new BrowserProtocolError("OPERATION_CANCELLED", "Frame capture has no current consumer.");
-      const artifact = await this.artifacts.put(this.actor, bytes, { browserSessionId: tab.browserSessionId, tabId: tab.tabId, purpose: "workspace-frame", mediaType: "image/png", signal });
-      artifactId = artifact.artifactId;
-      await this.commitBarrierForTest?.();
-      this.assertCurrent(schedule, generation, signal);
-      this.validateCaptured(address, targetId, cdpSessionId, documentGeneration, viewportGeneration);
-      if (schedule.consumers.size === 0 && schedule.activeActions === 0) throw new BrowserProtocolError("OPERATION_CANCELLED", "Frame capture has no current consumer.");
-      this.artifacts.pinFrameArtifact(this.actor, artifact.artifactId, `${tab.browserSessionId}\u0000${tab.tabId}`);
-      this.assertCurrent(schedule, generation, signal);
-      const frame: FrameEvent = {
-        protocolVersion: PROTOCOL_VERSION, kind: "frame.available", address,
-        documentGeneration, viewportGeneration,
-        frameSequence: this.registry.incrementFrame(tab), capturedMonotonicMs, publishedMonotonicMs: performance.now(),
-        mediaType: "image/png", byteLength: bytes.byteLength, artifactId: artifact.artifactId, sha256: artifact.sha256,
-        viewport: { width: after.width, height: after.height, devicePixelRatio: after.dpr }, url: after.url, title: after.title, cursor: this.motor.state,
-      };
-      this.assertCurrent(schedule, generation, signal);
-      this.latest.set(tab.tabId, frame);
-      this.emit("frame", frame);
-      artifactId = undefined;
-    } catch (error) {
-      if (artifactId !== undefined) this.artifacts.revokeIfOwned(this.actor, artifactId);
-      if (tab.state !== "open" && this.schedules.has(schedule.tabId)) void this.stop(schedule.tabId);
-      throw error;
-    }
+    const transaction = async (captureSignal: AbortSignal): Promise<void> => {
+      try {
+        await this.motor.ensureOverlay(tab);
+        this.assertCurrent(schedule, generation, captureSignal);
+        const targetId = tab.targetId;
+        const cdpSessionId = tab.cdpSessionId;
+        const documentGeneration = tab.documentGeneration;
+        const viewportGeneration = tab.viewportGeneration;
+        const controlEpoch = this.currentEpoch();
+        const address: TabAddress = { browserSessionId: tab.browserSessionId, tabId: tab.tabId, targetId, controlEpoch };
+        const before = await layout(tab, captureSignal);
+        this.assertCurrent(schedule, generation, captureSignal);
+        const result = await frameConnection(tab).send<{ data: string }>("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false }, tab.cdpSessionId, { signal: captureSignal });
+        await this.afterScreenshotForTest?.();
+        this.assertCurrent(schedule, generation, captureSignal);
+        const after = await layout(tab, captureSignal);
+        const capturedMonotonicMs = performance.now();
+        if (tab.targetId !== targetId || tab.documentGeneration !== documentGeneration || tab.viewportGeneration !== viewportGeneration) throw new BrowserProtocolError("DOCUMENT_CHANGED", "Frame target changed during capture.");
+        if (before.width !== after.width || before.height !== after.height || before.dpr !== after.dpr || Math.abs(before.scrollX - after.scrollX) > 2 || Math.abs(before.scrollY - after.scrollY) > 2) throw new BrowserProtocolError("VIEWPORT_CHANGED", "Frame viewport changed during capture.");
+        const bytes = Buffer.from(result.data, "base64");
+        for (const [key, consumer] of schedule.consumers) if (!sameAddress(consumer.address, address)) { schedule.consumers.delete(key); this.consumerAddresses.delete(key); }
+        this.assertCurrent(schedule, generation, captureSignal);
+        if (schedule.consumers.size === 0 && schedule.activeActions === 0) throw new BrowserProtocolError("OPERATION_CANCELLED", "Frame capture has no current consumer.");
+        const artifact = await this.artifacts.put(this.actor, bytes, { browserSessionId: tab.browserSessionId, tabId: tab.tabId, purpose: "workspace-frame", mediaType: "image/png", signal: captureSignal });
+        artifactId = artifact.artifactId;
+        await this.commitBarrierForTest?.();
+        this.assertCurrent(schedule, generation, captureSignal);
+        this.validateCaptured(address, targetId, cdpSessionId, documentGeneration, viewportGeneration);
+        if (schedule.consumers.size === 0 && schedule.activeActions === 0) throw new BrowserProtocolError("OPERATION_CANCELLED", "Frame capture has no current consumer.");
+        this.artifacts.pinFrameArtifact(this.actor, artifact.artifactId, `${tab.browserSessionId}\u0000${tab.tabId}`);
+        this.assertCurrent(schedule, generation, captureSignal);
+        const frame: FrameEvent = {
+          protocolVersion: PROTOCOL_VERSION, kind: "frame.available", address,
+          documentGeneration, viewportGeneration,
+          frameSequence: this.registry.incrementFrame(tab), capturedMonotonicMs, publishedMonotonicMs: performance.now(),
+          mediaType: "image/png", byteLength: bytes.byteLength, artifactId: artifact.artifactId, sha256: artifact.sha256,
+          viewport: { width: after.width, height: after.height, devicePixelRatio: after.dpr }, url: after.url, title: after.title, cursor: this.motor.state,
+        };
+        this.assertCurrent(schedule, generation, captureSignal);
+        this.latest.set(tab.tabId, frame);
+        this.emit("frame", frame);
+        artifactId = undefined;
+      } catch (error) {
+        if (artifactId !== undefined) this.artifacts.revokeIfOwned(this.actor, artifactId);
+        if (error instanceof CdpCommandTimeoutError && error.method === "Page.captureScreenshot") {
+          this.captureCoordinator?.recordFrameScreenshotTimeout();
+          this.droppedFrames++;
+        }
+        if (tab.state !== "open" && this.schedules.has(schedule.tabId)) void this.stop(schedule.tabId);
+        throw error;
+      }
+    };
+    if (this.captureCoordinator === undefined) await transaction(signal);
+    else await this.captureCoordinator.runFrame(tab.tabId, signal, transaction);
   }
 
   private isCurrent(schedule: TabSchedule, generation: number): boolean { return !this.closed && !schedule.closed && schedule.generation === generation && this.schedules.get(schedule.tabId) === schedule; }

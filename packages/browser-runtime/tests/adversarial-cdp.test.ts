@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CdpConnection } from "../src/cdp/connection.js";
+import { CdpCommandTimeoutError, CdpConnection } from "../src/cdp/connection.js";
 
 class FakeWebSocket extends EventTarget {
   readyState: number = WebSocket.CONNECTING;
@@ -83,6 +83,22 @@ describe("adversarial CDP cancellation", () => {
     await expect(promise).rejects.toThrow("cancelled");
     expect(connection.pendingCount).toBe(0);
     socket.message({ id, result: { late: true } });
+    expect(connection.pendingCount).toBe(0);
+  });
+
+  it("returns typed command timeout identity and ignores the late response exactly once", async () => {
+    const { connection, socket } = await connected();
+    const promise = connection.send("Page.captureScreenshot", {}, "session-a", { timeoutMs: 5 });
+    const id = (JSON.parse(socket.sent[0] ?? "{}") as { id: number }).id;
+    await expect(promise).rejects.toMatchObject({
+      name: "CdpCommandTimeoutError",
+      method: "Page.captureScreenshot",
+      timeoutMs: 5,
+      code: "CDP_ERROR",
+      retryable: true,
+    } satisfies Partial<CdpCommandTimeoutError>);
+    expect(connection.pendingCount).toBe(0);
+    socket.message({ id, result: { data: "late" } });
     expect(connection.pendingCount).toBe(0);
   });
 
