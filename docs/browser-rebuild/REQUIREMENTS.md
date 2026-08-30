@@ -60,9 +60,20 @@
 | BR-44 | Chrome denies downloads. | Require browser-wide deny with events, cancel any start, expose no caller path, and fail closed when denial is unsupported. Test anchor, attachment, script, and popup cases and require no file. |
 | BR-45 | The route passes across process and restart boundaries. | Run separate browserd, webxd, Pi harness, page fixture, and test-only proxy processes. Cover delayed click, exact images, DOM, streams, Pi rebind, webxd restart, browserd restart, health change, search/read independence, response loss, and complete cleanup, then run 30 minutes uninterrupted. |
 
+## Phase 2B.1 capture qualification criteria
+
+| ID | Criterion | Acceptance test |
+|---|---|---|
+| BR-46 | One coordinator governs every screenshot transaction in one browser session. | Barrier-test frame-first and observation-first order. Require same-session maximum concurrency 1 across overlay, layout, screenshot, validation, and commit while two sessions overlap. |
+| BR-47 | Agent and workspace capture queues are bounded and fair. | Require agent FIFO maximum 8, one coalesced frame intent per tab, maximum 8 frame tabs, immediate queued cancellation, agent priority, and one pending frame after at most four agent captures. |
+| BR-48 | Screenshot timeout recovery is typed, read-only, and bounded. | Classify only exact `CdpCommandTimeoutError` for `Page.captureScreenshot`; make at most two agent attempts under one operation/deadline; do not retry frames or changed identity; publish nothing from failed attempts. |
+| BR-49 | Session close settles all capture work. | Close with active and queued work, including an active transaction that ignores cancellation. Require bounded settlement and no late artifact, observation, frame, event, or sequence. |
+| BR-50 | Webxd shutdown is cleanup-final and replacement-safe. | Inject browser, server, and socket cleanup failures. Attempt every stage, aggregate failures, retry residue, reject same-object restart, allow a new runtime, and never remove its replacement socket. |
+| BR-51 | Final capture qualification is clean, pinned, and process-isolated. | From an externally pinned clean SHA, run at least 1,000 governed captures and 300 exact observations, then an uninterrupted 1,800-second process route. Require same-session maximum 1, cross-session overlap, zero unrecovered screenshot failures, zero general-cache image bytes, bounded evidence, and complete cleanup. |
+
 ## Phase delivery boundary
 
-Phase 1 implements BR-01, BR-02, BR-04 through BR-11, BR-13, BR-14, BR-16 through BR-23 in the parallel runtime. Phase 2A adds BR-12, BR-24, and BR-25 through BR-33 behind the non-default reversible startup switch. Phase 2B adds BR-34 through BR-45 without changing the default. BR-03 and BR-15 remain Phase 3 Tauri workspace gates.
+Phase 1 implements BR-01, BR-02, BR-04 through BR-11, BR-13, BR-14, BR-16 through BR-23 in the parallel runtime. Phase 2A adds BR-12, BR-24, and BR-25 through BR-33 behind the non-default reversible startup switch. Phase 2B adds BR-34 through BR-45 without changing the default. Phase 2B.1 adds BR-46 through BR-51 and qualifies the development route without changing the default. BR-03 and BR-15 remain Phase 3 Tauri workspace gates.
 
 ## Required pointer operations
 

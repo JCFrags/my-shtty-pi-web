@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Phase 2B implements the routed-browser usability, retry, transport, restart, egress, and stream-foundation corrections found after Phase 2A. The native screenshot route passed deterministic tests and the complete process-isolated acceptance route on the final code. A fresh uninterrupted 30-minute process-isolated soak passed before the small final review corrections; post-review long-soak status is qualified below.
+Phase 2B implements the routed-browser usability, retry, transport, restart, egress, and stream-foundation corrections found after Phase 2A. The native screenshot route passed deterministic tests and the complete process-isolated acceptance route. Its original post-review long-soak gap is now superseded by Phase 2B.1 capture arbitration and final-code qualification. See `PHASE2B1-RESULTS.md`.
 
 Production-default routing remains disabled. `WEBX_BROWSER_BACKEND` is immutable at webxd startup and still defaults to `legacy`. The legacy browser stack remains installed and selectable. Phase 2B does not implement Tauri and does not resolve the ADR-012 Chrome memory plateau gate.
 
@@ -128,7 +128,9 @@ The uninterrupted soak at `ba571d9` ran 1,800.594 seconds for a requested 1,800 
 
 The evidence separately records webxd heap, browserd heap, actor connections, operations, artifacts, profile bytes, and each Chrome process tree's PSS and private dirty memory. This 30-minute run does not establish a long-term Chrome plateau. ADR-012 remains unresolved.
 
-Final review then produced `9edd31d`, which closes unconfirmed subscribe admission, missing error-response operation identity, bracketed IPv6 proxy configuration, weak lost-close side-effect assertions, and three lint findings. All deterministic gates and the complete no-soak process route pass on `9edd31d`. At the user's direction, the replacement soak was shortened to 120 seconds. That attempt stopped on one retryable `CDP_ERROR` timeout from `Page.captureScreenshot` and produced no replacement evidence file. Cleanup left no process. Therefore the strict requirement for a fresh uninterrupted 30-minute soak after every correction is not satisfied on the final code. The earlier passing 30-minute evidence remains useful but is not represented as final-commit proof.
+Final review then produced `9edd31d`, which closes unconfirmed subscribe admission, missing error-response operation identity, bracketed IPv6 proxy configuration, weak lost-close side-effect assertions, and three lint findings. All deterministic gates and the complete no-soak process route pass on `9edd31d`. At the user's direction, the first replacement soak was shortened to 120 seconds. That attempt stopped on one retryable `CDP_ERROR` timeout from `Page.captureScreenshot` and produced no replacement evidence file. Cleanup left no process.
+
+Phase 2B.1 started exactly from the pushed Phase 2B baseline `8504bd0f4d559cbeecf848ea729ecf5c970b030e`, reproduced same-session observation/frame overlap, and added one session capture coordinator, typed bounded screenshot recovery, cleanup-final webxd shutdown, and pinned qualification. Final runtime/harness SHA `79254d6b30267432e35bec67cdb053aba59f322f` passed a clean uninterrupted 1,800.578-second soak with same-session maximum concurrency 1, cross-session maximum 2, 720 agent and 2,974 workspace attempts, zero timeouts/retries/unrecovered failures, zero general-cache image bytes, and complete cleanup. The former strict final-code soak gap is closed. See `PHASE2B1-RESULTS.md` and ADR-017.
 
 ## Verification commands
 
@@ -199,4 +201,4 @@ A fresh independent final reviewer found no reproduced blocking request mismatch
 
 Phase 2B does not resolve ADR-012, test Google Chrome, package services, implement user takeover, or add the Tauri workspace. Fractional desktop scaling, multiple monitors, fullscreen/PDF/top-layer overlay cases, and cross-origin out-of-process iframe DOM fallback remain later work.
 
-Do not start Phase 3 under the directive's strict completion gate until a fresh uninterrupted 30-minute process soak passes on the final code. When that evidence exists, Phase 3 can start the trusted local screenshot workspace above webxd/browserd authority. It must not connect Tauri directly to browserd, expose model-facing frame subscriptions, or change the production backend default. Production-default AgentCursor routing must remain disabled until ADR-012 and later deployment gates are satisfied.
+Phase 2B.1 now supplies the fresh uninterrupted final-code 30-minute process soak. Phase 3 development may start as a separate task for the trusted local screenshot workspace above webxd/browserd authority. It must not connect Tauri directly to browserd, expose model-facing frame subscriptions, or change the production backend default. Production-default AgentCursor routing must remain disabled until ADR-012 and later deployment gates are satisfied.

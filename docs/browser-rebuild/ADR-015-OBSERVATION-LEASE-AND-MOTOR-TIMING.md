@@ -1,6 +1,6 @@
 # ADR-015: Production observation lease and motor timing
 
-Status: accepted for Phase 2B
+Status: accepted for Phase 2B and requalified by Phase 2B.1
 
 ## Context
 
@@ -47,6 +47,8 @@ The final uninterrupted Phase 2B soak recorded 705 motor paths:
 - post-path guard p95 0 ms and maximum 1.034 ms.
 
 The first long Phase 2B soak reproduced the background-session defect at 5,229.488 ms p95. Focus emulation plus bounded acknowledgement pipelining corrected it. Phase 2A's median was 5,214.985 ms.
+
+The final-code Phase 2B.1 process route again used the normal 60,000 ms lease with no override. It waited 10,004.135 ms and completed a 555.523 ms bound click. Its uninterrupted 1,800-second soak recorded 705 motor paths: replay median/p95/max 609.532/1,419.567/1,732.526 ms, nominal median/p95 538.679/747.910 ms, sample median 16 and minimum 9, and 15 of 15 delayed actions successful. Session capture arbitration did not push ordinary motor timing outside the accepted target.
 
 ## Consequences
 

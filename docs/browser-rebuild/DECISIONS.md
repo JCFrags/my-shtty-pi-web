@@ -130,7 +130,15 @@ These decisions apply to the replacement browser runtime. They supersede conflic
 
 **Consequence:** General idempotency reports zero retained image bytes. Exact image retrieval validates canonical base64, total bytes, digest, media type, and dimensions. Cached public responses cannot revive expired observations, artifacts, handles, or documents. See `ADR-016-SCREENSHOT-TRANSFER-AND-IDEMPOTENCY.md`.
 
-## Phase 1.1, Phase 1.2, Phase 2A, and Phase 2B confirmations
+## ADR-017: Session capture arbitration and bounded screenshot recovery
+
+**Decision:** Construct one `SessionCaptureCoordinator` per browser session. Route complete agent-observation and workspace-frame screenshot transactions through it. Allow at most one safe read-only retry for an exact typed `Page.captureScreenshot` timeout. Make webxd shutdown cleanup-final and replacement-socket-safe.
+
+**Reason:** Phase 2B allowed explicit observations and workspace frames to overlap against one session compositor. Generic timeout errors could not support exact recovery, and fail-fast webxd shutdown could skip socket cleanup.
+
+**Consequence:** Same-session capture concurrency is one while separate browser sessions retain concurrency. Agent FIFO is bounded to eight, frame intent is coalesced per tab, and bounded fairness admits a pending frame after at most four agent captures. Failed attempts publish nothing. See `ADR-017-SESSION-CAPTURE-ARBITRATION.md`.
+
+## Phase 1.1, Phase 1.2, Phase 2A, Phase 2B, and Phase 2B.1 confirmations
 
 Phase 1.1 confirms that frame subscriptions are connection-, actor-, full-address-, epoch-, and subscription-ID-scoped. Operation IDs use canonical semantic fingerprints. Artifacts use actor, session, tab, purpose, media type, size, digest, and lifetime provenance. Screenshot metadata is checked before and after capture. Descriptor and profile ownership use runtime instance identity plus PID start identity.
 
@@ -138,4 +146,6 @@ Phase 1.2 confirms exclusive nonce-bound browserd startup ownership, unique inst
 
 Phase 2A Gate 0 replaces stale filesystem ownership recovery with kernel-owned abstract AF_UNIX lifetime locks. It also makes artifact admission atomic, bounds terminal target history, settles in-flight captures, makes cleanup retryable, adds global capacity, validates operation-result resources, and reports truthful health. The routed integration binds trusted webxd actors, delivers verified screenshots as Pi image items, converts image pixels inside browserd, and rejects old sessions after daemon replacement.
 
-Phase 2B adds production observation leases, practical motor timing, exact image GETs, route-aware idempotency, persistent UTF-8 transport, bounded subscription and client lifecycles, webxd restart rehydration, pinned runtime identity, stable public mutation IDs, functional branded egress health, explicit download denial, and process-isolated acceptance. Production-default routing remains disabled.
+Phase 2B adds production observation leases, practical motor timing, exact image GETs, route-aware idempotency, persistent UTF-8 transport, bounded subscription and client lifecycles, webxd restart rehydration, pinned runtime identity, stable public mutation IDs, functional branded egress health, explicit download denial, and process-isolated acceptance.
+
+Phase 2B.1 confirms barrier-reproduced same-session overlap, one session capture coordinator, typed bounded screenshot recovery, non-cooperative close settlement, cleanup-final webxd shutdown, clean externally pinned evidence, 1,001-transaction Fedora Chromium contention, and a final-code uninterrupted 1,800-second soak. Production-default routing remains disabled and ADR-012 remains unresolved.

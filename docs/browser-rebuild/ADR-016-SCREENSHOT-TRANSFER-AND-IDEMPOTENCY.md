@@ -1,6 +1,6 @@
 # ADR-016: Exact screenshot transfer and route-aware idempotency
 
-Status: accepted for Phase 2B
+Status: accepted for Phase 2B and requalified by Phase 2B.1
 
 ## Context
 
@@ -60,12 +60,14 @@ Deterministic tests cover:
 - screenshot artifact expiry, DOM expiry, and document change while an operation result remains;
 - SDK/facade retrieval by the real observation ID.
 
-The process-isolated route retrieved three concurrent images with distinct observation IDs, digests, and byte counts. The 30-minute soak completed 720 screenshot-plus-image requests. Final general idempotency held 475 durable entries and 283,984 serialized bytes, zero ephemeral entries, zero image entries, and zero image bytes. Webxd retained 22 metadata records using 21,130 bytes at the final sample and zero long-lived image buffers.
+The process-isolated route retrieved three concurrent images with distinct observation IDs, digests, and byte counts. The original Phase 2B 30-minute soak completed 720 screenshot-plus-image requests with zero general image bytes.
+
+The final-code Phase 2B.1 contention run read 784 exact images into a bounded SHA-256 ledger with 784 distinct observation IDs and zero general-cache image bytes. Its uninterrupted soak completed another 720 screenshot-plus-image routes. Final general idempotency held 475 durable entries and 283,984 serialized bytes, zero ephemeral entries, zero image entries, and zero image bytes. Webxd retained 22 metadata records using 21,127 bytes at the final sample and zero long-lived image buffers.
 
 ## Consequences
 
 Screenshot delivery requires one metadata request and one exact image request. This extra request is accepted because it gives correct concurrency, lifetime, isolation, and memory behavior. The final soak's combined screenshot-plus-image route had 43.820 ms median and 507.081 ms p95 latency.
 
-The future trusted workspace gateway can use browserd's separate frame subscriptions and artifacts. It must not turn frame events into model observations or expose a model-facing subscription tool.
+The future trusted workspace gateway can use browserd's separate frame subscriptions and artifacts. Phase 2B.1 coordinates their screenshot transactions with model observations but does not merge the products. The gateway must not turn frame events into model observations or expose a model-facing subscription tool.
 
 This decision corrects the Phase 2A statement: image base64 was intended to stay out of general idempotency, but the old all-POST policy did not enforce that. Phase 2B now enforces and measures zero retained image bytes.

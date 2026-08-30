@@ -1,6 +1,6 @@
 # Internal browser protocol
 
-Status: Phase 2B executable internal contract. This is the private browserd protocol, not public WebX API major 3.
+Status: Phase 2B.1 executable internal contract. This is the private browserd protocol, not public WebX API major 3.
 
 The authoritative source is `packages/browser-protocol/src/schema.ts`. The deterministic machine-readable artifact is `packages/browser-protocol/schema/browser-protocol.schema.json`. Conformance fixtures and parser tests are in `packages/browser-protocol/tests/`.
 
@@ -115,7 +115,7 @@ Its result contains:
 - cursor position, visibility, path sequence, and persona ID;
 - validity timestamp.
 
-The runtime compares target, CDP session, document generation, viewport generation, control epoch, CSS dimensions, DPR, and scroll before and after capture. It retries one inconsistent capture when the deadline permits. The immutable captured identity remains bound through digest and artifact insertion. The runtime resolves the exact tab again immediately before commit. It returns `DOCUMENT_CHANGED`, `VIEWPORT_CHANGED`, or `CONTROL_EPOCH_STALE` on a commit-time mismatch and idempotently revokes any new artifact. `capturedMonotonicMs` records completed capture.
+The runtime compares target, CDP session, document generation, viewport generation, control epoch, CSS dimensions, DPR, and scroll before and after capture. One session-level coordinator governs the complete overlay, pre-layout, screenshot, post-layout, validation, and commit transaction across agent observations and workspace frames. An agent capture retries once only for an exact typed `CdpCommandTimeoutError` from `Page.captureScreenshot`, while the original deadline and immutable identity remain valid. A frame timeout is dropped without immediate retry. The immutable captured identity remains bound through digest and artifact insertion. The runtime resolves the exact tab again immediately before commit. It returns `DOCUMENT_CHANGED`, `VIEWPORT_CHANGED`, or `CONTROL_EPOCH_STALE` on a commit-time mismatch and idempotently revokes any new artifact. `capturedMonotonicMs` records completed capture.
 
 The observation record does not retain another full screenshot buffer. It retains bounded binding metadata and an artifact reference. `validUntil` is the exact wall-clock projection of the monotonic lease.
 
@@ -179,7 +179,7 @@ A workspace frame event contains:
 - media type, byte length, artifact ID, and digest;
 - current session cursor state.
 
-It does not contain an agent observation ID. A frame does not create a durable model observation. The server sends frame events on the same bound socket. Frame writes are droppable when the socket is slow.
+It does not contain an agent observation ID. A frame does not create a durable model observation. Its capture transaction shares the browser session coordinator with agent observations. The coordinator keeps one coalesced latest frame intent per tab, prioritizes bounded agent FIFO, and preserves bounded frame fairness. The server sends frame events on the same bound socket. Frame writes are droppable when the socket is slow.
 
 ## Artifact reads
 
@@ -187,7 +187,7 @@ It does not contain an agent observation ID. A frame does not create a durable m
 
 ## Responses and errors
 
-A response has the request ID, optional operation ID, `ok`, and either a validated result or a sanitized error. Runtime and transport failures use a typed `BrowserProtocolError` with a finite code, safe message, retry flag, and bounded safe details. Unknown failures become `INTERNAL_ERROR`; they are not inferred from message text. CDP disconnect is `CDP_DISCONNECTED`, target crash is `TARGET_CRASHED`, missing operation is `OPERATION_NOT_FOUND`, and missing or foreign artifact is `ARTIFACT_NOT_FOUND`. Ownership failures do not reveal whether a foreign session, tab, target, observation, artifact, or operation exists.
+A response has the request ID, optional operation ID, `ok`, and either a validated result or a sanitized error. Runtime and transport failures use a typed `BrowserProtocolError` with a finite code, safe message, retry flag, and bounded safe details. Internal CDP command timers create `CdpCommandTimeoutError` with exact method and timeout identity; screenshot retry classification uses that type rather than message text. Unknown failures become `INTERNAL_ERROR`; they are not inferred from message text. CDP disconnect is `CDP_DISCONNECTED`, target crash is `TARGET_CRASHED`, missing operation is `OPERATION_NOT_FOUND`, and missing or foreign artifact is `ARTIFACT_NOT_FOUND`. Ownership failures do not reveal whether a foreign session, tab, target, observation, artifact, or operation exists.
 
 The error enum includes request, authentication, deadline, ownership, session, tab, target, epoch, observation, document, viewport, coordinate, handle, operation, browser, CDP, artifact, navigation, limit, and capability failures. Ordinary errors exclude profile paths, CDP endpoints, cookies, headers, storage, and page secrets.
 

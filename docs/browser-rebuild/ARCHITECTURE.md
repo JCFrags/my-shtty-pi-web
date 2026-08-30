@@ -20,7 +20,7 @@ flowchart LR
   Webxd --> Workspace
 ```
 
-Phase 2A connects `packages/browser-protocol`, `packages/browser-runtime`, and `apps/browserd` to trusted webxd, the public SDK, and native Pi tools. Phase 2B makes that route usable under model latency, fragmented transport, long-lived frame streams, Pi reconnect, and webxd restart. The immutable `WEBX_BROWSER_BACKEND` startup switch defaults to `legacy`. The new `agentcursor` selection has no request-level fallback. It does not connect the Tauri workspace and it is not the production default.
+Phase 2A connects `packages/browser-protocol`, `packages/browser-runtime`, and `apps/browserd` to trusted webxd, the public SDK, and native Pi tools. Phase 2B makes that route usable under model latency, fragmented transport, long-lived frame streams, Pi reconnect, and webxd restart. Phase 2B.1 adds one capture coordinator per browser session, typed bounded screenshot timeout recovery, cleanup-final webxd shutdown, and final process qualification. The immutable `WEBX_BROWSER_BACKEND` startup switch defaults to `legacy`. The new `agentcursor` selection has no request-level fallback. It does not connect the Tauri workspace and it is not the production default.
 
 ## Process responsibilities
 
@@ -102,6 +102,8 @@ A browser session can own many explicit tabs. Each tab owns its target ID, flatt
 
 Pointer actions on two tabs in one browser session serialize through the same motor. Actions in different browser sessions can run concurrently. When the motor moves to another tab, the runtime first restores the session cursor overlay at its current position.
 
+One `SessionCaptureCoordinator` also belongs to each browser session. It serializes the complete overlay, layout, screenshot, validation, and commit transaction across every tab in that Chrome process. Agent observations use a bounded high-priority FIFO. Workspace frames keep one coalesced latest intent per tab and receive bounded fairness after at most four consecutive agent captures. Different browser sessions still capture concurrently. Session close aborts and settles active and queued capture work before resource cleanup. See ADR-017.
+
 ## Target lifecycle
 
 The registry creates and adopts only targets that belong to its exact browser session. It closes or hides the browser bootstrap page. A popup is registered only when its opener is an owned tab. Unknown targets are not adopted.
@@ -116,7 +118,7 @@ A target close or crash invalidates its observations, DOM handles, and frame sch
 
 An agent observation exists only after an explicit `observe.screenshot` request. It uses lossless PNG in Phase 1. Its bounded metadata includes the exact actor-owned address, URL, title, wall and monotonic capture time, viewport, DPR, scroll, document and viewport generations, frame sequence, digest, cursor state, and validity time.
 
-Capture is a bounded consistency transaction. The runtime reads layout and scroll before and after PNG capture and confirms the same target, CDP session, document generation, viewport generation, control epoch, CSS dimensions, DPR, and scroll tolerance. It retries once when safe. The captured identity remains immutable through digest and artifact insertion. The runtime resolves the exact tab again immediately before publication. A commit-time mismatch returns `DOCUMENT_CHANGED`, `VIEWPORT_CHANGED`, or `CONTROL_EPOCH_STALE`, revokes any new artifact idempotently, and retains no observation. The completed capture time defines freshness.
+Capture is a bounded consistency transaction governed by the session coordinator. The runtime reads layout and scroll before and after PNG capture and confirms the same target, CDP session, document generation, viewport generation, control epoch, CSS dimensions, DPR, and scroll tolerance. It retries once only for a typed `Page.captureScreenshot` command timeout when identity, cancellation, and the original operation deadline still permit it. The retry starts a fresh complete transaction. The captured identity remains immutable through digest and artifact insertion. The runtime resolves the exact tab again immediately before publication. A commit-time mismatch returns `DOCUMENT_CHANGED`, `VIEWPORT_CHANGED`, or `CONTROL_EPOCH_STALE`, revokes any new artifact idempotently, and retains no observation. The completed capture time defines freshness.
 
 The image is stored as an owner-scoped artifact unless it is below the reviewed inline limit. Observation metadata stores an artifact ID and digest. It does not retain another full image buffer.
 
@@ -128,7 +130,7 @@ A workspace frame is a separate, short-lived product. A bounded scheduler keeps 
 
 Each frame subscription has a bounded opaque ID. It belongs to one browserd connection, actor, full tab address, control epoch, and interest level. An identical duplicate is idempotent. Conflicting ID reuse fails. Disconnect, epoch change, tab close, and session close remove the subscription and stop an unused schedule. A frame is sent only to a connection that owns a matching live subscription.
 
-A workspace frame does not create an agent observation. Frame bytes use owner-scoped artifacts in Phase 1. A later Tauri bridge can use a more direct bounded byte channel after review.
+A workspace frame does not create an agent observation. Its complete capture transaction uses the same session coordinator as explicit observations. A frame timeout is dropped without immediate retry; the next normal scheduler tick may try again. Frame bytes use owner-scoped artifacts in Phase 1. A later Tauri bridge can use a more direct bounded byte channel after review.
 
 ## Screenshot-bound input
 
@@ -194,4 +196,4 @@ The executable comes only from reviewed service configuration. Prefer Google Chr
 
 Linux resource evidence uses `/proc/<pid>/smaps_rollup` PSS as the primary memory metric. Summed RSS can double-count shared pages and is not the production decision metric. Keep one Chrome process per browser session until PSS evidence and a separate architecture decision justify a change.
 
-The Phase 1.2 two-hour mixed run did not prove a memory plateau. Total PSS slopes were +41,613 KiB/hour over the full run, +61,198 KiB/hour in the final hour, and +29,914 KiB/hour in the final 30 minutes. Browserd, bounded stores, process counts, and one Chrome session were nearly flat late in the run. Most final-hour growth was in the other Chrome tree. The Phase 2A and process-isolated Phase 2B 30-minute routed soaks are development-route gates only. Production-default routing still requires either credible longer plateau evidence or a tested bounded Chrome session recycling and recovery policy.
+The Phase 1.2 two-hour mixed run did not prove a memory plateau. Total PSS slopes were +41,613 KiB/hour over the full run, +61,198 KiB/hour in the final hour, and +29,914 KiB/hour in the final 30 minutes. Browserd, bounded stores, process counts, and one Chrome session were nearly flat late in the run. Most final-hour growth was in the other Chrome tree. The Phase 2A, Phase 2B, and final-code Phase 2B.1 30-minute routed soaks are development-route gates only. The Phase 2B.1 evidence explicitly sets `chromePlateauClaimedResolved` to false. Production-default routing still requires either credible longer plateau evidence or a tested bounded Chrome session recycling and recovery policy.

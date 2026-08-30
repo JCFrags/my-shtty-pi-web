@@ -1,0 +1,852 @@
+{
+  "passed": true,
+  "testedSha": "79254d6b30267432e35bec67cdb053aba59f322f",
+  "expectedSha": "79254d6b30267432e35bec67cdb053aba59f322f",
+  "workingTreeClean": true,
+  "processIsolation": {
+    "piHarnessPid": 289856,
+    "browserdPid": 289907,
+    "webxdPid": 289920,
+    "distinct": true
+  },
+  "productionObservationLease": {
+    "configuredMs": 60000,
+    "testOverrideUsed": false,
+    "requestedModelDelayMs": 0,
+    "actualModelDelayMs": 1.251846999999998,
+    "validUntil": "2026-08-30T05:47:13.833Z",
+    "clickSucceeded": true,
+    "clickRouteMs": 548.2897509999998
+  },
+  "motor": {
+    "generatedNominalPathDurationMs": {
+      "count": 1,
+      "min": 511.9484255769921,
+      "median": 511.9484255769921,
+      "p95": 511.9484255769921,
+      "max": 511.9484255769921,
+      "mean": 511.9484255769921
+    },
+    "sampleReplayWallMs": {
+      "count": 1,
+      "min": 517.6184629999999,
+      "median": 517.6184629999999,
+      "p95": 517.6184629999999,
+      "max": 517.6184629999999,
+      "mean": 517.6184629999999
+    },
+    "sampleCount": {
+      "count": 1,
+      "min": 16,
+      "median": 16,
+      "p95": 16,
+      "max": 16,
+      "mean": 16
+    }
+  },
+  "exactObservationImages": {
+    "concurrent": true,
+    "observations": [
+      {
+        "observationId": "observation_x7BC2qGJfX3tS9itl2kQq25j",
+        "digest": "3fadd587212c5cadd19c1b7b732fbb162b3c21394049a8030e46a7ac2f045fba",
+        "bytes": 13188
+      },
+      {
+        "observationId": "observation_ql32ekl8qU0DjP36eDbu6lf9",
+        "digest": "5fca3fa16226bb299e5b5a5648810ec7892de01f4eb8212b742eeda960e59077",
+        "bytes": 14819
+      },
+      {
+        "observationId": "observation_hdmbnPPhwjtwGCHQtdJ_qFXe",
+        "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+        "bytes": 10883
+      }
+    ],
+    "distinctObservationIds": true,
+    "distinctDigests": true
+  },
+  "domFallback": {
+    "succeeded": true,
+    "value": "phase2b process"
+  },
+  "frameSubscription": {
+    "survivedIdleTimeoutMs": 1000,
+    "waitedMs": 1500,
+    "frameCount": 219,
+    "duplicateFrameSequences": 0,
+    "nonMonotonicFrameSequences": 0,
+    "settled": true
+  },
+  "captureContention": {
+    "passed": true,
+    "requestedTransactions": 1000,
+    "governedScreenshotTransactions": 1001,
+    "explicitAgentObservations": 784,
+    "agentScreenshotAttempts": 784,
+    "workspaceScreenshotAttempts": 217,
+    "motorActions": 32,
+    "durationSeconds": 248.767038365,
+    "sameSessionMaximumConcurrency": 1,
+    "crossSessionConcurrencyObserved": true,
+    "workloadOverlapEvents": 408,
+    "processMaximumConcurrency": 2,
+    "maximumAgentQueueDepth": 1,
+    "maximumWorkspaceQueueDepth": 1,
+    "agentQueueWaitMs": {
+      "count": 788,
+      "retainedCount": 788,
+      "min": 0.0018419999978505075,
+      "medianUpperBound": 0.017242999994778074,
+      "p95UpperBound": 596.1537989999924,
+      "max": 2028.2518790000004,
+      "meanUpperBound": 272.0541020987341
+    },
+    "workspaceQueueWaitMs": {
+      "count": 218,
+      "retainedCount": 218,
+      "min": 0.0047130000020843,
+      "medianUpperBound": 101.53090300000622,
+      "p95UpperBound": 107.4875100000063,
+      "max": 2602.255059,
+      "meanUpperBound": 103.45127652752295
+    },
+    "agentTransactionMs": {
+      "count": 788,
+      "retainedCount": 788,
+      "min": 9.639389999996638,
+      "medianUpperBound": 173.3412659999999,
+      "p95UpperBound": 548.0853510000015,
+      "max": 3275.5339330000006,
+      "meanUpperBound": 300.19423514936756
+    },
+    "workspaceTransactionMs": {
+      "count": 217,
+      "retainedCount": 217,
+      "min": 54.754775000001246,
+      "medianUpperBound": 600.6512689999945,
+      "p95UpperBound": 1059.3352969999978,
+      "max": 2039.0394940000042,
+      "meanUpperBound": 585.8489394377889
+    },
+    "typedTimeouts": 0,
+    "agentTypedTimeouts": 0,
+    "retries": 0,
+    "recoveredRetries": 0,
+    "unrecoveredTimeouts": 0,
+    "unrecoveredAgentFailures": 0,
+    "droppedWorkspaceRequests": 0,
+    "coalescedWorkspaceRequests": 0,
+    "observationRouteLatencyMs": {
+      "count": 784,
+      "min": 15.021497000008821,
+      "median": 58.70238999999128,
+      "p95": 652.8221430000012,
+      "max": 3285.859457999999,
+      "mean": 312.4253825612243
+    },
+    "actionRouteLatencyMs": {
+      "count": 32,
+      "min": 381.9993919999979,
+      "median": 711.96740400001,
+      "p95": 1274.4027449999994,
+      "max": 1444.2301690000022,
+      "mean": 837.0237081250021
+    },
+    "exactImageReads": 784,
+    "distinctObservationIds": 784,
+    "imageBytesInGeneralCache": 0,
+    "frameCount": 217,
+    "duplicateFrameSequences": 0,
+    "nonMonotonicFrameSequences": 0,
+    "ledger": {
+      "algorithm": "sha256-ndjson",
+      "digest": "ed93e52393afcb9ff4b8ba9171f74eb3226d0a345dd60ef152fd6ff5e1a45a6c",
+      "recordCount": 784,
+      "head": [
+        {
+          "ordinal": 1,
+          "actor": "a-second",
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "tabId": "tab_CSejyNi4qpr_wb1ULzW0cl2B",
+          "observationId": "observation_fzmHnHI-AzFzoXnEN6iarJmd",
+          "digest": "5fca3fa16226bb299e5b5a5648810ec7892de01f4eb8212b742eeda960e59077",
+          "bytes": 14819
+        },
+        {
+          "ordinal": 2,
+          "actor": "b-primary",
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "tabId": "tab_5St3D5j93MprEWYebYk0QJ10",
+          "observationId": "observation_yATF2b_UaKvLy7uFiVlvI6Jb",
+          "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+          "bytes": 10883
+        },
+        {
+          "ordinal": 3,
+          "actor": "a-primary",
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "tabId": "tab_bcYbR33rbhbDpRLoGIyEww-L",
+          "observationId": "observation_N53WT1I5-lvCDJCzMR6hM7Rs",
+          "digest": "9c4c36476643bbf2cdce2a75c5f8ec588267e0986b4bcaea212356d026723e10",
+          "bytes": 13168
+        },
+        {
+          "ordinal": 4,
+          "actor": "b-primary",
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "tabId": "tab_5St3D5j93MprEWYebYk0QJ10",
+          "observationId": "observation_LKoKZOjJmMIEsZH2imajOzzY",
+          "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+          "bytes": 10883
+        },
+        {
+          "ordinal": 5,
+          "actor": "a-second",
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "tabId": "tab_CSejyNi4qpr_wb1ULzW0cl2B",
+          "observationId": "observation_BmZxzrvOAmx28rPj-aiYC1U9",
+          "digest": "5fca3fa16226bb299e5b5a5648810ec7892de01f4eb8212b742eeda960e59077",
+          "bytes": 14819
+        },
+        {
+          "ordinal": 6,
+          "actor": "b-primary",
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "tabId": "tab_5St3D5j93MprEWYebYk0QJ10",
+          "observationId": "observation_Gcjd9ETJr83DUS8fUq6MQmDx",
+          "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+          "bytes": 10883
+        },
+        {
+          "ordinal": 7,
+          "actor": "a-primary",
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "tabId": "tab_bcYbR33rbhbDpRLoGIyEww-L",
+          "observationId": "observation_UxfC1R3jzKOuK9hjFqfhkosL",
+          "digest": "31a75f66a96f738b8749380af08eb668cd5682c88576623816a9668c84739e5a",
+          "bytes": 13306
+        },
+        {
+          "ordinal": 8,
+          "actor": "b-primary",
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "tabId": "tab_5St3D5j93MprEWYebYk0QJ10",
+          "observationId": "observation_nqnEJe6GYKj4E2aGuJ9Cc-h3",
+          "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+          "bytes": 10883
+        },
+        {
+          "ordinal": 9,
+          "actor": "a-second",
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "tabId": "tab_CSejyNi4qpr_wb1ULzW0cl2B",
+          "observationId": "observation_xoQbSitiqSk1RQq8nyFIsvoL",
+          "digest": "5fca3fa16226bb299e5b5a5648810ec7892de01f4eb8212b742eeda960e59077",
+          "bytes": 14819
+        },
+        {
+          "ordinal": 10,
+          "actor": "b-primary",
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "tabId": "tab_5St3D5j93MprEWYebYk0QJ10",
+          "observationId": "observation_vd2-Hc3C4PJYMNdnsv49PBDv",
+          "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+          "bytes": 10883
+        },
+        {
+          "ordinal": 11,
+          "actor": "a-primary",
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "tabId": "tab_bcYbR33rbhbDpRLoGIyEww-L",
+          "observationId": "observation_mGN-5IMcaayTralGLga4mYNz",
+          "digest": "31a75f66a96f738b8749380af08eb668cd5682c88576623816a9668c84739e5a",
+          "bytes": 13306
+        },
+        {
+          "ordinal": 12,
+          "actor": "b-primary",
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "tabId": "tab_5St3D5j93MprEWYebYk0QJ10",
+          "observationId": "observation_GSv3P3-nzWftBff5bbM953S8",
+          "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+          "bytes": 10883
+        },
+        {
+          "ordinal": 13,
+          "actor": "a-second",
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "tabId": "tab_CSejyNi4qpr_wb1ULzW0cl2B",
+          "observationId": "observation_S_kOUZ9qcdHK1mIGA3m23wSe",
+          "digest": "5fca3fa16226bb299e5b5a5648810ec7892de01f4eb8212b742eeda960e59077",
+          "bytes": 14819
+        },
+        {
+          "ordinal": 14,
+          "actor": "b-primary",
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "tabId": "tab_5St3D5j93MprEWYebYk0QJ10",
+          "observationId": "observation_hERdrogy4SEgHYT7aXN3ETTO",
+          "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+          "bytes": 10883
+        },
+        {
+          "ordinal": 15,
+          "actor": "a-primary",
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "tabId": "tab_bcYbR33rbhbDpRLoGIyEww-L",
+          "observationId": "observation_SizSKNAgCiAflZ6M8JcNjuzy",
+          "digest": "5b58807b5fcd42e6ca514c995e8f943aea19f5364bb192f07aa6f62f1e29a8d7",
+          "bytes": 13323
+        },
+        {
+          "ordinal": 16,
+          "actor": "b-primary",
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "tabId": "tab_5St3D5j93MprEWYebYk0QJ10",
+          "observationId": "observation_i8805APcAyAgwNN8xNw4BGFm",
+          "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+          "bytes": 10883
+        }
+      ],
+      "tail": [
+        {
+          "ordinal": 769,
+          "actor": "a-second",
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "tabId": "tab_CSejyNi4qpr_wb1ULzW0cl2B",
+          "observationId": "observation_S_2F-vqMrpAjDu20aXKjJVJb",
+          "digest": "5fca3fa16226bb299e5b5a5648810ec7892de01f4eb8212b742eeda960e59077",
+          "bytes": 14819
+        },
+        {
+          "ordinal": 770,
+          "actor": "b-primary",
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "tabId": "tab_5St3D5j93MprEWYebYk0QJ10",
+          "observationId": "observation_hzL-UP68_z3i7PbpLj93JAkI",
+          "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+          "bytes": 10916
+        },
+        {
+          "ordinal": 771,
+          "actor": "a-primary",
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "tabId": "tab_bcYbR33rbhbDpRLoGIyEww-L",
+          "observationId": "observation_fOdd3IocVHJoq7wLJdy4l4f8",
+          "digest": "5864ce67f581f5219add80772fb6c149c342a33abad9c6b3fe2883624a4cf45a",
+          "bytes": 13343
+        },
+        {
+          "ordinal": 772,
+          "actor": "b-primary",
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "tabId": "tab_5St3D5j93MprEWYebYk0QJ10",
+          "observationId": "observation_WWX7gfvLy55FYrQkgewH5BJr",
+          "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+          "bytes": 10916
+        },
+        {
+          "ordinal": 773,
+          "actor": "a-second",
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "tabId": "tab_CSejyNi4qpr_wb1ULzW0cl2B",
+          "observationId": "observation_rgf5jOUVmaJtHAdKPwNsz75Y",
+          "digest": "5fca3fa16226bb299e5b5a5648810ec7892de01f4eb8212b742eeda960e59077",
+          "bytes": 14819
+        },
+        {
+          "ordinal": 774,
+          "actor": "b-primary",
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "tabId": "tab_5St3D5j93MprEWYebYk0QJ10",
+          "observationId": "observation_u1GDIIdv1Eo3dsFjnw223CJq",
+          "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+          "bytes": 10916
+        },
+        {
+          "ordinal": 775,
+          "actor": "a-primary",
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "tabId": "tab_bcYbR33rbhbDpRLoGIyEww-L",
+          "observationId": "observation_4xx0UsS5crbr1m8NFUhApw14",
+          "digest": "5864ce67f581f5219add80772fb6c149c342a33abad9c6b3fe2883624a4cf45a",
+          "bytes": 13343
+        },
+        {
+          "ordinal": 776,
+          "actor": "b-primary",
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "tabId": "tab_5St3D5j93MprEWYebYk0QJ10",
+          "observationId": "observation_lKeVGGqJIU6j2q_enURwS1X_",
+          "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+          "bytes": 10916
+        },
+        {
+          "ordinal": 777,
+          "actor": "a-second",
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "tabId": "tab_CSejyNi4qpr_wb1ULzW0cl2B",
+          "observationId": "observation_dYp8uFXpGaFGx167FzmcMYHW",
+          "digest": "5fca3fa16226bb299e5b5a5648810ec7892de01f4eb8212b742eeda960e59077",
+          "bytes": 14819
+        },
+        {
+          "ordinal": 778,
+          "actor": "b-primary",
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "tabId": "tab_5St3D5j93MprEWYebYk0QJ10",
+          "observationId": "observation_c4DGut23uRLhz7NYRUY3xLfA",
+          "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+          "bytes": 10916
+        },
+        {
+          "ordinal": 779,
+          "actor": "a-primary",
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "tabId": "tab_bcYbR33rbhbDpRLoGIyEww-L",
+          "observationId": "observation_5FQqfBYOTVC6xJ1xESyF7ByU",
+          "digest": "5864ce67f581f5219add80772fb6c149c342a33abad9c6b3fe2883624a4cf45a",
+          "bytes": 13343
+        },
+        {
+          "ordinal": 780,
+          "actor": "b-primary",
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "tabId": "tab_5St3D5j93MprEWYebYk0QJ10",
+          "observationId": "observation_fIvXgfYVvbD8r2QSTZoyqfDk",
+          "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+          "bytes": 10916
+        },
+        {
+          "ordinal": 781,
+          "actor": "a-second",
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "tabId": "tab_CSejyNi4qpr_wb1ULzW0cl2B",
+          "observationId": "observation_iz_vS8IdCBIQ53ZrSsYjgy3i",
+          "digest": "5fca3fa16226bb299e5b5a5648810ec7892de01f4eb8212b742eeda960e59077",
+          "bytes": 14819
+        },
+        {
+          "ordinal": 782,
+          "actor": "b-primary",
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "tabId": "tab_5St3D5j93MprEWYebYk0QJ10",
+          "observationId": "observation_VHwlFTTaBcj21ELFB_QVK-Fd",
+          "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+          "bytes": 10916
+        },
+        {
+          "ordinal": 783,
+          "actor": "a-primary",
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "tabId": "tab_bcYbR33rbhbDpRLoGIyEww-L",
+          "observationId": "observation_jdvfcTgx5qXMBRAMlr5pDKqO",
+          "digest": "5864ce67f581f5219add80772fb6c149c342a33abad9c6b3fe2883624a4cf45a",
+          "bytes": 13343
+        },
+        {
+          "ordinal": 784,
+          "actor": "b-primary",
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "tabId": "tab_5St3D5j93MprEWYebYk0QJ10",
+          "observationId": "observation_XKDceimfTDl9kQLug3VB7IkH",
+          "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+          "bytes": 10916
+        }
+      ]
+    },
+    "settlement": {
+      "subscriptions": 0,
+      "captureCoordinators": [
+        {
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "active": 0,
+          "agentQueued": 0,
+          "frameQueued": 0,
+          "maxObservedConcurrent": 1,
+          "maxObservedAgentQueue": 1,
+          "maxObservedFrameQueue": 0,
+          "agentRequests": 393,
+          "frameRequests": 0,
+          "agentScreenshotAttempts": 393,
+          "frameScreenshotAttempts": 0,
+          "agentScreenshotRetries": 0,
+          "completedAgent": 393,
+          "completedFrame": 0,
+          "failedAgent": 0,
+          "rejectedAgent": 0,
+          "droppedFrame": 0,
+          "coalescedFrame": 0,
+          "cancelled": 0,
+          "agentWaitMaxMs": 0.030529999999998836,
+          "frameWaitMaxMs": 0,
+          "agentScreenshotTimeouts": 0,
+          "recoveredAgentScreenshotTimeouts": 0,
+          "unrecoveredAgentScreenshotTimeouts": 0,
+          "frameScreenshotTimeouts": 0,
+          "agentQueueWaitMs": {
+            "count": 393,
+            "retainedCount": 393,
+            "min": 0.0018419999978505075,
+            "median": 0.003488000002107583,
+            "p95": 0.007716000000073109,
+            "max": 0.030529999999998836,
+            "mean": 0.004478798982860057
+          },
+          "frameQueueWaitMs": {
+            "count": 0,
+            "retainedCount": 0,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "max": 0,
+            "mean": 0
+          },
+          "agentTransactionMs": {
+            "count": 393,
+            "retainedCount": 393,
+            "min": 9.639389999996638,
+            "median": 20.291191999998773,
+            "p95": 29.488798000005772,
+            "max": 3275.5339330000006,
+            "mean": 35.844193534350595
+          },
+          "frameTransactionMs": {
+            "count": 0,
+            "retainedCount": 0,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "max": 0,
+            "mean": 0
+          },
+          "processActiveTransactions": 0,
+          "processMaxObservedConcurrent": 2,
+          "processOverlapEvents": 410,
+          "closed": false
+        },
+        {
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "active": 0,
+          "agentQueued": 0,
+          "frameQueued": 0,
+          "maxObservedConcurrent": 1,
+          "maxObservedAgentQueue": 1,
+          "maxObservedFrameQueue": 1,
+          "agentRequests": 395,
+          "frameRequests": 219,
+          "agentScreenshotAttempts": 395,
+          "frameScreenshotAttempts": 219,
+          "agentScreenshotRetries": 0,
+          "completedAgent": 395,
+          "completedFrame": 219,
+          "failedAgent": 0,
+          "rejectedAgent": 0,
+          "droppedFrame": 0,
+          "coalescedFrame": 0,
+          "cancelled": 0,
+          "agentWaitMaxMs": 2028.2518790000004,
+          "frameWaitMaxMs": 2602.255059,
+          "agentScreenshotTimeouts": 0,
+          "recoveredAgentScreenshotTimeouts": 0,
+          "unrecoveredAgentScreenshotTimeouts": 0,
+          "frameScreenshotTimeouts": 0,
+          "agentQueueWaitMs": {
+            "count": 395,
+            "retainedCount": 395,
+            "min": 0.002374000003328547,
+            "median": 0.017242999994778074,
+            "p95": 596.1537989999924,
+            "max": 2028.2518790000004,
+            "mean": 272.0541020987341
+          },
+          "frameQueueWaitMs": {
+            "count": 219,
+            "retainedCount": 219,
+            "min": 0.0047130000020843,
+            "median": 101.53090300000622,
+            "p95": 107.4875100000063,
+            "max": 2602.255059,
+            "mean": 102.97895743835628
+          },
+          "agentTransactionMs": {
+            "count": 395,
+            "retainedCount": 395,
+            "min": 32.3730949999881,
+            "median": 173.3412659999999,
+            "p95": 548.0853510000015,
+            "max": 3102.495406,
+            "mean": 300.19423514936756
+          },
+          "frameTransactionMs": {
+            "count": 219,
+            "retainedCount": 219,
+            "min": 54.754775000001246,
+            "median": 600.6512689999945,
+            "p95": 1059.3352969999978,
+            "max": 2039.0394940000042,
+            "mean": 583.6948059178092
+          },
+          "processActiveTransactions": 0,
+          "processMaxObservedConcurrent": 2,
+          "processOverlapEvents": 410,
+          "closed": false
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session_pLGcvlFEXfo--WX8p7DydF06",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oh6eJAD-fJ0vCYrdO9Kbi8rI",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    }
+  },
+  "piReconnect": {
+    "sameActorSessionUsable": true
+  },
+  "webxdRestart": {
+    "browserdRuntimePreserved": true,
+    "sessionRehydrated": true,
+    "screenshotSucceeded": true
+  },
+  "browserdReplacement": {
+    "oldRuntimeInstanceId": "runtime_xRXB1qe9Lj-bGlP7V3s06lzw",
+    "newRuntimeInstanceId": "runtime_hpT1BmbfoYTTT_v9dnWYXYAl",
+    "oldSessionRejected": true,
+    "newSessionWorked": true
+  },
+  "proxyHealth": {
+    "healthyCapability": true,
+    "unhealthyCapability": false,
+    "recovered": true
+  },
+  "searchReadIndependence": {
+    "succeededDuringBrowserdAndProxyOutage": true
+  },
+  "downloadDenial": {
+    "eventCount": 1,
+    "forbiddenFilesRemaining": 0
+  },
+  "stableCloseRetry": {
+    "firstResponseLost": true,
+    "transparentExactRetrySucceeded": true,
+    "idempotencyKey": "phase2b-close-response-loss",
+    "injectedDropObserved": true
+  },
+  "idempotency": {
+    "byPolicy": {
+      "durable-mutation": {
+        "entries": 5,
+        "bytes": 3881
+      },
+      "ephemeral-observation": {
+        "entries": 0,
+        "bytes": 0
+      },
+      "image-read": {
+        "entries": 0,
+        "bytes": 0
+      }
+    },
+    "imageBytesRetained": 0
+  },
+  "webxd": {
+    "pid": 292188,
+    "heapUsedBytes": 20742968,
+    "clientConnections": 3,
+    "liveBindings": 3,
+    "idempotency": {
+      "byPolicy": {
+        "durable-mutation": {
+          "entries": 5,
+          "bytes": 3881
+        },
+        "ephemeral-observation": {
+          "entries": 0,
+          "bytes": 0
+        },
+        "image-read": {
+          "entries": 0,
+          "bytes": 0
+        }
+      },
+      "imageBytesRetained": 0
+    },
+    "browser": {
+      "runtimeInstanceId": "runtime_hpT1BmbfoYTTT_v9dnWYXYAl",
+      "sessions": 0,
+      "observationMetadata": {
+        "count": 0,
+        "bytes": 0
+      },
+      "imageBytesRetained": 0,
+      "actorConnections": 1
+    },
+    "testResponseDropped": true,
+    "stream": {
+      "connectionCount": 1,
+      "active": false,
+      "frameCount": 0,
+      "duplicateFrameSequences": 0,
+      "nonMonotonicFrameSequences": 0,
+      "uniqueFrameSequences": 0,
+      "lastFrameSequence": 0
+    }
+  },
+  "browserd": {
+    "pid": 292277,
+    "heapUsedBytes": 22206384,
+    "runtimeInstanceId": "runtime_hpT1BmbfoYTTT_v9dnWYXYAl",
+    "connections": 2,
+    "sessions": 0,
+    "tabs": 0,
+    "subscriptions": 0,
+    "operations": 4,
+    "artifacts": 0,
+    "artifactBytes": 0,
+    "heldInput": [],
+    "chrome": [],
+    "droppedFrames": 0,
+    "captureCoordinators": [],
+    "captureCoordinator": {
+      "sessionCount": 0,
+      "sameSessionMaximumConcurrency": 0,
+      "processActiveTransactions": 0,
+      "processMaximumConcurrency": 0,
+      "processOverlapEvents": 0,
+      "agentRequests": 0,
+      "workspaceRequests": 0,
+      "agentScreenshotAttempts": 0,
+      "workspaceScreenshotAttempts": 0,
+      "agentScreenshotRetries": 0,
+      "typedTimeouts": 0,
+      "agentTypedTimeouts": 0,
+      "workspaceTypedTimeouts": 0,
+      "recoveredAgentTimeouts": 0,
+      "unrecoveredAgentTimeouts": 0,
+      "unrecoveredAgentFailures": 0,
+      "droppedWorkspaceRequests": 0,
+      "coalescedWorkspaceRequests": 0,
+      "maximumAgentQueueDepth": 0,
+      "maximumWorkspaceQueueDepth": 0,
+      "agentQueueWaitMs": {
+        "count": 0,
+        "retainedCount": 0,
+        "min": 0,
+        "medianUpperBound": 0,
+        "p95UpperBound": 0,
+        "max": 0,
+        "meanUpperBound": 0
+      },
+      "workspaceQueueWaitMs": {
+        "count": 0,
+        "retainedCount": 0,
+        "min": 0,
+        "medianUpperBound": 0,
+        "p95UpperBound": 0,
+        "max": 0,
+        "meanUpperBound": 0
+      },
+      "agentTransactionMs": {
+        "count": 0,
+        "retainedCount": 0,
+        "min": 0,
+        "medianUpperBound": 0,
+        "p95UpperBound": 0,
+        "max": 0,
+        "meanUpperBound": 0
+      },
+      "workspaceTransactionMs": {
+        "count": 0,
+        "retainedCount": 0,
+        "min": 0,
+        "medianUpperBound": 0,
+        "p95UpperBound": 0,
+        "max": 0,
+        "meanUpperBound": 0
+      }
+    },
+    "actionTimings": [
+      {
+        "browserSessionId": "session_b3Qhutj632NUPbIGInbT_afj",
+        "tabId": "tab_ZpYpAa0FPXUUA1aGUa2X6Tko",
+        "recordedMonotonicMs": 1662.234161,
+        "pathDurationMs": 511.9484255769921,
+        "pathWallMs": 517.6184629999999,
+        "generatedNominalPathDurationMs": 511.9484255769921,
+        "sampleReplayWallMs": 517.6184629999999,
+        "cdpInputLatencyMs": 47.44074200000034,
+        "cdpInputMaxLatencyMs": 13.58072500000003,
+        "overlayUpdateLatencyMs": 8.277418000000239,
+        "postPathGuardMs": 0.6796070000000327,
+        "sampleCount": 16,
+        "completionAfterPathMs": 136.5570439999999,
+        "totalMs": 655.3425220000001
+      }
+    ],
+    "dispatchTimings": [
+      {
+        "kind": "session.list",
+        "durationMs": 0.21407200000004423
+      },
+      {
+        "kind": "session.create",
+        "durationMs": 439.87616199999997
+      },
+      {
+        "kind": "session.list",
+        "durationMs": 0.05328999999994721
+      },
+      {
+        "kind": "observe.screenshot",
+        "durationMs": 219.70156900000006
+      },
+      {
+        "kind": "session.list",
+        "durationMs": 0.02703699999995024
+      },
+      {
+        "kind": "artifact.read",
+        "durationMs": 0.12063299999999799
+      },
+      {
+        "kind": "session.list",
+        "durationMs": 0.022971999999981563
+      },
+      {
+        "kind": "action.coordinate",
+        "durationMs": 657.629053
+      },
+      {
+        "kind": "tab.list",
+        "durationMs": 0.05008399999996982
+      },
+      {
+        "kind": "session.list",
+        "durationMs": 0.024205000000165455
+      },
+      {
+        "kind": "session.close",
+        "durationMs": 61.53761500000019
+      },
+      {
+        "kind": "capabilities.get",
+        "durationMs": 0.1913830000003145
+      }
+    ]
+  },
+  "cleanup": {
+    "profilesRemaining": 0,
+    "webxdSocketRemoved": true,
+    "browserdDescriptorRemoved": true,
+    "childrenRemaining": 0
+  },
+  "testAuthorityBoundary": "Loopback destination and response-loss injection are constructed only by the opt-in test worker. Production main.ts cannot enable either path."
+}

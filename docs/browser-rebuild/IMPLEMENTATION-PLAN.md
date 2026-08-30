@@ -100,7 +100,7 @@ Each phase has one acceptance gate. Keep the old browser production path until t
 
 ## Phase 2B — route usability, idempotency, and stream foundation
 
-**Status:** implementation, deterministic tests, and final-code process-isolated acceptance pass on `rebuild/screenshot-first-browser`. A 30-minute process soak passed before final review corrections. The user requested a shorter replacement; its 120-second attempt hit one screenshot CDP timeout. The strict final-code 30-minute gate remains open. Production-default routing remains disabled.
+**Status:** complete on `rebuild/screenshot-first-browser`, as superseded and qualified by Phase 2B.1. The earlier post-review screenshot timeout led to session capture arbitration and a new final-code 30-minute gate. Production-default routing remains disabled.
 
 **Goal:** close routed correctness and usability defects before Tauri work.
 
@@ -124,6 +124,20 @@ Each phase has one acceptance gate. Keep the old browser production path until t
 **Deletions enabled:** none. Keep the legacy stack and immutable service switch.
 
 **Rollback:** start webxd with the default `WEBX_BROWSER_BACKEND=legacy`. No request can select or fall back to AgentCursor.
+
+### Phase 2B.1 — capture arbitration and final qualification
+
+**Status:** complete on `rebuild/screenshot-first-browser`. Final runtime and harness code `79254d6b30267432e35bec67cdb053aba59f322f` passed deterministic gates, Fedora Chromium contention, the process-isolated route, and an uninterrupted 1,800-second soak from a clean externally pinned tree.
+
+**Completed work:** barrier-driven overlap reproduction in both orderings; one coordinator per browser session for complete observation and frame transactions; bounded agent FIFO, coalesced frame intents, and bounded fairness; typed CDP command timeout identity; at most one safe read-only agent screenshot retry; frame timeout drop; bounded diagnostics; abort-aware close settlement; cleanup-final retryable webxd shutdown with replacement socket safety; pinned bounded qualification and automatic failure evidence.
+
+**Evidence:** `PHASE2B1-RESULTS.md`, `ADR-017-SESSION-CAPTURE-ARBITRATION.md`, and `evidence/phase2b1-*-results.json`.
+
+**Acceptance gate:** same-session maximum capture concurrency is one; cross-session concurrency occurs; no agent capture is silently replaced; timeout recovery is typed and bounded; failed attempts publish nothing; webxd cleanup is all-stage; contention, process, and uninterrupted 30-minute routes pass with zero unrecovered screenshot failures, general-cache image bytes, held input, or cleanup leaks.
+
+**Deletions enabled:** none. Keep the legacy stack and immutable service switch.
+
+**Handoff:** Phase 3 development may begin as a separate task under the existing trusted-workspace boundary. ADR-012 and later deployment gates still block production-default routing.
 
 ## Phase 3 — production Tauri workspace and human control
 

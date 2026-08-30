@@ -42,10 +42,13 @@ Scale: impact and likelihood are low, medium, or high before mitigation.
 | Active frame capture leaks after unsubscribe failure | High | Medium | Keep subscriptions open through idle pruning, update activity on frames, share teardown, retain local state until remote commit, and close the full actor connection when confirmation is lost. Browserd connection cleanup removes remote subscriptions. |
 | An unrelated listener impersonates healthy browser egress | Critical | Medium | Require a bounded exact 204 branded health response and agreement on egress binding ID. Probe independently on session creation. Do not claim this protects against hostile same-UID code. |
 | Page starts a download without a public download tool | High | Medium | Require browser-wide Chrome download deny with events, cancel starts, accept no caller-selected path, and fail host startup/operation closed when enforcement is unsupported. Verify no file remains. |
+| Agent observations and workspace frames contend for one Chrome compositor | High | Medium | Give each browser session one capture coordinator for complete overlay/layout/screenshot/validation/commit transactions. Bound agent FIFO to eight, coalesce one frame intent per tab, preserve bounded fairness, settle close, and prove same-session maximum concurrency 1 plus cross-session overlap. |
+| A transient screenshot timeout creates retry pressure or stale output | High | Medium | Classify exact typed CDP command timeout only. Permit at most one full read-only agent retry under the original deadline and identity. Do not retry frames immediately or return an older image. Commit nothing from a failed attempt. |
+| Webxd upstream shutdown failure leaves a stale or foreign socket | High | Low–medium | Run every cleanup stage, aggregate failures, retry residue, make a stopped object one-shot, and compare owned socket inode identity before unlink. Test old-instance cleanup after replacement. |
 
-## Residual risks after Phase 2B
+## Residual risks after Phase 2B.1
 
-Phase 2B makes the new route reliable only behind the non-default development switch. These items remain gates before production-default routing:
+Phase 2B.1 qualifies the new development route only behind the non-default switch. These items remain gates before production-default routing:
 
 1. Add the production Tauri frame bridge and human takeover. Keep workspace selection separate from authority.
 2. Test Google Chrome when it is installed. Current evidence on this host covers Fedora Chromium only.
@@ -55,4 +58,4 @@ Phase 2B makes the new route reliable only behind the non-default development sw
 6. Keep cross-origin out-of-process iframe DOM fallback unsupported until a separate authority and coordinate design is reviewed. Same-origin iframe fallback is covered.
 7. Hostile same-UID code remains outside the ADR-011 boundary. Use a separate Unix user or stronger sandbox only if that threat enters scope.
 
-The Phase 0 viewer is not a security reference. The Phase 2B native route does not use Tauri. The 30-minute process soak does not resolve ADR-012. See `PHASE2B-RESULTS.md`, `ADR-015-OBSERVATION-LEASE-AND-MOTOR-TIMING.md`, and `ADR-016-SCREENSHOT-TRANSFER-AND-IDEMPOTENCY.md`.
+The Phase 0 viewer is not a security reference. The Phase 2B.1 native route does not use Tauri. Its final-code 30-minute process soak does not resolve ADR-012. See `PHASE2B1-RESULTS.md` and ADR-015 through ADR-017.

@@ -1,6 +1,6 @@
 # ADR-013: Public screenshot-first browser contract
 
-Status: accepted and corrected by Phase 2B
+Status: accepted and corrected by Phase 2B; capture delivery qualified by Phase 2B.1
 
 ## Context
 
@@ -80,4 +80,4 @@ Image-grounded actions remain valid at non-1 DPR because the conversion occurs i
 
 The contract is smaller than the legacy browser surface. Unsupported legacy workspace and debug tools are not active for `agentcursor/chrome`.
 
-Production-default routing stays disabled after Phase 2B. The immutable startup switch still defaults to `legacy`. ADR-016 is authoritative for screenshot transfer and idempotency lifetimes.
+Phase 2B.1 adds internal session capture arbitration without changing this public contract. Production-default routing stays disabled. The immutable startup switch still defaults to `legacy`. ADR-016 is authoritative for screenshot transfer and idempotency lifetimes; ADR-017 is authoritative for internal capture concurrency and timeout recovery.
