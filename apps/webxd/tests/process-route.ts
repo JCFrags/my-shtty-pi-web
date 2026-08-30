@@ -22,6 +22,8 @@ interface SoakBrowserReplacement {
   readonly secondTabId: string;
   readonly searchReadHealthyDuringOutage: true;
   readonly piReconnects: number;
+  readonly captureReadinessAttempts: number;
+  readonly captureReadinessRecoveredTimeouts: number;
 }
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const MAX_ROUTE_SAMPLES = 2_048;
@@ -326,9 +328,27 @@ async function main(): Promise<void> {
       const created = await primaryPi.execute("browser_tabs", { action: "create-tab", browserSessionId: nextA.browserSessionId, url: `${origin}/second?soak-replacement=1` });
       const nextSecondTabId = allMatches(textOf(created), /"tabId":\s*"([^"]+)"/gu).find((id) => id !== nextA.tabId);
       if (nextSecondTabId === undefined) throw new Error("replacement soak session did not create its second tab");
+      // Prove that both cold replacement Chromium processes can complete a
+      // screenshot round without a recovery before enabling continuous frames.
+      // A prior recovered timeout is allowed, but readiness requires one later
+      // retry-free round and remains bounded to three rounds.
+      const readinessStart = numberField(asRecord(asRecord(await next.call("metrics")).captureCoordinator), "recoveredAgentTimeouts");
+      let captureReadinessAttempts = 0;
+      let captureReadinessRecoveredTimeouts = 0;
+      let captureReady = false;
+      for (let round = 0; round < 3; round++) {
+        const before = numberField(asRecord(asRecord(await next.call("metrics")).captureCoordinator), "recoveredAgentTimeouts");
+        assertPiImage(await primaryPi.execute("browser_observe", nextA)); captureReadinessAttempts += 1;
+        assertPiImage(await currentPiB.execute("browser_observe", nextB)); captureReadinessAttempts += 1;
+        const after = numberField(asRecord(asRecord(await next.call("metrics")).captureCoordinator), "recoveredAgentTimeouts");
+        captureReadinessRecoveredTimeouts = after - readinessStart;
+        if (after === before) { captureReady = true; break; }
+        await sleep(2_000);
+      }
+      assert.equal(captureReady, true, "replacement Chromium capture readiness did not stabilize");
       if (workspace !== undefined) { await workspace.waitForSessions([nextA.browserSessionId, nextB.browserSessionId]); await workspace.select(nextA.browserSessionId, nextA.tabId); }
-      await currentWebxd.call("subscribe", { ownerId: "phase2b-agent-a", browserSessionId: nextA.browserSessionId, tabId: nextA.tabId });
-      return { browserd: next, ready, identityA: nextA, identityB: nextB, secondTabId: nextSecondTabId, searchReadHealthyDuringOutage: true, piReconnects: 4 };
+      if (workspace === undefined) await currentWebxd.call("subscribe", { ownerId: "phase2b-agent-a", browserSessionId: nextA.browserSessionId, tabId: nextA.tabId });
+      return { browserd: next, ready, identityA: nextA, identityB: nextB, secondTabId: nextSecondTabId, searchReadHealthyDuringOutage: true, piReconnects: 4, captureReadinessAttempts, captureReadinessRecoveredTimeouts };
     },
   }) : undefined;
   if (soakRun !== undefined) { piB = soakRun.piB; webxd = soakRun.webxd; browserd = soakRun.browserd; activeBrowserd = browserd; identityA = soakRun.identityA; }
@@ -750,8 +770,11 @@ async function runProcessSoak(options: {
   let restarted = false;
   const retryController = new AbortController();
   const retryFacade = new WebxFacadeClient(options.webxPath, join(options.root, "soak-retry-exports"));
+  const actorFrameStreamEnabled = options.workspace === undefined;
   await retryFacade.start({ signal: retryController.signal, ownerId: "phase2b-agent-a", cwd: "/deterministic/phase2b-process" });
-  await currentWebxd.call("subscribe", { ownerId: "phase2b-agent-a", browserSessionId: currentIdentityA.browserSessionId, tabId: currentIdentityA.tabId });
+  // The graphical Phase 3A route uses only its connection-local selected Tauri
+  // subscription. Retain the actor stream only for the non-workspace Phase 2 route.
+  if (actorFrameStreamEnabled) await currentWebxd.call("subscribe", { ownerId: "phase2b-agent-a", browserSessionId: currentIdentityA.browserSessionId, tabId: currentIdentityA.tabId });
   try {
     while (performance.now() < end) {
       iterations += 1;
@@ -830,7 +853,7 @@ async function runProcessSoak(options: {
         streamSegments.push(asRecord(beforeRestart.stream));
         currentWebxd = await options.restartWebxd(currentWebxd);
         const listed = await options.piA.execute("browser_tabs", { action: "list" }); assert.match(textOf(listed), new RegExp(currentIdentityA.browserSessionId));
-        await currentWebxd.call("subscribe", { ownerId: "phase2b-agent-a", browserSessionId: currentIdentityA.browserSessionId, tabId: currentIdentityA.tabId });
+        if (actorFrameStreamEnabled) await currentWebxd.call("subscribe", { ownerId: "phase2b-agent-a", browserSessionId: currentIdentityA.browserSessionId, tabId: currentIdentityA.tabId });
         restarted = true; webxdRestarts += 1;
       }
       if (browserReplacement === undefined && elapsed >= options.durationSeconds * 1_000 * 0.8) {
@@ -854,7 +877,7 @@ async function runProcessSoak(options: {
       const delay = Math.min(Math.max(0, nextIteration - performance.now()), Math.max(0, end - performance.now())); if (delay > 0) await sleep(delay);
     }
   } finally {
-    await currentWebxd.call("unsubscribe").catch(() => undefined);
+    if (actorFrameStreamEnabled) await currentWebxd.call("unsubscribe").catch(() => undefined);
     retryController.abort(); await retryFacade.stop({ ownerId: "phase2b-agent-a" }).catch(() => undefined);
   }
   const actualDurationSeconds = (performance.now() - started) / 1_000;
@@ -967,7 +990,7 @@ async function runProcessSoak(options: {
       motor: { generatedNominalPathDurationMs: distribution(actions.map((item) => numberField(item, "generatedNominalPathDurationMs"))), sampleReplayWallMs: pathDistribution, cdpInputLatencyMs: distribution(actions.map((item) => numberField(item, "cdpInputLatencyMs"))), cdpInputMaxLatencyMs: distribution(actions.map((item) => numberField(item, "cdpInputMaxLatencyMs"))), overlayUpdateLatencyMs: distribution(actions.map((item) => numberField(item, "overlayUpdateLatencyMs"))), postPathGuardMs: distribution(actions.map((item) => numberField(item, "postPathGuardMs"))), totalMs: distribution(actions.map((item) => numberField(item, "totalMs"))), sampleCount: distribution(actions.map((item) => numberField(item, "sampleCount"))), bySession: motorBySession, slowestActions },
       browserdDispatchLatencyMs: { screenshotMetadata: distribution(dispatch.filter((item) => item.kind === "observe.screenshot").map((item) => numberField(item, "durationMs"))), imageArtifactRead: distribution(dispatch.filter((item) => item.kind === "artifact.read").map((item) => numberField(item, "durationMs"))), coordinateAction: distribution(dispatch.filter((item) => item.kind === "action.coordinate").map((item) => numberField(item, "durationMs"))) },
       piReconnects, webxdRestarts, browserdReplacements, workspaceWindowCycles, tabCycles, exactCloseRetryPairs: closeRetryPairs,
-      browserdReplacement: { oldRuntimeInstanceId: workloadBrowser.runtimeInstanceId, newRuntimeInstanceId: finalBrowser.runtimeInstanceId, newSessions: [currentIdentityA.browserSessionId, currentIdentityB.browserSessionId], secondTabId: browserReplacement.secondTabId, searchReadHealthyDuringOutage: browserReplacement.searchReadHealthyDuringOutage },
+      browserdReplacement: { oldRuntimeInstanceId: workloadBrowser.runtimeInstanceId, newRuntimeInstanceId: finalBrowser.runtimeInstanceId, newSessions: [currentIdentityA.browserSessionId, currentIdentityB.browserSessionId], secondTabId: browserReplacement.secondTabId, searchReadHealthyDuringOutage: browserReplacement.searchReadHealthyDuringOutage, captureReadinessAttempts: browserReplacement.captureReadinessAttempts, captureReadinessRecoveredTimeouts: browserReplacement.captureReadinessRecoveredTimeouts },
       workspaceSwitches: workspaceSwitchLatencyMsForSoak.length,
       workspaceSwitchLatencyMs: distribution(workspaceSwitchLatencyMsForSoak),
       finalIdempotency: idempotency,
