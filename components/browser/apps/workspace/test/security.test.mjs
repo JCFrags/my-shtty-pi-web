@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFile, readdir } from "node:fs/promises";
 
 const root = new URL("..", import.meta.url);
-const frontendPaths = ["src/App.tsx", "src/bridge.ts", "src/main.tsx"];
+const frontendPaths = ["src/App.tsx", "src/bridge.ts", "src/FrameViewport.tsx", "src/main.tsx", "src/workspaceState.ts"];
 const frontend = (await Promise.all(frontendPaths.map((path) => readFile(new URL(path, root), "utf8")))).join("\n");
 const rustFiles = (await readdir(new URL("src-tauri/src/", root))).filter((name) => name.endsWith(".rs"));
 const rust = (await Promise.all(rustFiles.map((name) => readFile(new URL(`src-tauri/src/${name}`, root), "utf8")))).join("\n");

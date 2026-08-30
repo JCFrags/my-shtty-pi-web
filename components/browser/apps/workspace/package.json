@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "tauri": "tauri",
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test test/*.test.mjs && vitest run test/*.test.ts",
     "test:binary-ipc": "cargo test --manifest-path src-tauri/Cargo.toml probe::tests::produces_one_hundred_unique_one_megabyte_payload_digests && node --test test/security.test.mjs",
     "check": "tsc -b",
     "format": "true"
@@ -23,6 +23,7 @@
     "@types/react-dom": "19.1.6",
     "@vitejs/plugin-react": "4.6.0",
     "typescript": "5.9.3",
-    "vite": "7.0.6"
+    "vite": "7.0.6",
+    "vitest": "4.1.10"
   }
 }

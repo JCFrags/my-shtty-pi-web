@@ -27,8 +27,14 @@ pub struct FrameDeliveryMetadata {
     pub height: u32,
 }
 
+pub fn admit_frame_sequence(last_sequence: u64, header: &FrameHeader, payload: &[u8]) -> Result<Option<u64>, WorkspaceError> {
+    if header.frame_sequence <= last_sequence { return Ok(None); }
+    validate_frame_payload(header, payload)?;
+    Ok(Some(header.frame_sequence))
+}
+
 pub fn encode_frame_delivery(delivery_id: u64, header: &FrameHeader, payload: &[u8]) -> Result<Vec<u8>, WorkspaceError> {
-    if payload.len() != header.byte_length || Sha256::digest(payload).as_slice() != hex_digest(&header.sha256)?.as_slice() { return Err(WorkspaceError::Protocol); }
+    validate_frame_payload(header, payload)?;
     let metadata = FrameDeliveryMetadata {
         delivery_id,
         selection_id: header.selection_id.clone(),
@@ -57,6 +63,11 @@ pub fn encode_frame_delivery(delivery_id: u64, header: &FrameHeader, payload: &[
     Ok(output)
 }
 
+fn validate_frame_payload(header: &FrameHeader, payload: &[u8]) -> Result<(), WorkspaceError> {
+    if payload.len() != header.byte_length || Sha256::digest(payload).as_slice() != hex_digest(&header.sha256)?.as_slice() { return Err(WorkspaceError::Protocol); }
+    Ok(())
+}
+
 fn hex_digest(value: &str) -> Result<Vec<u8>, WorkspaceError> {
     if value.len() != 64 { return Err(WorkspaceError::Protocol); }
     (0..value.len()).step_by(2).map(|index| u8::from_str_radix(&value[index..index + 2], 16).map_err(|_| WorkspaceError::Protocol)).collect()
@@ -77,5 +88,13 @@ mod tests {
         assert_eq!(metadata["deliveryId"], 9);
         assert_eq!(&encoded[4 + metadata_len..], payload);
         assert!(!String::from_utf8_lossy(&encoded[..4 + metadata_len]).contains("base64"));
+
+        let mut last_sequence = 0;
+        let corrupt = vec![8_u8; payload.len()];
+        assert!(admit_frame_sequence(last_sequence, &header, &corrupt).is_err());
+        assert_eq!(last_sequence, 0, "digest rejection must not advance the watermark");
+        last_sequence = admit_frame_sequence(last_sequence, &header, &payload).unwrap().unwrap();
+        assert_eq!(last_sequence, header.frame_sequence);
+        assert_eq!(admit_frame_sequence(last_sequence, &header, &payload).unwrap(), None);
     }
 }

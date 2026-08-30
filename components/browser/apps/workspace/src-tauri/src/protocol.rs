@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 pub const PROTOCOL_VERSION: &str = "workspace.v1";
 pub const MAX_HEADER_BYTES: usize = 64 * 1024;
 pub const MAX_PAYLOAD_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_FRAME_PIXELS: u64 = 33_554_432;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -239,7 +240,8 @@ fn validate_snapshot(snapshot: &WorkspaceSnapshot) -> Result<(), WorkspaceError>
 }
 
 fn validate_frame(frame: &FrameHeader, payload_len: usize) -> Result<(), WorkspaceError> {
-    if frame.byte_length != payload_len || payload_len == 0 || !opaque_id(&frame.selection_id) || !opaque_id(&frame.subscription_id) || !opaque_id(&frame.browserd_runtime_instance_id) || !id(&frame.browser_session_id) || !id(&frame.tab_id) || !matches!(frame.media_type.as_str(), "image/png" | "image/jpeg") || frame.sha256.len() != 64 || !frame.sha256.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) || frame.width == 0 || frame.height == 0 || frame.width > 32_768 || frame.height > 32_768 { return Err(WorkspaceError::Protocol); }
+    let pixels = u64::from(frame.width) * u64::from(frame.height);
+    if frame.byte_length != payload_len || payload_len == 0 || !opaque_id(&frame.selection_id) || !opaque_id(&frame.subscription_id) || !opaque_id(&frame.browserd_runtime_instance_id) || !id(&frame.browser_session_id) || !id(&frame.tab_id) || !matches!(frame.media_type.as_str(), "image/png" | "image/jpeg") || frame.sha256.len() != 64 || !frame.sha256.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) || frame.width == 0 || frame.height == 0 || frame.width > 32_768 || frame.height > 32_768 || pixels > MAX_FRAME_PIXELS { return Err(WorkspaceError::Protocol); }
     Ok(())
 }
 
@@ -271,5 +273,7 @@ mod tests {
         let frame = serde_json::json!({"protocolVersion":"workspace.v1","kind":"frame","selectionId":"selection_123456","subscriptionId":"subscription_1234","browserdRuntimeInstanceId":"runtime_123456789","browserSessionId":"session:one","tabId":"tab:one","frameSequence":1,"documentGeneration":1,"viewportGeneration":1,"capturedAt":"2026-08-30T00:00:00.000Z","publishedAt":"2026-08-30T00:00:00.000Z","mediaType":"image/png","byteLength":3,"sha256":"a".repeat(64),"width":1,"height":1});
         assert!(matches!(parse_server_record(&serde_json::to_vec(&frame).unwrap(), 3), Ok(ServerRecord::Frame(_))));
         assert!(parse_server_record(&serde_json::to_vec(&frame).unwrap(), 2).is_err());
+        let oversized = serde_json::json!({"protocolVersion":"workspace.v1","kind":"frame","selectionId":"selection_123456","subscriptionId":"subscription_1234","browserdRuntimeInstanceId":"runtime_123456789","browserSessionId":"session:one","tabId":"tab:one","frameSequence":1,"documentGeneration":1,"viewportGeneration":1,"capturedAt":"2026-08-30T00:00:00.000Z","publishedAt":"2026-08-30T00:00:00.000Z","mediaType":"image/png","byteLength":3,"sha256":"a".repeat(64),"width":32768,"height":32768});
+        assert!(parse_server_record(&serde_json::to_vec(&oversized).unwrap(), 3).is_err());
     }
 }

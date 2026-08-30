@@ -1,7 +1,7 @@
 use crate::{
     descriptor::WorkspaceDescriptor,
     error::{PublicError, WorkspaceError},
-    frame::encode_frame_delivery,
+    frame::{admit_frame_sequence, encode_frame_delivery},
     protocol::{self, FrameHeader, ResponseResult, ServerRecord, WorkspaceSnapshot},
     state::{FrontendStateRecord, PublicWorkspaceState, SelectedTab, SharedPublicState},
 };
@@ -254,11 +254,18 @@ impl Worker {
 
     fn accept_frame(&mut self, header: FrameHeader, payload: Vec<u8>) -> Result<(), WorkspaceError> {
         let selected = match &self.selected { Some(selected) if selected.selection_id == header.selection_id && selected.browser_session_id == header.browser_session_id && selected.tab_id == header.tab_id => selected, _ => { self.dropped += 1; return Ok(()); } };
-        if self.browserd_runtime_instance_id.as_deref() != Some(&header.browserd_runtime_instance_id) || header.frame_sequence <= self.last_frame_sequence { self.dropped += 1; return Ok(()); }
-        self.last_frame_sequence = header.frame_sequence;
+        if self.browserd_runtime_instance_id.as_deref() != Some(&header.browserd_runtime_instance_id) { self.dropped += 1; return Ok(()); }
+        let Some(sequence) = admit_frame_sequence(self.last_frame_sequence, &header, &payload)? else { self.dropped += 1; return Ok(()); };
         let _ = selected;
-        if self.inflight_delivery_id.is_some() { if self.pending_frame.replace((header, payload)).is_some() { self.dropped += 1; } self.update_frame_metrics(); return Ok(()); }
-        self.send_frame(header, payload)
+        if self.inflight_delivery_id.is_some() {
+            self.last_frame_sequence = sequence;
+            if self.pending_frame.replace((header, payload)).is_some() { self.dropped += 1; }
+            self.update_frame_metrics();
+            return Ok(());
+        }
+        self.send_frame(header, payload)?;
+        self.last_frame_sequence = sequence;
+        Ok(())
     }
 
     fn send_frame(&mut self, header: FrameHeader, payload: Vec<u8>) -> Result<(), WorkspaceError> {

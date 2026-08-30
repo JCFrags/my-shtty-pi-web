@@ -28,7 +28,16 @@ const textDecoder = new TextDecoder("utf-8", { fatal: true });
 const ID = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/;
 const OPAQUE_ID = /^[A-Za-z0-9_-]{16,128}$/;
 
-export class WorkspaceBridge {
+export interface WorkspaceApi {
+  open(onState: (record: FrontendStateRecord) => void, onFrame: (frame: ArrayBuffer) => void): Promise<void>;
+  select(browserSessionId: string, tabId?: string): Promise<SelectedTab>;
+  clearSelection(): Promise<void>;
+  currentState(): Promise<PublicWorkspaceState>;
+  acknowledgeFrame(deliveryId: number): Promise<void>;
+  windowAction(action: "raise" | "hide"): Promise<void>;
+}
+
+export class WorkspaceBridge implements WorkspaceApi {
   #stateChannel?: Channel<FrontendStateRecord>;
   #frameChannel?: Channel<ArrayBuffer>;
 
