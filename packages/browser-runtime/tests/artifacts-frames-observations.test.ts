@@ -343,12 +343,17 @@ describe("screenshot consistency transaction", () => {
       if (method === "Page.captureScreenshot") { screenshots++; throw new CdpCommandTimeoutError(method, 10_000); }
       return { result: { value: layout() } } as T;
     } });
-    const scheduler = new FrameScheduler(actor, registryFor([target]), artifacts, motor as never, () => 1, { selectedIntervalMs: 10_000, captureCoordinator });
+    const scheduler = new FrameScheduler(actor, registryFor([target]), artifacts, motor as never, () => 1, { selectedIntervalMs: 10_000, frameTimeoutRecoveryMs: 50, captureCoordinator });
     const events: FrameEvent[] = [];
     scheduler.on("frame", (event) => events.push(event));
     scheduler.subscribe("connection\0frame-timeout", address(target));
     await waitFor(() => captureCoordinator.diagnostics.frameScreenshotTimeouts === 1);
+    let agentStarted = false;
+    const queuedAgent = captureCoordinator.runAgent("frame-timeout", undefined, async () => { agentStarted = true; });
     await sleep(10);
+    assert.equal(agentStarted, false);
+    await queuedAgent;
+    assert.equal(agentStarted, true);
     assert.equal(screenshots, 1);
     assert.equal(events.length, 0);
     assert.equal(artifacts.entryCount, 0);

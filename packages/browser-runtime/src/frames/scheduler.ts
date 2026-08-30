@@ -27,6 +27,7 @@ export interface FrameSchedulerOptions {
   idleIntervalMs?: number;
   selectedIntervalMs?: number;
   burstIntervalMs?: number;
+  frameTimeoutRecoveryMs?: number;
   commitBarrierForTest?: () => Promise<void>;
   afterScreenshotForTest?: () => Promise<void>;
   captureCoordinator?: SessionCaptureCoordinator;
@@ -39,6 +40,7 @@ export class FrameScheduler extends EventEmitter {
   private readonly idleIntervalMs: number;
   private readonly selectedIntervalMs: number;
   private readonly burstIntervalMs: number;
+  private readonly frameTimeoutRecoveryMs: number;
   private readonly commitBarrierForTest: (() => Promise<void>) | undefined;
   private readonly afterScreenshotForTest: (() => Promise<void>) | undefined;
   private readonly captureCoordinator: SessionCaptureCoordinator | undefined;
@@ -50,6 +52,7 @@ export class FrameScheduler extends EventEmitter {
     this.idleIntervalMs = options.idleIntervalMs ?? 2_000;
     this.selectedIntervalMs = options.selectedIntervalMs ?? 500;
     this.burstIntervalMs = options.burstIntervalMs ?? 100;
+    this.frameTimeoutRecoveryMs = options.frameTimeoutRecoveryMs ?? 2_000;
     this.commitBarrierForTest = options.commitBarrierForTest;
     this.afterScreenshotForTest = options.afterScreenshotForTest;
     this.captureCoordinator = options.captureCoordinator;
@@ -231,6 +234,10 @@ export class FrameScheduler extends EventEmitter {
         if (error instanceof CdpCommandTimeoutError && error.method === "Page.captureScreenshot") {
           this.captureCoordinator?.recordFrameScreenshotTimeout();
           this.droppedFrames++;
+          // Chrome can continue compositor work after the CDP request times out.
+          // Keep this session's capture permit during a bounded recovery dwell so
+          // a queued agent screenshot does not inherit that still-busy capture.
+          await abortableDelay(this.frameTimeoutRecoveryMs, captureSignal);
         }
         if (tab.state !== "open" && this.schedules.has(schedule.tabId)) void this.stop(schedule.tabId);
         throw error;
@@ -263,3 +270,14 @@ function frameConnection(tab: TabRecord): FrameConnection { const connection = c
 async function layout(tab: TabRecord, signal?: AbortSignal): Promise<Layout> { const expression = "({url:location.href,title:document.title,width:innerWidth,height:innerHeight,dpr:devicePixelRatio,scrollX:scrollX,scrollY:scrollY})"; const response = await frameConnection(tab).send<{ result?: { value?: unknown }; exceptionDetails?: unknown }>("Runtime.evaluate", { expression, returnByValue: true }, tab.cdpSessionId, signal ? { signal } : {}); const value = response.result?.value; if (response.exceptionDetails !== undefined || !isLayout(value)) throw new BrowserProtocolError("CDP_ERROR", "Could not inspect frame viewport."); return value; }
 function isLayout(value: unknown): value is Layout { if (typeof value !== "object" || value === null) return false; const item = value as Partial<Layout>; return typeof item.url === "string" && typeof item.title === "string" && [item.width, item.height, item.dpr, item.scrollX, item.scrollY].every((number) => typeof number === "number" && Number.isFinite(number)); }
 function sameAddress(left: TabAddress, right: TabAddress): boolean { return left.browserSessionId === right.browserSessionId && left.tabId === right.tabId && left.targetId === right.targetId && left.controlEpoch === right.controlEpoch; }
+async function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  if (ms <= 0) return;
+  signal.throwIfAborted();
+  await new Promise<void>((resolveDelay, rejectDelay) => {
+    const complete = (): void => { signal.removeEventListener("abort", abort); resolveDelay(); };
+    const timer = setTimeout(complete, ms);
+    const abort = (): void => { clearTimeout(timer); signal.removeEventListener("abort", abort); rejectDelay(signal.reason ?? new BrowserProtocolError("OPERATION_CANCELLED", "Frame timeout recovery was cancelled.")); };
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+  });
+}
