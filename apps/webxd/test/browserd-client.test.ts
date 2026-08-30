@@ -129,6 +129,14 @@ class FakeBrowserd {
   }
 
   send(socket: Socket, value: unknown): void { socket.write(`${JSON.stringify(value)}\n`); }
+  sendSplit(socket: Socket, value: unknown, marker: string, markerByteBoundary: number): void {
+    const encoded = Buffer.from(`${JSON.stringify(value)}\n`, "utf8");
+    const markerOffset = encoded.indexOf(Buffer.from(marker, "utf8"));
+    if (markerOffset < 0) throw new Error("split marker is absent");
+    const split = markerOffset + markerByteBoundary;
+    socket.write(encoded.subarray(0, split));
+    setImmediate(() => socket.write(encoded.subarray(split)));
+  }
   disconnectAll(): void { for (const socket of this.sockets) socket.destroy(); }
 
   async close(): Promise<void> {
@@ -328,6 +336,20 @@ describe("BrowserdClientPool transport", () => {
     await client.close();
   });
 
+  it("pins descriptor-dependent request construction and execution to the same runtime connection", async () => {
+    const fixture = await FakeBrowserd.start();
+    const client = pool(fixture);
+    const pinned = await client.requestWithDescriptor(actorA, "operation-pinned", async (seenDescriptor) => {
+      expect(seenDescriptor.runtimeInstanceId).toBe("runtime_fixture_a");
+      await fixture.replaceRuntime("runtime_fixture_b");
+      return { kind: "capabilities.get" };
+    });
+    expect(pinned).toEqual({ runtimeInstanceId: "runtime_fixture_a", result: { kind: "ack", operationId: "operation-pinned" } });
+    await expect(client.request(actorB, "operation-after-replacement", { kind: "capabilities.get" })).resolves.toMatchObject({ operationId: "operation-after-replacement" });
+    expect(client.runtimeInstanceId).toBe("runtime_fixture_b");
+    await client.close();
+  });
+
   it("fails old pending work on runtime replacement and reconnects new work", async () => {
     const fixture = await FakeBrowserd.start();
     fixture.handler = (message, socket) => { if (message.operationId === "operation-new") fixture.respondAck(socket, message); };
@@ -373,6 +395,76 @@ describe("BrowserdClientPool transport", () => {
     fixture.handler = (message, socket) => fixture.respondAck(socket, message, "operation-other");
     const client = pool(fixture);
     await expect(client.request(actorA, "operation-a", { kind: "capabilities.get" })).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+    await client.close();
+  });
+
+  it("reconstructs exact multibyte response, error, frame title, and frame URL across every UTF-8 byte boundary", async () => {
+    const fixture = await FakeBrowserd.start();
+    const marker = "😀";
+    let splitBoundary = 1;
+    fixture.handler = (message, socket) => {
+      if (message.operationId?.startsWith("response-split-") === true) {
+        fixture.sendSplit(socket, {
+          protocolVersion: PROTOCOL_VERSION, kind: "response", requestId: message.requestId, operationId: message.operationId, ok: true,
+          result: { kind: "sessions", sessions: [{ kind: "session", browserSessionId: "session-a", controlEpoch: 1, state: "ready", personaId, cursor: { x: 0, y: 0, pathSequence: 0, sampleSequence: 0, personaId, visible: true }, tabs: [{ kind: "tab", address, documentGeneration: 1, viewportGeneration: 1, state: "ready", url: `https://example.test/${marker}`, title: `雪${marker}`, frameSequence: 0 }] }] },
+        }, marker, splitBoundary);
+      } else if (message.operationId?.startsWith("error-split-") === true) {
+        fixture.sendSplit(socket, { protocolVersion: PROTOCOL_VERSION, kind: "response", requestId: message.requestId, operationId: message.operationId, ok: false, error: { code: "INTERNAL_ERROR", message: `typed-雪-${marker}`, retryable: false } }, marker, splitBoundary);
+      } else if (message.kind === "frames.subscribe" || message.kind === "frames.unsubscribe") fixture.respondAck(socket, message);
+      else fixture.respondAck(socket, message);
+    };
+    const client = pool(fixture);
+    for (splitBoundary = 1; splitBoundary < Buffer.byteLength(marker); splitBoundary += 1) {
+      const response = await client.request(actorA, `response-split-${splitBoundary}`, { kind: "session.list" }) as { sessions: Array<{ tabs: Array<{ title: string; url: string }> }> };
+      expect(response.sessions[0]?.tabs[0]).toMatchObject({ title: `雪${marker}`, url: `https://example.test/${marker}` });
+      await expect(client.request(actorA, `error-split-${splitBoundary}`, { kind: "session.list" })).rejects.toMatchObject({ code: "INTERNAL_ERROR", message: `typed-雪-${marker}` });
+    }
+    const seen: FrameEvent[] = [];
+    const subscription = await client.subscribeFrames(actorA, "subscribe-unicode", address, (event) => seen.push(event));
+    const socket = [...fixture.sockets][0];
+    if (socket === undefined) throw new Error("fixture socket missing");
+    for (splitBoundary = 1; splitBoundary < Buffer.byteLength(marker); splitBoundary += 1) {
+      fixture.sendSplit(socket, { ...frame(splitBoundary), title: `frame-雪-${marker}`, url: `https://example.test/路径/${marker}` }, marker, splitBoundary);
+      await waitUntil(() => seen.length === splitBoundary);
+    }
+    expect(seen.every((event) => event.title === `frame-雪-${marker}` && event.url === `https://example.test/路径/${marker}`)).toBe(true);
+    await subscription.close();
+    await client.close();
+  });
+
+  it("keeps active subscriptions through idle pruning and prunes them after confirmed close", async () => {
+    const fixture = await FakeBrowserd.start();
+    fixture.handler = (message, socket) => fixture.respondAck(socket, message);
+    const now = vi.spyOn(Date, "now");
+    now.mockReturnValue(1_000);
+    const client = pool(fixture, { maxActorConnections: 1, idleTimeoutMs: 100 });
+    const subscription = await client.subscribeFrames(actorA, "subscribe-idle", address, () => undefined);
+    now.mockReturnValue(2_000);
+    await expect(client.request(actorB, "other-while-subscribed", { kind: "capabilities.get" })).rejects.toMatchObject({ code: "LIMIT_EXCEEDED" });
+    const socket = [...fixture.sockets][0];
+    if (socket === undefined) throw new Error("fixture socket missing");
+    fixture.send(socket, frame(1));
+    await flush();
+    now.mockReturnValue(2_050);
+    await subscription.close();
+    now.mockReturnValue(2_151);
+    await expect(client.request(actorB, "other-after-close", { kind: "capabilities.get" })).resolves.toMatchObject({ operationId: "other-after-close" });
+    expect(client.connectionCount).toBe(1);
+    await client.close();
+  });
+
+  it("shares unsubscribe teardown and closes the actor connection when confirmation is lost", async () => {
+    const fixture = await FakeBrowserd.start();
+    fixture.handler = (message, socket) => { if (message.kind !== "frames.unsubscribe" && message.kind !== "operation.cancel") fixture.respondAck(socket, message); };
+    const client = pool(fixture, { requestTimeoutMs: 20 });
+    const subscription = await client.subscribeFrames(actorA, "subscribe-loss", address, () => undefined);
+    const first = subscription.close();
+    const second = subscription.close();
+    await expect(first).rejects.toMatchObject({ code: "DEADLINE_EXCEEDED" });
+    await expect(second).rejects.toMatchObject({ code: "DEADLINE_EXCEEDED" });
+    expect(fixture.messages.filter((message) => message.kind === "frames.unsubscribe")).toHaveLength(1);
+    await waitUntil(() => fixture.sockets.size === 0);
+    expect(client.connectionCount).toBe(0);
     await client.close();
   });
 

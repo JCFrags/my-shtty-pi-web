@@ -3,6 +3,7 @@ import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { createConnection, type Socket } from "node:net";
 import { dirname, resolve } from "node:path";
 import {
+  MAX_REQUEST_BYTES,
   MAX_RESPONSE_BYTES,
   PROTOCOL_VERSION,
   parseServerMessage,
@@ -29,6 +30,8 @@ export interface BrowserdDescriptor {
 
 export type BrowserdRequestFields = BrowserRequest extends infer Request ? Request extends BrowserRequest ? Omit<Request, "protocolVersion" | "requestId" | "operationId" | "deadline"> : never : never;
 
+export interface BrowserdPinnedResult { readonly runtimeInstanceId: string; readonly result: unknown }
+
 export interface BrowserdFrameSubscription {
   readonly subscriptionId: string;
   close(signal?: AbortSignal): Promise<void>;
@@ -41,6 +44,8 @@ export interface BrowserdClientPoolOptions {
   readonly maxPendingPerConnection?: number;
   readonly idleTimeoutMs?: number;
   readonly requestTimeoutMs?: number;
+  readonly maxOutboundBytesPerConnection?: number;
+  readonly maxSubscriptionsPerConnection?: number;
 }
 
 export class BrowserdClientError extends Error {
@@ -53,11 +58,14 @@ export class BrowserdClientError extends Error {
 }
 
 interface PoolEntry { readonly connection: BoundBrowserdConnection; lastUsedMs: number }
+type SubscriptionState = "open" | "unsubscribing" | "closed" | "cleanup-failed";
 interface LocalFrameSubscription {
   readonly addressKey: string;
   readonly listener: (event: FrameEvent) => void;
   pending?: FrameEvent;
   scheduled: boolean;
+  state: SubscriptionState;
+  closePromise?: Promise<void>;
 }
 
 export class BrowserdClientPool {
@@ -67,6 +75,8 @@ export class BrowserdClientPool {
   readonly #maxPendingPerConnection: number;
   readonly #idleTimeoutMs: number;
   readonly #requestTimeoutMs: number;
+  readonly #maxOutboundBytesPerConnection: number;
+  readonly #maxSubscriptionsPerConnection: number;
   readonly #runtimeDirectory: string;
   readonly #descriptorPath: string;
   #runtimeInstanceId?: string;
@@ -79,6 +89,10 @@ export class BrowserdClientPool {
     this.#maxPendingPerConnection = options.maxPendingPerConnection ?? 64;
     this.#idleTimeoutMs = options.idleTimeoutMs ?? 60_000;
     this.#requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
+    this.#maxOutboundBytesPerConnection = options.maxOutboundBytesPerConnection ?? 2 * MAX_REQUEST_BYTES;
+    this.#maxSubscriptionsPerConnection = options.maxSubscriptionsPerConnection ?? 16;
+    if (!Number.isSafeInteger(this.#maxOutboundBytesPerConnection) || this.#maxOutboundBytesPerConnection < MAX_REQUEST_BYTES) throw new Error("browserd outbound byte bound is invalid");
+    if (!Number.isSafeInteger(this.#maxSubscriptionsPerConnection) || this.#maxSubscriptionsPerConnection < 1 || this.#maxSubscriptionsPerConnection > 256) throw new Error("browserd subscription bound is invalid");
     if (dirname(this.#descriptorPath) !== this.#runtimeDirectory) throw new Error("browserd descriptor must be inside its expected runtime directory");
   }
 
@@ -92,14 +106,25 @@ export class BrowserdClientPool {
   }
 
   async request(actor: AuthorityActor, operationId: string, fields: BrowserdRequestFields, signal?: AbortSignal): Promise<unknown> {
+    return (await this.requestPinned(actor, operationId, fields, signal)).result;
+  }
+
+  async requestPinned(actor: AuthorityActor, operationId: string, fields: BrowserdRequestFields, signal?: AbortSignal): Promise<BrowserdPinnedResult> {
+    return await this.requestWithDescriptor(actor, operationId, async () => fields, signal);
+  }
+
+  async requestWithDescriptor(actor: AuthorityActor, operationId: string, fields: (descriptor: BrowserdDescriptor) => Promise<BrowserdRequestFields>, signal?: AbortSignal): Promise<BrowserdPinnedResult> {
     if (this.#closed) throw new BrowserdClientError("CAPABILITY_UNAVAILABLE", "browser service client is closed", true);
+    if (signal?.aborted) throw new DOMException("browser request was cancelled", "AbortError");
     this.pruneIdle();
     const descriptor = await readSecureDescriptor(this.#descriptorPath, this.#runtimeDirectory);
     this.acceptRuntime(descriptor.runtimeInstanceId);
     const entry = await this.connection(actor, descriptor);
+    const requestFields = await fields(descriptor);
+    if (signal?.aborted) throw new DOMException("browser request was cancelled", "AbortError");
     entry.lastUsedMs = Date.now();
-    const request = this.makeRequest(operationId, fields);
-    try { return await entry.connection.call(request, signal); }
+    const request = this.makeRequest(operationId, requestFields);
+    try { return { runtimeInstanceId: entry.connection.runtimeInstanceId, result: await entry.connection.call(request, signal) }; }
     finally { entry.lastUsedMs = Date.now(); }
   }
 
@@ -126,19 +151,31 @@ export class BrowserdClientPool {
     } finally {
       entry.lastUsedMs = Date.now();
     }
-    let closed = false;
+    let state: SubscriptionState = "open";
+    let closePromise: Promise<void> | undefined;
     return {
       subscriptionId,
-      close: async (closeSignal) => {
-        if (closed) return;
-        closed = true;
-        entry.connection.removeSubscription(subscriptionId);
-        if (entry.connection.closed) return;
-        try {
-          await entry.connection.call(this.makeRequest(nextId("unsubscribeOperation"), { kind: "frames.unsubscribe", address, subscriptionId }), closeSignal);
-        } finally {
-          entry.lastUsedMs = Date.now();
-        }
+      close: (closeSignal) => {
+        if (state === "closed") return Promise.resolve();
+        if (closePromise !== undefined) return closePromise;
+        state = "unsubscribing";
+        entry.connection.beginSubscriptionTeardown(subscriptionId);
+        closePromise = (async () => {
+          if (entry.connection.closed) { state = "closed"; return; }
+          try {
+            await entry.connection.call(this.makeRequest(nextId("unsubscribeOperation"), { kind: "frames.unsubscribe", address, subscriptionId }), closeSignal);
+            entry.connection.removeSubscription(subscriptionId);
+            state = "closed";
+          } catch (error) {
+            state = "cleanup-failed";
+            entry.connection.failSubscriptionTeardown(subscriptionId);
+            await entry.connection.close(new BrowserdClientError("CAPABILITY_UNAVAILABLE", "frame unsubscribe could not be confirmed; actor connection was closed", true, entry.connection.runtimeInstanceId));
+            throw error;
+          } finally {
+            entry.lastUsedMs = Date.now();
+          }
+        })();
+        return closePromise;
       },
     };
   }
@@ -184,13 +221,14 @@ export class BrowserdClientPool {
   }
 
   private async openConnection(key: string, actor: AuthorityActor, descriptor: BrowserdDescriptor): Promise<PoolEntry> {
-    const connection = await BoundBrowserdConnection.connect(descriptor, actor, this.#maxPendingPerConnection, this.#requestTimeoutMs);
+    const connection = await BoundBrowserdConnection.connect(descriptor, actor, this.#maxPendingPerConnection, this.#requestTimeoutMs, this.#maxOutboundBytesPerConnection, this.#maxSubscriptionsPerConnection);
     if (this.#closed || this.#runtimeInstanceId !== descriptor.runtimeInstanceId) {
       await connection.close();
       throw new BrowserdClientError("BROWSER_INSTANCE_REPLACED", "browser service instance was replaced", true, this.#runtimeInstanceId);
     }
     const entry = { connection, lastUsedMs: Date.now() };
     this.#entries.set(key, entry);
+    connection.onActivity = () => { const current = this.#entries.get(key); if (current?.connection === connection) current.lastUsedMs = Date.now(); };
     connection.onClosed = () => { if (this.#entries.get(key)?.connection === connection) this.#entries.delete(key); };
     return entry;
   }
@@ -207,15 +245,21 @@ export class BrowserdClientPool {
 
   private pruneIdle(): void {
     const cutoff = Date.now() - this.#idleTimeoutMs;
-    for (const [key, entry] of this.#entries) if (entry.lastUsedMs <= cutoff && entry.connection.pendingCount === 0) { this.#entries.delete(key); void entry.connection.close(); }
+    for (const [key, entry] of this.#entries) if (entry.lastUsedMs <= cutoff && entry.connection.pendingCount === 0 && entry.connection.subscriptionCount === 0 && entry.connection.subscriptionTeardownCount === 0) { this.#entries.delete(key); void entry.connection.close(); }
   }
 }
 
 class BoundBrowserdConnection {
   readonly #pending = new Map<string, { readonly operationId: string; resolve(value: unknown): void; reject(error: Error): void; cleanup(): void }>();
   readonly #subscriptions = new Map<string, LocalFrameSubscription>();
+  readonly #decoder = new TextDecoder("utf-8", { fatal: true });
   #buffer = "";
+  #frameBytes = 0;
+  #incompleteUtf8Bytes = 0;
+  #expectedUtf8Continuations = 0;
+  #outboundBytes = 0;
   #closed = false;
+  onActivity?: () => void;
   onClosed?: () => void;
 
   private constructor(
@@ -224,14 +268,16 @@ class BoundBrowserdConnection {
     private readonly actor: ActorIdentity,
     private readonly maxPending: number,
     private readonly requestTimeoutMs: number,
+    private readonly maxOutboundBytes: number,
+    private readonly maxSubscriptions: number,
   ) {}
 
-  static async connect(descriptor: BrowserdDescriptor, actor: AuthorityActor, maxPending: number, requestTimeoutMs: number): Promise<BoundBrowserdConnection> {
+  static async connect(descriptor: BrowserdDescriptor, actor: AuthorityActor, maxPending: number, requestTimeoutMs: number, maxOutboundBytes: number, maxSubscriptions: number): Promise<BoundBrowserdConnection> {
     const socket = createConnection({ path: descriptor.socketPath });
     let connection: BoundBrowserdConnection | undefined;
     try {
       await connected(socket);
-      connection = new BoundBrowserdConnection(descriptor.runtimeInstanceId, socket, { principalId: actor.principalId, agentSessionId: actor.agentId }, maxPending, requestTimeoutMs);
+      connection = new BoundBrowserdConnection(descriptor.runtimeInstanceId, socket, { principalId: actor.principalId, agentSessionId: actor.agentId }, maxPending, requestTimeoutMs, maxOutboundBytes, maxSubscriptions);
       socket.on("data", (chunk) => connection?.receive(chunk));
       socket.on("error", () => connection?.close(new BrowserdClientError("CAPABILITY_UNAVAILABLE", "browser service connection failed", true, descriptor.runtimeInstanceId)));
       socket.on("close", () => connection?.close(new BrowserdClientError("CAPABILITY_UNAVAILABLE", "browser service connection closed", true, descriptor.runtimeInstanceId)));
@@ -248,6 +294,8 @@ class BoundBrowserdConnection {
 
   get closed(): boolean { return this.#closed; }
   get pendingCount(): number { return this.#pending.size; }
+  get subscriptionCount(): number { return [...this.#subscriptions.values()].filter((item) => item.state !== "closed").length; }
+  get subscriptionTeardownCount(): number { return [...this.#subscriptions.values()].filter((item) => item.state === "unsubscribing").length; }
 
   async call(request: BrowserRequest, signal?: AbortSignal): Promise<unknown> {
     if (this.#closed) throw new BrowserdClientError("CAPABILITY_UNAVAILABLE", "browser service connection is closed", true, this.runtimeInstanceId);
@@ -257,9 +305,12 @@ class BoundBrowserdConnection {
 
   registerSubscription(subscriptionId: string, addressKey: string, listener: (event: FrameEvent) => void): void {
     if (this.#subscriptions.has(subscriptionId)) throw new BrowserdClientError("OPERATION_CONFLICT", "frame subscription already exists");
-    this.#subscriptions.set(subscriptionId, { addressKey, listener, scheduled: false });
+    if (this.#subscriptions.size >= this.maxSubscriptions) throw new BrowserdClientError("LIMIT_EXCEEDED", "frame subscription capacity is full", true, this.runtimeInstanceId);
+    this.#subscriptions.set(subscriptionId, { addressKey, listener, scheduled: false, state: "open" });
   }
-  removeSubscription(subscriptionId: string): void { this.#subscriptions.delete(subscriptionId); }
+  removeSubscription(subscriptionId: string): void { const item = this.#subscriptions.get(subscriptionId); if (item !== undefined) item.state = "closed"; this.#subscriptions.delete(subscriptionId); }
+  beginSubscriptionTeardown(subscriptionId: string): void { const item = this.#subscriptions.get(subscriptionId); if (item !== undefined && item.state === "open") item.state = "unsubscribing"; }
+  failSubscriptionTeardown(subscriptionId: string): void { const item = this.#subscriptions.get(subscriptionId); if (item !== undefined) item.state = "cleanup-failed"; }
 
   async close(reason = new BrowserdClientError("CAPABILITY_UNAVAILABLE", "browser service connection closed", true, this.runtimeInstanceId)): Promise<void> {
     if (this.#closed) return;
@@ -272,7 +323,12 @@ class BoundBrowserdConnection {
   }
 
   private exchange(message: unknown, requestId: string, operationId: string, signal?: AbortSignal): Promise<unknown> {
+    if (this.#closed) return Promise.reject(new BrowserdClientError("CAPABILITY_UNAVAILABLE", "browser service connection is closed", true, this.runtimeInstanceId));
     if (signal?.aborted) return Promise.reject(new DOMException("browser request was cancelled", "AbortError"));
+    if (this.#pending.size >= this.maxPending) return Promise.reject(new BrowserdClientError("LIMIT_EXCEEDED", "browser connection request capacity is full", true, this.runtimeInstanceId));
+    const encoded = `${JSON.stringify(message)}\n`;
+    const encodedBytes = Buffer.byteLength(encoded, "utf8");
+    if (encodedBytes > MAX_REQUEST_BYTES || this.#outboundBytes + encodedBytes > this.maxOutboundBytes) return Promise.reject(new BrowserdClientError("LIMIT_EXCEEDED", "browser connection outbound byte capacity is full", true, this.runtimeInstanceId));
     return new Promise((resolve, reject) => {
       let admitted = false;
       const abort = () => {
@@ -296,8 +352,15 @@ class BoundBrowserdConnection {
       const cleanup = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); };
       signal?.addEventListener("abort", abort, { once: true });
       this.#pending.set(requestId, { operationId, resolve, reject, cleanup });
-      try { this.socket.write(`${JSON.stringify(message)}\n`); admitted = true; }
-      catch (error) { this.#pending.delete(requestId); cleanup(); reject(error); }
+      if (signal?.aborted) { abort(); return; }
+      try {
+        this.#outboundBytes += encodedBytes;
+        this.socket.write(encoded, () => { this.#outboundBytes = Math.max(0, this.#outboundBytes - encodedBytes); });
+        admitted = true;
+      } catch (error) {
+        this.#outboundBytes = Math.max(0, this.#outboundBytes - encodedBytes);
+        this.#pending.delete(requestId); cleanup(); reject(error instanceof Error ? error : new Error("browser service socket write failed"));
+      }
     });
   }
 
@@ -311,41 +374,81 @@ class BoundBrowserdConnection {
 
   private receive(chunk: Uint8Array): void {
     if (this.#closed) return;
-    this.#buffer += new TextDecoder().decode(chunk, { stream: true });
-    if (Buffer.byteLength(this.#buffer, "utf8") > MAX_RESPONSE_BYTES) { void this.close(new BrowserdClientError("INTERNAL_ERROR", "browser service response exceeded its bound")); return; }
-    for (;;) {
-      const newline = this.#buffer.indexOf("\n");
-      if (newline < 0) return;
-      const line = this.#buffer.slice(0, newline); this.#buffer = this.#buffer.slice(newline + 1);
-      if (line.trim() === "") continue;
-      let message: ServerMessage;
-      try { message = parseServerMessage(JSON.parse(line) as unknown); }
-      catch { void this.close(new BrowserdClientError("INTERNAL_ERROR", "browser service returned an invalid message")); return; }
-      if (message.kind === "frame.available") { this.dispatchFrame(message); continue; }
-      const pending = this.#pending.get(message.requestId);
-      if (pending === undefined) continue;
-      if (message.kind !== "bound" && message.operationId !== undefined && message.operationId !== pending.operationId) {
-        const error = new BrowserdClientError("INTERNAL_ERROR", "browser service response operation identity changed");
-        this.#pending.delete(message.requestId); pending.cleanup(); pending.reject(error);
-        void this.close(error);
-        continue;
+    let start = 0;
+    try {
+      for (let index = 0; index < chunk.byteLength; index += 1) {
+        if (chunk[index] !== 0x0a) continue;
+        this.decodeFrameBytes(chunk.subarray(start, index));
+        if (this.#expectedUtf8Continuations !== 0) throw new Error("incomplete UTF-8 sequence at frame boundary");
+        this.#buffer += this.#decoder.decode();
+        const line = this.#buffer;
+        this.#buffer = "";
+        this.#frameBytes = 0;
+        this.#incompleteUtf8Bytes = 0;
+        this.#expectedUtf8Continuations = 0;
+        start = index + 1;
+        if (line.trim() !== "") this.handleLine(line);
+        if (this.#closed) return;
       }
-      this.#pending.delete(message.requestId); pending.cleanup();
-      if (message.kind === "bound") { pending.resolve(message); continue; }
-      if (message.ok) pending.resolve(message.result);
-      else pending.reject(new BrowserdClientError(message.error.code, message.error.message, message.error.retryable, this.runtimeInstanceId));
+      this.decodeFrameBytes(chunk.subarray(start));
+    } catch {
+      void this.close(new BrowserdClientError("INTERNAL_ERROR", "browser service returned invalid or oversized UTF-8 NDJSON"));
     }
+  }
+
+  private decodeFrameBytes(bytes: Uint8Array): void {
+    if (bytes.byteLength === 0) return;
+    this.#frameBytes += bytes.byteLength;
+    if (this.#frameBytes > MAX_RESPONSE_BYTES) throw new Error("response frame exceeded bound");
+    for (const byte of bytes) this.trackUtf8Byte(byte);
+    this.#buffer += this.#decoder.decode(bytes, { stream: true });
+  }
+
+  private trackUtf8Byte(byte: number): void {
+    if (this.#expectedUtf8Continuations > 0) {
+      if (byte < 0x80 || byte > 0xbf) throw new Error("invalid UTF-8 continuation");
+      this.#expectedUtf8Continuations -= 1;
+      this.#incompleteUtf8Bytes += 1;
+      if (this.#expectedUtf8Continuations === 0) this.#incompleteUtf8Bytes = 0;
+    } else if (byte <= 0x7f) this.#incompleteUtf8Bytes = 0;
+    else if (byte >= 0xc2 && byte <= 0xdf) { this.#expectedUtf8Continuations = 1; this.#incompleteUtf8Bytes = 1; }
+    else if (byte >= 0xe0 && byte <= 0xef) { this.#expectedUtf8Continuations = 2; this.#incompleteUtf8Bytes = 1; }
+    else if (byte >= 0xf0 && byte <= 0xf4) { this.#expectedUtf8Continuations = 3; this.#incompleteUtf8Bytes = 1; }
+    else throw new Error("invalid UTF-8 leading byte");
+    if (this.#incompleteUtf8Bytes > 4) throw new Error("incomplete UTF-8 sequence exceeded bound");
+  }
+
+  private handleLine(line: string): void {
+    let message: ServerMessage;
+    try { message = parseServerMessage(JSON.parse(line) as unknown); }
+    catch { void this.close(new BrowserdClientError("INTERNAL_ERROR", "browser service returned an invalid message")); return; }
+    if (message.kind === "frame.available") { this.dispatchFrame(message); return; }
+    const pending = this.#pending.get(message.requestId);
+    if (pending === undefined) return;
+    if (message.kind !== "bound" && message.operationId !== undefined && message.operationId !== pending.operationId) {
+      const error = new BrowserdClientError("INTERNAL_ERROR", "browser service response operation identity changed");
+      this.#pending.delete(message.requestId); pending.cleanup(); pending.reject(error);
+      void this.close(error);
+      return;
+    }
+    this.#pending.delete(message.requestId); pending.cleanup();
+    if (message.kind === "bound") { pending.resolve(message); return; }
+    if (message.ok) pending.resolve(message.result);
+    else pending.reject(new BrowserdClientError(message.error.code, message.error.message, message.error.retryable, this.runtimeInstanceId));
   }
 
   private dispatchFrame(event: FrameEvent): void {
     const key = frameAddressKey(event.address);
+    let matched = false;
     for (const subscription of this.#subscriptions.values()) {
-      if (subscription.addressKey !== key) continue;
+      if (subscription.addressKey !== key || subscription.state === "closed") continue;
+      matched = true;
       subscription.pending = event;
       if (subscription.scheduled) continue;
       subscription.scheduled = true;
       queueMicrotask(() => this.deliverFrame(subscription));
     }
+    if (matched) this.onActivity?.();
   }
 
   private deliverFrame(subscription: LocalFrameSubscription): void {
