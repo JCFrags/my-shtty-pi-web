@@ -66,6 +66,7 @@ export class SessionMotor extends EventEmitter {
   isActiveTab(tabId: string): boolean { return this.activeTab?.tabId === tabId; }
 
   async initializeTab(tab: TabRecord): Promise<void> {
+    await this.command(tab, "Emulation.setFocusEmulationEnabled", { enabled: true });
     await this.command(tab, "Page.addScriptToEvaluateOnNewDocument", { source: overlayInstallSource(this.overlay) });
     await this.installOverlay(tab);
   }

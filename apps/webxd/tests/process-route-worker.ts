@@ -227,8 +227,9 @@ function attachMotorListeners(runtime: BrowserRuntime, attached: Set<string>, ti
     if (attached.has(session.browserSessionId)) continue;
     attached.add(session.browserSessionId);
     session.motor.on("actionEnd", (event: unknown) => {
-      const item = isRecord(event) ? event.timings : undefined;
-      if (item !== undefined) { timings.push(item); if (timings.length > 20_000) timings.splice(0, timings.length - 20_000); }
+      const record = isRecord(event) ? event : undefined;
+      const item = record !== undefined && isRecord(record.timings) ? record.timings : undefined;
+      if (item !== undefined) { timings.push({ browserSessionId: session.browserSessionId, tabId: record?.tabId, recordedMonotonicMs: performance.now(), ...item }); if (timings.length > 20_000) timings.splice(0, timings.length - 20_000); }
     });
   }
 }
