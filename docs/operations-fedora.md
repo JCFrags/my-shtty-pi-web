@@ -81,6 +81,17 @@ pi-web doctor --json
 journalctl --user -u webxd.service -n 100 --no-pager
 ```
 
+`webxd.service` owns `/run/user/$UID/pi-web` through `RuntimeDirectory=pi-web` and `RuntimeDirectoryMode=0700`. If Pi reports `connect ENOENT .../pi-web/webxd.sock`, inspect the unit and socket before reloading Pi:
+
+```bash
+systemctl --user show webxd.service -p RuntimeDirectory -p RuntimeDirectoryMode
+systemctl --user restart webxd.service
+stat -c '%a %F %n' "$XDG_RUNTIME_DIR/pi-web" "$XDG_RUNTIME_DIR/pi-web/webxd.sock"
+pi-web doctor --json
+```
+
+The expected modes are `0700` for the directory and `0600` for the socket. A running service without these unit directives can fail after the transient runtime directory disappears. Add the directives with a user-unit drop-in, reload systemd, and restart the service; do not rely on a manually created runtime directory. After service verification, use `/reload` or start a new Pi session because a Pi extension that failed during `session_start` does not recover that startup attempt in place.
+
 If verification fails, use the exact run ID from the apply result:
 
 ```bash

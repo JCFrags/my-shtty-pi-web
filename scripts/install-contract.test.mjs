@@ -10,6 +10,12 @@ test("generated webxd unit depends only on core search and reader services", asy
   assert.doesNotMatch(unit, /pi-browserd|pi-web-crawl|pi-web-docling|pi-web-egress-proxy/);
 });
 
+test("generated webxd unit owns its private runtime directory", async () => {
+  const cutover = await readFile(new URL("./pi-web-cutover", import.meta.url), "utf8");
+  const unit = cutover.match(/"webxd\.service": f"""([\s\S]*?)""",/)?.[1] ?? "";
+  assert.match(unit, /\\nRuntimeDirectory=pi-web\\nRuntimeDirectoryMode=0700\\n/);
+});
+
 test("Fedora installer stages a reviewed candidate before live cutover", async () => {
   const installer = await readFile(new URL("../install-fedora.sh", import.meta.url), "utf8");
   assert.match(installer, /pi-web-profile/);
