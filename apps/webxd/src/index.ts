@@ -4,3 +4,7 @@ export * from "./content-store.js";
 export * from "./fixtures.js";
 export * from "./ports.js";
 export * from "./runtime.js";
+export * from "./workspace/browserd-broker-client.js";
+export * from "./workspace/descriptor.js";
+export * from "./workspace/gateway.js";
+export * from "./workspace/sanitizer.js";

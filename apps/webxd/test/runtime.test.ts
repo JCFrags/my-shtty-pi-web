@@ -355,12 +355,12 @@ describe("actual WebX Unix runtime", () => {
     const concurrent = runtime.stop();
     await expect(first).rejects.toBeInstanceOf(AggregateError);
     await expect(concurrent).rejects.toBeInstanceOf(AggregateError);
-    expect(stageCalls).toEqual(["1:clients", "1:server", "1:bindings", "1:browser", "1:socket"]);
+    expect(stageCalls).toEqual(["1:clients", "1:server", "1:bindings", "1:workspace", "1:browser", "1:socket"]);
     expect(runtime.diagnostics).toMatchObject({ clientConnections: 0, liveBindings: 0 });
     await expect(stat(webxPath)).rejects.toMatchObject({ code: "ENOENT" });
 
     await runtime.stop();
-    expect(stageCalls).toEqual(["1:clients", "1:server", "1:bindings", "1:browser", "1:socket", "2:browser"]);
+    expect(stageCalls).toEqual(["1:clients", "1:server", "1:bindings", "1:workspace", "1:browser", "1:socket", "2:browser"]);
     await expect(runtime.start()).rejects.toThrow("cannot restart");
   });
 

@@ -53,6 +53,7 @@ class FakeBrowserd {
       socketPath,
       bindingSecret: "b".repeat(43),
       brokerSigningSecret: "s".repeat(43),
+      workspaceBrokerSecret: "w".repeat(43),
       startedAt: "2026-08-29T00:00:00.000Z",
     };
     const fixture = new FakeBrowserd(directory, socketPath, descriptorPath, descriptor);

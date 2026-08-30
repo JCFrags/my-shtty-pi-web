@@ -9,6 +9,7 @@
     "start": "pnpm run build && node dist/apps/webxd/src/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:workspace": "vitest run test/workspace-gateway.test.ts",
     "test:phase2b": "vitest run",
     "test:live-agentcursor": "tsx tests/live-agentcursor-route.ts",
     "test:live-phase2b": "tsx tests/live-agentcursor-route.ts",

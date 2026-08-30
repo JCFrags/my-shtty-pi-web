@@ -25,6 +25,7 @@ export interface BrowserdDescriptor {
   readonly socketPath: string;
   readonly bindingSecret: string;
   readonly brokerSigningSecret: string;
+  readonly workspaceBrokerSecret: string;
   readonly startedAt: string;
 }
 
@@ -485,14 +486,14 @@ async function readSecureDescriptorUnchecked(descriptorPath: string, runtimeDire
   if (!descriptorInfo.isFile() || descriptorInfo.isSymbolicLink() || (descriptorInfo.mode & 0o777) !== 0o600) throw new BrowserdClientError("CAPABILITY_UNAVAILABLE", "browser service descriptor is not a private regular file");
   let value: unknown;
   try { value = JSON.parse(await readFile(descriptorPath, "utf8")); } catch { throw new BrowserdClientError("CAPABILITY_UNAVAILABLE", "browser service descriptor is invalid"); }
-  if (!isRecord(value) || value.protocolVersion !== PROTOCOL_VERSION || typeof value.runtimeInstanceId !== "string" || !ID.test(value.runtimeInstanceId) || !Number.isSafeInteger(value.pid) || (value.pid as number) <= 0 || typeof value.processStartTicks !== "string" || !/^\d+$/u.test(value.processStartTicks) || typeof value.socketPath !== "string" || typeof value.bindingSecret !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(value.bindingSecret) || typeof value.brokerSigningSecret !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(value.brokerSigningSecret) || typeof value.startedAt !== "string" || !Number.isFinite(Date.parse(value.startedAt))) throw new BrowserdClientError("CAPABILITY_UNAVAILABLE", "browser service descriptor is invalid");
+  if (!isRecord(value) || value.protocolVersion !== PROTOCOL_VERSION || typeof value.runtimeInstanceId !== "string" || !ID.test(value.runtimeInstanceId) || !Number.isSafeInteger(value.pid) || (value.pid as number) <= 0 || typeof value.processStartTicks !== "string" || !/^\d+$/u.test(value.processStartTicks) || typeof value.socketPath !== "string" || typeof value.bindingSecret !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(value.bindingSecret) || typeof value.brokerSigningSecret !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(value.brokerSigningSecret) || typeof value.workspaceBrokerSecret !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(value.workspaceBrokerSecret) || typeof value.startedAt !== "string" || !Number.isFinite(Date.parse(value.startedAt))) throw new BrowserdClientError("CAPABILITY_UNAVAILABLE", "browser service descriptor is invalid");
   const socketPath = resolve(value.socketPath);
   if (dirname(socketPath) !== expectedDirectory || await realpath(dirname(socketPath)) !== expectedDirectory) throw new BrowserdClientError("CAPABILITY_UNAVAILABLE", "browser service socket location is invalid");
   const socketInfo = await lstat(socketPath);
   if (!socketInfo.isSocket() || (socketInfo.mode & 0o777) !== 0o600) throw new BrowserdClientError("CAPABILITY_UNAVAILABLE", "browser service socket is not private");
   const processStartTicks = await readProcessStartTicks(value.pid as number).catch(() => undefined);
   if (processStartTicks !== value.processStartTicks) throw new BrowserdClientError("CAPABILITY_UNAVAILABLE", "browser service process identity is stale", true);
-  return { protocolVersion: PROTOCOL_VERSION, runtimeInstanceId: value.runtimeInstanceId, pid: value.pid as number, processStartTicks: value.processStartTicks, socketPath, bindingSecret: value.bindingSecret, brokerSigningSecret: value.brokerSigningSecret, startedAt: value.startedAt };
+  return { protocolVersion: PROTOCOL_VERSION, runtimeInstanceId: value.runtimeInstanceId, pid: value.pid as number, processStartTicks: value.processStartTicks, socketPath, bindingSecret: value.bindingSecret, brokerSigningSecret: value.brokerSigningSecret, workspaceBrokerSecret: value.workspaceBrokerSecret, startedAt: value.startedAt };
 }
 
 async function readProcessStartTicks(pid: number): Promise<string> { const text = await readFile(`/proc/${pid}/stat`, "utf8"); const end = text.lastIndexOf(")"); const ticks = text.slice(end + 2).split(" ")[19]; if (ticks === undefined || !/^\d+$/u.test(ticks)) throw new Error("invalid process identity"); return ticks; }

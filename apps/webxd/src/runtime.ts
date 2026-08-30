@@ -11,6 +11,7 @@ import type { BrowserBackendSelection } from "./browser-backend-selection.js";
 import { FailClosedBrowserDestinationAuthority, type BrowserDestinationAuthority } from "./destination-authority.js";
 import { PUBLIC_SOURCES } from "./fixtures.js";
 import type { AuthorityActor, IndexedSource } from "./ports.js";
+import { WorkspaceGateway } from "./workspace/gateway.js";
 
 const MAX_REQUEST_BYTES = 1_048_576;
 // A complete 4 MiB image expands to about 5.34 MiB as base64 inside the JSON response.
@@ -34,6 +35,7 @@ export interface WebxdRuntimeOptions {
   readonly browserBackend?: BrowserBackendSelection;
   readonly browserDescriptorPath?: string;
   readonly browserRuntimeDirectory?: string;
+  readonly workspaceRuntimeDirectory?: string;
   readonly cwd?: string;
   readonly sources?: readonly IndexedSource[];
   readonly browserConnectionFactory?: BrowserRpcConnectionFactory;
@@ -55,7 +57,7 @@ export interface WebxdRuntimeOptions {
   readonly cleanupStageForTest?: (stage: WebxdCleanupStage, attempt: number) => void | Promise<void>;
 }
 
-export type WebxdCleanupStage = "clients" | "server" | "bindings" | "browser" | "socket";
+export type WebxdCleanupStage = "clients" | "server" | "bindings" | "workspace" | "browser" | "socket";
 type SocketIdentity = { readonly dev: number; readonly ino: number };
 type CleanupState = Record<WebxdCleanupStage, boolean>;
 
@@ -63,6 +65,7 @@ type CleanupState = Record<WebxdCleanupStage, boolean>;
 export class WebxdRuntime {
   readonly #browser: import("./ports.js").BrowserDaemonPort;
   readonly #authority: WebxAuthority;
+  readonly #workspace?: WorkspaceGateway;
   readonly #clients = new Set<Socket>();
   readonly #bindings = new Map<string, ActorBinding>();
   readonly #controllers = new Set<AbortController>();
@@ -79,7 +82,7 @@ export class WebxdRuntime {
   #stopPromise?: Promise<void>;
   #stopAttempt = 0;
   #socketIdentity?: SocketIdentity;
-  #cleanupState: CleanupState = { clients: false, server: false, bindings: false, browser: false, socket: false };
+  #cleanupState: CleanupState = { clients: false, server: false, bindings: false, workspace: false, browser: false, socket: false };
   #testResponseDropped = false;
 
   constructor(private readonly options: WebxdRuntimeOptions) {
@@ -99,6 +102,13 @@ export class WebxdRuntime {
       if (options.browserDescriptorPath === undefined || options.browserRuntimeDirectory === undefined) throw new Error("agentcursor backend requires the browserd descriptor and runtime directory");
       this.#browser = new AgentCursorBrowserPort(new BrowserdClientPool({ descriptorPath: options.browserDescriptorPath, runtimeDirectory: options.browserRuntimeDirectory }), options.browserDestinationAuthority ?? new FailClosedBrowserDestinationAuthority());
     }
+    if (options.workspaceRuntimeDirectory !== undefined) {
+      this.#workspace = new WorkspaceGateway({
+        runtimeDirectory: options.workspaceRuntimeDirectory,
+        browserBackend: backend,
+        ...(backend === "agentcursor" ? { browserDescriptorPath: options.browserDescriptorPath, browserRuntimeDirectory: options.browserRuntimeDirectory } : {}),
+      });
+    }
     this.#authority = new WebxAuthority({
       browser: this.#browser,
       sources: options.sources ?? PUBLIC_SOURCES,
@@ -117,6 +127,7 @@ export class WebxdRuntime {
     readonly liveBindings: number;
     readonly idempotency: WebxAuthority["idempotencyStats"];
     readonly browser?: AgentCursorBrowserPort["diagnostics"];
+    readonly workspace?: WorkspaceGateway["diagnostics"];
     readonly testResponseDropped: boolean;
   } {
     return {
@@ -124,6 +135,7 @@ export class WebxdRuntime {
       liveBindings: this.#bindings.size,
       idempotency: this.#authority.idempotencyStats,
       ...(this.#browser instanceof AgentCursorBrowserPort ? { browser: this.#browser.diagnostics } : {}),
+      ...(this.#workspace === undefined ? {} : { workspace: this.#workspace.diagnostics }),
       testResponseDropped: this.#testResponseDropped,
     };
   }
@@ -142,8 +154,16 @@ export class WebxdRuntime {
     const info = await lstat(this.options.socketPath);
     if (!info.isSocket()) throw new Error("WebX endpoint is not a Unix socket");
     this.#socketIdentity = { dev: info.dev, ino: info.ino };
-    this.#cleanupState = { clients: false, server: false, bindings: false, browser: false, socket: false };
+    this.#cleanupState = { clients: false, server: false, bindings: false, workspace: false, browser: false, socket: false };
     this.#server = server;
+    try { await this.#workspace?.start(); }
+    catch (error) {
+      await closeServer(server).catch(() => undefined);
+      this.#server = undefined;
+      await unlinkOwnedSocket(this.options.socketPath, this.#socketIdentity).catch(() => undefined);
+      this.#socketIdentity = undefined;
+      throw error;
+    }
     this.#started = true;
   }
 
@@ -182,6 +202,7 @@ export class WebxdRuntime {
       this.#server = undefined;
     }, failures);
     await this.cleanupStage("bindings", attempt, async () => { this.#bindings.clear(); }, failures);
+    await this.cleanupStage("workspace", attempt, async () => { await this.#workspace?.stop(); }, failures);
     await this.cleanupStage("browser", attempt, async () => { await this.#browser.shutdown(); }, failures);
     await this.cleanupStage("socket", attempt, async () => { await unlinkOwnedSocket(this.options.socketPath, this.#socketIdentity); }, failures);
     if (failures.length > 0) throw new AggregateError(failures, "WebX runtime shutdown cleanup failed.");

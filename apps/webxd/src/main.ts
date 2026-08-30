@@ -18,6 +18,7 @@ const runtime = new WebxdRuntime({
   browserBackend,
   browserRuntimeDirectory,
   browserDescriptorPath: process.env.BROWSERD_DESCRIPTOR ?? `${browserRuntimeDirectory}/browserd.json`,
+  workspaceRuntimeDirectory: process.env.WEBXD_WORKSPACE_RUNTIME_DIR ?? `${runtimeDirectory}/pi-web/workspace`,
   cwd: process.cwd(),
   searxUrl: process.env.WEBX_SEARX_URL ?? "http://127.0.0.1:8888",
   readerUrl: process.env.WEBX_READER_URL ?? "http://127.0.0.1:8787",
