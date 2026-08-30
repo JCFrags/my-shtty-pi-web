@@ -22,16 +22,22 @@ The server:
 - issues one random runtime binding secret during facade start;
 - requires the binding ID and secret on later requests;
 - rejects forged binding secrets and does not let one request change actor identity;
-- uses one persistent browser connection per bound actor;
+- uses one persistent browser connection per bound actor with persistent UTF-8 decoding and independent pending, subscription, frame, incomplete-byte, and outbound bounds;
 - uses legacy actor registration only in legacy mode;
 - binds AgentCursor browserd connections once from authenticated authority identity;
-- reconnects for new work after a browser daemon replacement but never recreates or remaps old sessions;
+- removes each transient actor binding when its issuing Pi socket closes while browserd-owned sessions survive;
+- rehydrates actor-owned sessions after webxd restart when the browserd runtime is unchanged;
+- reconnects for new work after a browser daemon replacement, purges old local metadata, and never recreates or remaps old sessions;
 - removes its Unix socket and closes upstream connections during shutdown;
 - fails closed. It has no direct browser-provider fallback.
 
 Browser operations use only `BrowserDaemonPort`. The selected backend reports only its own path and actions. `agentcursor/chrome` uses explicit sessions and tabs, screenshot observations, image-pixel or CSS-viewport coordinates, explicit DOM fallback, and bounded cancellation. It does not expose legacy workspace, debug, upload, or download operations.
 
-For `agentcursor`, webxd applies destination policy and signs a short-lived browser authorization bound to the actor, operation, runtime, normalized URL, and configured egress route. Browser session creation fails closed unless the destination authority reports a healthy proxy. Search, read, content, cache, and artifacts remain independent of browserd.
+For `agentcursor`, webxd applies destination policy and signs a short-lived browser authorization bound to the actor, operation, runtime, normalized URL, and configured egress route. Signing and dispatch use one pinned browserd runtime connection. Capability health performs a bounded branded proxy probe and requires matching egress binding IDs. Browser session creation probes independently and fails closed unless the route is functional. Search, read, content, cache, and artifacts remain independent of browserd.
+
+Browserd screenshot and DOM observation lifetimes default separately to 60 seconds and are configured on browserd with `BROWSERD_SCREENSHOT_OBSERVATION_TTL_MS` and `BROWSERD_DOM_OBSERVATION_TTL_MS`. Each accepts 10,000 through 120,000 ms. Runtime expiry is monotonic and public results include exact wall `validUntil`.
+
+AgentCursor screenshot POST returns metadata only. Webxd then serves the exact image GET by session, tab, and real observation ID. It verifies canonical base64, complete byte count, digest, media type, and decoded dimensions. It retains bounded observation metadata and no full screenshot buffer. Frame subscriptions are internal trusted primitives with idle/selected interest, active-action burst, latest-frame-only backpressure, and deterministic connection cleanup. They are not model-facing tools.
 
 ## Search
 
@@ -57,7 +63,7 @@ The cache keeps up to 256 entries and 32 MiB in RAM. It keeps up to 2,048 entrie
 
 Identical eligible search and read work is coalesced under at most 256 in-flight keys. Each caller keeps independent cancellation. The shared operation stops only when no waiter remains.
 
-Successful mutation idempotency records expire after 15 minutes. They use at most 1,024 entries and 16 MiB. Browser screenshot responses do not put multi-megabyte image base64 in this general cache. AgentCursor screenshot bytes come from verified bounded browserd artifact reads and move through the facade image payload.
+Successful durable-mutation idempotency records expire after 15 minutes. They use at most 1,024 entries and 16 MiB. Screenshot and DOM observations are ephemeral and exact image reads are uncached; neither enters this general map. Diagnostics report entries and bytes by policy and require image bytes retained to remain zero. AgentCursor screenshot bytes come from verified bounded browserd artifact reads and exist in webxd only for immediate facade image presentation.
 
 This cache reduces repeated search-provider and website traffic. It is not a durable research archive and has no Pi-facing recall operations. When a change alters cached search semantics, update the search cache format version so an older response cannot mask the new behavior.
 

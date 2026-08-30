@@ -1,0 +1,7674 @@
+{
+  "passed": true,
+  "requestedDurationSeconds": 1800,
+  "actualDurationSeconds": 1800.5944010299997,
+  "uninterrupted": true,
+  "iterations": 360,
+  "requestedSampleIntervalSeconds": 15,
+  "sampleCount": 121,
+  "sampleCadenceNote": "Samples are collected at the first safe workload boundary after each requested interval; long routed actions can coalesce intervals.",
+  "delayedActions": {
+    "attempts": 15,
+    "successes": 15,
+    "modelDelayMs": {
+      "count": 16,
+      "min": 4898.8837389999535,
+      "median": 10001.546705999994,
+      "p95": 10004.079486000119,
+      "max": 10005.654159000027,
+      "mean": 9683.325775124993
+    }
+  },
+  "screenshotAndImageRouteLatencyMs": {
+    "count": 720,
+    "min": 18.795989000005648,
+    "median": 43.8196459999308,
+    "p95": 507.08121000020765,
+    "max": 1551.6226769999485,
+    "mean": 164.7317515319466
+  },
+  "imageRetrievalPresentationBytesCheckMs": {
+    "count": 720,
+    "min": 0.007599000120535493,
+    "median": 0.014747999841347337,
+    "p95": 0.028141000017058104,
+    "max": 0.0676649999950314,
+    "mean": 0.01579854583139119
+  },
+  "actionRouteLatencyMs": {
+    "count": 703,
+    "min": 93.2861190000549,
+    "median": 789.3819619999267,
+    "p95": 1232.5719449999742,
+    "max": 1733.1172380000353,
+    "mean": 844.0650421223372
+  },
+  "domFallbackRouteLatencyMs": {
+    "count": 240,
+    "min": 6.427424000110477,
+    "median": 8.483406000072137,
+    "p95": 10.561076999998477,
+    "max": 14.881466999882832,
+    "mean": 8.647578483334458
+  },
+  "searchReadLatencyMs": {
+    "count": 120,
+    "min": 0.20004700002027676,
+    "median": 0.4664589997846633,
+    "p95": 0.7306049999897368,
+    "max": 3.520038000002387,
+    "mean": 0.5322402916568535
+  },
+  "motor": {
+    "generatedNominalPathDurationMs": {
+      "count": 705,
+      "min": 85.70984331535874,
+      "median": 541.7754083662679,
+      "p95": 732.929626816406,
+      "max": 837.4658514520377,
+      "mean": 540.2466814551768
+    },
+    "sampleReplayWallMs": {
+      "count": 705,
+      "min": 87.49353399989195,
+      "median": 760.6153659999836,
+      "p95": 1225.1911499999696,
+      "max": 1724.914824000094,
+      "mean": 833.8470240397157
+    },
+    "cdpInputLatencyMs": {
+      "count": 705,
+      "min": 13.639601999893785,
+      "median": 349.92247900087386,
+      "p95": 1046.9304929994978,
+      "max": 1120.525799999974,
+      "mean": 523.0332347503626
+    },
+    "cdpInputMaxLatencyMs": {
+      "count": 705,
+      "min": 1.0235500000417233,
+      "median": 42.85679699998582,
+      "p95": 713.2921539999079,
+      "max": 956.8674649999884,
+      "mean": 298.53450397730643
+    },
+    "overlayUpdateLatencyMs": {
+      "count": 705,
+      "min": 4.279857999412343,
+      "median": 11.587935000006837,
+      "p95": 16.11125300003914,
+      "max": 22.442348000360653,
+      "mean": 11.963048693627346
+    },
+    "postPathGuardMs": {
+      "count": 705,
+      "min": 0,
+      "median": 0,
+      "p95": 0,
+      "max": 1.0342490000002726,
+      "mean": 0.0027572482269520894
+    },
+    "totalMs": {
+      "count": 705,
+      "min": 87.89990600012243,
+      "median": 760.8693800000474,
+      "p95": 1225.5026629999047,
+      "max": 1725.2911499999464,
+      "mean": 834.9299746326232
+    },
+    "sampleCount": {
+      "count": 705,
+      "min": 9,
+      "median": 16,
+      "p95": 16,
+      "max": 16,
+      "mean": 15.859574468085107
+    },
+    "bySession": {
+      "session_oon5Qq4mvXCW2nFx9hSdOTvE": {
+        "count": 361,
+        "min": 263.886770000001,
+        "median": 1131.0885650001,
+        "p95": 1273.0491309999488,
+        "max": 1724.914824000094,
+        "mean": 1118.849526903048
+      },
+      "session__sC8CivcsZW467zEiklgIcSC": {
+        "count": 344,
+        "min": 87.49353399989195,
+        "median": 548.6117720000912,
+        "p95": 720.5603059999994,
+        "max": 829.6952990000136,
+        "mean": 534.7600951627886
+      }
+    },
+    "slowestActions": [
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 1733293.137944,
+        "pathDurationMs": 770.2237438425346,
+        "pathWallMs": 1724.914824000094,
+        "generatedNominalPathDurationMs": 770.2237438425346,
+        "sampleReplayWallMs": 1724.914824000094,
+        "cdpInputLatencyMs": 1117.7414290001616,
+        "cdpInputMaxLatencyMs": 954.0168810000177,
+        "overlayUpdateLatencyMs": 8.630555000156164,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1725.2911499999464
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 173276.673768,
+        "pathDurationMs": 744.6152422012988,
+        "pathWallMs": 1701.8232699999935,
+        "generatedNominalPathDurationMs": 744.6152422012988,
+        "sampleReplayWallMs": 1701.8232699999935,
+        "cdpInputLatencyMs": 1120.525799999974,
+        "cdpInputMaxLatencyMs": 956.8674649999884,
+        "overlayUpdateLatencyMs": 11.569351999933133,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1702.4311760000128
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 1583055.904361,
+        "pathDurationMs": 744.5780149906502,
+        "pathWallMs": 1692.2730669998564,
+        "generatedNominalPathDurationMs": 744.5780149906502,
+        "sampleReplayWallMs": 1692.2730669998564,
+        "cdpInputLatencyMs": 1088.776889000088,
+        "cdpInputMaxLatencyMs": 947.685884000035,
+        "overlayUpdateLatencyMs": 8.783615999855101,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1692.5446920001414
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 828444.554799,
+        "pathDurationMs": 727.1269764945429,
+        "pathWallMs": 1667.034442000091,
+        "generatedNominalPathDurationMs": 727.1269764945429,
+        "sampleReplayWallMs": 1667.034442000091,
+        "cdpInputLatencyMs": 1069.959194000112,
+        "cdpInputMaxLatencyMs": 940.9090309999883,
+        "overlayUpdateLatencyMs": 12.27662499982398,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1670.8402770000976
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 702958.538138,
+        "pathDurationMs": 712.5108767667741,
+        "pathWallMs": 1579.8777680000057,
+        "generatedNominalPathDurationMs": 712.5108767667741,
+        "sampleReplayWallMs": 1579.8777680000057,
+        "cdpInputLatencyMs": 1020.5121780001791,
+        "cdpInputMaxLatencyMs": 868.4295540000312,
+        "overlayUpdateLatencyMs": 11.97614799987059,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1580.6333660000237
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 1103867.145637,
+        "pathDurationMs": 755.4158970646314,
+        "pathWallMs": 1487.0140819998924,
+        "generatedNominalPathDurationMs": 755.4158970646314,
+        "sampleReplayWallMs": 1487.0140819998924,
+        "cdpInputLatencyMs": 1019.0811020005494,
+        "cdpInputMaxLatencyMs": 732.1231870001648,
+        "overlayUpdateLatencyMs": 14.291407000040635,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1487.3934150000568
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 1002862.586541,
+        "pathDurationMs": 770.8910163598189,
+        "pathWallMs": 1481.7715220000828,
+        "generatedNominalPathDurationMs": 770.8910163598189,
+        "sampleReplayWallMs": 1481.7715220000828,
+        "cdpInputLatencyMs": 1019.4742219998734,
+        "cdpInputMaxLatencyMs": 710.7629629999865,
+        "overlayUpdateLatencyMs": 12.68509299994912,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1482.3487560000503
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 1117988.212287,
+        "pathDurationMs": 737.4272762693676,
+        "pathWallMs": 1410.001826000167,
+        "generatedNominalPathDurationMs": 737.4272762693676,
+        "sampleReplayWallMs": 1410.001826000167,
+        "cdpInputLatencyMs": 1058.9758839996066,
+        "cdpInputMaxLatencyMs": 673.0446219998412,
+        "overlayUpdateLatencyMs": 13.432394999312237,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1410.474955999991
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 342770.943914,
+        "pathDurationMs": 705.4399897949907,
+        "pathWallMs": 1395.1886710000108,
+        "generatedNominalPathDurationMs": 705.4399897949907,
+        "sampleReplayWallMs": 1395.1886710000108,
+        "cdpInputLatencyMs": 1046.369185999909,
+        "cdpInputMaxLatencyMs": 689.6021199999959,
+        "overlayUpdateLatencyMs": 12.828272000013385,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1400.62030900002
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 1008110.682955,
+        "pathDurationMs": 539.2270961598297,
+        "pathWallMs": 1328.6852489999728,
+        "generatedNominalPathDurationMs": 539.2270961598297,
+        "sampleReplayWallMs": 1328.6852489999728,
+        "cdpInputLatencyMs": 1076.2376430000877,
+        "cdpInputMaxLatencyMs": 790.1909180000657,
+        "overlayUpdateLatencyMs": 12.967694999882951,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1333.781203999999
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 1308087.219944,
+        "pathDurationMs": 485.1996583759623,
+        "pathWallMs": 1326.52428100002,
+        "generatedNominalPathDurationMs": 485.1996583759623,
+        "sampleReplayWallMs": 1326.52428100002,
+        "cdpInputLatencyMs": 1071.0629580006935,
+        "cdpInputMaxLatencyMs": 841.0006899998989,
+        "overlayUpdateLatencyMs": 14.47674599965103,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1326.9090380000416
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 1222700.979025,
+        "pathDurationMs": 673.155219777897,
+        "pathWallMs": 1324.1222679999191,
+        "generatedNominalPathDurationMs": 673.155219777897,
+        "sampleReplayWallMs": 1324.1222679999191,
+        "cdpInputLatencyMs": 1073.3832180001773,
+        "cdpInputMaxLatencyMs": 651.8470070001204,
+        "overlayUpdateLatencyMs": 14.353563000215217,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1324.4308170001023
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 877849.875868,
+        "pathDurationMs": 696.9395523573679,
+        "pathWallMs": 1284.0364570000675,
+        "generatedNominalPathDurationMs": 696.9395523573679,
+        "sampleReplayWallMs": 1284.0364570000675,
+        "cdpInputLatencyMs": 1012.6184259998845,
+        "cdpInputMaxLatencyMs": 586.7303769999417,
+        "overlayUpdateLatencyMs": 13.450193000026047,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1284.4940289999358
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 1466197.771883,
+        "pathDurationMs": 526.7249621076669,
+        "pathWallMs": 1280.7242019998375,
+        "generatedNominalPathDurationMs": 526.7249621076669,
+        "sampleReplayWallMs": 1280.7242019998375,
+        "cdpInputLatencyMs": 1032.0874489997514,
+        "cdpInputMaxLatencyMs": 755.1679819999263,
+        "overlayUpdateLatencyMs": 10.39114199951291,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1281.3537329998799
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 1297859.917362,
+        "pathDurationMs": 785.0901674597317,
+        "pathWallMs": 1278.854150999803,
+        "generatedNominalPathDurationMs": 785.0901674597317,
+        "sampleReplayWallMs": 1278.854150999803,
+        "cdpInputLatencyMs": 951.1566429992672,
+        "cdpInputMaxLatencyMs": 494.4069529999979,
+        "overlayUpdateLatencyMs": 13.718673999421299,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1283.1482840001117
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 918057.828575,
+        "pathDurationMs": 759.8510689535327,
+        "pathWallMs": 1275.3672449999722,
+        "generatedNominalPathDurationMs": 759.8510689535327,
+        "sampleReplayWallMs": 1275.3672449999722,
+        "cdpInputLatencyMs": 1030.4285020002862,
+        "cdpInputMaxLatencyMs": 516.0857219999889,
+        "overlayUpdateLatencyMs": 14.90739299962297,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1275.957179000019
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 1704114.245724,
+        "pathDurationMs": 558.902418071627,
+        "pathWallMs": 1274.9557550000027,
+        "generatedNominalPathDurationMs": 558.902418071627,
+        "sampleReplayWallMs": 1274.9557550000027,
+        "cdpInputLatencyMs": 1015.7216750001535,
+        "cdpInputMaxLatencyMs": 716.6361209999304,
+        "overlayUpdateLatencyMs": 12.987391000147909,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1275.1766220000573
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 262650.78964,
+        "pathDurationMs": 587.0988705780339,
+        "pathWallMs": 1274.8628629999876,
+        "generatedNominalPathDurationMs": 587.0988705780339,
+        "sampleReplayWallMs": 1274.8628629999876,
+        "cdpInputLatencyMs": 1036.3374050000275,
+        "cdpInputMaxLatencyMs": 687.9155490000267,
+        "overlayUpdateLatencyMs": 14.561798999988241,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1275.4283760000253
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 744029.054983,
+        "pathDurationMs": 560.649315743666,
+        "pathWallMs": 1273.0491309999488,
+        "generatedNominalPathDurationMs": 560.649315743666,
+        "sampleReplayWallMs": 1273.0491309999488,
+        "cdpInputLatencyMs": 1002.1221469996963,
+        "cdpInputMaxLatencyMs": 711.8255979999667,
+        "overlayUpdateLatencyMs": 14.497989999712445,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1275.3990859999321
+      },
+      {
+        "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+        "tabId": "tab_3c7BpcceJsc2LNpsgIE0VcQO",
+        "recordedMonotonicMs": 383970.743887,
+        "pathDurationMs": 670.5163258226299,
+        "pathWallMs": 1270.5566439999966,
+        "generatedNominalPathDurationMs": 670.5163258226299,
+        "sampleReplayWallMs": 1270.5566439999966,
+        "cdpInputLatencyMs": 990.8792729998822,
+        "cdpInputMaxLatencyMs": 599.6430790000013,
+        "overlayUpdateLatencyMs": 12.357335000007879,
+        "postPathGuardMs": 0,
+        "sampleCount": 16,
+        "completionAfterPathMs": 0,
+        "totalMs": 1271.8300419999869
+      }
+    ]
+  },
+  "browserdDispatchLatencyMs": {
+    "screenshotMetadata": {
+      "count": 725,
+      "min": 14.94312800001353,
+      "median": 40.33607199997641,
+      "p95": 501.60745700006373,
+      "max": 1545.0366810000269,
+      "mean": 158.8123245227575
+    },
+    "imageArtifactRead": {
+      "count": 725,
+      "min": 0.05200599995441735,
+      "median": 0.11054799996782094,
+      "p95": 0.2344989999983227,
+      "max": 0.3830019999295473,
+      "mean": 0.12647284965808625
+    },
+    "coordinateAction": {
+      "count": 704,
+      "min": 90.66103799990378,
+      "median": 763.6635660000611,
+      "p95": 1229.5685460000532,
+      "max": 1730.5389300000388,
+      "mean": 840.0084247698833
+    }
+  },
+  "piReconnects": 1,
+  "webxdRestarts": 1,
+  "tabCycles": 30,
+  "exactCloseRetryPairs": 36,
+  "finalIdempotency": {
+    "byPolicy": {
+      "durable-mutation": {
+        "entries": 475,
+        "bytes": 283984
+      },
+      "ephemeral-observation": {
+        "entries": 0,
+        "bytes": 0
+      },
+      "image-read": {
+        "entries": 0,
+        "bytes": 0
+      }
+    },
+    "imageBytesRetained": 0
+  },
+  "finalObservationMetadata": {
+    "count": 22,
+    "bytes": 21130
+  },
+  "finalSubscriptions": 0,
+  "finalHeldInput": [
+    {
+      "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+      "buttons": [],
+      "keys": []
+    },
+    {
+      "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+      "buttons": [],
+      "keys": []
+    }
+  ],
+  "samples": [
+    {
+      "elapsedSeconds": 11.246708826999999,
+      "browserdHeapUsedBytes": 19655680,
+      "webxdHeapUsedBytes": 22422008,
+      "browserdConnections": 3,
+      "actorConnections": 2,
+      "activeFrameSubscriptions": 1,
+      "operations": 18,
+      "artifacts": 27,
+      "artifactBytes": 354552,
+      "observationMetadata": {
+        "count": 3,
+        "bytes": 2853
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 1,
+            "bytes": 506
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 8811674,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385531,
+          "privateDirtyKiB": 206836,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 425656,
+          "privateDirtyKiB": 230300,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 16.609643202000004,
+      "browserdHeapUsedBytes": 20949368,
+      "webxdHeapUsedBytes": 18226360,
+      "browserdConnections": 4,
+      "actorConnections": 2,
+      "activeFrameSubscriptions": 1,
+      "operations": 32,
+      "artifacts": 40,
+      "artifactBytes": 521953,
+      "observationMetadata": {
+        "count": 9,
+        "bytes": 8565
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 7,
+            "bytes": 3542
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 8868522,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 378966,
+          "privateDirtyKiB": 199808,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 417462,
+          "privateDirtyKiB": 222352,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 31.649035700999995,
+      "browserdHeapUsedBytes": 20624880,
+      "webxdHeapUsedBytes": 19001712,
+      "browserdConnections": 4,
+      "actorConnections": 2,
+      "activeFrameSubscriptions": 1,
+      "operations": 46,
+      "artifacts": 62,
+      "artifactBytes": 809773,
+      "observationMetadata": {
+        "count": 15,
+        "bytes": 14281
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 15,
+            "bytes": 8988
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 8869026,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 379397,
+          "privateDirtyKiB": 200344,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 418104,
+          "privateDirtyKiB": 222888,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 46.801617275,
+      "browserdHeapUsedBytes": 21401360,
+      "webxdHeapUsedBytes": 18980512,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 62,
+      "artifacts": 83,
+      "artifactBytes": 1084092,
+      "observationMetadata": {
+        "count": 21,
+        "bytes": 20004
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 23,
+            "bytes": 12847
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 8886504,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 376968,
+          "privateDirtyKiB": 197884,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 416541,
+          "privateDirtyKiB": 221292,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 61.644952067000006,
+      "browserdHeapUsedBytes": 21714464,
+      "webxdHeapUsedBytes": 18844264,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 78,
+      "artifacts": 106,
+      "artifactBytes": 1383787,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22879
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 33,
+            "bytes": 19630
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 9016792,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 376688,
+          "privateDirtyKiB": 197492,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 417405,
+          "privateDirtyKiB": 222168,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 76.623709731,
+      "browserdHeapUsedBytes": 22295248,
+      "webxdHeapUsedBytes": 19622296,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 92,
+      "artifacts": 113,
+      "artifactBytes": 1474280,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22899
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 39,
+            "bytes": 22666
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17331040,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 376781,
+          "privateDirtyKiB": 197592,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 417092,
+          "privateDirtyKiB": 221844,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 91.616563271,
+      "browserdHeapUsedBytes": 20304048,
+      "webxdHeapUsedBytes": 19491072,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 106,
+      "artifacts": 116,
+      "artifactBytes": 1508327,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22919
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 47,
+            "bytes": 28112
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17331040,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 376682,
+          "privateDirtyKiB": 197592,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 417667,
+          "privateDirtyKiB": 222316,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 106.616956879,
+      "browserdHeapUsedBytes": 21300888,
+      "webxdHeapUsedBytes": 19258720,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 122,
+      "artifacts": 119,
+      "artifactBytes": 1542245,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22935
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 55,
+            "bytes": 31971
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17339422,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 376981,
+          "privateDirtyKiB": 198176,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 418935,
+          "privateDirtyKiB": 223072,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 126.35120816999999,
+      "browserdHeapUsedBytes": 21405752,
+      "webxdHeapUsedBytes": 18961536,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 133,
+      "artifacts": 121,
+      "artifactBytes": 1564769,
+      "observationMetadata": {
+        "count": 20,
+        "bytes": 19122
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 62,
+            "bytes": 37242
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17405815,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 375962,
+          "privateDirtyKiB": 197060,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 418546,
+          "privateDirtyKiB": 222312,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 136.606996246,
+      "browserdHeapUsedBytes": 22243064,
+      "webxdHeapUsedBytes": 18977928,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 151,
+      "artifacts": 125,
+      "artifactBytes": 1609993,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22951
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 70,
+            "bytes": 41290
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17396178,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 377562,
+          "privateDirtyKiB": 198672,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 438410,
+          "privateDirtyKiB": 240028,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 151.621629125,
+      "browserdHeapUsedBytes": 22030112,
+      "webxdHeapUsedBytes": 18728384,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 167,
+      "artifacts": 128,
+      "artifactBytes": 1644187,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22953
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 80,
+            "bytes": 47560
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17396202,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 378689,
+          "privateDirtyKiB": 199156,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 438401,
+          "privateDirtyKiB": 240528,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 166.15270864500002,
+      "browserdHeapUsedBytes": 22140632,
+      "webxdHeapUsedBytes": 19202400,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 181,
+      "artifacts": 131,
+      "artifactBytes": 1678433,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22952
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 86,
+            "bytes": 50596
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17396202,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 378886,
+          "privateDirtyKiB": 199452,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 439380,
+          "privateDirtyKiB": 241404,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 181.65298854399998,
+      "browserdHeapUsedBytes": 22950416,
+      "webxdHeapUsedBytes": 19292472,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 197,
+      "artifacts": 134,
+      "artifactBytes": 1712415,
+      "observationMetadata": {
+        "count": 26,
+        "bytes": 24865
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 96,
+            "bytes": 57385
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17469694,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 378517,
+          "privateDirtyKiB": 198940,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 439714,
+          "privateDirtyKiB": 241884,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 196.606073412,
+      "browserdHeapUsedBytes": 23546496,
+      "webxdHeapUsedBytes": 19339000,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 213,
+      "artifacts": 137,
+      "artifactBytes": 1746363,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22951
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 104,
+            "bytes": 61244
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17403542,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 380006,
+          "privateDirtyKiB": 200436,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 440318,
+          "privateDirtyKiB": 242472,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 211.601643052,
+      "browserdHeapUsedBytes": 20840744,
+      "webxdHeapUsedBytes": 19044984,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 227,
+      "artifacts": 140,
+      "artifactBytes": 1780086,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22952
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 112,
+            "bytes": 66691
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17403542,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 380340,
+          "privateDirtyKiB": 200872,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 441185,
+          "privateDirtyKiB": 243240,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 226.61105730800003,
+      "browserdHeapUsedBytes": 21197288,
+      "webxdHeapUsedBytes": 19200920,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 241,
+      "artifacts": 143,
+      "artifactBytes": 1813873,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22952
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 118,
+            "bytes": 69727
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17403542,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 380908,
+          "privateDirtyKiB": 201440,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 441921,
+          "privateDirtyKiB": 243976,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 246.461506534,
+      "browserdHeapUsedBytes": 21681712,
+      "webxdHeapUsedBytes": 18941256,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 252,
+      "artifacts": 145,
+      "artifactBytes": 1835979,
+      "observationMetadata": {
+        "count": 20,
+        "bytes": 19128
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 125,
+            "bytes": 74998
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17469935,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 379996,
+          "privateDirtyKiB": 200420,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 443269,
+          "privateDirtyKiB": 244936,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 256.09191977899997,
+      "browserdHeapUsedBytes": 22449632,
+      "webxdHeapUsedBytes": 19383872,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 272,
+      "artifacts": 149,
+      "artifactBytes": 1881130,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22954
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 135,
+            "bytes": 79869
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17477034,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 381707,
+          "privateDirtyKiB": 202136,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 442406,
+          "privateDirtyKiB": 244520,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 271.610338672,
+      "browserdHeapUsedBytes": 21239104,
+      "webxdHeapUsedBytes": 19431176,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 286,
+      "artifacts": 152,
+      "artifactBytes": 1915016,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22952
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 143,
+            "bytes": 85316
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17410913,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 382181,
+          "privateDirtyKiB": 202616,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 442510,
+          "privateDirtyKiB": 244612,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 286.618010895,
+      "browserdHeapUsedBytes": 21073112,
+      "webxdHeapUsedBytes": 19043656,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 300,
+      "artifacts": 155,
+      "artifactBytes": 1948923,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22952
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 149,
+            "bytes": 88352
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17410913,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 382595,
+          "privateDirtyKiB": 203076,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 443354,
+          "privateDirtyKiB": 245304,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 301.60725362799997,
+      "browserdHeapUsedBytes": 22683648,
+      "webxdHeapUsedBytes": 19153784,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 318,
+      "artifacts": 156,
+      "artifactBytes": 1960391,
+      "observationMetadata": {
+        "count": 26,
+        "bytes": 24865
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 161,
+            "bytes": 95964
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17484437,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 382053,
+          "privateDirtyKiB": 202432,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 444194,
+          "privateDirtyKiB": 246180,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 316.609000924,
+      "browserdHeapUsedBytes": 22530800,
+      "webxdHeapUsedBytes": 19621320,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 332,
+      "artifacts": 156,
+      "artifactBytes": 1960689,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22956
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 167,
+            "bytes": 99000
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17418285,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383555,
+          "privateDirtyKiB": 203940,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 445071,
+          "privateDirtyKiB": 247040,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 331.60853726,
+      "browserdHeapUsedBytes": 21460992,
+      "webxdHeapUsedBytes": 19074152,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 346,
+      "artifacts": 156,
+      "artifactBytes": 1960631,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22961
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 175,
+            "bytes": 104447
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17418285,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383852,
+          "privateDirtyKiB": 204336,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 446138,
+          "privateDirtyKiB": 248008,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 347.16810342,
+      "browserdHeapUsedBytes": 22107248,
+      "webxdHeapUsedBytes": 19509256,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 362,
+      "artifacts": 156,
+      "artifactBytes": 1960660,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22967
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 183,
+            "bytes": 108306
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17418285,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383792,
+          "privateDirtyKiB": 204276,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 446570,
+          "privateDirtyKiB": 248440,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 366.3019342,
+      "browserdHeapUsedBytes": 22564200,
+      "webxdHeapUsedBytes": 19384880,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 373,
+      "artifacts": 154,
+      "artifactBytes": 1937965,
+      "observationMetadata": {
+        "count": 20,
+        "bytes": 19143
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 190,
+            "bytes": 113578
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17484678,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 382967,
+          "privateDirtyKiB": 203344,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 447893,
+          "privateDirtyKiB": 249516,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 376.627772108,
+      "browserdHeapUsedBytes": 22855440,
+      "webxdHeapUsedBytes": 19847872,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 391,
+      "artifacts": 156,
+      "artifactBytes": 1960661,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22972
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 198,
+            "bytes": 117626
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17425601,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383995,
+          "privateDirtyKiB": 204384,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 446725,
+          "privateDirtyKiB": 248780,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 391.644660579,
+      "browserdHeapUsedBytes": 22283640,
+      "webxdHeapUsedBytes": 19364456,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 405,
+      "artifacts": 156,
+      "artifactBytes": 1960866,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22974
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 206,
+            "bytes": 123073
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17425625,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383980,
+          "privateDirtyKiB": 204364,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 446303,
+          "privateDirtyKiB": 248352,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 406.620857251,
+      "browserdHeapUsedBytes": 22998440,
+      "webxdHeapUsedBytes": 19957904,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 421,
+      "artifacts": 156,
+      "artifactBytes": 1960408,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22975
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 214,
+            "bytes": 126932
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17425625,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383129,
+          "privateDirtyKiB": 203612,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 446599,
+          "privateDirtyKiB": 248548,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 421.647479842,
+      "browserdHeapUsedBytes": 23391488,
+      "webxdHeapUsedBytes": 20022880,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 437,
+      "artifacts": 157,
+      "artifactBytes": 1971984,
+      "observationMetadata": {
+        "count": 26,
+        "bytes": 24889
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 224,
+            "bytes": 133722
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17499117,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383084,
+          "privateDirtyKiB": 203452,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 446760,
+          "privateDirtyKiB": 248808,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 436.669350535,
+      "browserdHeapUsedBytes": 24147504,
+      "webxdHeapUsedBytes": 19505048,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 451,
+      "artifacts": 156,
+      "artifactBytes": 1960600,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22974
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 230,
+            "bytes": 136758
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17432965,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384147,
+          "privateDirtyKiB": 204524,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 447248,
+          "privateDirtyKiB": 249280,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 451.62470389,
+      "browserdHeapUsedBytes": 23411808,
+      "webxdHeapUsedBytes": 19555360,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 467,
+      "artifacts": 156,
+      "artifactBytes": 1960459,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22975
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 240,
+            "bytes": 143028
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17432965,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384146,
+          "privateDirtyKiB": 204620,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 447314,
+          "privateDirtyKiB": 249248,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 466.645759933,
+      "browserdHeapUsedBytes": 23002152,
+      "webxdHeapUsedBytes": 19591608,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 481,
+      "artifacts": 156,
+      "artifactBytes": 1960509,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22975
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 246,
+            "bytes": 146064
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17432965,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383042,
+          "privateDirtyKiB": 203684,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 448811,
+          "privateDirtyKiB": 250476,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 486.35197033500003,
+      "browserdHeapUsedBytes": 22954232,
+      "webxdHeapUsedBytes": 20324512,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 492,
+      "artifacts": 154,
+      "artifactBytes": 1937759,
+      "observationMetadata": {
+        "count": 20,
+        "bytes": 19147
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 253,
+            "bytes": 151336
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17499358,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383077,
+          "privateDirtyKiB": 203596,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 449399,
+          "privateDirtyKiB": 250776,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 497.090956677,
+      "browserdHeapUsedBytes": 23866248,
+      "webxdHeapUsedBytes": 20034840,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 512,
+      "artifacts": 156,
+      "artifactBytes": 1960400,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22981
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 263,
+            "bytes": 156207
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17440544,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383309,
+          "privateDirtyKiB": 203840,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 447035,
+          "privateDirtyKiB": 248840,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 511.637459177,
+      "browserdHeapUsedBytes": 24217104,
+      "webxdHeapUsedBytes": 20287488,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 526,
+      "artifacts": 156,
+      "artifactBytes": 1960421,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22986
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 271,
+            "bytes": 161654
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17440568,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384329,
+          "privateDirtyKiB": 204860,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 448059,
+          "privateDirtyKiB": 249864,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 526.604954472,
+      "browserdHeapUsedBytes": 23272728,
+      "webxdHeapUsedBytes": 19769504,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 540,
+      "artifacts": 156,
+      "artifactBytes": 1960351,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 22993
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 277,
+            "bytes": 164690
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17440568,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383343,
+          "privateDirtyKiB": 203972,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 448553,
+          "privateDirtyKiB": 250256,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 541.623244327,
+      "browserdHeapUsedBytes": 23067712,
+      "webxdHeapUsedBytes": 20411384,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 556,
+      "artifacts": 157,
+      "artifactBytes": 1971672,
+      "observationMetadata": {
+        "count": 26,
+        "bytes": 24915
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 287,
+            "bytes": 171484
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17514059,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383359,
+          "privateDirtyKiB": 203864,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 448847,
+          "privateDirtyKiB": 250652,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 556.742859426,
+      "browserdHeapUsedBytes": 24272208,
+      "webxdHeapUsedBytes": 21447968,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 572,
+      "artifacts": 156,
+      "artifactBytes": 1960703,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23007
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 295,
+            "bytes": 175343
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17447907,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384460,
+          "privateDirtyKiB": 204976,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 449439,
+          "privateDirtyKiB": 251236,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 571.644217376,
+      "browserdHeapUsedBytes": 24479792,
+      "webxdHeapUsedBytes": 20294424,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 586,
+      "artifacts": 156,
+      "artifactBytes": 1960429,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23011
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 303,
+            "bytes": 180790
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17447907,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384389,
+          "privateDirtyKiB": 205000,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 449907,
+          "privateDirtyKiB": 251600,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 586.722422616,
+      "browserdHeapUsedBytes": 23957176,
+      "webxdHeapUsedBytes": 20157952,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 598,
+      "artifacts": 156,
+      "artifactBytes": 1960619,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23012
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 309,
+            "bytes": 183826
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17448618,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383549,
+          "privateDirtyKiB": 204160,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 449851,
+          "privateDirtyKiB": 251544,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 606.854185268,
+      "browserdHeapUsedBytes": 23183768,
+      "webxdHeapUsedBytes": 20028336,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 596,
+      "artifacts": 154,
+      "artifactBytes": 1937973,
+      "observationMetadata": {
+        "count": 20,
+        "bytes": 19177
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 318,
+            "bytes": 189927
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17518649,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383678,
+          "privateDirtyKiB": 204184,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 450972,
+          "privateDirtyKiB": 252352,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 616.625180388,
+      "browserdHeapUsedBytes": 24073696,
+      "webxdHeapUsedBytes": 20734096,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1960864,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23011
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 326,
+            "bytes": 193975
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17455935,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384692,
+          "privateDirtyKiB": 205212,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 449075,
+          "privateDirtyKiB": 250900,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 631.6918557609999,
+      "browserdHeapUsedBytes": 24617880,
+      "webxdHeapUsedBytes": 20552072,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1960824,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23009
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 334,
+            "bytes": 199422
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17455959,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384716,
+          "privateDirtyKiB": 205236,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 448911,
+          "privateDirtyKiB": 250736,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 647.13620092,
+      "browserdHeapUsedBytes": 25010088,
+      "webxdHeapUsedBytes": 20923080,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 599,
+      "artifacts": 156,
+      "artifactBytes": 1960785,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23010
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 342,
+            "bytes": 203281
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17455959,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383308,
+          "privateDirtyKiB": 203932,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 448862,
+          "privateDirtyKiB": 250584,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 661.6460339910001,
+      "browserdHeapUsedBytes": 23694376,
+      "webxdHeapUsedBytes": 20889120,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 157,
+      "artifactBytes": 1972179,
+      "observationMetadata": {
+        "count": 26,
+        "bytes": 24927
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 352,
+            "bytes": 210077
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17529615,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383471,
+          "privateDirtyKiB": 203988,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 449145,
+          "privateDirtyKiB": 250984,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 676.659054604,
+      "browserdHeapUsedBytes": 23920208,
+      "webxdHeapUsedBytes": 20705304,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1960620,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23012
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 358,
+            "bytes": 213113
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17463463,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384548,
+          "privateDirtyKiB": 205072,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 449677,
+          "privateDirtyKiB": 251500,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 691.628933383,
+      "browserdHeapUsedBytes": 24359336,
+      "webxdHeapUsedBytes": 20947928,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1961182,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23013
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 366,
+            "bytes": 218560
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17463463,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384441,
+          "privateDirtyKiB": 205064,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 450067,
+          "privateDirtyKiB": 251792,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 706.614777476,
+      "browserdHeapUsedBytes": 24757528,
+      "webxdHeapUsedBytes": 20792160,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1961083,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23009
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 374,
+            "bytes": 222419
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17472183,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383469,
+          "privateDirtyKiB": 204092,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 449967,
+          "privateDirtyKiB": 251692,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 726.352493843,
+      "browserdHeapUsedBytes": 23032176,
+      "webxdHeapUsedBytes": 20696792,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 599,
+      "artifacts": 154,
+      "artifactBytes": 1938212,
+      "observationMetadata": {
+        "count": 20,
+        "bytes": 19175
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 381,
+            "bytes": 227698
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17538064,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383430,
+          "privateDirtyKiB": 203932,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 451375,
+          "privateDirtyKiB": 252368,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 736.605287637,
+      "browserdHeapUsedBytes": 23676096,
+      "webxdHeapUsedBytes": 21095552,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1960989,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23015
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 389,
+            "bytes": 231746
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17470947,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384660,
+          "privateDirtyKiB": 205164,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 449265,
+          "privateDirtyKiB": 251112,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 751.6333323480001,
+      "browserdHeapUsedBytes": 24295256,
+      "webxdHeapUsedBytes": 20926456,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1960715,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23019
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 399,
+            "bytes": 238016
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17470971,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384652,
+          "privateDirtyKiB": 205156,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 449285,
+          "privateDirtyKiB": 251132,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 766.645665863,
+      "browserdHeapUsedBytes": 24628248,
+      "webxdHeapUsedBytes": 20027456,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1960380,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23024
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 405,
+            "bytes": 241052
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17470971,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383618,
+          "privateDirtyKiB": 204220,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 449748,
+          "privateDirtyKiB": 251492,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 781.638239574,
+      "browserdHeapUsedBytes": 24968120,
+      "webxdHeapUsedBytes": 20139336,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 602,
+      "artifacts": 157,
+      "artifactBytes": 1971942,
+      "observationMetadata": {
+        "count": 26,
+        "bytes": 24944
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 415,
+            "bytes": 247849
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17548215,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383589,
+          "privateDirtyKiB": 204084,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 451000,
+          "privateDirtyKiB": 252844,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 797.143712632,
+      "browserdHeapUsedBytes": 23428960,
+      "webxdHeapUsedBytes": 19768000,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 599,
+      "artifacts": 156,
+      "artifactBytes": 1960381,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23025
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 423,
+            "bytes": 251708
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17482063,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383771,
+          "privateDirtyKiB": 204272,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 449586,
+          "privateDirtyKiB": 251416,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 812.187691013,
+      "browserdHeapUsedBytes": 24216808,
+      "webxdHeapUsedBytes": 19641608,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1960873,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23024
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 431,
+            "bytes": 257155
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17482063,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384678,
+          "privateDirtyKiB": 205284,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 450971,
+          "privateDirtyKiB": 252708,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 826.614403626,
+      "browserdHeapUsedBytes": 24581424,
+      "webxdHeapUsedBytes": 20255120,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1960689,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23026
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 437,
+            "bytes": 260191
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17482063,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383862,
+          "privateDirtyKiB": 204468,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 450935,
+          "privateDirtyKiB": 252672,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 846.32286845,
+      "browserdHeapUsedBytes": 24413800,
+      "webxdHeapUsedBytes": 19983496,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 604,
+      "artifacts": 154,
+      "artifactBytes": 1937977,
+      "observationMetadata": {
+        "count": 20,
+        "bytes": 19186
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 444,
+            "bytes": 265470
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17548456,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 383986,
+          "privateDirtyKiB": 204500,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452223,
+          "privateDirtyKiB": 253560,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 856.647240317,
+      "browserdHeapUsedBytes": 24442720,
+      "webxdHeapUsedBytes": 20357904,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1960894,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23023
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 454,
+            "bytes": 270341
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17489380,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385099,
+          "privateDirtyKiB": 205628,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 450606,
+          "privateDirtyKiB": 252372,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 871.647055587,
+      "browserdHeapUsedBytes": 24130896,
+      "webxdHeapUsedBytes": 20183040,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1961132,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23021
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 462,
+            "bytes": 275788
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17489404,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385145,
+          "privateDirtyKiB": 205692,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 450523,
+          "privateDirtyKiB": 252304,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 886.634960549,
+      "browserdHeapUsedBytes": 24620800,
+      "webxdHeapUsedBytes": 20432616,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 602,
+      "artifacts": 156,
+      "artifactBytes": 1960812,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23020
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 468,
+            "bytes": 278824
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17489404,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384073,
+          "privateDirtyKiB": 204700,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 450852,
+          "privateDirtyKiB": 252512,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 902.3256354150001,
+      "browserdHeapUsedBytes": 25299640,
+      "webxdHeapUsedBytes": 20875992,
+      "browserdConnections": 2,
+      "actorConnections": 1,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 157,
+      "artifactBytes": 1972568,
+      "observationMetadata": {
+        "count": 0,
+        "bytes": 0
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17562897,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384182,
+          "privateDirtyKiB": 204696,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452105,
+          "privateDirtyKiB": 253960,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 916.66404675,
+      "browserdHeapUsedBytes": 23290744,
+      "webxdHeapUsedBytes": 18983472,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1960638,
+      "observationMetadata": {
+        "count": 6,
+        "bytes": 5757
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 6,
+            "bytes": 3036
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17496745,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386388,
+          "privateDirtyKiB": 206652,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 450882,
+          "privateDirtyKiB": 252948,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 931.609859173,
+      "browserdHeapUsedBytes": 24068024,
+      "webxdHeapUsedBytes": 18366576,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1960662,
+      "observationMetadata": {
+        "count": 12,
+        "bytes": 11513
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 14,
+            "bytes": 8482
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17496745,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386141,
+          "privateDirtyKiB": 206504,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 451319,
+          "privateDirtyKiB": 253288,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 947.252711269,
+      "browserdHeapUsedBytes": 24473672,
+      "webxdHeapUsedBytes": 19006184,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1960572,
+      "observationMetadata": {
+        "count": 18,
+        "bytes": 17270
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 22,
+            "bytes": 12341
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17496745,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384929,
+          "privateDirtyKiB": 205292,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 451111,
+          "privateDirtyKiB": 253080,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 966.368781229,
+      "browserdHeapUsedBytes": 25770560,
+      "webxdHeapUsedBytes": 19255592,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 154,
+      "artifactBytes": 1937780,
+      "observationMetadata": {
+        "count": 20,
+        "bytes": 19189
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 29,
+            "bytes": 17619
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17563138,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384908,
+          "privateDirtyKiB": 205152,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452325,
+          "privateDirtyKiB": 253976,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 976.619055833,
+      "browserdHeapUsedBytes": 23980912,
+      "webxdHeapUsedBytes": 18961024,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1960600,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23026
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 37,
+            "bytes": 21667
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17504225,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385945,
+          "privateDirtyKiB": 206200,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 450307,
+          "privateDirtyKiB": 252396,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 991.851603799,
+      "browserdHeapUsedBytes": 24126496,
+      "webxdHeapUsedBytes": 19779848,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1961384,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23030
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 45,
+            "bytes": 27113
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17504249,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385981,
+          "privateDirtyKiB": 206236,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 450245,
+          "privateDirtyKiB": 252332,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1006.644022407,
+      "browserdHeapUsedBytes": 25844952,
+      "webxdHeapUsedBytes": 19770000,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1961193,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23036
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 53,
+            "bytes": 30972
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17504249,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384823,
+          "privateDirtyKiB": 205176,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 450558,
+          "privateDirtyKiB": 252544,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1021.620112831,
+      "browserdHeapUsedBytes": 25463512,
+      "webxdHeapUsedBytes": 19045088,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 157,
+      "artifactBytes": 1972590,
+      "observationMetadata": {
+        "count": 26,
+        "bytes": 24958
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 63,
+            "bytes": 37768
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17577905,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384771,
+          "privateDirtyKiB": 205028,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 450800,
+          "privateDirtyKiB": 252860,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1036.649339666,
+      "browserdHeapUsedBytes": 23925168,
+      "webxdHeapUsedBytes": 18658720,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1961132,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23046
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 69,
+            "bytes": 40804
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17520473,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385868,
+          "privateDirtyKiB": 206132,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 451308,
+          "privateDirtyKiB": 253352,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1051.649408018,
+      "browserdHeapUsedBytes": 24351336,
+      "webxdHeapUsedBytes": 19110392,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1961095,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23046
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 79,
+            "bytes": 47074
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17520473,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385813,
+          "privateDirtyKiB": 206180,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 451569,
+          "privateDirtyKiB": 253520,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1066.606400805,
+      "browserdHeapUsedBytes": 24288032,
+      "webxdHeapUsedBytes": 20055080,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1960560,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23045
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 85,
+            "bytes": 50110
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17520473,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 384965,
+          "privateDirtyKiB": 205332,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 451577,
+          "privateDirtyKiB": 253528,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1085.9993185419999,
+      "browserdHeapUsedBytes": 24611776,
+      "webxdHeapUsedBytes": 18971824,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 606,
+      "artifacts": 154,
+      "artifactBytes": 1938547,
+      "observationMetadata": {
+        "count": 20,
+        "bytes": 19205
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 92,
+            "bytes": 55389
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17586354,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385078,
+          "privateDirtyKiB": 205324,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452781,
+          "privateDirtyKiB": 254432,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1097.1754451179997,
+      "browserdHeapUsedBytes": 25139760,
+      "webxdHeapUsedBytes": 19347896,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1961512,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23047
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 102,
+            "bytes": 60260
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17519070,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386111,
+          "privateDirtyKiB": 206368,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 450123,
+          "privateDirtyKiB": 252208,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1111.6291692589998,
+      "browserdHeapUsedBytes": 23633800,
+      "webxdHeapUsedBytes": 19061136,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1961825,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23050
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 110,
+            "bytes": 65707
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17519094,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386131,
+          "privateDirtyKiB": 206388,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 451123,
+          "privateDirtyKiB": 253208,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1126.638673132,
+      "browserdHeapUsedBytes": 24451352,
+      "webxdHeapUsedBytes": 18937368,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1961765,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23050
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 116,
+            "bytes": 68743
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17519094,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385096,
+          "privateDirtyKiB": 205448,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 451595,
+          "privateDirtyKiB": 253572,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1141.6384874969997,
+      "browserdHeapUsedBytes": 24272408,
+      "webxdHeapUsedBytes": 19270000,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 157,
+      "artifactBytes": 1973387,
+      "observationMetadata": {
+        "count": 26,
+        "bytes": 24972
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 126,
+            "bytes": 75540
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17592585,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385184,
+          "privateDirtyKiB": 205440,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 451754,
+          "privateDirtyKiB": 253836,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1156.675117435,
+      "browserdHeapUsedBytes": 25312576,
+      "webxdHeapUsedBytes": 19233360,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1960768,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23051
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 134,
+            "bytes": 79399
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17526433,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386333,
+          "privateDirtyKiB": 206596,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452442,
+          "privateDirtyKiB": 254508,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1171.6175368259999,
+      "browserdHeapUsedBytes": 23653904,
+      "webxdHeapUsedBytes": 19241424,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1960556,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23051
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 142,
+            "bytes": 84846
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17526433,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386266,
+          "privateDirtyKiB": 206628,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452105,
+          "privateDirtyKiB": 254072,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1186.6380081959999,
+      "browserdHeapUsedBytes": 25153120,
+      "webxdHeapUsedBytes": 19478688,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1960496,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23051
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 148,
+            "bytes": 87882
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17526433,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385270,
+          "privateDirtyKiB": 205632,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452025,
+          "privateDirtyKiB": 253992,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1206.96485554,
+      "browserdHeapUsedBytes": 24244104,
+      "webxdHeapUsedBytes": 19137856,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 154,
+      "artifactBytes": 1937784,
+      "observationMetadata": {
+        "count": 20,
+        "bytes": 19209
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 157,
+            "bytes": 93984
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17596627,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385186,
+          "privateDirtyKiB": 205440,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 453230,
+          "privateDirtyKiB": 254860,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1216.6087654509997,
+      "browserdHeapUsedBytes": 24839720,
+      "webxdHeapUsedBytes": 19607640,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1960318,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23049
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 165,
+            "bytes": 98032
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17533913,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386443,
+          "privateDirtyKiB": 206708,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 451096,
+          "privateDirtyKiB": 253164,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1231.6409236609998,
+      "browserdHeapUsedBytes": 25384944,
+      "webxdHeapUsedBytes": 19016080,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1960413,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23048
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 173,
+            "bytes": 103479
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17533937,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386483,
+          "privateDirtyKiB": 206748,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 451012,
+          "privateDirtyKiB": 253080,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1247.1062417529997,
+      "browserdHeapUsedBytes": 24470088,
+      "webxdHeapUsedBytes": 19493488,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1960431,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23049
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 181,
+            "bytes": 107338
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17533937,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385084,
+          "privateDirtyKiB": 205448,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 451486,
+          "privateDirtyKiB": 253452,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1261.6450061799999,
+      "browserdHeapUsedBytes": 24963120,
+      "webxdHeapUsedBytes": 19129568,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 157,
+      "artifactBytes": 1971717,
+      "observationMetadata": {
+        "count": 26,
+        "bytes": 24970
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 191,
+            "bytes": 114135
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17607597,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385016,
+          "privateDirtyKiB": 205272,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 451298,
+          "privateDirtyKiB": 253380,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1276.626082515,
+      "browserdHeapUsedBytes": 25247392,
+      "webxdHeapUsedBytes": 19792440,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1960616,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23050
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 197,
+            "bytes": 117171
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17541445,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385765,
+          "privateDirtyKiB": 206028,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 451774,
+          "privateDirtyKiB": 253840,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1291.8290813879998,
+      "browserdHeapUsedBytes": 26562248,
+      "webxdHeapUsedBytes": 19733432,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 604,
+      "artifacts": 156,
+      "artifactBytes": 1960665,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23050
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 205,
+            "bytes": 122618
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17541445,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385674,
+          "privateDirtyKiB": 206036,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452181,
+          "privateDirtyKiB": 254148,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1306.6442853229998,
+      "browserdHeapUsedBytes": 23358736,
+      "webxdHeapUsedBytes": 19365304,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1960819,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23049
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 213,
+            "bytes": 126477
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17541445,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385013,
+          "privateDirtyKiB": 205420,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 453249,
+          "privateDirtyKiB": 255172,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1326.3696920589998,
+      "browserdHeapUsedBytes": 23844144,
+      "webxdHeapUsedBytes": 19909328,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 154,
+      "artifactBytes": 1938102,
+      "observationMetadata": {
+        "count": 20,
+        "bytes": 19208
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 220,
+            "bytes": 131756
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17607838,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385137,
+          "privateDirtyKiB": 205408,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 453896,
+          "privateDirtyKiB": 255512,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1336.6449798219999,
+      "browserdHeapUsedBytes": 24610456,
+      "webxdHeapUsedBytes": 20035640,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1960891,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23049
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 228,
+            "bytes": 135804
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17548925,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385653,
+          "privateDirtyKiB": 205936,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452119,
+          "privateDirtyKiB": 254168,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1351.686695804,
+      "browserdHeapUsedBytes": 25744096,
+      "webxdHeapUsedBytes": 19525648,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1960893,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23049
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 238,
+            "bytes": 142074
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17548949,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385725,
+          "privateDirtyKiB": 206008,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452047,
+          "privateDirtyKiB": 254096,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1366.671474495,
+      "browserdHeapUsedBytes": 25879656,
+      "webxdHeapUsedBytes": 19652488,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1960448,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23050
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 244,
+            "bytes": 145110
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17557669,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385083,
+          "privateDirtyKiB": 205464,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452655,
+          "privateDirtyKiB": 254600,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1381.6126785299998,
+      "browserdHeapUsedBytes": 24355456,
+      "webxdHeapUsedBytes": 20004056,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 157,
+      "artifactBytes": 1971982,
+      "observationMetadata": {
+        "count": 26,
+        "bytes": 24971
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 254,
+            "bytes": 151907
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17630651,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385139,
+          "privateDirtyKiB": 205384,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 453347,
+          "privateDirtyKiB": 255440,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1397.116877042,
+      "browserdHeapUsedBytes": 25282128,
+      "webxdHeapUsedBytes": 19841056,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1960637,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23051
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 262,
+            "bytes": 155766
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17556291,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385680,
+          "privateDirtyKiB": 205932,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452718,
+          "privateDirtyKiB": 254796,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1411.653162177,
+      "browserdHeapUsedBytes": 25457904,
+      "webxdHeapUsedBytes": 20248792,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 604,
+      "artifacts": 156,
+      "artifactBytes": 1960569,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23051
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 270,
+            "bytes": 161213
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17556291,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385489,
+          "privateDirtyKiB": 205840,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 453294,
+          "privateDirtyKiB": 255272,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1426.761799578,
+      "browserdHeapUsedBytes": 26262712,
+      "webxdHeapUsedBytes": 19771096,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1960562,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23049
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 276,
+            "bytes": 164249
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17556291,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385265,
+          "privateDirtyKiB": 205616,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452854,
+          "privateDirtyKiB": 254832,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1446.312953243,
+      "browserdHeapUsedBytes": 23893952,
+      "webxdHeapUsedBytes": 20101264,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 154,
+      "artifactBytes": 1937855,
+      "observationMetadata": {
+        "count": 20,
+        "bytes": 19207
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 283,
+            "bytes": 169528
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17622684,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385241,
+          "privateDirtyKiB": 205484,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 454054,
+          "privateDirtyKiB": 255700,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1456.3131356,
+      "browserdHeapUsedBytes": 26376616,
+      "webxdHeapUsedBytes": 20619464,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1961407,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23049
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 293,
+            "bytes": 174399
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17563608,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386038,
+          "privateDirtyKiB": 206292,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 451882,
+          "privateDirtyKiB": 253960,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1471.62821985,
+      "browserdHeapUsedBytes": 25784520,
+      "webxdHeapUsedBytes": 20302816,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1961433,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23050
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 301,
+            "bytes": 179846
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17563632,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386506,
+          "privateDirtyKiB": 206760,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 451850,
+          "privateDirtyKiB": 253928,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1486.626452474,
+      "browserdHeapUsedBytes": 26664688,
+      "webxdHeapUsedBytes": 20522104,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 156,
+      "artifactBytes": 1961369,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23052
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 307,
+            "bytes": 182882
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17563632,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385388,
+          "privateDirtyKiB": 205740,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452247,
+          "privateDirtyKiB": 254224,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1501.651846607,
+      "browserdHeapUsedBytes": 24978584,
+      "webxdHeapUsedBytes": 20735192,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 603,
+      "artifacts": 157,
+      "artifactBytes": 1972782,
+      "observationMetadata": {
+        "count": 26,
+        "bytes": 24971
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 319,
+            "bytes": 190502
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17637143,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385364,
+          "privateDirtyKiB": 205620,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452466,
+          "privateDirtyKiB": 254548,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1516.6360940309999,
+      "browserdHeapUsedBytes": 24700208,
+      "webxdHeapUsedBytes": 20096200,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1961427,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23050
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 325,
+            "bytes": 193538
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17570991,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386765,
+          "privateDirtyKiB": 207028,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452950,
+          "privateDirtyKiB": 255016,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1531.623848361,
+      "browserdHeapUsedBytes": 25889304,
+      "webxdHeapUsedBytes": 20504576,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1960502,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23048
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 333,
+            "bytes": 198985
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17570991,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386494,
+          "privateDirtyKiB": 206856,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 453609,
+          "privateDirtyKiB": 255576,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1547.1028575,
+      "browserdHeapUsedBytes": 23582104,
+      "webxdHeapUsedBytes": 20367512,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1960453,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23047
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 341,
+            "bytes": 202844
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17570991,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385300,
+          "privateDirtyKiB": 205656,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 453598,
+          "privateDirtyKiB": 255560,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1566.856119922,
+      "browserdHeapUsedBytes": 24106776,
+      "webxdHeapUsedBytes": 20935072,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 596,
+      "artifacts": 154,
+      "artifactBytes": 1938324,
+      "observationMetadata": {
+        "count": 20,
+        "bytes": 19206
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 348,
+            "bytes": 208123
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17637403,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385315,
+          "privateDirtyKiB": 205568,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 454278,
+          "privateDirtyKiB": 255908,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1576.6081643629998,
+      "browserdHeapUsedBytes": 25266064,
+      "webxdHeapUsedBytes": 20271600,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1961062,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23048
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 356,
+            "bytes": 212171
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17644503,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386359,
+          "privateDirtyKiB": 206616,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 453059,
+          "privateDirtyKiB": 255132,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1591.643478278,
+      "browserdHeapUsedBytes": 26388032,
+      "webxdHeapUsedBytes": 20301824,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1960963,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23050
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 364,
+            "bytes": 217618
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17578351,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386302,
+          "privateDirtyKiB": 206568,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452240,
+          "privateDirtyKiB": 254304,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1606.6733544019999,
+      "browserdHeapUsedBytes": 24842464,
+      "webxdHeapUsedBytes": 20365632,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 602,
+      "artifacts": 156,
+      "artifactBytes": 1960921,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23051
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 372,
+            "bytes": 221477
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17578351,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385171,
+          "privateDirtyKiB": 205536,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452690,
+          "privateDirtyKiB": 254652,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1621.6026703789998,
+      "browserdHeapUsedBytes": 24575592,
+      "webxdHeapUsedBytes": 20776632,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 602,
+      "artifacts": 157,
+      "artifactBytes": 1972281,
+      "observationMetadata": {
+        "count": 26,
+        "bytes": 24972
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 382,
+            "bytes": 228274
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17628451,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385245,
+          "privateDirtyKiB": 205500,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452773,
+          "privateDirtyKiB": 254872,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1636.6276983009998,
+      "browserdHeapUsedBytes": 24923256,
+      "webxdHeapUsedBytes": 20423032,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1961039,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23050
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 388,
+            "bytes": 231310
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17562299,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386358,
+          "privateDirtyKiB": 206620,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 453301,
+          "privateDirtyKiB": 255384,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1651.645715691,
+      "browserdHeapUsedBytes": 25855040,
+      "webxdHeapUsedBytes": 20468496,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1960350,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23050
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 398,
+            "bytes": 237580
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17562299,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386207,
+          "privateDirtyKiB": 206572,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 453736,
+          "privateDirtyKiB": 255728,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1666.6507359679997,
+      "browserdHeapUsedBytes": 27037568,
+      "webxdHeapUsedBytes": 19609048,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1960347,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23050
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 404,
+            "bytes": 240616
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17562299,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385211,
+          "privateDirtyKiB": 205572,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 453723,
+          "privateDirtyKiB": 255708,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1686.440685384,
+      "browserdHeapUsedBytes": 24122984,
+      "webxdHeapUsedBytes": 19778640,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 596,
+      "artifacts": 154,
+      "artifactBytes": 1937756,
+      "observationMetadata": {
+        "count": 20,
+        "bytes": 19209
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 411,
+            "bytes": 245895
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17628711,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385208,
+          "privateDirtyKiB": 205472,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 454944,
+          "privateDirtyKiB": 256556,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1697.09524266,
+      "browserdHeapUsedBytes": 25931656,
+      "webxdHeapUsedBytes": 19685600,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1960457,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23052
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 421,
+            "bytes": 250766
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17569803,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386377,
+          "privateDirtyKiB": 206652,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452575,
+          "privateDirtyKiB": 254620,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1711.6216026589998,
+      "browserdHeapUsedBytes": 25680288,
+      "webxdHeapUsedBytes": 19861552,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 602,
+      "artifacts": 156,
+      "artifactBytes": 1960478,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23052
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 429,
+            "bytes": 256213
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17569827,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 387177,
+          "privateDirtyKiB": 207452,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452455,
+          "privateDirtyKiB": 254500,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1726.7534185549998,
+      "browserdHeapUsedBytes": 24318568,
+      "webxdHeapUsedBytes": 20025424,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1961235,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23052
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 435,
+            "bytes": 259249
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17569827,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385546,
+          "privateDirtyKiB": 205920,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 453062,
+          "privateDirtyKiB": 255004,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1741.6415669049998,
+      "browserdHeapUsedBytes": 24655600,
+      "webxdHeapUsedBytes": 19810736,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 157,
+      "artifactBytes": 1972868,
+      "observationMetadata": {
+        "count": 26,
+        "bytes": 24972
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 445,
+            "bytes": 266046
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17643339,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385550,
+          "privateDirtyKiB": 205816,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 452861,
+          "privateDirtyKiB": 254952,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1756.612632398,
+      "browserdHeapUsedBytes": 25660648,
+      "webxdHeapUsedBytes": 20025376,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1961181,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23051
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 453,
+            "bytes": 269905
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17577187,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386682,
+          "privateDirtyKiB": 206956,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 453336,
+          "privateDirtyKiB": 255412,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1771.369886337,
+      "browserdHeapUsedBytes": 26086560,
+      "webxdHeapUsedBytes": 20012432,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1962036,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23050
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 461,
+            "bytes": 275352
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17577187,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 386624,
+          "privateDirtyKiB": 206996,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 453714,
+          "privateDirtyKiB": 255692,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1786.6140932979997,
+      "browserdHeapUsedBytes": 24130448,
+      "webxdHeapUsedBytes": 19515440,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 601,
+      "artifacts": 156,
+      "artifactBytes": 1961141,
+      "observationMetadata": {
+        "count": 24,
+        "bytes": 23050
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 467,
+            "bytes": 278388
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17577187,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385484,
+          "privateDirtyKiB": 205860,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 453703,
+          "privateDirtyKiB": 255688,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 1800.5170168999998,
+      "browserdHeapUsedBytes": 25629512,
+      "webxdHeapUsedBytes": 20166320,
+      "browserdConnections": 5,
+      "actorConnections": 3,
+      "activeFrameSubscriptions": 1,
+      "operations": 605,
+      "artifacts": 156,
+      "artifactBytes": 1960897,
+      "observationMetadata": {
+        "count": 22,
+        "bytes": 21130
+      },
+      "idempotency": {
+        "byPolicy": {
+          "durable-mutation": {
+            "entries": 475,
+            "bytes": 283984
+          },
+          "ephemeral-observation": {
+            "entries": 0,
+            "bytes": 0
+          },
+          "image-read": {
+            "entries": 0,
+            "bytes": 0
+          }
+        },
+        "imageBytesRetained": 0
+      },
+      "profileBytes": 17647400,
+      "chrome": [
+        {
+          "pid": 139439,
+          "pssKiB": 385620,
+          "privateDirtyKiB": 205888,
+          "processCount": 12
+        },
+        {
+          "pid": 139441,
+          "pssKiB": 460420,
+          "privateDirtyKiB": 261676,
+          "processCount": 13
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session__sC8CivcsZW467zEiklgIcSC",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_oon5Qq4mvXCW2nFx9hSdOTvE",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    }
+  ],
+  "chromePlateauClaimedResolved": false
+}

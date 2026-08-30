@@ -114,10 +114,28 @@ These decisions apply to the replacement browser runtime. They supersede conflic
 
 **Consequence:** Session creation fails closed without healthy egress. Redirects and page-driven navigation remain on the proxy path. Browserd quarantines unexpected committed protocols as defense in depth. Test-only loopback fixture policy cannot be enabled in production. See `ADR-014-BROWSER-EGRESS-BOUNDARY.md`.
 
-## Phase 1.1, Phase 1.2, and Phase 2A confirmations
+## ADR-015: Production observation lease and motor timing
+
+**Decision:** Configure screenshot and DOM observation lifetimes separately. Both default to 60 seconds and accept only 10–120 seconds. Use monotonic expiry and expose exact wall `validUntil`. Keep all structural and post-path checks. Keep visible human paths while pipelining bounded CDP input acknowledgements and enabling per-tab focus emulation.
+
+**Reason:** A 3-second production lease could not cover model reasoning plus Phase 2A's 5.2-second route. Serialized background CDP acknowledgements, not the path generator, caused the long delay.
+
+**Consequence:** Ordinary movement targets 400–1,500 ms median and at most 2,500 ms p95 without teleporting or deleting persona behavior. See `ADR-015-OBSERVATION-LEASE-AND-MOTOR-TIMING.md`.
+
+## ADR-016: Exact screenshot transfer and route-aware idempotency
+
+**Decision:** POST screenshot observation returns metadata only. A separate authenticated GET retrieves one exact actor/session/tab/observation image. Webxd retains bounded metadata and no long-lived full screenshot buffer. Only durable small mutations enter general idempotency; ephemeral observations and image reads do not.
+
+**Reason:** The Phase 2A all-POST policy could retain image base64 for 15 minutes, and a session-wide latest image could be overwritten by concurrent observations or outlive its artifact.
+
+**Consequence:** General idempotency reports zero retained image bytes. Exact image retrieval validates canonical base64, total bytes, digest, media type, and dimensions. Cached public responses cannot revive expired observations, artifacts, handles, or documents. See `ADR-016-SCREENSHOT-TRANSFER-AND-IDEMPOTENCY.md`.
+
+## Phase 1.1, Phase 1.2, Phase 2A, and Phase 2B confirmations
 
 Phase 1.1 confirms that frame subscriptions are connection-, actor-, full-address-, epoch-, and subscription-ID-scoped. Operation IDs use canonical semantic fingerprints. Artifacts use actor, session, tab, purpose, media type, size, digest, and lifetime provenance. Screenshot metadata is checked before and after capture. Descriptor and profile ownership use runtime instance identity plus PID start identity.
 
 Phase 1.2 confirms exclusive nonce-bound browserd startup ownership, unique instance sockets, atomic profile locks, outer-root cleanup, transactional target publication, immutable capture identity through artifact commit, typed bounded DOM fallback, retry lookup before resource lookup, connection-bound frame retry semantics, idempotent artifact rollback, and session-before-owner quota order. Same-origin iframe DOM fallback is supported. Cross-origin out-of-process iframe fallback is not supported.
 
-Phase 2A Gate 0 replaces stale filesystem ownership recovery with kernel-owned abstract AF_UNIX lifetime locks. It also makes artifact admission atomic, bounds terminal target history, settles in-flight captures, makes cleanup retryable, adds global capacity, validates operation-result resources, and reports truthful health. The routed integration binds trusted webxd actors, delivers verified screenshots as Pi image items, converts image pixels inside browserd, and rejects old sessions after daemon replacement. Production-default routing remains disabled.
+Phase 2A Gate 0 replaces stale filesystem ownership recovery with kernel-owned abstract AF_UNIX lifetime locks. It also makes artifact admission atomic, bounds terminal target history, settles in-flight captures, makes cleanup retryable, adds global capacity, validates operation-result resources, and reports truthful health. The routed integration binds trusted webxd actors, delivers verified screenshots as Pi image items, converts image pixels inside browserd, and rejects old sessions after daemon replacement.
+
+Phase 2B adds production observation leases, practical motor timing, exact image GETs, route-aware idempotency, persistent UTF-8 transport, bounded subscription and client lifecycles, webxd restart rehydration, pinned runtime identity, stable public mutation IDs, functional branded egress health, explicit download denial, and process-isolated acceptance. Production-default routing remains disabled.

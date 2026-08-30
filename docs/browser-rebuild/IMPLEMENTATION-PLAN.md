@@ -98,6 +98,33 @@ Each phase has one acceptance gate. Keep the old browser production path until t
 
 **Rollback:** start webxd with `WEBX_BROWSER_BACKEND=legacy`. Selection is immutable for the process. No request can switch or fall back to the other backend.
 
+## Phase 2B — route usability, idempotency, and stream foundation
+
+**Status:** implementation, deterministic tests, and final-code process-isolated acceptance pass on `rebuild/screenshot-first-browser`. A 30-minute process soak passed before final review corrections. The user requested a shorter replacement; its 120-second attempt hit one screenshot CDP timeout. The strict final-code 30-minute gate remains open. Production-default routing remains disabled.
+
+**Goal:** close routed correctness and usability defects before Tauri work.
+
+**Completed work:**
+
+- Added separate bounded 60-second production screenshot and DOM leases with monotonic expiry and exact public `validUntil`.
+- Corrected human motor replay to practical latency while preserving sampled persona behavior and post-path revalidation.
+- Removed images from general WebX idempotency and removed full screenshot buffers from webxd session bindings.
+- Added exact actor/session/tab/observation image GET and complete byte, digest, media, and dimension verification.
+- Added persistent UTF-8 decoding, independent transport bounds, bounded cancellation/backpressure, and durable subscription teardown.
+- Bound webxd actor identity and resource limits to each client socket while browserd-owned sessions survive disconnect.
+- Rehydrated actor sessions after webxd restart, pinned descriptor-dependent work to one browserd runtime, and rejected old sessions after replacement.
+- Propagated stable public operation IDs through all mutations and replaced internal time/random IDs with cryptographic IDs.
+- Added functional branded proxy health, egress binding agreement, strict CONNECT parsing, IPv6 Host formatting, and browser-wide download denial.
+- Added process-isolated browserd, webxd, Pi harness, deterministic page, and test-only proxy acceptance plus a 30-minute soak.
+
+**Evidence:** `PHASE2B-RESULTS.md`, `ADR-015-OBSERVATION-LEASE-AND-MOTOR-TIMING.md`, `ADR-016-SCREENSHOT-TRANSFER-AND-IDEMPOTENCY.md`, and `evidence/phase2b-*-results.json`.
+
+**Acceptance gate:** production-default delayed clicks work; stale state fails closed; motor p95 is below 2.5 seconds; image bytes in general idempotency and long-lived webxd buffers are zero; exact concurrent images, fragmented UTF-8, long-lived streams, binding cleanup, webxd rehydration, browserd replacement, stable close retry, proxy health, download denial, process isolation, and cleanup pass. Search/read stay healthy during browser outages.
+
+**Deletions enabled:** none. Keep the legacy stack and immutable service switch.
+
+**Rollback:** start webxd with the default `WEBX_BROWSER_BACKEND=legacy`. No request can select or fall back to AgentCursor.
+
 ## Phase 3 — production Tauri workspace and human control
 
 **Goal:** replace the spike viewer with a local screenshot workspace and safe user takeover.

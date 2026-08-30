@@ -1,12 +1,14 @@
 # Internal browser protocol
 
-Status: Phase 2A executable internal contract. This is the private browserd protocol, not public WebX API major 3.
+Status: Phase 2B executable internal contract. This is the private browserd protocol, not public WebX API major 3.
 
 The authoritative source is `packages/browser-protocol/src/schema.ts`. The deterministic machine-readable artifact is `packages/browser-protocol/schema/browser-protocol.schema.json`. Conformance fixtures and parser tests are in `packages/browser-protocol/tests/`.
 
 ## Framing and version
 
 `browserd` uses bounded newline-delimited JSON on an owner-only Unix socket. Every record has `protocolVersion: "browser.v1"`. Request and response objects reject unknown fields. IDs, strings, URLs, numbers, lists, screenshots, and frame sizes have explicit bounds.
+
+Each browserd and webxd client connection owns one persistent fatal UTF-8 decoder. Bounds for one frame, accumulated incomplete UTF-8 bytes, pending requests, active subscriptions, and queued outbound bytes are independent. A history of valid small frames does not consume a cumulative frame budget. An already-aborted request is rejected before write. A queued socket write is admitted; later caller cancellation sends one bounded `operation.cancel`. Socket drain controls backpressure and connection failure rejects all pending callers.
 
 Mutation and observation requests contain:
 
@@ -86,6 +88,8 @@ A normal `session.create` transaction creates the Chrome host and first tab. The
 
 `frames.subscribe` requires a bounded opaque `subscriptionId` and accepts `interest: "idle" | "selected"`. `frames.unsubscribe` requires the same ID and full address. The ID is bound to one connection, actor, address, epoch, and interest. An identical duplicate is idempotent. Reuse for another address or interest returns `OPERATION_CONFLICT`. Unsubscribing an unknown ID is idempotent and returns `subscribed: false`. Active pointer actions temporarily override either rate with a burst rate.
 
+A client subscription is `open`, `unsubscribing`, `closed`, or `cleanup-failed`. Duplicate close calls share one teardown. Local state remains until browserd confirms unsubscribe. If confirmation is lost, webxd closes the complete actor connection so browserd removes every remote subscription. Open or tearing-down subscriptions prevent idle eviction; delivered frames update activity.
+
 ## Session and tab records
 
 A session descriptor contains its browser session ID, control epoch, state, persona ID, cursor state, and explicit tab descriptors. A tab descriptor contains its full address, URL, title, state, document generation, viewport generation, and latest frame sequence.
@@ -95,6 +99,8 @@ Tab focus changes presentation only. It does not set request authority.
 ## Screenshot observation
 
 `observe.screenshot` accepts the full address and `delivery: "inline" | "artifact" | "auto"`. Production WebX requests artifact delivery and reconstructs bounded chunks outside browserd.
+
+The production screenshot lease defaults to 60,000 ms and accepts 10,000 through 120,000 ms. Expiry is monotonic. DOM lifetime is separately configured with the same default and accepted range.
 
 Its result contains:
 
@@ -111,7 +117,7 @@ Its result contains:
 
 The runtime compares target, CDP session, document generation, viewport generation, control epoch, CSS dimensions, DPR, and scroll before and after capture. It retries one inconsistent capture when the deadline permits. The immutable captured identity remains bound through digest and artifact insertion. The runtime resolves the exact tab again immediately before commit. It returns `DOCUMENT_CHANGED`, `VIEWPORT_CHANGED`, or `CONTROL_EPOCH_STALE` on a commit-time mismatch and idempotently revokes any new artifact. `capturedMonotonicMs` records completed capture.
 
-The observation record does not retain another full screenshot buffer. It retains bounded binding metadata and an artifact reference.
+The observation record does not retain another full screenshot buffer. It retains bounded binding metadata and an artifact reference. `validUntil` is the exact wall-clock projection of the monotonic lease.
 
 ## DOM fallback observation
 
@@ -195,8 +201,10 @@ Control-epoch increment cancels queued prior-epoch actions and stops running act
 
 ## Public WebX boundary
 
-Trusted webxd parses every browserd response and event through the private protocol parser. It securely discovers the current descriptor, binds one persistent connection per authenticated actor, and generates a new request ID for each wire attempt. The WebX idempotency key supplies the stable mutation operation ID.
+Trusted webxd parses every browserd response and event through the private protocol parser. It securely discovers the current descriptor, binds one persistent connection per authenticated actor, and generates a new request ID for each wire attempt. The WebX idempotency key supplies the stable mutation operation ID for session and tab creation/focus/close, session close, actions, navigation, and cancellation. Genuinely internal support/read IDs use a bounded cryptographic random source.
 
-The public browser contract is version `3.0.0`. It removes CDP target IDs and private transport details. Public tabs use `tabId`; webxd restores the internal full address from actor-owned session state and confirms ownership with browserd.
+The public browser contract is version `3.0.0`. It removes CDP target IDs and private transport details. Public tabs use `tabId`; webxd restores the internal full address from actor-owned session state and confirms ownership with browserd. Actor-scoped `session.list` rehydrates webxd bindings after webxd restart. Descriptor-dependent signing and dispatch use one pinned browserd runtime connection. A browserd replacement purges local session/observation state and never remaps an old session.
+
+POST screenshot observation returns metadata only. GET `/v1/browser/sessions/<session>/tabs/<tab>/observations/<observation>/image` reads the exact current artifact. Webxd verifies canonical base64, complete bytes, digest, media type, and PNG/JPEG dimensions before immediate presentation. Durable small mutations use the general WebX idempotency map. Screenshot and DOM observations and image reads bypass it, so it retains zero image bytes and cannot revive expired browserd resources.
 
 A daemon runtime-instance change closes old connections. Old sessions are not recreated. New actor connections can bind to the replacement for new work. Search and read do not use this transport.

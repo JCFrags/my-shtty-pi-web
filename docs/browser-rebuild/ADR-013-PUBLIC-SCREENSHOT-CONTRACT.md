@@ -1,6 +1,6 @@
 # ADR-013: Public screenshot-first browser contract
 
-Status: accepted for Phase 2A development
+Status: accepted and corrected by Phase 2B
 
 ## Context
 
@@ -37,7 +37,7 @@ A tab contains its public `tabId`, URL, title, state, document generation, viewp
 
 `browser_observe` defaults to `screenshot`. Its result contains the real browserd observation ID and bounded metadata for the exact session and tab. It includes CSS viewport dimensions, image pixel dimensions, device-pixel ratio, capture scale, scroll, generations, digest, media type, cursor, and validity time.
 
-The Pi facade retrieves and verifies the complete browserd artifact. It then moves the bytes through `artifactPayload`. Pi presentation emits one bounded text item and one image item. Image base64 does not appear in the text item or compact details.
+POST observation returns metadata only. The Pi facade uses a separate authenticated GET for the exact actor/session/tab/observation image, verifies the complete browserd artifact, and moves the bytes through `artifactPayload`. Pi presentation emits one bounded text item and one image item. Image base64 does not appear in the text item or compact details.
 
 `browser_observe` accepts `mode: dom` only as an explicit fallback. A DOM observation contains bounded document-scoped opaque handles. DOM pointer actions still use the human-style browser motor.
 
@@ -66,9 +66,11 @@ It does not expose selectors as the normal action model. It does not expose arbi
 
 WebX uses its idempotency key as the stable source for browserd mutation identity. Each wire attempt has a separate request ID. Exact retries reuse one operation result while its referenced resource remains valid. Conflicting semantics fail with a conflict.
 
-Screenshot bytes are not copied into the general long-lived WebX idempotency cache. Webxd reads bounded browserd artifact chunks, verifies canonical base64, byte count, media type, and SHA-256, and retains only the latest verified screenshot needed for immediate Pi image presentation.
+Phase 2A intended screenshot bytes to stay outside general idempotency, but its all-successful-POST policy did not enforce that. Phase 2B classifies routes explicitly. Durable small mutations use the bounded 15-minute map. Screenshot and DOM observations and exact image reads bypass it. Diagnostics require zero retained image bytes.
 
-A browserd restart does not recreate sessions. An old session fails with `BROWSER_INSTANCE_REPLACED` or a non-enumerating not-found result. The agent must open a new session.
+Webxd reads bounded browserd artifact chunks, verifies canonical base64, byte count, media type, SHA-256, and decoded PNG or JPEG dimensions. It retains bounded exact-observation metadata and no full screenshot buffer. The bytes exist only during the exact request and immediate Pi image presentation.
+
+A cached response cannot revive an expired observation, artifact, handle, or changed document. A webxd restart rehydrates actor-owned sessions from the same browserd runtime. A browserd restart does not recreate sessions. An old session fails with `BROWSER_INSTANCE_REPLACED` or a non-enumerating not-found result. The agent must open a new session.
 
 ## Consequences
 
@@ -78,4 +80,4 @@ Image-grounded actions remain valid at non-1 DPR because the conversion occurs i
 
 The contract is smaller than the legacy browser surface. Unsupported legacy workspace and debug tools are not active for `agentcursor/chrome`.
 
-Production-default routing stays disabled in Phase 2A. The immutable startup switch still defaults to `legacy`.
+Production-default routing stays disabled after Phase 2B. The immutable startup switch still defaults to `legacy`. ADR-016 is authoritative for screenshot transfer and idempotency lifetimes.

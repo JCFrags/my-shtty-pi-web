@@ -18,9 +18,9 @@ The public versions are `WEBX_API_VERSION = 3.0.0`, `WEBX_API_MAJOR = 3`, and `B
 
 The facade can save one extracted read below `${XDG_DATA_HOME:-~/.local/share}/pi-web/exports`. It uses private directories and files, protects existing destinations by default, and returns compact metadata instead of the body.
 
-The browser contract exposes explicit session and tab identities. A screenshot observation contains the real browserd observation ID, document and viewport generations, CSS and image dimensions, DPR, scroll, digest, media type, cursor, and validity. Coordinate actions cite that observation and use `imagePixels` or `cssViewport`. Explicit DOM fallback returns bounded opaque document-scoped handles.
+The browser contract exposes explicit session and tab identities. A screenshot observation contains the real browserd observation ID, document and viewport generations, CSS and image dimensions, DPR, scroll, digest, media type, cursor, and exact `validUntil`. Coordinate actions cite that observation and use `imagePixels` or `cssViewport`. Explicit DOM fallback returns bounded opaque document-scoped handles and its own exact `validUntil`.
 
-The facade verifies the complete browser image and moves it through `artifactPayload`. Pi presentation emits one bounded text item and one actual image item. Image base64 does not appear in model text or compact details.
+Screenshot creation returns metadata. The facade then requests the exact image with the real session, tab, and observation ID, verifies complete bytes, digest, media type, and dimensions, and moves it through `artifactPayload`. Pi presentation emits one bounded text item and one actual image item. Image base64 does not appear in model text, compact details, or general WebX idempotency. The Unix transport uses one serialized persistent connection with persistent UTF-8 decoding, bounded response bytes, cancellation, reconnect, and explicit `close()`.
 
 Capabilities come from the backend that webxd selected at startup. `agentcursor/chrome` does not advertise workspace, safe debug, control, upload, or download operations. The SDK has no per-request backend selector and no silent fallback.
 

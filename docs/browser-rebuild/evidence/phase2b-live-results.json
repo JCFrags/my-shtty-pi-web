@@ -1,0 +1,69 @@
+{
+  "passed": true,
+  "chromium": "Chromium 151.0.7922.173 Built from source for Fedora release 44 (Forty Four)",
+  "serviceStartupMs": 3.632669999999962,
+  "agentSessions": [
+    "session_0mtruNUM6_-26AelGmNtE8Dl",
+    "session_NcejJuKjOUYxF6kIm6Q1mIRI"
+  ],
+  "chromePids": [
+    160237,
+    160239
+  ],
+  "distinctProfiles": true,
+  "distinctPersonas": true,
+  "piImageContent": {
+    "agentA": {
+      "mimeType": "image/png",
+      "bytes": 21623
+    },
+    "agentB": {
+      "mimeType": "image/png",
+      "bytes": 21608
+    },
+    "textItems": 1,
+    "imageItems": 1,
+    "base64InTextOrDetails": false
+  },
+  "coordinateProof": {
+    "devicePixelRatio": 2,
+    "cssButtonCenter": [
+      190,
+      126
+    ],
+    "imagePixelClick": [
+      380,
+      252
+    ],
+    "agentAState": "alpha count 1",
+    "agentBState": "beta count 1",
+    "actionWallMs": 746.348086
+  },
+  "domFallback": {
+    "explicit": true,
+    "typedValue": "alpha isolated",
+    "crossAgentLeak": false,
+    "humanPathSequence": 3
+  },
+  "tabs": {
+    "createdFocusedListedClosed": true
+  },
+  "cancellation": {
+    "settled": true,
+    "heldButtons": 0,
+    "heldKeys": 0
+  },
+  "restart": {
+    "oldSessionRejected": true,
+    "newSessionId": "session_a7GTCFwN4O8BmELiwXfTER0G"
+  },
+  "searchReadIndependence": {
+    "searchSucceededWhileBrowserdAbsent": true
+  },
+  "cleanup": {
+    "profilesRemaining": 0,
+    "browserdDescriptorRemoved": true,
+    "webxdSocketRemoved": true
+  },
+  "testOnlyEgress": "LoopbackFixtureAuthorization and LoopbackDestinationAuthority exist only in this opt-in live test. Production proxy enforcement is tested separately."
+}

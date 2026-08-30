@@ -43,9 +43,26 @@
 | BR-32 | The complete native route is isolated and bounded. | Run two Pi actors through SDK, webxd, browserd, and headed Chromium. Confirm distinct processes, profiles, sessions, personas, and tabs; explicit DOM fallback; tabs; cancellation; retry truth; no warm process spawn; and complete cleanup. |
 | BR-33 | The actual routed workload passes for 30 minutes. | Run two actors through repeated screenshot, image action, DOM fallback, tab, retry, pool eviction, artifact, search, and read work. Record separate Chrome process-tree PSS/private dirty, route latency, combined test-process heap, counts, profile bytes, and cleanup. Do not claim this resolves ADR-012. |
 
-## Phase 1 delivery boundary
+## Phase 2B route acceptance criteria
 
-Phase 1 implements BR-01, BR-02, BR-04 through BR-11, BR-13, BR-14, BR-16 through BR-23 in the parallel runtime. Phase 2A adds BR-12, BR-24, and BR-25 through BR-33 behind the non-default reversible startup switch. BR-03 and BR-15 remain Phase 3 Tauri workspace gates.
+| ID | Criterion | Acceptance test |
+|---|---|---|
+| BR-34 | Production observation leases cover model reasoning and fail closed. | Use the normal 60-second screenshot default, wait 10 and 30 seconds, and complete a bound click. After expiry or before-expiry document, viewport, scroll, epoch, or tab replacement, return a typed stale failure. Keep DOM lifetime separate. |
+| BR-35 | Ordinary human motor timing is practical without teleporting. | Preserve persona behavior and at least six samples where distance permits. Record nominal, replay, CDP, overlay, queue, guard, route, and presentation times. Require about 400–1,500 ms median and at most 2,500 ms p95 for ordinary viewport paths. |
+| BR-36 | General idempotency retains no image bytes. | Classify durable mutations, ephemeral observations, and image reads. Report count and bytes per class and require `imageBytesRetained` to remain zero. Do not let cached metadata outlive browserd resources. |
+| BR-37 | Image retrieval is exact and transient. | POST metadata, then GET by actor/session/tab/observation. Verify canonical bytes, size, digest, media, and dimensions. Exercise concurrent same-tab, cross-tab, and cross-actor observations. Keep no full screenshot buffer in webxd session state. |
+| BR-38 | Browserd and webxd NDJSON remain exact under fragmentation and load. | Split every multibyte field at every byte boundary. Independently bound frames, incomplete bytes, pending work, subscriptions, and outbound bytes. Prove pre-write abort, admitted cancellation, drain backpressure, and prompt disconnect rejection. |
+| BR-39 | Frame subscriptions survive idle and settle safely. | Deliver frames longer than idle timeout. Share duplicate close, retain local state until unsubscribe commits, and close the actor connection when confirmation is lost. End with zero local and remote subscriptions. |
+| BR-40 | Webxd client bindings are bounded and transient. | Enforce connection, bind-time, live-binding, request, queue, and outbound limits. Remove binding on issuing socket close and reject cross-client reuse. Rebind the same authenticated actor without closing its browserd-owned sessions. |
+| BR-41 | Webxd restart rehydrates while browserd replacement invalidates. | Restart webxd only and continue listing, observing, imaging, acting, tab work, and close on the same browserd session. Restart browserd and reject old sessions without remapping. Pin session creation and signed navigation to the runtime that executes them. |
+| BR-42 | Every public mutation keeps one stable operation identity. | Lose close-tab and close-session responses after commit and retry the exact HTTP mutation. Confirm one side effect and the original result. Cover focus, create, conflict, actions, navigation, and cancellation. |
+| BR-43 | Browser capability health requires functional egress. | Require exact branded local proxy response and browserd/webxd binding agreement. Reject absent, wrong, malformed, stalled, restarted, or mismatched proxy. Session creation probes independently. |
+| BR-44 | Chrome denies downloads. | Require browser-wide deny with events, cancel any start, expose no caller path, and fail closed when denial is unsupported. Test anchor, attachment, script, and popup cases and require no file. |
+| BR-45 | The route passes across process and restart boundaries. | Run separate browserd, webxd, Pi harness, page fixture, and test-only proxy processes. Cover delayed click, exact images, DOM, streams, Pi rebind, webxd restart, browserd restart, health change, search/read independence, response loss, and complete cleanup, then run 30 minutes uninterrupted. |
+
+## Phase delivery boundary
+
+Phase 1 implements BR-01, BR-02, BR-04 through BR-11, BR-13, BR-14, BR-16 through BR-23 in the parallel runtime. Phase 2A adds BR-12, BR-24, and BR-25 through BR-33 behind the non-default reversible startup switch. Phase 2B adds BR-34 through BR-45 without changing the default. BR-03 and BR-15 remain Phase 3 Tauri workspace gates.
 
 ## Required pointer operations
 

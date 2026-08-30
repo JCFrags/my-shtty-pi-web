@@ -1,0 +1,254 @@
+{
+  "passed": true,
+  "processIsolation": {
+    "piHarnessPid": 224017,
+    "browserdPid": 224059,
+    "webxdPid": 224077,
+    "distinct": true
+  },
+  "productionObservationLease": {
+    "configuredMs": 60000,
+    "testOverrideUsed": false,
+    "requestedModelDelayMs": 10000,
+    "actualModelDelayMs": 10004.388946,
+    "validUntil": "2026-08-30T04:27:42.137Z",
+    "clickSucceeded": true,
+    "clickRouteMs": 555.2187320000012
+  },
+  "motor": {
+    "generatedNominalPathDurationMs": {
+      "count": 1,
+      "min": 511.95143340596087,
+      "median": 511.95143340596087,
+      "p95": 511.95143340596087,
+      "max": 511.95143340596087,
+      "mean": 511.95143340596087
+    },
+    "sampleReplayWallMs": {
+      "count": 1,
+      "min": 511.295435,
+      "median": 511.295435,
+      "p95": 511.295435,
+      "max": 511.295435,
+      "mean": 511.295435
+    },
+    "sampleCount": {
+      "count": 1,
+      "min": 16,
+      "median": 16,
+      "p95": 16,
+      "max": 16,
+      "mean": 16
+    }
+  },
+  "exactObservationImages": {
+    "concurrent": true,
+    "observations": [
+      {
+        "observationId": "observation_mFkhV_rvUb83ieHrhQoMSeV9",
+        "digest": "3fadd587212c5cadd19c1b7b732fbb162b3c21394049a8030e46a7ac2f045fba",
+        "bytes": 13188
+      },
+      {
+        "observationId": "observation_yCO_YnMXiBDlZn26g1_JOfRD",
+        "digest": "5fca3fa16226bb299e5b5a5648810ec7892de01f4eb8212b742eeda960e59077",
+        "bytes": 14819
+      },
+      {
+        "observationId": "observation_eLh_pcm_zQi5kh5KsMnmX09f",
+        "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+        "bytes": 10883
+      }
+    ],
+    "distinctObservationIds": true,
+    "distinctDigests": true
+  },
+  "domFallback": {
+    "succeeded": true,
+    "value": "phase2b process"
+  },
+  "frameSubscription": {
+    "survivedIdleTimeoutMs": 1000,
+    "waitedMs": 1500,
+    "frameCount": 2,
+    "settled": true
+  },
+  "piReconnect": {
+    "sameActorSessionUsable": true
+  },
+  "webxdRestart": {
+    "browserdRuntimePreserved": true,
+    "sessionRehydrated": true,
+    "screenshotSucceeded": true
+  },
+  "browserdReplacement": {
+    "oldRuntimeInstanceId": "runtime_m69iVSLyX42y2nwdECg97nFY",
+    "newRuntimeInstanceId": "runtime_bc6GBtFnETqS50rTYkW7V8gy",
+    "oldSessionRejected": true,
+    "newSessionWorked": true
+  },
+  "proxyHealth": {
+    "healthyCapability": true,
+    "unhealthyCapability": false,
+    "recovered": true
+  },
+  "searchReadIndependence": {
+    "succeededDuringBrowserdAndProxyOutage": true
+  },
+  "downloadDenial": {
+    "eventCount": 1,
+    "forbiddenFilesRemaining": 0
+  },
+  "stableCloseRetry": {
+    "firstResponseLost": true,
+    "transparentExactRetrySucceeded": true,
+    "idempotencyKey": "phase2b-close-response-loss",
+    "injectedDropObserved": true
+  },
+  "idempotency": {
+    "byPolicy": {
+      "durable-mutation": {
+        "entries": 5,
+        "bytes": 3881
+      },
+      "ephemeral-observation": {
+        "entries": 0,
+        "bytes": 0
+      },
+      "image-read": {
+        "entries": 0,
+        "bytes": 0
+      }
+    },
+    "imageBytesRetained": 0
+  },
+  "webxd": {
+    "pid": 224704,
+    "heapUsedBytes": 18951824,
+    "clientConnections": 3,
+    "liveBindings": 3,
+    "idempotency": {
+      "byPolicy": {
+        "durable-mutation": {
+          "entries": 5,
+          "bytes": 3881
+        },
+        "ephemeral-observation": {
+          "entries": 0,
+          "bytes": 0
+        },
+        "image-read": {
+          "entries": 0,
+          "bytes": 0
+        }
+      },
+      "imageBytesRetained": 0
+    },
+    "browser": {
+      "runtimeInstanceId": "runtime_bc6GBtFnETqS50rTYkW7V8gy",
+      "sessions": 0,
+      "observationMetadata": {
+        "count": 0,
+        "bytes": 0
+      },
+      "imageBytesRetained": 0,
+      "actorConnections": 1
+    },
+    "testResponseDropped": true,
+    "stream": {
+      "connectionCount": 1,
+      "active": false,
+      "frameCount": 0
+    }
+  },
+  "browserd": {
+    "pid": 224743,
+    "heapUsedBytes": 21696656,
+    "runtimeInstanceId": "runtime_bc6GBtFnETqS50rTYkW7V8gy",
+    "connections": 2,
+    "sessions": 0,
+    "tabs": 0,
+    "subscriptions": 0,
+    "operations": 4,
+    "artifacts": 0,
+    "artifactBytes": 0,
+    "heldInput": [],
+    "chrome": [],
+    "droppedFrames": 0,
+    "actionTimings": [
+      {
+        "browserSessionId": "session_v78Haw0BC65kv16xA2DstODX",
+        "tabId": "tab_tqPedrCIvp97518zcCHLF7hF",
+        "recordedMonotonicMs": 1692.029939,
+        "pathDurationMs": 511.95143340596087,
+        "pathWallMs": 511.295435,
+        "generatedNominalPathDurationMs": 511.95143340596087,
+        "sampleReplayWallMs": 511.295435,
+        "cdpInputLatencyMs": 53.67236999999932,
+        "cdpInputMaxLatencyMs": 15.27448900000013,
+        "overlayUpdateLatencyMs": 10.228042000000187,
+        "postPathGuardMs": 0.5955799999999272,
+        "sampleCount": 16,
+        "completionAfterPathMs": 134.2264110000001,
+        "totalMs": 646.8079790000002
+      }
+    ],
+    "dispatchTimings": [
+      {
+        "kind": "session.list",
+        "durationMs": 0.21771699999999328
+      },
+      {
+        "kind": "session.create",
+        "durationMs": 436.301474
+      },
+      {
+        "kind": "session.list",
+        "durationMs": 0.04998399999999492
+      },
+      {
+        "kind": "observe.screenshot",
+        "durationMs": 265.643008
+      },
+      {
+        "kind": "session.list",
+        "durationMs": 0.029050999999981286
+      },
+      {
+        "kind": "artifact.read",
+        "durationMs": 0.14346299999988332
+      },
+      {
+        "kind": "session.list",
+        "durationMs": 0.02845800000000054
+      },
+      {
+        "kind": "action.coordinate",
+        "durationMs": 650.088039
+      },
+      {
+        "kind": "tab.list",
+        "durationMs": 0.05316399999992427
+      },
+      {
+        "kind": "session.list",
+        "durationMs": 0.056251999999858526
+      },
+      {
+        "kind": "session.close",
+        "durationMs": 143.5735249999998
+      },
+      {
+        "kind": "capabilities.get",
+        "durationMs": 0.23210199999994074
+      }
+    ]
+  },
+  "cleanup": {
+    "profilesRemaining": 0,
+    "webxdSocketRemoved": true,
+    "browserdDescriptorRemoved": true,
+    "childrenRemaining": 0
+  },
+  "testAuthorityBoundary": "Loopback destination and response-loss injection are constructed only by the opt-in test worker. Production main.ts cannot enable either path."
+}

@@ -1,6 +1,6 @@
 # ADR-014: Browser navigation and egress boundary
 
-Status: accepted for Phase 2A development
+Status: accepted and hardened by Phase 2B
 
 ## Context
 
@@ -35,13 +35,15 @@ Chrome launches with:
 - QUIC disabled;
 - non-proxied WebRTC UDP disabled.
 
-The proxy accepts only a literal loopback listener address and a valid port. For each HTTP request or HTTPS CONNECT, it rejects credentials and local names. It resolves the destination and rejects the complete answer set if any address is non-public. It connects directly to one validated IP address from that answer set. This connection pin prevents DNS rebinding between policy validation and connection setup.
+The proxy accepts only a literal loopback listener address and a valid port. It owns a deterministic local health endpoint at `http://webx-egress.invalid/.well-known/webx-egress-health`. A valid probe returns exact status 204, an empty body, and `WebX-Egress-Proxy: secure-egress/1`. Webxd applies a bounded timeout and small health cache and requires browserd's egress binding ID to match its own. A successful TCP connection or unrelated HTTP response is unhealthy. Session creation calls readiness independently of cached capability health.
+
+For each HTTP request or HTTPS CONNECT, the proxy rejects credentials and local names. CONNECT uses strict authority-form parsing. It resolves the destination and rejects the complete answer set if any address is non-public. It connects directly to one validated IP address from that answer set. Public IPv6 literals are bracketed when constructing HTTP Host fields. This connection pin prevents DNS rebinding between policy validation and connection setup.
 
 Each redirect, link navigation, form, script navigation, and popup network request goes through a new proxy request or connection and receives the same destination checks. Production session creation calls the destination authority readiness check before Chrome starts. Browser capability health also depends on configured egress. A missing or unreachable proxy fails closed.
 
 Browserd monitors top-level target URLs as a second boundary. It permits public HTTP or HTTPS, `about:blank`, and a bounded Chromium error URL. It closes and removes tabs that commit a file or unsupported external protocol. Unknown targets are not adopted. A popup is adopted only when its opener is an owned tab and registration completes transactionally.
 
-Downloads remain disabled by contract in Phase 2A. Chrome sandboxing, site isolation, certificate validation, and web security remain enabled.
+Downloads are denied in Chrome, not only omitted from the API. Browser startup requires `Browser.setDownloadBehavior` with `behavior: "deny"` and events enabled. A download start emits a bounded typed denial, requests `Browser.cancelDownload`, and fails the host closed if cancellation cannot be enforced. No request can select a writable download path. Unsupported browser versions fail capability/startup instead of silently allowing downloads. Chrome sandboxing, site isolation, certificate validation, and web security remain enabled.
 
 ## Trust boundary
 
@@ -61,7 +63,7 @@ A browser authorization expires after 15 seconds. It cannot be used with another
 
 Browserd replacement changes both runtime identity and descriptor secrets. Webxd detects that change, closes old actor connections, and rejects old sessions. It signs new work only against the replacement descriptor.
 
-Browserd or proxy failure makes browser capability unavailable. It does not make WebX search, direct read, content, cache, or artifact services unhealthy.
+Browserd or functional proxy failure, malformed or stalled health response, or egress binding disagreement makes browser capability unavailable. Proxy restart is reflected after the bounded health-cache interval. It does not make WebX search, direct read, content, cache, or artifact services unhealthy.
 
 ## Consequences
 
@@ -69,4 +71,6 @@ A broker authorization is necessary but is not sufficient. Production browsing i
 
 A proxy destination check is necessary for every connection because page-driven navigation does not carry a WebX operation token. Top-level target quarantine is defense in depth after commit; it is not a substitute for network denial before connection.
 
-Production-default `agentcursor` routing remains disabled in Phase 2A. Operators must configure and supervise the reviewed proxy before a later staged deployment can select this backend.
+The branded local probe proves that the expected reviewed service is responding. It is not cryptographic protection against hostile code running as the same Unix user.
+
+Production-default `agentcursor` routing remains disabled after Phase 2B. Operators must configure and supervise the reviewed proxy before a later staged deployment can select this backend.
