@@ -69,5 +69,10 @@ mod tests {
         assert!(parse_launch_args(["--raise".into(), "--hide".into()]).is_err());
         assert!(parse_launch_args(["--select-tab=tab:one".into()]).is_err());
         assert!(parse_launch_args(["--select-session=/tmp/socket".into()]).is_err());
+        assert_eq!(parse_launch_args(["--hide".into()]).unwrap(), LaunchRequest { hide: true, ..LaunchRequest::default() });
+        assert!(parse_launch_args(["--hide".into(), "--hide".into()]).is_err());
+        assert!(parse_launch_args(["--select-session=session:one".into(), "--select-session=session:two".into()]).is_err());
+        assert!(parse_launch_args(["--raise".into(), "--select-session=session:one".into(), "--select-tab=tab:one".into(), "--unknown".into(), "--extra".into()]).is_err());
+        assert!(parse_launch_args([format!("--select-session={}", "a".repeat(257))]).is_err());
     }
 }

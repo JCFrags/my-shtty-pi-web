@@ -17,6 +17,7 @@ import {
   WebSearchSchema,
 } from "../src/schemas.js";
 import type { WebxCapabilities, WebxRequestOptions, WebxResult, WebxSdk } from "../src/sdk.js";
+import type { WorkspaceLaunchRequest } from "../src/workspace-launcher.js";
 
 const readyCapabilities: WebxCapabilities = {
   apiVersion: "3.0.0",
@@ -66,7 +67,9 @@ function harness(sdk: MockSdk, trusted = true, audit: { record(input: unknown): 
     getActiveTools() { return active; },
     setActiveTools(value: string[]) { active = value; },
   };
-  createPiWebxExtension(() => sdk, audit, options)(pi as never);
+  const workspaceRequests: WorkspaceLaunchRequest[] = [];
+  const workspaceLauncher = options.workspaceLauncher ?? { launch: async (request: WorkspaceLaunchRequest) => { workspaceRequests.push(request); } };
+  createPiWebxExtension(() => sdk, audit, { ...options, workspaceLauncher })(pi as never);
   const controller = new AbortController();
   const ctx = {
     cwd: "/trusted/project",
@@ -94,7 +97,7 @@ function harness(sdk: MockSdk, trusted = true, audit: { record(input: unknown): 
   return {
     tools, commands, shortcuts, events, ctx, execute,
     get active() { return active; },
-    status, notifications, selectionPrompts, inputPrompts, selections, inputs,
+    status, notifications, selectionPrompts, inputPrompts, selections, inputs, workspaceRequests,
   };
 }
 
@@ -174,22 +177,51 @@ test("one /web settings command routes modes and browser workspace actions", asy
   assert.ok(!fx.active.includes("browser_open"));
 
   await fx.commands.get("web")?.handler("workspace attach session-1 tab-1", fx.ctx);
-  assert.deepEqual(sdk.calls.at(-1)?.input, { action: "attach", browserSessionId: "session-1", tabId: "tab-1" });
+  assert.deepEqual(fx.workspaceRequests.at(-1), { action: "attach", browserSessionId: "session-1", tabId: "tab-1" });
+  assert.ok(!sdk.calls.some((call) => call.operation === "browser.workspace"));
 
   fx.selections.push("Take over browser session");
-  fx.inputs.push("session-2");
   await fx.commands.get("web")?.handler("settings", fx.ctx);
-  assert.deepEqual(sdk.calls.at(-1)?.input, { action: "takeover", browserSessionId: "session-2" });
-  assert.equal(fx.inputPrompts.length, 1);
+  assert.equal(fx.inputPrompts.length, 0);
+  assert.match(String(fx.notifications.at(-1)?.[0]), /unavailable in Phase 3A/);
 
-  const callCount = sdk.calls.length;
+  const launchCount = fx.workspaceRequests.length;
   await fx.commands.get("web")?.handler("workspace profile personal", fx.ctx);
-  assert.equal(sdk.calls.length, callCount);
+  assert.equal(fx.workspaceRequests.length, launchCount);
   assert.match(String(fx.notifications.at(-1)?.[0]), /Usage: \/web workspace/);
 
   await fx.shortcuts.get("ctrl+alt+g")?.handler(fx.ctx);
-  assert.deepEqual(sdk.calls.at(-1)?.input, { action: "show" });
+  assert.deepEqual(fx.workspaceRequests.at(-1), { action: "show" });
   await fx.events.get("session_shutdown")?.();
+});
+
+test("workspace commands never fall back to legacy RPC or expose Phase 3B controls", async () => {
+  const sdk = new MockSdk();
+  sdk.capabilitiesValue = { ...readyCapabilities, browserPathIds: ["agent-browser/chrome"] };
+  const fx = harness(sdk);
+  await fx.events.get("session_start")?.({}, fx.ctx);
+  await fx.commands.get("web")?.handler("workspace show", fx.ctx);
+  assert.equal(fx.workspaceRequests.length, 0);
+  assert.match(String(fx.notifications.at(-1)?.[0]), /AgentCursor browser workspace is not active/);
+
+  sdk.capabilitiesValue = readyCapabilities;
+  await fx.events.get("session_shutdown")?.();
+  const agentcursor = harness(sdk);
+  await agentcursor.events.get("session_start")?.({}, agentcursor.ctx);
+  await agentcursor.commands.get("web")?.handler("workspace return session-1", agentcursor.ctx);
+  assert.equal(agentcursor.workspaceRequests.length, 0);
+  assert.match(String(agentcursor.notifications.at(-1)?.[0]), /unavailable in Phase 3A/);
+  assert.ok(!sdk.calls.some((call) => call.operation === "browser.workspace"));
+  await agentcursor.events.get("session_shutdown")?.();
+
+  const outageSdk = new MockSdk();
+  outageSdk.capabilitiesValue = { ...readyCapabilities, groups: { ...readyCapabilities.groups, browser: false } };
+  const outage = harness(outageSdk);
+  await outage.events.get("session_start")?.({}, outage.ctx);
+  await outage.commands.get("web")?.handler("workspace show", outage.ctx);
+  assert.deepEqual(outage.workspaceRequests, [{ action: "show" }], "the existing viewer can be raised to show its bounded browser-outage state");
+  assert.ok(!outageSdk.calls.some((call) => call.operation === "browser.workspace"));
+  await outage.events.get("session_shutdown")?.();
 });
 
 test("read model schemas match reviewed snapshots", async () => {

@@ -4,6 +4,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { WebAuditLog } from "./audit.js";
 import { availableTools, TOOL_NAMES, type WebMode } from "./modes.js";
 import { presentResult } from "./output.js";
+import { NodeWorkspaceLauncher, type WorkspaceLauncher } from "./workspace-launcher.js";
 import {
   BrowserActSchema,
   BrowserDebugSchema,
@@ -28,13 +29,12 @@ import {
 const STATUS_KEY = "pi-webx";
 const REFRESH_MS = 60_000;
 const WEB_MODES = ["off", "read", "browser", "debug"] as const;
-const WORKSPACE_ACTIONS = ["show", "hide", "list", "attach", "takeover", "return"] as const;
+const WORKSPACE_ACTIONS = ["show", "hide", "attach", "takeover", "return"] as const;
 type WorkspaceAction = (typeof WORKSPACE_ACTIONS)[number];
 const WEB_SETTINGS = [
   "Set capability mode",
   "Show browser workspace",
   "Hide browser workspace",
-  "List browser sessions",
   "Attach browser session",
   "Take over browser session",
   "Return browser session to agent",
@@ -83,9 +83,12 @@ function assertTrusted(ctx: ExtensionContext): void {
 export interface PiWebxExtensionOptions {
   /** Keep the legacy linked-read fields in the model schema for an explicit compatibility period. */
   readonly advancedLinkedRead?: boolean;
+  /** Test seam for the user-only fixed workspace process launcher. */
+  readonly workspaceLauncher?: WorkspaceLauncher;
 }
 
 export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClient, audit: Pick<WebAuditLog, "record"> = new WebAuditLog(), options: PiWebxExtensionOptions = {}) {
+  const workspaceLauncher = options.workspaceLauncher ?? new NodeWorkspaceLauncher();
   return function piWebxExtension(pi: ExtensionAPI): void {
     const readSchema = options.advancedLinkedRead === true ? WebReadAdvancedSchema : WebReadSchema;
     let mode: WebMode = "browser";
@@ -226,7 +229,7 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
     };
 
     const showHelp = (ctx: ExtensionContext) => {
-      ctx.ui.notify("Run /web with no options to open WebX settings. Direct options are /web mode off|read|browser|debug, /web status, and /web workspace show|hide|list|attach|takeover|return [sessionId]. WebX is automatic: use web_read for a known URL or API, web_search for discovery or short source extracts, and browser tools only for dynamic pages or interaction.", "info");
+      ctx.ui.notify("Run /web with no options to open WebX settings. Direct options are /web mode off|read|browser|debug, /web status, and /web workspace show|hide|attach [sessionId] [tabId]. Human takeover and return are unavailable in Phase 3A. WebX is automatic: use web_read for a known URL or API, web_search for discovery or short source extracts, and browser tools only for dynamic pages or interaction.", "info");
     };
 
     const setMode = async (requested: string, ctx: ExtensionContext) => {
@@ -243,28 +246,33 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
 
     const workspace = async (action: WorkspaceAction, sessionId: string | undefined, tabId: string | undefined, ctx: ExtensionContext) => {
       assertTrusted(ctx);
-      if (!sdk || !capabilities || !lifecycle || !activeOwner || !activeCwd) throw new Error(diagnostic);
-      if (!capabilities.groups.browser) throw new Error("Browser workspace controls are unavailable because the browser backend is unhealthy.");
+      if (action === "takeover" || action === "return") {
+        ctx.ui.notify("Human takeover is unavailable in Phase 3A. The browser workspace is read-only.", "warning");
+        return;
+      }
+      if (!capabilities?.browserPathIds.includes("agentcursor/chrome")) {
+        ctx.ui.notify("AgentCursor browser workspace is not active.", "warning");
+        return;
+      }
       let selectedSessionId = sessionId;
-      if ((action === "attach" || action === "takeover" || action === "return") && !selectedSessionId) {
+      if (action === "attach" && !selectedSessionId) {
         if (!ctx.hasUI) {
-          ctx.ui.notify(`${action} requires a browser session ID.`, "warning");
+          ctx.ui.notify("attach requires a browser session ID.", "warning");
           return;
         }
-        selectedSessionId = (await ctx.ui.input("Browser session ID", "session ID from browser_tabs or List browser sessions"))?.trim();
+        selectedSessionId = (await ctx.ui.input("Browser session ID", "session ID from browser_tabs"))?.trim();
         if (!selectedSessionId) return;
       }
-      const result = await sdk.request("browser.workspace", {
-        action,
-        ...(selectedSessionId ? { browserSessionId: selectedSessionId } : {}),
-        ...(tabId ? { tabId } : {}),
-      }, {
-        signal: lifecycle.signal,
-        idempotencyKey: `command:${randomUUID()}`,
-        ownerId: activeOwner,
-        cwd: activeCwd,
-      });
-      ctx.ui.notify(result.summary, "info");
+      try {
+        await workspaceLauncher.launch({
+          action,
+          ...(selectedSessionId ? { browserSessionId: selectedSessionId } : {}),
+          ...(tabId ? { tabId } : {}),
+        });
+        ctx.ui.notify(action === "attach" ? "Browser workspace raised and selection requested." : `Browser workspace ${action} requested.`, "info");
+      } catch (error) {
+        ctx.ui.notify(error instanceof Error ? error.message : "The Pi Browser Workspace request failed.", "error");
+      }
     };
 
     const showSettings = async (ctx: ExtensionContext) => {
@@ -290,7 +298,6 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
       const actionByChoice: Partial<Record<(typeof WEB_SETTINGS)[number], WorkspaceAction>> = {
         "Show browser workspace": "show",
         "Hide browser workspace": "hide",
-        "List browser sessions": "list",
         "Attach browser session": "attach",
         "Take over browser session": "takeover",
         "Return browser session to agent": "return",
@@ -327,7 +334,7 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
         if (words[0] === "workspace") {
           const action = words[1];
           if (!WORKSPACE_ACTIONS.includes(action as WorkspaceAction)) {
-            ctx.ui.notify("Usage: /web workspace show|hide|list|attach|takeover|return [sessionId] [tabId]", "warning");
+            ctx.ui.notify("Usage: /web workspace show|hide|attach [sessionId] [tabId]. Human takeover and return are unavailable in Phase 3A.", "warning");
             return;
           }
           await workspace(action as WorkspaceAction, words[2], words[3], ctx);
