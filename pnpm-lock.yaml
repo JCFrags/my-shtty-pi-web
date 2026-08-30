@@ -102,9 +102,6 @@ importers:
 
   components/browser/apps/workspace:
     dependencies:
-      '@pi-web/protocol':
-        specifier: workspace:*
-        version: link:../../packages/protocol-ts
       '@tauri-apps/api':
         specifier: 2.8.0
         version: 2.8.0

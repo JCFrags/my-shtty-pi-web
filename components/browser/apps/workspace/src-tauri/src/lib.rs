@@ -1,47 +1,41 @@
-use serde::{Deserialize, Serialize};
-use std::{env, fs, path::PathBuf};
-use tauri::{Manager, WebviewWindow};
+mod client;
+mod commands;
+mod descriptor;
+mod error;
+mod frame;
+mod probe;
+mod protocol;
+mod state;
+mod window;
 
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct BrowserdDescriptor {
-    protocol_version: String,
-    workspace_endpoint: String,
-    workspace_websocket_endpoint: String,
-    workspace_token: String,
-    unix_socket: String,
-}
-
-#[tauri::command]
-fn browserd_descriptor() -> Result<BrowserdDescriptor, String> {
-    let path = runtime_root().join("browserd.json");
-    let content = fs::read_to_string(&path).map_err(|error| format!("read {}: {error}", path.display()))?;
-    serde_json::from_str(&content).map_err(|error| format!("parse {}: {error}", path.display()))
-}
-
-fn runtime_root() -> PathBuf {
-    env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(env::temp_dir)
-        .join("pi-web")
-}
-
-fn raise(window: &WebviewWindow) {
-    let _ = window.show();
-    let _ = window.unminimize();
-    let _ = window.set_focus();
-}
+use client::WorkspaceClientService;
+use window::{apply_launch_request, parse_launch_args};
 
 pub fn run() {
+    let initial = parse_launch_args(std::env::args().skip(1)).unwrap_or_else(|error| panic!("invalid Pi Browser Workspace arguments: {error}"));
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") { raise(&window); }
-        }))
-        .invoke_handler(tauri::generate_handler![browserd_descriptor])
-        .setup(|app| {
-            if let Some(window) = app.get_webview_window("main") {
-                if std::env::args().any(|arg| arg == "--raise") { raise(&window); }
+        // This plugin must remain first so secondary processes never initialize other plugins.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            let request = parse_launch_args(args.into_iter().skip(1));
+            match request {
+                Ok(request) => apply_launch_request(app, request, true),
+                Err(error) => eprintln!("rejected Pi Browser Workspace launch: {error}"),
             }
+        }))
+        .manage(WorkspaceClientService::default())
+        .manage(probe::BinaryProbeService::default())
+        .invoke_handler(tauri::generate_handler![
+            commands::workspace_open,
+            commands::workspace_select,
+            commands::workspace_clear_selection,
+            commands::workspace_frame_ack,
+            commands::workspace_current_state,
+            commands::workspace_window_action,
+            commands::workspace_binary_probe_open,
+            commands::workspace_binary_probe_ack,
+        ])
+        .setup(move |app| {
+            apply_launch_request(app.handle(), initial.clone(), false);
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -7,12 +7,12 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "tauri": "tauri",
-    "test": "node --experimental-strip-types --test test/*.test.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:binary-ipc": "cargo test --manifest-path src-tauri/Cargo.toml probe::tests::produces_one_hundred_unique_one_megabyte_payload_digests && node --test test/security.test.mjs",
     "check": "tsc -b",
     "format": "true"
   },
   "dependencies": {
-    "@pi-web/protocol": "workspace:*",
     "@tauri-apps/api": "2.8.0",
     "react": "19.1.0",
     "react-dom": "19.1.0"
