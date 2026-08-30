@@ -34,7 +34,7 @@ describe("browser protocol conformance", () => {
 
   it("requires bounded opaque IDs for connection-scoped frame subscriptions", () => {
     const address = { browserSessionId: "session:frame", tabId: "tab:frame", targetId: "target_frame_0001", controlEpoch: 3 };
-    const subscribe = { protocolVersion: "browser.v1", kind: "frames.subscribe", requestId: "request:subscribe", operationId: "operation:subscribe", deadline: validDeadline, address, subscriptionId: "subscription_0001", interest: "selected" };
+    const subscribe = { protocolVersion: "browser.v2", kind: "frames.subscribe", requestId: "request:subscribe", operationId: "operation:subscribe", deadline: validDeadline, address, subscriptionId: "subscription_0001", interest: "selected" };
     const unsubscribe = { protocolVersion: subscribe.protocolVersion, kind: "frames.unsubscribe", requestId: subscribe.requestId, operationId: subscribe.operationId, deadline: subscribe.deadline, address: subscribe.address, subscriptionId: subscribe.subscriptionId };
     assert.equal(Check(BrowserRequestSchema, subscribe), true);
     assert.equal(Check(BrowserRequestSchema, unsubscribe), true);
@@ -49,11 +49,11 @@ describe("browser protocol conformance", () => {
 
   it("has strict server response and event schemas", () => {
     assert.equal(Check(ServerMessageSchema, {
-      protocolVersion: "browser.v1", kind: "bound", requestId: "request:1",
+      protocolVersion: "browser.v2", kind: "bound", requestId: "request:1",
       actor: { principalId: "owner:1", agentSessionId: "agent:1" },
     }), true);
     assert.equal(Check(ServerMessageSchema, {
-      protocolVersion: "browser.v1", kind: "bound", requestId: "request:1",
+      protocolVersion: "browser.v2", kind: "bound", requestId: "request:1",
       actor: { principalId: "owner:1", agentSessionId: "agent:1" }, unexpected: true,
     }), false);
   });

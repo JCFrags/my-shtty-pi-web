@@ -12,7 +12,7 @@ const other: AuthorityActor = { principalId: "principal-b", agentId: "agent-b", 
 const bytes = (() => { const value = Buffer.alloc(24); Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(value); value.write("IHDR", 12, "ascii"); value.writeUInt32BE(1600, 16); value.writeUInt32BE(1200, 20); return value; })();
 const digest = createHash("sha256").update(bytes).digest("hex");
 const descriptor: BrowserdDescriptor = {
-  protocolVersion: "browser.v1",
+  protocolVersion: "browser.v2",
   runtimeInstanceId: "runtime_fixture_a",
   pid: process.pid,
   processStartTicks: "1",

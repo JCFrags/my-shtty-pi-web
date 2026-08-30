@@ -5,6 +5,7 @@ import { actorKey } from "../actor/identity.js";
 interface MutableOperation {
   readonly actor: string;
   readonly operationId: string;
+  readonly kind: string;
   readonly fingerprint: string;
   readonly laneKey: string;
   readonly browserSessionId?: string;
@@ -35,6 +36,7 @@ export type OperationTask<T> = (context: OperationContext) => Promise<T>;
 
 export interface SubmitOptions {
   operationId: string;
+  kind?: string;
   fingerprint?: string;
   laneKey: string;
   deadline: string;
@@ -73,6 +75,13 @@ export class OperationRegistry {
 
   get size(): number { return this.operations.size; }
 
+  workspaceSummary(browserSessionId: string): { operationId: string; kind: string; state: "queued" | "running" | "cancelling" | "terminal"; dispatchState: DispatchState; startedAt?: string; cancellable: boolean } | undefined {
+    const candidates = [...this.operations.values()].filter((operation) => operation.browserSessionId === browserSessionId && !isTerminal(operation.state));
+    const operation = candidates.at(-1);
+    if (operation === undefined) return undefined;
+    return { operationId: operation.operationId, kind: operation.kind, state: operation.state === "queued" ? "queued" : "running", dispatchState: operation.dispatchState, ...(operation.startedAt === undefined ? {} : { startedAt: operation.startedAt }), cancellable: true };
+  }
+
   currentEpoch(actor: ActorIdentity, browserSessionId: string): number {
     return this.epochs.get(epochKey(actor, browserSessionId)) ?? 1;
   }
@@ -108,7 +117,7 @@ export class OperationRegistry {
     const lane = this.queues.get(options.laneKey) ?? [];
     if (lane.length >= this.maxQueuedPerLane) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Operation lane is full.", true);
     const operation: MutableOperation = {
-      actor: actorKey(actor), operationId: options.operationId, fingerprint, laneKey: options.laneKey,
+      actor: actorKey(actor), operationId: options.operationId, kind: options.kind ?? "operation", fingerprint, laneKey: options.laneKey,
       ...(options.browserSessionId !== undefined ? { browserSessionId: options.browserSessionId } : {}),
       ...(options.tabId !== undefined ? { tabId: options.tabId } : {}),
       ...(options.controlEpoch !== undefined ? { controlEpoch: options.controlEpoch } : {}),

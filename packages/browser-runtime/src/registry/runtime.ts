@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { BrowserProtocolError, type ActorIdentity, type BrowserRequest, type FrameEvent, type OperationStatus, type SessionDescriptor, type TabAddress } from "@webx/browser-protocol";
+import { BrowserProtocolError, type ActorIdentity, type BrowserRequest, type FrameEvent, type OperationStatus, type SessionDescriptor, type TabAddress, type WorkspaceBrokerRequest, type WorkspaceFrameEvent, type WorkspaceSnapshot, type WorkspaceStateEvent } from "@webx/browser-protocol";
 import { actorKey, DenyNavigationAuthorization, type NavigationAuthorization } from "../actor/identity.js";
 import { BrowserArtifactStore } from "../artifacts/store.js";
 import { findChromeExecutable, type ChromeHostOptions } from "../chrome/host.js";
@@ -9,6 +10,8 @@ import { canonicalOperationFingerprint, OperationRegistry, type OperationContext
 import { BrowserSession, type DomFallbackAction } from "./session.js";
 
 interface RuntimeSubscription { readonly actor: string; readonly connectionId: string; readonly subscriptionId: string; readonly address: TabAddress; readonly interest: "idle" | "selected"; readonly consumerKey: string }
+interface WorkspaceSubscription { readonly connectionId: string; readonly subscriptionId: string; readonly browserSessionId: string; readonly tabId: string; readonly interest: "idle" | "selected"; readonly consumerKey: string }
+interface WorkspaceFrameLedgerEntry { readonly subscriptionId: string; readonly actor: ActorIdentity; readonly browserSessionId: string; readonly tabId: string; readonly frameSequence: number; readonly artifactId: string; readonly deliveredAtMs: number }
 
 export const DEFAULT_SCREENSHOT_OBSERVATION_TTL_MS = 60_000;
 export const DEFAULT_DOM_OBSERVATION_TTL_MS = 60_000;
@@ -38,6 +41,10 @@ export class BrowserRuntime extends EventEmitter {
   readonly operations = new OperationRegistry();
   private readonly sessions = new Map<string, BrowserSession>();
   private readonly subscriptions = new Map<string, Map<string, RuntimeSubscription>>();
+  private readonly workspaceSubscriptions = new Map<string, Map<string, WorkspaceSubscription>>();
+  private readonly workspaceEventSubscribers = new Set<string>();
+  private readonly workspaceFrameLedgers = new Map<string, WorkspaceFrameLedgerEntry[]>();
+  private workspaceRevision = 0;
   private readonly navigationAuthorization: NavigationAuthorization;
   private readonly chrome: Omit<ChromeHostOptions, "hostId" | "profileManager">;
   private readonly profileManager: ProfileManager;
@@ -76,10 +83,99 @@ export class BrowserRuntime extends EventEmitter {
     this.requireEgressForSessions = options.requireEgressForSessions ?? false;
   }
 
-  get subscriptionCount(): number { let count = 0; for (const values of this.subscriptions.values()) count += values.size; return count; }
+  get subscriptionCount(): number { let count = 0; for (const values of this.subscriptions.values()) count += values.size; for (const values of this.workspaceSubscriptions.values()) count += values.size; return count; }
+  get workspaceSubscriptionCount(): number { let count = 0; for (const values of this.workspaceSubscriptions.values()) count += values.size; return count; }
+  get workspaceLedgerCount(): number { let count = 0; for (const values of this.workspaceFrameLedgers.values()) count += values.length; return count; }
 
   listSessions(actor: ActorIdentity): SessionDescriptor[] { const owner = actorKey(actor); return [...this.sessions.values()].filter((session) => actorKey(session.actor) === owner).map((session) => session.descriptor()); }
   ownsSession(actor: ActorIdentity, browserSessionId: string): boolean { const session = this.sessions.get(browserSessionId); return session !== undefined && actorKey(session.actor) === actorKey(actor); }
+
+  workspaceSnapshot(): WorkspaceSnapshot {
+    return {
+      kind: "workspaceSnapshot",
+      workspaceRevision: this.workspaceRevision,
+      generatedAt: new Date().toISOString(),
+      sessions: [...this.sessions.values()].map((session) => {
+        const descriptor = session.descriptor();
+        const activeOperation = this.operations.workspaceSummary(descriptor.browserSessionId);
+        return {
+          browserSessionId: descriptor.browserSessionId,
+          agentSessionId: session.actor.agentSessionId,
+          actorDisplayId: `actor_${createHash("sha256").update(actorKey(session.actor)).digest("base64url").slice(0, 24)}`,
+          pathId: "agentcursor/chrome" as const,
+          state: descriptor.state,
+          controlState: "agent" as const,
+          personaId: descriptor.personaId,
+          cursor: descriptor.cursor,
+          tabs: descriptor.tabs.map((tab) => ({ tabId: tab.address.tabId, url: tab.url, title: tab.title.slice(0, 512), state: tab.state, documentGeneration: tab.documentGeneration, viewportGeneration: tab.viewportGeneration, frameSequence: tab.frameSequence })),
+          ...(activeOperation === undefined ? {} : { activeOperation }),
+        };
+      }),
+    };
+  }
+
+  workspaceSubscribeEvents(connectionId: string): void { this.workspaceEventSubscribers.add(connectionId); }
+  workspaceUnsubscribeEvents(connectionId: string): void { this.workspaceEventSubscribers.delete(connectionId); }
+  shouldDeliverWorkspaceEvent(connectionId: string): boolean { return this.workspaceEventSubscribers.has(connectionId); }
+
+  workspaceSubscribeFrames(connectionId: string, subscriptionId: string, browserSessionId: string, tabId: string, interest: "idle" | "selected"): void {
+    const values = this.workspaceSubscriptions.get(connectionId) ?? new Map<string, WorkspaceSubscription>();
+    const existing = values.get(subscriptionId);
+    if (existing !== undefined) {
+      if (existing.browserSessionId !== browserSessionId || existing.tabId !== tabId || existing.interest !== interest) throw new BrowserProtocolError("OPERATION_CONFLICT", "Workspace subscription ID is already bound.");
+      return;
+    }
+    if (values.size >= 16 || this.workspaceSubscriptionCount >= 32) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Workspace subscription limit reached.", true);
+    const session = this.sessions.get(browserSessionId);
+    const tab = session?.descriptor().tabs.find((item) => item.address.tabId === tabId);
+    if (session === undefined || tab === undefined || tab.state !== "ready") throw new BrowserProtocolError("TAB_NOT_FOUND", "Workspace tab not found.");
+    const subscription: WorkspaceSubscription = { connectionId, subscriptionId, browserSessionId, tabId, interest, consumerKey: `workspace\u0000${connectionId}\u0000${subscriptionId}` };
+    session.subscribeFrames(subscription.consumerKey, tab.address, interest);
+    values.set(subscriptionId, subscription);
+    this.workspaceSubscriptions.set(connectionId, values);
+  }
+
+  async workspaceUnsubscribeFrames(connectionId: string, subscriptionId: string, browserSessionId: string, tabId: string): Promise<void> {
+    const values = this.workspaceSubscriptions.get(connectionId);
+    const subscription = values?.get(subscriptionId);
+    if (subscription === undefined) return;
+    if (subscription.browserSessionId !== browserSessionId || subscription.tabId !== tabId) throw new BrowserProtocolError("OPERATION_CONFLICT", "Workspace subscription identity does not match.");
+    const session = this.sessions.get(browserSessionId);
+    const address = session?.descriptor().tabs.find((item) => item.address.tabId === tabId)?.address;
+    if (session !== undefined && address !== undefined) await session.unsubscribeFrames(subscription.consumerKey, address);
+    values?.delete(subscriptionId);
+    if (values?.size === 0) this.workspaceSubscriptions.delete(connectionId);
+    this.pruneWorkspaceLedger(connectionId, subscriptionId);
+  }
+
+  workspaceFrameDelivery(connectionId: string, frame: FrameEvent): { subscriptionId: string; frame: FrameEvent } | undefined {
+    for (const subscription of this.workspaceSubscriptions.get(connectionId)?.values() ?? []) if (subscription.browserSessionId === frame.address.browserSessionId && subscription.tabId === frame.address.tabId) return { subscriptionId: subscription.subscriptionId, frame };
+    return undefined;
+  }
+
+  recordWorkspaceFrameDelivered(connectionId: string, subscriptionId: string, frame: FrameEvent): void {
+    const session = this.sessions.get(frame.address.browserSessionId);
+    const subscription = this.workspaceSubscriptions.get(connectionId)?.get(subscriptionId);
+    if (session === undefined || subscription === undefined || subscription.browserSessionId !== frame.address.browserSessionId || subscription.tabId !== frame.address.tabId) return;
+    const values = (this.workspaceFrameLedgers.get(connectionId) ?? []).filter((item) => Date.now() - item.deliveredAtMs <= 60_000);
+    values.push({ subscriptionId, actor: session.actor, browserSessionId: frame.address.browserSessionId, tabId: frame.address.tabId, frameSequence: frame.frameSequence, artifactId: frame.artifactId, deliveredAtMs: Date.now() });
+    while (values.filter((item) => item.subscriptionId === subscriptionId).length > 2) values.splice(values.findIndex((item) => item.subscriptionId === subscriptionId), 1);
+    while (values.length > 32) values.shift();
+    this.workspaceFrameLedgers.set(connectionId, values);
+  }
+
+  async workspaceReadFrame(connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.frame.read" }>): Promise<unknown> {
+    const values = this.workspaceFrameLedgers.get(connectionId) ?? [];
+    const entry = values.find((item) => item.subscriptionId === request.subscriptionId && item.browserSessionId === request.browserSessionId && item.tabId === request.tabId && item.frameSequence === request.frameSequence && item.artifactId === request.artifactId && Date.now() - item.deliveredAtMs <= 60_000);
+    if (entry === undefined || this.workspaceSubscriptions.get(connectionId)?.has(request.subscriptionId) !== true) throw new BrowserProtocolError("ARTIFACT_FORBIDDEN", "Workspace frame artifact is not available.");
+    const artifact = await this.artifacts.read(entry.actor, entry.artifactId);
+    if (artifact.descriptor.purpose !== "workspace-frame" || artifact.descriptor.browserSessionId !== entry.browserSessionId || artifact.descriptor.tabId !== entry.tabId) throw new BrowserProtocolError("ARTIFACT_FORBIDDEN", "Workspace frame artifact is not available.");
+    const offset = request.offset ?? 0;
+    const maxBytes = request.maxBytes ?? 1024 * 1024;
+    if (offset > artifact.bytes.byteLength) throw new BrowserProtocolError("INVALID_REQUEST", "Workspace frame offset is outside the artifact.");
+    const chunk = artifact.bytes.slice(offset, Math.min(artifact.bytes.byteLength, offset + maxBytes));
+    return { kind: "workspaceFrameArtifact", artifactId: entry.artifactId, browserSessionId: entry.browserSessionId, tabId: entry.tabId, subscriptionId: entry.subscriptionId, frameSequence: entry.frameSequence, mediaType: artifact.descriptor.mediaType, byteLength: chunk.byteLength, sha256: artifact.descriptor.sha256, offset, totalBytes: artifact.bytes.byteLength, eof: offset + chunk.byteLength >= artifact.bytes.byteLength, base64: Buffer.from(chunk).toString("base64") };
+  }
 
   shouldDeliverFrame(connectionId: string, actor: ActorIdentity, frame: FrameEvent): boolean {
     for (const subscription of this.subscriptions.get(connectionId)?.values() ?? []) if (subscription.actor === actorKey(actor) && sameAddress(subscription.address, frame.address)) return true;
@@ -88,9 +184,17 @@ export class BrowserRuntime extends EventEmitter {
 
   releaseConnection(connectionId: string): void {
     const values = this.subscriptions.get(connectionId);
-    if (values === undefined) return;
     this.subscriptions.delete(connectionId);
-    for (const subscription of values.values()) this.sessions.get(subscription.address.browserSessionId)?.frames.removeConsumer(subscription.consumerKey);
+    for (const subscription of values?.values() ?? []) this.sessions.get(subscription.address.browserSessionId)?.frames.removeConsumer(subscription.consumerKey);
+    this.releaseWorkspaceConnection(connectionId);
+  }
+
+  releaseWorkspaceConnection(connectionId: string): void {
+    const workspace = this.workspaceSubscriptions.get(connectionId);
+    this.workspaceSubscriptions.delete(connectionId);
+    this.workspaceEventSubscribers.delete(connectionId);
+    this.workspaceFrameLedgers.delete(connectionId);
+    for (const subscription of workspace?.values() ?? []) this.sessions.get(subscription.browserSessionId)?.frames.removeConsumer(subscription.consumerKey);
   }
 
   private getSession(actor: ActorIdentity, browserSessionId: string): BrowserSession {
@@ -140,7 +244,8 @@ export class BrowserRuntime extends EventEmitter {
           if (context.signal.aborted) { await session.close(); throw context.signal.reason; }
           this.sessions.set(session.browserSessionId, session);
           session.onFrame(this.onFrame);
-          session.targets.on("tabTerminal", ({ tabId }: { tabId: string }) => this.removeTabSubscriptions(session.browserSessionId, tabId));
+          session.targets.on("tabTerminal", ({ tabId }: { tabId: string }) => { this.removeTabSubscriptions(session.browserSessionId, tabId); this.workspaceChanged("tab", session.browserSessionId, tabId); });
+          this.workspaceChanged("session", session.browserSessionId);
           return session.descriptor();
         } finally { this.creatingSessions--; }
       }, signal);
@@ -151,11 +256,11 @@ export class BrowserRuntime extends EventEmitter {
     const controlEpoch = request.kind === "session.close" || request.kind === "tab.create" || request.kind === "tab.list" ? request.controlEpoch : request.address.controlEpoch;
     const motorLane = `motor:${actorKey(actor)}:${browserSessionId}`;
 
-    if (request.kind === "session.close") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); context.markDispatched(); await session.close(); this.sessions.delete(browserSessionId); this.removeSessionSubscriptions(browserSessionId); return session.descriptor(); }, signal);
+    if (request.kind === "session.close") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); context.markDispatched(); await session.close(); this.sessions.delete(browserSessionId); this.removeSessionSubscriptions(browserSessionId); this.workspaceChanged("session", browserSessionId); return session.descriptor(); }, signal);
     if (request.kind === "tab.list") return { kind: "tabs", tabs: session.listTabs() };
-    if (request.kind === "tab.create") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const tab = await session.createTab(request.url, context.signal, () => context.markDispatched(), { operationId: request.operationId, ...(request.navigationAuthorization !== undefined ? { authorization: request.navigationAuthorization } : {}) }); return session.listTabs().find((item) => item.address.tabId === tab.tabId); }, signal);
+    if (request.kind === "tab.create") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const tab = await session.createTab(request.url, context.signal, () => context.markDispatched(), { operationId: request.operationId, ...(request.navigationAuthorization !== undefined ? { authorization: request.navigationAuthorization } : {}) }); this.workspaceChanged("tab", browserSessionId, tab.tabId); return session.listTabs().find((item) => item.address.tabId === tab.tabId); }, signal);
     if (request.kind === "tab.focus") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); await session.targets.focus(request.address, context.signal, () => context.markDispatched()); return session.listTabs().find((item) => item.address.tabId === request.address.tabId); }, signal);
-    if (request.kind === "tab.close") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const tab = session.resolve(request.address); if (session.motor.isActiveTab(tab.tabId)) await session.motor.releaseAll(tab); await session.targets.closeTab(request.address, context.signal, () => context.markDispatched()); this.removeTabSubscriptions(browserSessionId, request.address.tabId); return { kind: "ack", operationId: request.operationId }; }, signal);
+    if (request.kind === "tab.close") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const tab = session.resolve(request.address); if (session.motor.isActiveTab(tab.tabId)) await session.motor.releaseAll(tab); await session.targets.closeTab(request.address, context.signal, () => context.markDispatched()); this.removeTabSubscriptions(browserSessionId, request.address.tabId); this.workspaceChanged("tab", browserSessionId, request.address.tabId); return { kind: "ack", operationId: request.operationId }; }, signal);
     if (request.kind === "observe.screenshot") return await this.execute(actor, request, `capture:${browserSessionId}:${request.address.tabId}`, browserSessionId, controlEpoch, async (context) => await session.observe(request.address, request.delivery, context.signal), signal);
     if (request.kind === "observe.domFallback") return await this.execute(actor, request, `dom:${browserSessionId}:${request.address.tabId}`, browserSessionId, controlEpoch, async (context) => await session.observeDom(request.address, request.maxNodes, context.signal), signal);
     if (request.kind === "action.coordinate") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { await session.coordinate(request.address, request.observationId, request.action as CoordinateAction, context, request.riskPolicy, request.coordinateSpace ?? "imagePixels"); return { kind: "ack", operationId: request.operationId }; }, signal);
@@ -193,6 +298,9 @@ export class BrowserRuntime extends EventEmitter {
   private async closeInternal(): Promise<void> {
     const failures: unknown[] = [];
     this.subscriptions.clear();
+    this.workspaceSubscriptions.clear();
+    this.workspaceEventSubscribers.clear();
+    this.workspaceFrameLedgers.clear();
     for (const [id, session] of [...this.sessions]) {
       session.offFrame(this.onFrame);
       try { await session.close(); this.sessions.delete(id); }
@@ -231,10 +339,11 @@ export class BrowserRuntime extends EventEmitter {
 
   private async execute<T>(actor: ActorIdentity, request: BrowserRequest, laneKey: string, browserSessionId: string | undefined, controlEpoch: number | undefined, task: (context: OperationContext) => Promise<T>, signal?: AbortSignal, connectionId?: string): Promise<T> {
     this.operations.submit(actor, {
-      operationId: request.operationId, fingerprint: requestFingerprint(request, connectionId), laneKey, deadline: request.deadline,
+      operationId: request.operationId, kind: request.kind, fingerprint: requestFingerprint(request, connectionId), laneKey, deadline: request.deadline,
       ...(browserSessionId !== undefined ? { browserSessionId } : {}), ...("address" in request ? { tabId: request.address.tabId } : {}), ...(controlEpoch !== undefined ? { controlEpoch } : {}),
       ...(request.kind === "tab.close" ? { failOnTargetTermination: false } : {}),
     }, task);
+    this.workspaceChanged("operation", browserSessionId, "address" in request ? request.address.tabId : undefined);
     const abort = (): void => { try { this.operations.cancel(actor, request.operationId); } catch { /* Already pruned. */ } };
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
@@ -244,7 +353,7 @@ export class BrowserRuntime extends EventEmitter {
       const result = this.operations.result(actor, request.operationId);
       await this.validateResultResources(actor, result);
       return result as T;
-    } finally { signal?.removeEventListener("abort", abort); }
+    } finally { signal?.removeEventListener("abort", abort); this.workspaceChanged("operation", browserSessionId, "address" in request ? request.address.tabId : undefined); }
   }
 
   private async awaitExisting(actor: ActorIdentity, operationId: string, signal?: AbortSignal): Promise<unknown> {
@@ -284,9 +393,15 @@ export class BrowserRuntime extends EventEmitter {
   }
   private findSubscription(actor: ActorIdentity, connectionId: string, subscriptionId: string): RuntimeSubscription | undefined { const value = this.subscriptions.get(connectionId)?.get(subscriptionId); return value?.actor === actorKey(actor) ? value : undefined; }
   private removeSubscription(connectionId: string, subscriptionId: string, expected: RuntimeSubscription): void { const values = this.subscriptions.get(connectionId); if (values?.get(subscriptionId) !== expected) return; values.delete(subscriptionId); if (values.size === 0) this.subscriptions.delete(connectionId); }
-  private removeTabSubscriptions(sessionId: string, tabId: string): void { for (const [connectionId, values] of this.subscriptions) { for (const [id, subscription] of values) if (subscription.address.browserSessionId === sessionId && subscription.address.tabId === tabId) values.delete(id); if (values.size === 0) this.subscriptions.delete(connectionId); } }
-  private removeSessionSubscriptions(sessionId: string): void { for (const [connectionId, values] of this.subscriptions) { for (const [id, subscription] of values) if (subscription.address.browserSessionId === sessionId) values.delete(id); if (values.size === 0) this.subscriptions.delete(connectionId); } }
+  private pruneWorkspaceLedger(connectionId: string, subscriptionId: string): void { const values = this.workspaceFrameLedgers.get(connectionId)?.filter((item) => item.subscriptionId !== subscriptionId); if (values === undefined || values.length === 0) this.workspaceFrameLedgers.delete(connectionId); else this.workspaceFrameLedgers.set(connectionId, values); }
+  private removeTabSubscriptions(sessionId: string, tabId: string): void { for (const [connectionId, values] of this.subscriptions) { for (const [id, subscription] of values) if (subscription.address.browserSessionId === sessionId && subscription.address.tabId === tabId) values.delete(id); if (values.size === 0) this.subscriptions.delete(connectionId); } for (const [connectionId, values] of this.workspaceSubscriptions) { for (const [id, subscription] of values) if (subscription.browserSessionId === sessionId && subscription.tabId === tabId) { this.sessions.get(sessionId)?.frames.removeConsumer(subscription.consumerKey); values.delete(id); this.pruneWorkspaceLedger(connectionId, id); } if (values.size === 0) this.workspaceSubscriptions.delete(connectionId); } }
+  private removeSessionSubscriptions(sessionId: string): void { for (const [connectionId, values] of this.subscriptions) { for (const [id, subscription] of values) if (subscription.address.browserSessionId === sessionId) values.delete(id); if (values.size === 0) this.subscriptions.delete(connectionId); } for (const [connectionId, values] of this.workspaceSubscriptions) { for (const [id, subscription] of values) if (subscription.browserSessionId === sessionId) { this.sessions.get(sessionId)?.frames.removeConsumer(subscription.consumerKey); values.delete(id); this.pruneWorkspaceLedger(connectionId, id); } if (values.size === 0) this.workspaceSubscriptions.delete(connectionId); } }
   private readonly onFrame = (frame: FrameEvent): void => { this.emit("frame", frame); };
+  private workspaceChanged(eventKind: WorkspaceStateEvent["eventKind"], browserSessionId?: string, tabId?: string): void {
+    this.workspaceRevision++;
+    const event: WorkspaceStateEvent = { protocolVersion: "browser.v2", kind: "workspace.state.changed", revision: this.workspaceRevision, eventKind, ...(browserSessionId === undefined ? {} : { browserSessionId }), ...(tabId === undefined ? {} : { tabId }) };
+    this.emit("workspaceState", event);
+  }
 }
 
 function requestFingerprint(request: BrowserRequest, connectionId?: string): string {

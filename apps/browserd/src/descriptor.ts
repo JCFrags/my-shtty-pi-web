@@ -13,6 +13,7 @@ export interface BrowserdDescriptor {
   socketPath: string;
   bindingSecret: string;
   brokerSigningSecret: string;
+  workspaceBrokerSecret: string;
   startedAt: string;
 }
 
@@ -84,6 +85,7 @@ export async function prepareDescriptor(runtimeDirectory?: string, options: Prep
       socketPath: paths.socketPath,
       bindingSecret: randomBytes(32).toString("base64url"),
       brokerSigningSecret: randomBytes(32).toString("base64url"),
+      workspaceBrokerSecret: randomBytes(32).toString("base64url"),
       startedAt: new Date().toISOString(),
     };
     return { descriptor, paths, lease };
@@ -110,8 +112,8 @@ export async function readDescriptor(path: string): Promise<BrowserdDescriptor> 
   const info = await lstat(path);
   if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o777) !== 0o600) throw new BrowserProtocolError("INTERNAL_ERROR", "browserd descriptor must be a private regular file.");
   const value: unknown = JSON.parse(await readFile(path, "utf8"));
-  if (!isRecord(value) || value.protocolVersion !== PROTOCOL_VERSION || typeof value.runtimeInstanceId !== "string" || typeof value.pid !== "number" || typeof value.processStartTicks !== "string" || typeof value.socketPath !== "string" || typeof value.bindingSecret !== "string" || typeof value.brokerSigningSecret !== "string" || typeof value.startedAt !== "string") throw new BrowserProtocolError("INTERNAL_ERROR", "Invalid browserd descriptor.");
-  return { protocolVersion: PROTOCOL_VERSION, runtimeInstanceId: value.runtimeInstanceId, pid: value.pid, processStartTicks: value.processStartTicks, socketPath: value.socketPath, bindingSecret: value.bindingSecret, brokerSigningSecret: value.brokerSigningSecret, startedAt: value.startedAt };
+  if (!isRecord(value) || value.protocolVersion !== PROTOCOL_VERSION || typeof value.runtimeInstanceId !== "string" || typeof value.pid !== "number" || typeof value.processStartTicks !== "string" || typeof value.socketPath !== "string" || typeof value.bindingSecret !== "string" || typeof value.brokerSigningSecret !== "string" || typeof value.workspaceBrokerSecret !== "string" || typeof value.startedAt !== "string") throw new BrowserProtocolError("INTERNAL_ERROR", "Invalid browserd descriptor.");
+  return { protocolVersion: PROTOCOL_VERSION, runtimeInstanceId: value.runtimeInstanceId, pid: value.pid, processStartTicks: value.processStartTicks, socketPath: value.socketPath, bindingSecret: value.bindingSecret, brokerSigningSecret: value.brokerSigningSecret, workspaceBrokerSecret: value.workspaceBrokerSecret, startedAt: value.startedAt };
 }
 
 export async function cleanupDescriptor(paths: DescriptorPaths, descriptor: BrowserdDescriptor, lease: StartupLease): Promise<void> {

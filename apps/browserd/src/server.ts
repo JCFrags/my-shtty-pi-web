@@ -4,8 +4,8 @@ import { createServer, type Server, type Socket } from "node:net";
 import { Check } from "typebox/value";
 import {
   BrowserProtocolError, PROTOCOL_VERSION, ServerMessageSchema,
-  parseBindRequest, parseBrowserRequest, sanitizeMessage,
-  type ActorIdentity, type ErrorCode, type FrameEvent,
+  parseBindRequest, parseBrowserRequest, parseWorkspaceBrokerBindRequest, parseWorkspaceBrokerRequest, sanitizeMessage,
+  type ActorIdentity, type ErrorCode, type FrameEvent, type WorkspaceBrokerRequest, type WorkspaceStateEvent,
 } from "@webx/browser-protocol";
 import { BrokerNavigationAuthorization, BrowserRuntime, type BrowserRuntimeOptions } from "@webx/browser-runtime";
 import { cleanupDescriptor, prepareDescriptor, publishDescriptor, type BrowserdDescriptor, type DescriptorPaths, type StartupLease } from "./descriptor.js";
@@ -17,6 +17,7 @@ interface ConnectionState {
   readonly reader: NdjsonReader;
   readonly pending: Map<string, AbortController>;
   actor?: ActorIdentity;
+  role?: "actor" | "workspace";
   chain: Promise<void>;
   bindTimer: NodeJS.Timeout | undefined;
   closed: boolean;
@@ -26,6 +27,7 @@ export interface BrowserdServerOptions extends BrowserRuntimeOptions {
   runtimeDirectory?: string;
   runtime?: BrowserRuntime;
   maxConnections?: number;
+  maxWorkspaceConnections?: number;
   bindTimeoutMs?: number;
   allowTemporaryRuntimeDirectoryForTest?: boolean;
   startupHooksForTest?: { afterOwnership?: () => Promise<void>; afterListen?: () => Promise<void> };
@@ -37,6 +39,7 @@ export class BrowserdServer {
   private readonly egressBindingId: string;
   private readonly runtimeDirectory: string | undefined;
   private readonly maxConnections: number;
+  private readonly maxWorkspaceConnections: number;
   private readonly bindTimeoutMs: number;
   private readonly allowTemporaryRuntimeDirectoryForTest: boolean;
   private readonly startupHooksForTest: BrowserdServerOptions["startupHooksForTest"];
@@ -59,12 +62,15 @@ export class BrowserdServer {
     this.egressBindingId = proxy === undefined ? "unconfigured" : `forward-proxy://${proxy.host === "::1" ? "[::1]" : proxy.host}:${proxy.port}`;
     this.runtimeDirectory = options.runtimeDirectory;
     this.maxConnections = options.maxConnections ?? 128;
+    this.maxWorkspaceConnections = options.maxWorkspaceConnections ?? 4;
     this.bindTimeoutMs = options.bindTimeoutMs ?? 5_000;
     this.allowTemporaryRuntimeDirectoryForTest = options.allowTemporaryRuntimeDirectoryForTest ?? false;
     this.startupHooksForTest = options.startupHooksForTest;
     if (!Number.isInteger(this.maxConnections) || this.maxConnections < 1 || this.maxConnections > 1_024) throw new BrowserProtocolError("INVALID_REQUEST", "browserd connection limit is invalid.");
+    if (!Number.isInteger(this.maxWorkspaceConnections) || this.maxWorkspaceConnections < 1 || this.maxWorkspaceConnections > 16) throw new BrowserProtocolError("INVALID_REQUEST", "browserd workspace connection limit is invalid.");
     if (!Number.isFinite(this.bindTimeoutMs) || this.bindTimeoutMs < 10 || this.bindTimeoutMs > 60_000) throw new BrowserProtocolError("INVALID_REQUEST", "browserd bind timeout is invalid.");
     this.runtime.on("frame", this.onFrame);
+    this.runtime.on("workspaceState", this.onWorkspaceState);
   }
 
   get descriptor(): BrowserdDescriptor {
@@ -167,7 +173,7 @@ export class BrowserdServer {
       try {
         for (const line of state.reader.push(chunk)) {
           state.chain = state.chain.then(async () => {
-            if (state.actor === undefined) await this.handleLine(state, line);
+            if (state.role === undefined) await this.handleLine(state, line);
             else void this.handleLine(state, line).catch(() => this.closeConnection(state));
           }).catch(() => this.closeConnection(state));
         }
@@ -181,13 +187,24 @@ export class BrowserdServer {
     if (state.closed) return;
     let value: unknown;
     try { value = JSON.parse(line); } catch { this.sendError(state, undefined, "INVALID_REQUEST", "Request is not valid JSON."); return; }
-    if (state.actor === undefined) {
+    if (state.role === undefined) {
       try {
-        const bind = parseBindRequest(value);
-        if (!secretMatches(bind.bindingSecret, this.descriptor.bindingSecret)) throw new BrowserProtocolError("AUTH_FAILED", "Binding authentication failed.");
-        state.actor = Object.freeze({ ...bind.actor });
-        if (state.bindTimer !== undefined) { clearTimeout(state.bindTimer); state.bindTimer = undefined; }
-        this.send(state, { protocolVersion: PROTOCOL_VERSION, kind: "bound", requestId: bind.requestId, actor: state.actor });
+        if (isRecord(value) && value.kind === "workspace.bind") {
+          const workspaceConnections = [...this.connections].filter((item) => item.role === "workspace").length;
+          if (workspaceConnections >= this.maxWorkspaceConnections) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Workspace broker connection limit reached.", true);
+          const bind = parseWorkspaceBrokerBindRequest(value);
+          if (!secretMatches(bind.workspaceBrokerSecret, this.descriptor.workspaceBrokerSecret)) throw new BrowserProtocolError("AUTH_FAILED", "Workspace binding authentication failed.");
+          state.role = "workspace";
+          if (state.bindTimer !== undefined) { clearTimeout(state.bindTimer); state.bindTimer = undefined; }
+          this.send(state, { protocolVersion: PROTOCOL_VERSION, kind: "workspace.bound", requestId: bind.requestId, runtimeInstanceId: this.descriptor.runtimeInstanceId });
+        } else {
+          const bind = parseBindRequest(value);
+          if (!secretMatches(bind.bindingSecret, this.descriptor.bindingSecret)) throw new BrowserProtocolError("AUTH_FAILED", "Binding authentication failed.");
+          state.actor = Object.freeze({ ...bind.actor });
+          state.role = "actor";
+          if (state.bindTimer !== undefined) { clearTimeout(state.bindTimer); state.bindTimer = undefined; }
+          this.send(state, { protocolVersion: PROTOCOL_VERSION, kind: "bound", requestId: bind.requestId, actor: state.actor });
+        }
       } catch (error) {
         const requestId = isRecord(value) && typeof value.requestId === "string" ? value.requestId : undefined;
         this.sendCaught(state, requestId, error);
@@ -195,19 +212,46 @@ export class BrowserdServer {
       }
       return;
     }
-    if (isRecord(value) && value.kind === "bind") {
+    if (isRecord(value) && (value.kind === "bind" || value.kind === "workspace.bind")) {
       this.sendError(state, typeof value.requestId === "string" ? value.requestId : undefined, "ALREADY_BOUND", "Connection is already bound.");
       this.closeConnection(state, true);
+      return;
+    }
+    if (state.role === "workspace") {
+      let request: WorkspaceBrokerRequest;
+      try { request = parseWorkspaceBrokerRequest(value); } catch (error) { this.sendCaught(state, isRecord(value) && typeof value.requestId === "string" ? value.requestId : undefined, error); return; }
+      await this.handleWorkspaceRequest(state, request);
       return;
     }
     let request;
     try { request = parseBrowserRequest(value); } catch (error) { this.sendCaught(state, isRecord(value) && typeof value.requestId === "string" ? value.requestId : undefined, error); return; }
     if (state.pending.has(request.requestId)) { this.sendError(state, request.requestId, "OPERATION_CONFLICT", "Request ID is already pending."); return; }
     if (state.pending.size >= 64) { this.sendError(state, request.requestId, "LIMIT_EXCEEDED", "Connection request limit reached."); return; }
+    const actor = state.actor;
+    if (actor === undefined) { this.closeConnection(state); return; }
     const controller = new AbortController();
     state.pending.set(request.requestId, controller);
     try {
-      const result = await this.runtime.dispatch(state.actor, request, controller.signal, state.connectionId);
+      const result = await this.runtime.dispatch(actor, request, controller.signal, state.connectionId);
+      this.send(state, { protocolVersion: PROTOCOL_VERSION, kind: "response", requestId: request.requestId, operationId: request.operationId, ok: true, result });
+    } catch (error) { this.sendCaught(state, request.requestId, error, request.operationId); }
+    finally { state.pending.delete(request.requestId); }
+  }
+
+  private async handleWorkspaceRequest(state: ConnectionState, request: WorkspaceBrokerRequest): Promise<void> {
+    if (state.pending.has(request.requestId)) { this.sendError(state, request.requestId, "OPERATION_CONFLICT", "Request ID is already pending."); return; }
+    if (state.pending.size >= 16) { this.sendError(state, request.requestId, "LIMIT_EXCEEDED", "Workspace request limit reached."); return; }
+    const controller = new AbortController();
+    state.pending.set(request.requestId, controller);
+    try {
+      let result: unknown;
+      if (request.kind === "workspace.snapshot.get") result = this.runtime.workspaceSnapshot();
+      else if (request.kind === "workspace.events.subscribe") { this.runtime.workspaceSubscribeEvents(state.connectionId); result = { kind: "workspacePong", generatedAt: new Date().toISOString() }; }
+      else if (request.kind === "workspace.events.unsubscribe") { this.runtime.workspaceUnsubscribeEvents(state.connectionId); result = { kind: "workspacePong", generatedAt: new Date().toISOString() }; }
+      else if (request.kind === "workspace.frames.subscribe") { this.runtime.workspaceSubscribeFrames(state.connectionId, request.subscriptionId, request.browserSessionId, request.tabId, request.interest); result = { kind: "workspaceSubscription", operationId: request.operationId, subscriptionId: request.subscriptionId, subscribed: true }; }
+      else if (request.kind === "workspace.frames.unsubscribe") { await this.runtime.workspaceUnsubscribeFrames(state.connectionId, request.subscriptionId, request.browserSessionId, request.tabId); result = { kind: "workspaceSubscription", operationId: request.operationId, subscriptionId: request.subscriptionId, subscribed: false }; }
+      else if (request.kind === "workspace.frame.read") result = await this.runtime.workspaceReadFrame(state.connectionId, request);
+      else result = { kind: "workspacePong", generatedAt: new Date().toISOString() };
       this.send(state, { protocolVersion: PROTOCOL_VERSION, kind: "response", requestId: request.requestId, operationId: request.operationId, ok: true, result });
     } catch (error) { this.sendCaught(state, request.requestId, error, request.operationId); }
     finally { state.pending.delete(request.requestId); }
@@ -223,21 +267,31 @@ export class BrowserdServer {
     this.send(state, { protocolVersion: PROTOCOL_VERSION, kind: "response", requestId: safeRequestId, ...(operationId ? { operationId } : {}), ok: false, error: { code, message: sanitizeMessage(message), retryable, ...(details ? { details } : {}) } });
   }
 
-  private send(state: ConnectionState, message: unknown, droppable = false): void {
-    if (state.closed) return;
+  private send(state: ConnectionState, message: unknown, droppable = false): boolean {
+    if (state.closed) return false;
     if (!Check(ServerMessageSchema, message)) {
-      if (isRecord(message) && message.kind === "response" && message.ok === false) { this.closeConnection(state); return; }
+      if (isRecord(message) && message.kind === "response" && message.ok === false) { this.closeConnection(state); return false; }
       this.sendError(state, isRecord(message) && typeof message.requestId === "string" ? message.requestId : undefined, "INTERNAL_ERROR", "Server produced an invalid response.");
-      return;
+      return false;
     }
-    try { sendJson(state.socket, message, { droppable }); } catch { this.closeConnection(state); }
+    try { return sendJson(state.socket, message, { droppable }); } catch { this.closeConnection(state); return false; }
   }
 
   private readonly onFrame = (frame: FrameEvent): void => {
     for (const state of this.connections) {
-      if (state.actor === undefined || state.closed) continue;
-      if (this.runtime.shouldDeliverFrame(state.connectionId, state.actor, frame)) this.send(state, frame, true);
+      if (state.closed) continue;
+      if (state.role === "actor" && state.actor !== undefined && this.runtime.shouldDeliverFrame(state.connectionId, state.actor, frame)) this.send(state, frame, true);
+      if (state.role === "workspace") {
+        const delivery = this.runtime.workspaceFrameDelivery(state.connectionId, frame);
+        if (delivery === undefined) continue;
+        const message = { protocolVersion: PROTOCOL_VERSION, kind: "workspace.frame.available", runtimeInstanceId: this.descriptor.runtimeInstanceId, subscriptionId: delivery.subscriptionId, browserSessionId: frame.address.browserSessionId, tabId: frame.address.tabId, documentGeneration: frame.documentGeneration, viewportGeneration: frame.viewportGeneration, frameSequence: frame.frameSequence, capturedMonotonicMs: frame.capturedMonotonicMs, publishedMonotonicMs: frame.publishedMonotonicMs, mediaType: frame.mediaType, byteLength: frame.byteLength, artifactId: frame.artifactId, sha256: frame.sha256, width: frame.viewport.width, height: frame.viewport.height };
+        if (this.send(state, message, true)) this.runtime.recordWorkspaceFrameDelivered(state.connectionId, delivery.subscriptionId, frame);
+      }
     }
+  };
+
+  private readonly onWorkspaceState = (event: WorkspaceStateEvent): void => {
+    for (const state of this.connections) if (!state.closed && state.role === "workspace" && this.runtime.shouldDeliverWorkspaceEvent(state.connectionId)) this.send(state, event);
   };
 
   private closeConnection(state: ConnectionState, graceful = false): void {

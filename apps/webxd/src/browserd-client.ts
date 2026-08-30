@@ -424,6 +424,7 @@ class BoundBrowserdConnection {
     try { message = parseServerMessage(JSON.parse(line) as unknown); }
     catch { void this.close(new BrowserdClientError("INTERNAL_ERROR", "browser service returned an invalid message")); return; }
     if (message.kind === "frame.available") { this.dispatchFrame(message); return; }
+    if (message.kind !== "bound" && message.kind !== "response") { void this.close(new BrowserdClientError("INTERNAL_ERROR", "browser service crossed its bound connection role")); return; }
     const pending = this.#pending.get(message.requestId);
     if (pending === undefined) return;
     if (message.kind !== "bound" && message.operationId !== pending.operationId) {

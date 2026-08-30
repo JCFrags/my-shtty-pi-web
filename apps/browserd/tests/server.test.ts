@@ -67,6 +67,8 @@ function bind(secret: string, principalId = "owner:test", agentSessionId = "agen
 function request(kind: "capabilities.get" | "session.list", id: string) {
   return { protocolVersion: PROTOCOL_VERSION, kind, requestId: `request:${id}`, operationId: `operation:${id}`, deadline: new Date(Date.now() + 60_000).toISOString() };
 }
+function workspaceBind(secret: string) { return { protocolVersion: PROTOCOL_VERSION, kind: "workspace.bind", requestId: "request:workspace-bind", workspaceBrokerSecret: secret }; }
+function workspaceRequest(kind: "workspace.snapshot.get" | "workspace.ping", id: string) { return { protocolVersion: PROTOCOL_VERSION, kind, requestId: `request:${id}`, operationId: `operation:${id}`, deadline: new Date(Date.now() + 60_000).toISOString() }; }
 
 describe("browserd actor-bound Unix service", () => {
   it("creates private runtime, descriptor, and socket permissions and cleans them", async () => {
@@ -99,6 +101,33 @@ describe("browserd actor-bound Unix service", () => {
     assert.equal(rejected.kind, "response");
     assert.equal(rejected.error.code, "ALREADY_BOUND");
     client.close();
+  });
+
+  it("strictly separates actor and workspace-broker roles", async () => {
+    const { server } = await started();
+    assert.notEqual(server.descriptor.workspaceBrokerSecret, server.descriptor.bindingSecret);
+    assert.notEqual(server.descriptor.workspaceBrokerSecret, server.descriptor.brokerSigningSecret);
+
+    const workspace = await Client.open(server.descriptor.socketPath);
+    workspace.send(workspaceBind(server.descriptor.workspaceBrokerSecret));
+    const workspaceBound = await workspace.next() as { kind: string; runtimeInstanceId: string };
+    assert.equal(workspaceBound.kind, "workspace.bound");
+    assert.equal(workspaceBound.runtimeInstanceId, server.descriptor.runtimeInstanceId);
+    workspace.send(workspaceRequest("workspace.snapshot.get", "snapshot"));
+    const snapshot = await workspace.next() as { ok: boolean; result: { kind: string; sessions: unknown[] } };
+    assert.equal(snapshot.ok, true);
+    assert.equal(snapshot.result.kind, "workspaceSnapshot");
+    assert.deepEqual(snapshot.result.sessions, []);
+    workspace.send(request("session.list", "workspace-actor-command"));
+    assert.equal(((await workspace.next()) as { error: { code: string } }).error.code, "INVALID_REQUEST");
+
+    const actor = await Client.open(server.descriptor.socketPath);
+    actor.send(bind(server.descriptor.bindingSecret)); await actor.next();
+    actor.send(workspaceRequest("workspace.snapshot.get", "actor-workspace-command"));
+    assert.equal(((await actor.next()) as { error: { code: string } }).error.code, "INVALID_REQUEST");
+    actor.send(workspaceBind(server.descriptor.workspaceBrokerSecret));
+    assert.equal(((await actor.next()) as { error: { code: string } }).error.code, "ALREADY_BOUND");
+    workspace.close(); actor.close();
   });
 
   it("runs independent requests concurrently on one bound connection", async () => {

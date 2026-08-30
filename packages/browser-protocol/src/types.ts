@@ -1,6 +1,8 @@
 import type { Static } from "typebox";
 import type {
   ActorIdentitySchema, BindRequestSchema, BindResponseSchema, BrowserRequestSchema,
+  WorkspaceBrokerBindRequestSchema, WorkspaceBrokerRequestSchema, WorkspaceFrameEventSchema,
+  WorkspaceSessionSnapshotSchema, WorkspaceSnapshotSchema, WorkspaceStateEventSchema,
   DispatchStateSchema, DomObservationSchema, ErrorCodeSchema, ErrorResponseSchema,
   FrameEventSchema, OperationStateSchema, OperationStatusSchema, ProtocolErrorSchema,
   ScreenshotObservationSchema, ServerMessageSchema, SessionDescriptorSchema,
@@ -10,6 +12,12 @@ import type {
 export type ActorIdentity = Static<typeof ActorIdentitySchema>;
 export type BindRequest = Static<typeof BindRequestSchema>;
 export type BrowserRequest = Static<typeof BrowserRequestSchema>;
+export type WorkspaceBrokerBindRequest = Static<typeof WorkspaceBrokerBindRequestSchema>;
+export type WorkspaceBrokerRequest = Static<typeof WorkspaceBrokerRequestSchema>;
+export type WorkspaceSnapshot = Static<typeof WorkspaceSnapshotSchema>;
+export type WorkspaceSessionSnapshot = Static<typeof WorkspaceSessionSnapshotSchema>;
+export type WorkspaceStateEvent = Static<typeof WorkspaceStateEventSchema>;
+export type WorkspaceFrameEvent = Static<typeof WorkspaceFrameEventSchema>;
 export type BindResponse = Static<typeof BindResponseSchema>;
 export type SuccessResponse = Static<typeof SuccessResponseSchema>;
 export type ErrorResponse = Static<typeof ErrorResponseSchema>;
