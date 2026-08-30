@@ -148,9 +148,12 @@ export class BrowserRuntime extends EventEmitter {
     this.pruneWorkspaceLedger(connectionId, subscriptionId);
   }
 
-  workspaceFrameDelivery(connectionId: string, frame: FrameEvent): { subscriptionId: string; frame: FrameEvent } | undefined {
-    for (const subscription of this.workspaceSubscriptions.get(connectionId)?.values() ?? []) if (subscription.browserSessionId === frame.address.browserSessionId && subscription.tabId === frame.address.tabId) return { subscriptionId: subscription.subscriptionId, frame };
-    return undefined;
+  workspaceFrameDeliveries(connectionId: string, frame: FrameEvent): Array<{ subscriptionId: string; frame: FrameEvent }> {
+    const deliveries: Array<{ subscriptionId: string; frame: FrameEvent }> = [];
+    for (const subscription of this.workspaceSubscriptions.get(connectionId)?.values() ?? []) {
+      if (subscription.browserSessionId === frame.address.browserSessionId && subscription.tabId === frame.address.tabId) deliveries.push({ subscriptionId: subscription.subscriptionId, frame });
+    }
+    return deliveries;
   }
 
   recordWorkspaceFrameDelivered(connectionId: string, subscriptionId: string, frame: FrameEvent): void {

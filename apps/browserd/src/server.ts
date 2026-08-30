@@ -282,10 +282,10 @@ export class BrowserdServer {
       if (state.closed) continue;
       if (state.role === "actor" && state.actor !== undefined && this.runtime.shouldDeliverFrame(state.connectionId, state.actor, frame)) this.send(state, frame, true);
       if (state.role === "workspace") {
-        const delivery = this.runtime.workspaceFrameDelivery(state.connectionId, frame);
-        if (delivery === undefined) continue;
-        const message = { protocolVersion: PROTOCOL_VERSION, kind: "workspace.frame.available", runtimeInstanceId: this.descriptor.runtimeInstanceId, subscriptionId: delivery.subscriptionId, browserSessionId: frame.address.browserSessionId, tabId: frame.address.tabId, documentGeneration: frame.documentGeneration, viewportGeneration: frame.viewportGeneration, frameSequence: frame.frameSequence, capturedMonotonicMs: frame.capturedMonotonicMs, publishedMonotonicMs: frame.publishedMonotonicMs, mediaType: frame.mediaType, byteLength: frame.byteLength, artifactId: frame.artifactId, sha256: frame.sha256, width: frame.viewport.width, height: frame.viewport.height };
-        if (this.send(state, message, true)) this.runtime.recordWorkspaceFrameDelivered(state.connectionId, delivery.subscriptionId, frame);
+        for (const delivery of this.runtime.workspaceFrameDeliveries(state.connectionId, frame)) {
+          const message = { protocolVersion: PROTOCOL_VERSION, kind: "workspace.frame.available", runtimeInstanceId: this.descriptor.runtimeInstanceId, subscriptionId: delivery.subscriptionId, browserSessionId: frame.address.browserSessionId, tabId: frame.address.tabId, documentGeneration: frame.documentGeneration, viewportGeneration: frame.viewportGeneration, frameSequence: frame.frameSequence, capturedMonotonicMs: frame.capturedMonotonicMs, publishedMonotonicMs: frame.publishedMonotonicMs, mediaType: frame.mediaType, byteLength: frame.byteLength, artifactId: frame.artifactId, sha256: frame.sha256, width: frame.viewport.width, height: frame.viewport.height };
+          if (this.send(state, message, true)) this.runtime.recordWorkspaceFrameDelivered(state.connectionId, delivery.subscriptionId, frame);
+        }
       }
     }
   };

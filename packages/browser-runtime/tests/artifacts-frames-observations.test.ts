@@ -92,6 +92,21 @@ describe("connection-scoped frame schedules", () => {
     assert.equal(runtime.shouldDeliverFrame("connection:subscribed", actor, frame), false);
     await runtime.close();
   });
+
+  it("fans one matching frame out to every workspace subscription on the broker connection", async () => {
+    const runtime = new BrowserRuntime();
+    const workspaceSubscription = (subscriptionId: string) => ({ connectionId: "connection:workspace", subscriptionId, browserSessionId: "session:routing", tabId: "tab:routing", interest: "selected" as const, consumerKey: `workspace\0connection:workspace\0${subscriptionId}` });
+    const first = workspaceSubscription("subscription:first");
+    const second = workspaceSubscription("subscription:second");
+    const internal = runtime as unknown as { workspaceSubscriptions: Map<string, Map<string, typeof first>> };
+    internal.workspaceSubscriptions.set("connection:workspace", new Map([[first.subscriptionId, first], [second.subscriptionId, second]]));
+    const frame = { protocolVersion: PROTOCOL_VERSION, kind: "frame.available", address: { browserSessionId: "session:routing", tabId: "tab:routing", targetId: "target:routing", controlEpoch: 1 } } as FrameEvent;
+    assert.deepEqual(runtime.workspaceFrameDeliveries("connection:workspace", frame).map((item) => item.subscriptionId), [first.subscriptionId, second.subscriptionId]);
+    assert.deepEqual(runtime.workspaceFrameDeliveries("connection:other", frame), []);
+    runtime.releaseConnection("connection:workspace");
+    assert.equal(runtime.workspaceSubscriptionCount, 0);
+    await runtime.close();
+  });
 });
 
 describe("artifact provenance, fairness, and lifetime", () => {
