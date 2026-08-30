@@ -14,7 +14,7 @@ Rust retains at most one in-flight and one pending frame. The frontend retains o
 
 ## Evidence
 
-The binary IPC probe delivers 100 distinct synthetic 1 MiB payloads with exact order and digest. The graphical route and 1,803.144-second soak report:
+The binary IPC probe delivers 100 distinct synthetic 1 MiB payloads with exact order and digest. The graphical route and 1,811.605-second soak report:
 
 - frontend byte type: `ArrayBuffer`;
 - base64 frame bytes: 0;

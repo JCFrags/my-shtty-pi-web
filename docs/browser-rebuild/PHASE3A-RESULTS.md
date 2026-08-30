@@ -6,12 +6,12 @@ Phase 3A is qualified on `rebuild/screenshot-first-browser` as a read-only trust
 
 - Required starting SHA: `d6e42db04a3f0b0227c2211093cfcbdac76847d4`
 - Preserved user-approved runtime-directory correction: `37a0c4b2008479b62cbdb8a8f3095347d41f79dc`
-- Qualifying production and harness SHA: `7ae05ad6f747f42790d579ab168b9b7fba6f0214`
+- Qualifying production and harness SHA: `7cece820ad4510ac45c239a2ef6a09711cccfde8`
 - Final documentation SHA: the documentation-only commit that contains this report and the qualifying evidence; the exact SHA is recorded in the final delivery because a Git commit cannot contain its own SHA.
 - Private protocols: `browser.v2` and `workspace.v1`
 - Public WebX API and browser contract: unchanged at `3.0.0`, path `agentcursor/chrome`
 
-The exact-SHA gate started from a clean tree with an externally supplied expected SHA. It ran the real Tauri Rust client and React frontend, two Pi harnesses, two isolated Chromium sessions, browserd, webxd, a deterministic fixture, and a secure test proxy in separate processes. It completed uninterrupted for 1,803.144 seconds and cleaned up all owned resources.
+The exact-SHA gate started from a clean tree with an externally supplied expected SHA. It ran the real Tauri Rust client and React frontend, two Pi harnesses, two isolated Chromium sessions, browserd, webxd, a deterministic fixture, and a secure test proxy in separate processes. It completed uninterrupted for 1,811.605 seconds and cleaned up all owned resources.
 
 Human takeover, Tauri browser input, cancellation, and model-facing workspace tools remain absent and are deferred to Phase 3B. Production-default AgentCursor routing remains disabled. `WEBX_BROWSER_BACKEND` still defaults to `legacy`, and the legacy browser runtime remains installed and selectable. ADR-012 remains unresolved.
 
@@ -34,8 +34,8 @@ The soak records at most two Rust-retained frames, one frontend-retained frame, 
 The committed graphical acceptance and final soak prove:
 
 - two sanitized agent labels, two sessions, multiple explicit tabs, and exact selection;
-- 363 selection barriers and 306 continuous soak switches;
-- 2,585 frames received and 2,443 painted by the real Tauri application;
+- 365 selection barriers and 308 continuous soak switches;
+- 2,594 frames received and 2,456 painted by the real Tauri application;
 - zero cross-agent paints, zero former-selection paints, and zero non-monotonic paints;
 - five distinct cursor-motion frame digests from one human-style action, exceeding the required three;
 - 25 tab create/close cycles;
@@ -50,44 +50,44 @@ The committed graphical acceptance and final soak prove:
 
 | Metric | Result |
 |---|---:|
-| Startup to frontend ready | 1,389.134 ms |
-| Descriptor discovery | 1 ms |
-| Gateway bind | <1 ms recorded |
-| First snapshot | 1,209 ms |
-| First selected frame | 1,507 ms |
-| All soak switches | 306; median 2,641 ms; p95 3,132 ms; max 13,655 ms |
-| Initial stable session switch | 140 ms |
-| Initial stable tab switches | 3,018 and 3,376 ms |
-| Webxd recovery switch | 980 ms |
+| Startup to frontend ready | 886.681 ms |
+| Descriptor discovery | 0 ms recorded |
+| Gateway bind | 1 ms |
+| First snapshot | 709 ms |
+| First selected frame | 1,027 ms |
+| All soak switches | 308; median 2,510 ms; p95 3,132 ms; max 13,660 ms |
+| Initial stable session switch | 134 ms |
+| Initial stable tab switches | 2,987 and 3,564 ms |
+| Webxd recovery switch | 1,182 ms |
 | Decode | median 6 ms; p95 8 ms; max 11 ms |
-| Paint | median 0 ms; p95 1 ms; max 5 ms |
-| Publication to paint | median 107 ms; p95 133 ms; max 175 ms |
+| Paint | median 0 ms; p95 1 ms; max 4 ms |
+| Publication to paint | median 107 ms; p95 134 ms; max 170 ms |
 
 The first snapshot and first selected frame meet the 2-second development targets. The 1.5-second stable switch p95 development target was not met. This is recorded as a remaining performance gap, not hidden as an SLA pass.
 
 ## Final uninterrupted graphical soak
 
-Evidence: `evidence/phase3a-workspace-soak-results.json`, SHA-256 `f1eef6703dcebd402554fc75828af6edeb996d1fb06050e2925d75b479136a15`.
+Evidence: `evidence/phase3a-workspace-soak-results.json`, SHA-256 `4554ad58dca2a0fa8f21d7b9cc3803f65a8b18dd3853eab6c30a20640cf9e7ff`.
 
 | Metric | Result |
 |---|---:|
-| Requested / actual duration | 1,800 / 1,803.144 seconds |
+| Requested / actual duration | 1,800 / 1,811.605 seconds |
 | Uninterrupted | yes |
-| Iterations | 306 |
-| Screenshot attempts | 3,236 |
-| Explicit agent screenshots | 612 |
-| Workspace screenshot attempts | 2,608 |
-| Workspace switches | 306 |
+| Iterations | 308 |
+| Screenshot attempts | 3,246 |
+| Explicit agent screenshots | 616 |
+| Workspace screenshot attempts | 2,615 |
+| Workspace switches | 308 |
 | Tab cycles | 25 |
 | Pi reconnects / webxd restarts / browserd replacements | 5 / 1 / 1 |
 | Window and single-instance cycles | 51 |
 | Same-session capture maximum | 1 |
 | Cross-session capture concurrency | yes; process maximum 2 |
-| Typed timeouts / agent retries / recovered / unrecovered | 27 / 14 / 14 / 0 |
-| Recovered-agent rate | 14 / 628 = 2.2293% |
+| Typed timeouts / agent retries / recovered / unrecovered | 27 / 13 / 13 / 0 |
+| Recovered-agent rate | 13 / 631 = 2.0602% |
 | Graphical policy | <=32 retries, <=5% recovered rate, <=64 typed timeouts, zero unrecovered |
-| Pre-replacement timeouts | 0 across 581 agent and 2,344 workspace attempts |
-| Post-replacement timeouts | 14 agent and 13 workspace; all agent retries recovered |
+| Pre-replacement timeouts | 0 across the recorded pre-replacement segment |
+| Post-replacement timeouts | 13 agent and 14 workspace; all agent retries recovered |
 | Cross-agent / stale / non-monotonic paints | 0 / 0 / 0 |
 | General idempotency image bytes | 0 |
 
@@ -95,17 +95,17 @@ The earlier Phase 2B.1 non-graphical recovery gate remains unchanged at at most 
 
 ## Resources and cleanup
 
-The final Tauri/WebKit process tree used 282,577 KiB PSS and 162,716 KiB private dirty at final analysis. The first and last periodic samples were:
+The final Tauri/WebKit process tree used 282,379 KiB PSS and 163,336 KiB private dirty at final analysis. The first and last periodic samples were:
 
 | Process tree | First PSS / private dirty KiB | Last PSS / private dirty KiB |
 |---|---:|---:|
-| Tauri + WebKit | 257,891 / 142,116 | 278,573 / 162,788 |
-| webxd | 90,315 / 88,860 | 71,461 / 69,900 |
-| browserd | 120,328 / 119,000 | 95,761 / 94,376 |
-| Chromium session A | 418,670 / 221,272 | 414,816 / 218,884 |
-| Chromium session B | 377,831 / 198,144 | 383,909 / 202,608 |
+| Tauri + WebKit | 257,938 / 142,964 | 280,279 / 165,308 |
+| webxd | 91,298 / 89,844 | 73,310 / 71,800 |
+| browserd | 93,456 / 92,128 | 88,849 / 87,504 |
+| Chromium session A | 380,753 / 198,332 | 378,363 / 194,880 |
+| Chromium session B | 414,498 / 216,784 | 414,115 / 217,732 |
 
-The evidence contains 115 bounded periodic CPU and memory samples. It does not claim that the long-term Chrome plateau issue is resolved.
+The evidence contains 117 bounded periodic CPU and memory samples. It does not claim that the long-term Chrome plateau issue is resolved.
 
 Final cleanup reports zero profiles and children, no webxd socket, no browserd descriptor, no Tauri process tree, zero gateway clients/selections/pending frames, zero broker and browserd workspace subscriptions, zero frame-ledger entries, and all three observed workspace instance sockets removed.
 
@@ -135,7 +135,7 @@ pnpm --filter @pi-web/workspace build
 pnpm --filter @pi-web/workspace tauri build --debug --no-bundle
 pnpm --filter @pi-web/workspace test:binary-ipc
 pnpm --filter @webx/webxd test:workspace-live
-PHASE3A_EXPECTED_SHA=7ae05ad6f747f42790d579ab168b9b7fba6f0214 pnpm --filter @webx/webxd test:workspace-soak
+PHASE3A_EXPECTED_SHA=7cece820ad4510ac45c239a2ef6a09711cccfde8 pnpm --filter @webx/webxd test:workspace-soak
 git diff --check
 ```
 
@@ -166,6 +166,7 @@ Added modules include `packages/workspace-protocol/`, `apps/webxd/src/workspace/
 - `e5f0d8a` dwell after frame capture timeout
 - `4ea0e00` bound graphical soak recoveries
 - `7ae05ad` settle the prior frame before the selection barrier
+- `7cece82` record Phase 3A documentation and remove the obsolete legacy human-control test
 
 ## Remaining gaps and Phase 3B recommendation
 

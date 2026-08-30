@@ -141,7 +141,7 @@ Each phase has one acceptance gate. Keep the old browser production path until t
 
 ## Phase 3A — trusted read-only Tauri workspace
 
-**Status:** complete on `rebuild/screenshot-first-browser`. Frozen production and harness code `7ae05ad6f747f42790d579ab168b9b7fba6f0214` passed the real Tauri graphical route and an externally pinned, clean-tree, uninterrupted 1,803.144-second soak.
+**Status:** complete on `rebuild/screenshot-first-browser`. Frozen production and harness code `7cece820ad4510ac45c239a2ef6a09711cccfde8` passed the real Tauri graphical route and an externally pinned, clean-tree, uninterrupted 1,811.605-second soak.
 
 **Goal:** replace the legacy workspace with a local multi-agent screenshot viewer while keeping cross-agent view authority separate from browser control.
 
