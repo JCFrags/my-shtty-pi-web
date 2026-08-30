@@ -60,13 +60,13 @@ impl WorkspaceClientService {
     pub async fn select(&self, browser_session_id: String, tab_id: String) -> Result<SelectionResult, PublicError> {
         if !protocol::valid_id(&browser_session_id) || !protocol::valid_id(&tab_id) { return Err(WorkspaceError::InvalidSelection.public()); }
         let (reply, received) = oneshot::channel();
-        self.send(ClientCommand::Select { browser_session_id, tab_id, expires: Instant::now() + COMMAND_TTL, reply }).await?;
+        self.send_control(ClientCommand::Select { browser_session_id, tab_id, expires: Instant::now() + COMMAND_TTL, reply }).await?;
         tokio::time::timeout(COMMAND_TTL, received).await.map_err(|_| WorkspaceError::Unavailable.public())?.map_err(|_| WorkspaceError::Closed.public())?
     }
 
     pub async fn clear(&self) -> Result<(), PublicError> {
         let (reply, received) = oneshot::channel();
-        self.send(ClientCommand::Clear { expires: Instant::now() + COMMAND_TTL, reply }).await?;
+        self.send_control(ClientCommand::Clear { expires: Instant::now() + COMMAND_TTL, reply }).await?;
         tokio::time::timeout(COMMAND_TTL, received).await.map_err(|_| WorkspaceError::Unavailable.public())?.map_err(|_| WorkspaceError::Closed.public())?
     }
 
@@ -82,6 +82,13 @@ impl WorkspaceClientService {
     pub fn stop_task(&self) {
         if let Some(sender) = self.sender.lock().expect("workspace sender lock").take() { let _ = sender.try_send(ClientCommand::Stop); }
         if let Some(task) = self.task.lock().expect("workspace task lock").take() { task.abort(); }
+    }
+
+    async fn send_control(&self, command: ClientCommand) -> Result<(), PublicError> {
+        let sender = self.sender.lock().expect("workspace sender lock").clone().ok_or_else(|| WorkspaceError::Closed.public())?;
+        tokio::time::timeout(COMMAND_TTL, sender.send(command)).await
+            .map_err(|_| WorkspaceError::Capacity.public())?
+            .map_err(|_| WorkspaceError::Closed.public())
     }
 
     async fn send(&self, command: ClientCommand) -> Result<(), PublicError> {
@@ -353,5 +360,19 @@ mod tests {
     fn validates_selection_ids_without_paths_or_urls() {
         assert!(protocol::valid_id("session:one")); assert!(protocol::valid_id("tab-one"));
         assert!(!protocol::valid_id("/tmp/socket")); assert!(!protocol::valid_id("https://example.test"));
+    }
+
+    #[tokio::test]
+    async fn control_commands_wait_for_bounded_queue_capacity() {
+        let service = WorkspaceClientService::default();
+        let (sender, mut receiver) = mpsc::channel(1);
+        *service.sender.lock().expect("workspace sender lock") = Some(sender);
+        service.send(ClientCommand::Stop).await.expect("fill command queue");
+        let pending = service.send_control(ClientCommand::Stop);
+        tokio::pin!(pending);
+        assert!(tokio::time::timeout(Duration::from_millis(10), &mut pending).await.is_err());
+        assert!(matches!(receiver.recv().await, Some(ClientCommand::Stop)));
+        tokio::time::timeout(Duration::from_millis(100), pending).await.expect("control send should resume").expect("control send");
+        assert!(matches!(receiver.recv().await, Some(ClientCommand::Stop)));
     }
 }
