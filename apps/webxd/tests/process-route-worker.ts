@@ -270,6 +270,7 @@ function aggregateCaptureDiagnostics(items: ReadonlyArray<Record<string, unknown
     sameSessionMaximumConcurrency: maximum("maxObservedConcurrent"),
     processActiveTransactions: maximum("processActiveTransactions"),
     processMaximumConcurrency: maximum("processMaxObservedConcurrent"),
+    processOverlapEvents: maximum("processOverlapEvents"),
     agentRequests: sum("agentRequests"),
     workspaceRequests: sum("frameRequests"),
     agentScreenshotAttempts: sum("agentScreenshotAttempts"),

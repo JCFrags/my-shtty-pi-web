@@ -12,6 +12,7 @@ interface RegisteredTool { readonly name: string; readonly execute: (toolCallId:
 type EventHandler = (event?: unknown, context?: unknown) => Promise<unknown> | unknown;
 interface ChildReady extends Record<string, unknown> { readonly kind: "ready"; readonly role: string }
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const MAX_ROUTE_SAMPLES = 2_048;
 
 class PiHarness {
   readonly tools = new Map<string, RegisteredTool>();
@@ -95,8 +96,13 @@ async function main(): Promise<void> {
   const outputPath = resolve(argument("--output") ?? "../../docs/browser-rebuild/evidence/phase2b1-process-route-results.json");
   const delayMs = numberArgument("--model-delay-ms", 10_000);
   const testedSha = gitOutput(["rev-parse", "HEAD"]);
+  const expectedSha = argument("--expected-sha") ?? process.env.PHASE2B1_EXPECTED_SHA;
   const workingTreeClean = gitOutput(["status", "--porcelain"]) === "";
-  if (argument("--require-clean") === "true" && !workingTreeClean) throw new Error("qualification requires a clean tested SHA");
+  if (argument("--require-clean") === "true") {
+    if (!workingTreeClean) throw new Error("qualification requires a clean tested SHA");
+    if (expectedSha === undefined || !/^[0-9a-f]{40}$/u.test(expectedSha)) throw new Error("qualification requires PHASE2B1_EXPECTED_SHA or --expected-sha");
+    if (testedSha !== expectedSha) throw new Error(`qualification SHA mismatch: expected ${expectedSha}, found ${testedSha}`);
+  }
   const contentionTransactions = boundedNumberArgument("--contention-transactions", 0, 0, 10_000);
   const contentionObservations = boundedNumberArgument("--contention-observations", 0, 0, 10_000);
   if (contentionTransactions > 0 && (contentionObservations < 300 || contentionTransactions < 1_000)) throw new Error("capture contention requires at least 1,000 transactions and 300 observations");
@@ -188,7 +194,7 @@ async function main(): Promise<void> {
   const rehydratedList = await piA.execute("browser_tabs", { action: "list" }); assert.match(textOf(rehydratedList), new RegExp(identityA.browserSessionId));
   const rehydratedFrame = await piA.execute("browser_observe", identityA); assertPiImage(rehydratedFrame);
 
-  const soakDurationSeconds = numberArgument("--soak-duration-seconds", 0);
+  const soakDurationSeconds = boundedNumberArgument("--soak-duration-seconds", 0, 0, 7_200);
   const soakRun = soakDurationSeconds > 0 ? await runProcessSoak({
     durationSeconds: soakDurationSeconds,
     testedSha,
@@ -256,6 +262,7 @@ async function main(): Promise<void> {
   const result = {
     passed: true,
     testedSha,
+    expectedSha: expectedSha ?? null,
     workingTreeClean,
     processIsolation: { piHarnessPid: process.pid, browserdPid: browserdReady.pid, webxdPid: webxdReady.pid, distinct: true },
     productionObservationLease: { configuredMs: 60_000, testOverrideUsed: false, requestedModelDelayMs: delayMs, actualModelDelayMs: actualDelayMs, validUntil: delayedObservation.validUntil, clickSucceeded: true, clickRouteMs: delayedClickRouteMs },
@@ -305,6 +312,7 @@ async function runCaptureContention(options: {
   const beforeRetries = numberField(beforeCoordinator, "agentScreenshotRetries");
   const beforeRecovered = numberField(beforeCoordinator, "recoveredAgentTimeouts");
   const beforeUnrecoveredTimeouts = numberField(beforeCoordinator, "unrecoveredAgentTimeouts");
+  const beforeOverlapEvents = numberField(beforeCoordinator, "processOverlapEvents");
   const observationIds = new Set<string>();
   const ledgerHash = createHash("sha256");
   const ledgerHead: Record<string, unknown>[] = [];
@@ -370,8 +378,9 @@ async function runCaptureContention(options: {
   const unrecoveredFailures = numberField(coordinator, "unrecoveredAgentFailures") - beforeAgentFailures;
   assert.ok(totalAttempts >= options.requestedTransactions, `governed screenshot transaction count is ${totalAttempts}`);
   assert.ok(explicitObservations >= options.minimumObservations);
+  const workloadOverlapEvents = numberField(coordinator, "processOverlapEvents") - beforeOverlapEvents;
   assert.equal(numberField(coordinator, "sameSessionMaximumConcurrency"), 1);
-  assert.ok(numberField(coordinator, "processMaximumConcurrency") >= 2, "cross-session capture concurrency was not observed");
+  assert.ok(workloadOverlapEvents > 0, "cross-session capture concurrency was not observed during the contention workload");
   assert.equal(unrecoveredFailures, 0);
   assert.equal(unrecoveredTimeouts, 0);
   assert.ok(retryCount <= 3 && recoveredRetries / Math.max(1, agentAttempts) <= 0.005, `contention recovery policy exceeded: ${recoveredRetries}/${agentAttempts}`);
@@ -389,7 +398,8 @@ async function runCaptureContention(options: {
     motorActions,
     durationSeconds: (performance.now() - started) / 1_000,
     sameSessionMaximumConcurrency: numberField(coordinator, "sameSessionMaximumConcurrency"),
-    crossSessionConcurrencyObserved: numberField(coordinator, "processMaximumConcurrency") >= 2,
+    crossSessionConcurrencyObserved: workloadOverlapEvents > 0,
+    workloadOverlapEvents,
     processMaximumConcurrency: numberField(coordinator, "processMaximumConcurrency"),
     maximumAgentQueueDepth: numberField(coordinator, "maximumAgentQueueDepth"),
     maximumWorkspaceQueueDepth: numberField(coordinator, "maximumWorkspaceQueueDepth"),
@@ -434,7 +444,7 @@ async function runProcessSoak(options: {
   readonly webxd: ManagedChild;
   readonly restartWebxd: (current: ManagedChild) => Promise<ManagedChild>;
 }): Promise<{ readonly result: Record<string, unknown>; readonly piB: PiHarness; readonly webxd: ManagedChild }> {
-  if (options.durationSeconds < 1 || options.sampleSeconds < 1) throw new Error("soak duration and sample intervals must be positive");
+  if (options.durationSeconds < 1 || options.durationSeconds > 7_200 || options.sampleSeconds < 1 || options.sampleSeconds > 300) throw new Error("soak duration or sample interval is outside its bound");
   let currentPiB = options.piB;
   let currentWebxd = options.webxd;
   const screenshotLatencyMs: number[] = [];
@@ -447,6 +457,7 @@ async function runProcessSoak(options: {
   const streamSegments: Record<string, unknown>[] = [];
   const initialBrowser = asRecord(await options.browserd.call("metrics"));
   const initialCapture = asRecord(initialBrowser.captureCoordinator);
+  const initialOverlapEvents = numberField(initialCapture, "processOverlapEvents");
   let iterations = 0;
   let tabCycles = 0;
   let closeRetryPairs = 0;
@@ -482,7 +493,7 @@ async function runProcessSoak(options: {
       failureContext.currentOperation = "soak.action";
       const act = async (pi: PiHarness, identity: { browserSessionId: string; tabId: string }, observationId: string, x: number, y: number) => await pi.execute("browser_act", { ...identity, action: { kind: "move", observationId, coordinateSpace: "cssViewport", x, y } });
       if (iterations === 1 || iterations % 24 === 0) {
-        const delayStarted = performance.now(); await sleep(Math.min(options.modelDelayMs, Math.max(0, end - performance.now()))); modelDelaysMs.push(performance.now() - delayStarted);
+        const delayStarted = performance.now(); await sleep(Math.min(options.modelDelayMs, Math.max(0, end - performance.now()))); pushBounded(modelDelaysMs, performance.now() - delayStarted);
         if (performance.now() < end) { await timed(() => act(options.piA, options.identityA, observations[0]?.observationId ?? "", alternate ? 500 : 260, alternate ? 420 : 300), actionRouteLatencyMs); delayedActions += 1; }
       } else {
         await Promise.all([
@@ -533,7 +544,7 @@ async function runProcessSoak(options: {
         const browser = asRecord(await options.browserd.call("metrics"));
         const web = asRecord(await currentWebxd.call("metrics"));
         const chrome = await Promise.all(arrayOfRecords(browser.chrome).map(async (item) => await processTreeMemory(numberField(item, "pid"))));
-        samples.push({ elapsedSeconds: (now - started) / 1_000, browserdHeapUsedBytes: browser.heapUsedBytes, webxdHeapUsedBytes: web.heapUsedBytes, browserdConnections: browser.connections, actorConnections: isRecord(web.browser) ? web.browser.actorConnections : 0, activeFrameSubscriptions: browser.subscriptions, operations: browser.operations, artifacts: browser.artifacts, artifactBytes: browser.artifactBytes, observationMetadata: isRecord(web.browser) ? web.browser.observationMetadata : {}, idempotency: web.idempotency, captureCoordinator: browser.captureCoordinator, profileBytes: await directoryBytes(options.profileRoot), chrome, heldInput: browser.heldInput });
+        pushBounded(samples, { elapsedSeconds: (now - started) / 1_000, browserdHeapUsedBytes: browser.heapUsedBytes, webxdHeapUsedBytes: web.heapUsedBytes, browserdConnections: browser.connections, actorConnections: isRecord(web.browser) ? web.browser.actorConnections : 0, activeFrameSubscriptions: browser.subscriptions, operations: browser.operations, artifacts: browser.artifacts, artifactBytes: browser.artifactBytes, observationMetadata: isRecord(web.browser) ? web.browser.observationMetadata : {}, idempotency: web.idempotency, captureCoordinator: browser.captureCoordinator, profileBytes: await directoryBytes(options.profileRoot), chrome, heldInput: browser.heldInput });
         nextSample += options.sampleSeconds * 1_000;
       }
       nextIteration += 5_000;
@@ -565,8 +576,9 @@ async function runProcessSoak(options: {
   const nonMonotonicFrameSequences = streamSegments.reduce((total, item) => total + numberField(item, "nonMonotonicFrameSequences"), 0);
   assert.equal(idempotency.imageBytesRetained, 0);
   assert.ok(actualDurationSeconds >= options.durationSeconds);
+  const workloadOverlapEvents = numberField(capture, "processOverlapEvents") - initialOverlapEvents;
   assert.equal(numberField(capture, "sameSessionMaximumConcurrency"), 1);
-  assert.ok(numberField(capture, "processMaximumConcurrency") >= 2, "soak did not observe cross-session capture concurrency");
+  assert.ok(workloadOverlapEvents > 0, "soak did not observe cross-session capture concurrency during its workload");
   assert.equal(unrecoveredTimeouts, 0);
   assert.equal(unrecoveredAgentFailures, 0);
   assert.ok(retries <= 3 && recoveredRetries / Math.max(1, agentScreenshotAttempts) <= 0.005, `soak recovery policy exceeded: ${recoveredRetries}/${agentScreenshotAttempts}`);
@@ -600,7 +612,8 @@ async function runProcessSoak(options: {
       screenshotAttempts: agentScreenshotAttempts + workspaceScreenshotAttempts,
       captureCoordinator: {
         sameSessionMaximumConcurrency: numberField(capture, "sameSessionMaximumConcurrency"),
-        crossSessionConcurrencyObserved: numberField(capture, "processMaximumConcurrency") >= 2,
+        crossSessionConcurrencyObserved: workloadOverlapEvents > 0,
+        workloadOverlapEvents,
         processMaximumConcurrency: numberField(capture, "processMaximumConcurrency"),
         agentRequests: delta("agentRequests"),
         workspaceRequests: delta("workspaceRequests"),
@@ -652,7 +665,8 @@ function presentationData(presentation: ToolPresentation): Record<string, unknow
 function textOf(presentation: ToolPresentation): string { return presentation.content.filter((item): item is Extract<ToolPresentation["content"][number], { type: "text" }> => item.type === "text").map((item) => item.text).join("\n"); }
 function allMatches(text: string, pattern: RegExp): string[] { return [...text.matchAll(pattern)].map((match) => match[1]).filter((value): value is string => value !== undefined); }
 function distribution(values: number[]): { count: number; min: number; median: number; p95: number; max: number; mean: number } { if (values.length === 0) return { count: 0, min: 0, median: 0, p95: 0, max: 0, mean: 0 }; const sorted = [...values].sort((a, b) => a - b); const at = (fraction: number) => sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction))] ?? 0; return { count: values.length, min: sorted[0] ?? 0, median: at(0.5), p95: at(0.95), max: sorted.at(-1) ?? 0, mean: values.reduce((sum, value) => sum + value, 0) / values.length }; }
-async function timed<T>(task: () => Promise<T>, values: number[]): Promise<T> { const started = performance.now(); try { return await task(); } finally { values.push(performance.now() - started); } }
+async function timed<T>(task: () => Promise<T>, values: number[]): Promise<T> { const started = performance.now(); try { return await task(); } finally { pushBounded(values, performance.now() - started); } }
+function pushBounded<T>(values: T[], value: T): void { values.push(value); if (values.length > MAX_ROUTE_SAMPLES) values.splice(0, values.length - MAX_ROUTE_SAMPLES); }
 async function processTreeMemory(rootPid: number): Promise<{ pid: number; pssKiB: number; privateDirtyKiB: number; processCount: number }> {
   const entries = (await readdir("/proc")).filter((entry) => /^\d+$/u.test(entry));
   const parents = new Map<number, number>();
@@ -708,9 +722,9 @@ catch (error) {
   if (cleanupRoot !== undefined) await rm(cleanupRoot, { recursive: true, force: true });
   root = undefined;
   failure.cleanupOutcome = { childrenStillRunning: children.filter((child) => child.process.exitCode === null).length, temporaryRootRemoved: cleanupRoot === undefined || !(await exists(cleanupRoot)) };
-  const soakOutput = argument("--soak-output");
-  if (soakOutput !== undefined) {
-    const path = resolve(failureArtifactPath(soakOutput));
+  const failureBase = argument("--failure-output") ?? argument("--soak-output") ?? argument("--output") ?? "../../docs/browser-rebuild/evidence/phase2b1-process-route-results.json";
+  if (failureBase !== "") {
+    const path = resolve(failureArtifactPath(failureBase));
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, `${JSON.stringify(failure, null, 2)}\n`);
   }

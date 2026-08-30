@@ -33,6 +33,7 @@ describe("session capture coordinator", () => {
   it("allows different sessions to capture concurrently", async () => {
     const first = new SessionCaptureCoordinator();
     const second = new SessionCaptureCoordinator();
+    const overlapBefore = first.diagnostics.processOverlapEvents;
     const gate = deferred();
     let active = 0;
     let peak = 0;
@@ -41,6 +42,7 @@ describe("session capture coordinator", () => {
     const b = second.runFrame("tab-b", undefined, transaction);
     await waitFor(() => active === 2);
     assert.equal(peak, 2);
+    assert.ok(first.diagnostics.processOverlapEvents > overlapBefore);
     gate.resolve();
     await Promise.all([a, b]);
   });

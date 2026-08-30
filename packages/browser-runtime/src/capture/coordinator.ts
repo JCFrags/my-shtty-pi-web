@@ -53,6 +53,7 @@ export interface SessionCaptureDiagnostics {
   readonly frameTransactionMs: CaptureTimingDistribution;
   readonly processActiveTransactions: number;
   readonly processMaxObservedConcurrent: number;
+  readonly processOverlapEvents: number;
   readonly closed: boolean;
 }
 
@@ -72,6 +73,7 @@ interface CaptureJob {
 export class SessionCaptureCoordinator {
   private static processActiveTransactions = 0;
   private static processMaxObservedConcurrent = 0;
+  private static processOverlapEvents = 0;
   private readonly maxAgentQueue: number;
   private readonly maxFrameTabs: number;
   private readonly maxConsecutiveAgents: number;
@@ -153,6 +155,7 @@ export class SessionCaptureCoordinator {
       frameTransactionMs: distribution(this.frameTransactionCount, this.frameTransactionSamples),
       processActiveTransactions: SessionCaptureCoordinator.processActiveTransactions,
       processMaxObservedConcurrent: SessionCaptureCoordinator.processMaxObservedConcurrent,
+      processOverlapEvents: SessionCaptureCoordinator.processOverlapEvents,
       closed: this.closed,
     };
   }
@@ -264,6 +267,7 @@ export class SessionCaptureCoordinator {
       recordTiming(this.frameQueueWaitSamples, waitMs);
     }
     this.maxObservedConcurrent = Math.max(this.maxObservedConcurrent, 1);
+    if (SessionCaptureCoordinator.processActiveTransactions > 0) SessionCaptureCoordinator.processOverlapEvents = increment(SessionCaptureCoordinator.processOverlapEvents);
     SessionCaptureCoordinator.processActiveTransactions = increment(SessionCaptureCoordinator.processActiveTransactions);
     SessionCaptureCoordinator.processMaxObservedConcurrent = Math.max(SessionCaptureCoordinator.processMaxObservedConcurrent, SessionCaptureCoordinator.processActiveTransactions);
     const promise = this.execute(job)
