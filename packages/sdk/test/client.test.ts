@@ -29,7 +29,6 @@ describe("WebxClient", () => {
   it("requires idempotency for browser mutations", () => {
     const client = new WebxClient(transport());
     expect(() => client.createBrowserSession({ pathId: "agent-browser/chrome" }, {})).toThrow("idempotency key");
-    expect(() => client.getBrowserVisualFrame("session-1", "tab-1", {})).toThrow("idempotency key");
   });
 
   it("maps the complete facade inventory to SDK methods or explicit unavailable results", async () => {
@@ -53,7 +52,7 @@ describe("WebxClient", () => {
     await client.closeBrowserTab("session-1", "tab-1", { idempotencyKey: "browser-tab-close" });
     await client.getBrowserSession("session-1");
     await client.observeBrowser("session-1", "tab-1", "dom", 100, { idempotencyKey: "browser-observe-1" });
-    await client.getBrowserVisualFrame("session-1", "tab-1", { idempotencyKey: "browser-frame-01" });
+    await client.getBrowserVisualFrame("session-1", "tab-1", "observation-1");
     await client.actBrowser("session-1", "tab-1", { kind: "key-press", key: "Escape" }, { idempotencyKey: "browser-action-01" });
     await client.debugBrowser("session-1", { operation: "console" }, { idempotencyKey: "browser-debug-001" });
     await client.setBrowserControl("session-1", "agent", { idempotencyKey: "browser-control-1" });
@@ -61,7 +60,7 @@ describe("WebxClient", () => {
     await client.closeBrowserSession("session-1", { idempotencyKey: "browser-close-01" });
     expect(wire.request.mock.calls.map(([request]) => `${request.method} ${request.path}`)).toEqual(expect.arrayContaining([
       "POST /v1/read-batch", "POST /v1/content", "POST /v1/read-range", "GET /v1/artifacts/artifact-1/bytes?offset=0&max_bytes=10",
-      "GET /v1/browser/sessions", "POST /v1/browser/workspace", "DELETE /v1/browser/sessions/session-1/tabs/tab-1", "GET /v1/browser/sessions/session-1", "POST /v1/browser/sessions/session-1/observe", "POST /v1/browser/sessions/session-1/frame",
+      "GET /v1/browser/sessions", "POST /v1/browser/workspace", "DELETE /v1/browser/sessions/session-1/tabs/tab-1", "GET /v1/browser/sessions/session-1", "POST /v1/browser/sessions/session-1/observe", "GET /v1/browser/sessions/session-1/tabs/tab-1/observations/observation-1/image",
       "POST /v1/browser/sessions/session-1/actions", "POST /v1/browser/sessions/session-1/debug", "POST /v1/browser/sessions/session-1/control",
       "POST /v1/browser/operations/operation-1/cancel", "DELETE /v1/browser/sessions/session-1",
     ]));

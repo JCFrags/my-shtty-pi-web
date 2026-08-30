@@ -161,7 +161,7 @@ export class WebxFacadeClient {
       return external("Browser DOM observation", observation);
     }
     if (observation.kind !== "screenshot") throw new Error("browser service returned the wrong observation kind");
-    const frame = await client.getBrowserVisualFrame(sessionId, tabId, { signal: options.signal, idempotencyKey: `${options.idempotencyKey}:frame` });
+    const frame = await client.getBrowserVisualFrame(sessionId, tabId, observation.observationId, { signal: options.signal });
     if (frame.observationId !== observation.observationId || frame.browserSessionId !== sessionId || frame.tabId !== tabId || frame.mediaType !== observation.mediaType || frame.imagePixelWidth !== observation.imagePixelWidth || frame.imagePixelHeight !== observation.imagePixelHeight || frame.frameSequence !== observation.frameSequence || frame.viewportGeneration !== observation.viewportGeneration || frame.digest !== observation.digest) throw new Error("browser screenshot identity verification failed");
     const bytes = canonicalImageBase64(frame.payloadBase64);
     if (bytes.byteLength > 4 * 1024 * 1024 || sha256(bytes) !== frame.digest) throw new Error("browser screenshot integrity verification failed");

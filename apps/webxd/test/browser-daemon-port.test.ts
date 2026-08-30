@@ -90,7 +90,8 @@ describe("BrowserDaemonRpcPort API-v3 legacy adapter", () => {
     await create(port);
     const observation = await port.observe(owner, "session-1", "screenshot", 200, "observe-1");
     expect(observation).toEqual(expect.objectContaining({ kind: "screenshot", observationId: "observe-1", browserSessionId: "session-1", tabId: "tab-1", imagePixelWidth: 640, imagePixelHeight: 480, digest }));
-    const frame = await port.captureFrame(owner, "session-1", "frame-1");
+    if (observation.kind !== "screenshot") throw new Error("expected screenshot observation");
+    const frame = await port.captureFrame(owner, "session-1", "tab-1", observation.observationId);
     expect(frame).toEqual(expect.objectContaining({ observationId: "observe-1", payloadBase64: "cG5n", digest }));
     expect(connection.call.mock.calls.filter(([method]) => method === "workspace.getFrame")).toHaveLength(1);
   });

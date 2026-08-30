@@ -21,7 +21,7 @@ import {
 } from "../../../packages/sdk/src/index.js";
 import { WebxdRuntime, sameUserPiActorAuthenticator } from "../src/runtime.js";
 
-const imageBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+const imageBytes = (() => { const value = Buffer.alloc(24); Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(value); value.write("IHDR", 12, "ascii"); value.writeUInt32BE(1600, 16); value.writeUInt32BE(1200, 20); return value; })();
 const imageBase64 = imageBytes.toString("base64");
 const imageDigest = createHash("sha256").update(imageBytes).digest("hex");
 const artifactId = "artifact_route_fixture_0001";
@@ -160,7 +160,7 @@ class PrivateBrowserdFixture {
         kind: "screenshotObservation", observationId, address: request.address,
         documentGeneration: 1, viewportGeneration: 1, url: "about:blank", title: "Route fixture",
         capturedAt: "2026-08-29T20:00:00.000Z", capturedMonotonicMs: 100,
-        validUntil: "2026-08-29T20:00:30.000Z", viewport: { width: 800, height: 600, devicePixelRatio: 2 },
+        validUntil: "2099-08-29T20:00:30.000Z", viewport: { width: 800, height: 600, devicePixelRatio: 2 },
         scroll: { x: 0, y: 0 }, frameSequence: 1, mediaType: "image/png", byteLength: imageBytes.byteLength,
         imagePixelWidth: 1600, imagePixelHeight: 1200, captureScale: 1, sha256: imageDigest,
         cursor: session.cursor, image: { kind: "artifact", artifactId },
@@ -170,7 +170,7 @@ class PrivateBrowserdFixture {
     if (request.kind === "observe.domFallback") {
       this.success(socket, request, {
         kind: "domObservation", observationId: domObservationId, address: request.address,
-        documentGeneration: 1, observedAt: "2026-08-29T20:00:01.000Z", truncated: false,
+        documentGeneration: 1, observedAt: "2026-08-29T20:00:01.000Z", validUntil: "2099-08-29T20:01:01.000Z", truncated: false,
         nodes: [{ handle: domHandle, role: "button", name: "Continue", state: { enabled: true }, bounds: { x: 10, y: 20, width: 90, height: 30 }, locatorDescription: "Continue button" }],
       });
       return;
@@ -304,7 +304,7 @@ describe("actual AgentCursor WebX Unix route", () => {
     const screenshot = await actorA.observeBrowser(sessionA.browserSessionId, tabA, "screenshot", 1, { idempotencyKey: "route-observe-a" });
     expect(screenshot).toMatchObject({ kind: "screenshot", observationId, imagePixelWidth: 1600, cssViewportWidth: 800, devicePixelRatio: 2 });
     expect(JSON.stringify(screenshot)).not.toContain(imageBase64);
-    const frame = await actorA.getBrowserVisualFrame(sessionA.browserSessionId, tabA, { idempotencyKey: "route-frame-a" });
+    const frame = await actorA.getBrowserVisualFrame(sessionA.browserSessionId, tabA, observationId);
     expect(frame.payloadBase64).toBe(imageBase64);
     expect(Buffer.from(frame.payloadBase64, "base64")).toEqual(imageBytes);
 

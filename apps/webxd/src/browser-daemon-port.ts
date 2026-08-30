@@ -186,18 +186,25 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     const raw = record(await (await this.connection(actor)).call("browser.observe", {
       browserSessionId: sessionId, tabId: binding.session.tabId, view: view === "dom" ? "interactive" : "visual", maxChars, operationId,
     }, signal));
-    if (view === "dom") return { kind: "dom", operationId: text(raw.operationId, "operationId"), domObservationId: operationId, browserSessionId: sessionId, tabId: binding.session.tabId, documentGeneration: 1, observedAt: new Date().toISOString(), truncated: boolean(raw.truncated, "truncated"), nodes: [] };
-    const frame = await this.captureFrame(actor, sessionId, operationId, signal);
+    if (view === "dom") { const observedAtMs = Date.now(); return { kind: "dom", operationId: text(raw.operationId, "operationId"), domObservationId: operationId, browserSessionId: sessionId, tabId: binding.session.tabId, documentGeneration: 1, observedAt: new Date(observedAtMs).toISOString(), validUntil: new Date(observedAtMs + 60_000).toISOString(), truncated: boolean(raw.truncated, "truncated"), nodes: [] }; }
+    const frame = await this.captureLegacyFrame(actor, sessionId, operationId, signal);
     const now = Date.now();
     return { kind: "screenshot", operationId: text(raw.operationId, "operationId"), observationId: operationId, browserSessionId: sessionId, tabId: binding.session.tabId, url: text(raw.url, "url"), title: text(raw.title, "title"), capturedAt: new Date(now).toISOString(), documentGeneration: 1, viewportGeneration: frame.viewportGeneration, frameSequence: frame.frameSequence, cssViewportWidth: frame.imagePixelWidth, cssViewportHeight: frame.imagePixelHeight, imagePixelWidth: frame.imagePixelWidth, imagePixelHeight: frame.imagePixelHeight, devicePixelRatio: 1, captureScale: 1, scroll: { x: 0, y: 0 }, digest: frame.digest, mediaType: frame.mediaType, cursor: { x: 0, y: 0, coordinateSpace: "cssViewport", pathSequence: 0, sampleSequence: 0, visible: true }, validUntil: new Date(now + 30_000).toISOString(), artifactId: `legacy-frame:${operationId}` };
   }
 
-  async captureFrame(actor: AuthorityActor, sessionId: string, operationId: string, signal?: AbortSignal): Promise<BrowserVisualFrame> {
+  async captureFrame(actor: AuthorityActor, sessionId: string, tabId: string, observationId: string): Promise<BrowserVisualFrame> {
+    return this.withSessionLane(sessionId, async () => {
+      const binding = this.owned(actor, sessionId);
+      const retained = this.#pendingFrames.get(sessionId);
+      if (retained === undefined || retained.principalId !== actor.principalId || retained.agentId !== actor.agentId || retained.tabId !== tabId || retained.tabId !== binding.session.tabId || retained.observationId !== observationId || retained.workspace.expiresAtMs <= Date.now()) throw new BrowserPortError("OBSERVATION_STALE", "screenshot observation is stale", 409);
+      return legacyVisualFrame(retained);
+    });
+  }
+
+  private async captureLegacyFrame(actor: AuthorityActor, sessionId: string, operationId: string, signal?: AbortSignal): Promise<BrowserVisualFrame> {
     return this.withSessionLane(sessionId, async () => {
       const binding = this.owned(actor, sessionId);
       if (binding.session.pathId !== "agent-browser/chrome") throw new BrowserPortError("unsupported", `visual frames are not supported by ${binding.session.pathId}`, 400);
-      const retained = this.#pendingFrames.get(sessionId);
-      if (retained !== undefined && retained.principalId === actor.principalId && retained.agentId === actor.agentId && retained.tabId === binding.session.tabId && retained.workspace.expiresAtMs > Date.now()) return legacyVisualFrame(retained);
       await this.invalidatePendingFrame(sessionId);
       const workspace = await this.openWorkspace(actor, binding, signal);
       try {

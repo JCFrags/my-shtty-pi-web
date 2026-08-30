@@ -130,8 +130,8 @@ export class WebxClient {
     return this.call("POST", `/v1/browser/sessions/${encodeURIComponent(sessionId)}/observe`, { tabId, mode, ...(mode === "dom" ? { maxNodes } : {}) }, requireIdempotency(options));
   }
 
-  getBrowserVisualFrame(sessionId: string, tabId: string, options: RequestOptions): Promise<BrowserVisualFrame> {
-    return this.call("POST", `/v1/browser/sessions/${encodeURIComponent(sessionId)}/frame`, { tabId }, requireIdempotency(options));
+  getBrowserVisualFrame(sessionId: string, tabId: string, observationId: string, options: RequestOptions = {}): Promise<BrowserVisualFrame> {
+    return this.call("GET", `/v1/browser/sessions/${encodeURIComponent(sessionId)}/tabs/${encodeURIComponent(tabId)}/observations/${encodeURIComponent(observationId)}/image`, undefined, options);
   }
 
   actBrowser(sessionId: string, tabId: string, action: BrowserAction, options: RequestOptions): Promise<BrowserOperationResult> {

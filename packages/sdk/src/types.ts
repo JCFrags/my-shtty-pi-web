@@ -407,6 +407,7 @@ export interface BrowserDomObservation {
   readonly tabId: string;
   readonly documentGeneration: number;
   readonly observedAt: string;
+  readonly validUntil: string;
   readonly truncated: boolean;
   readonly nodes: readonly BrowserDomNode[];
 }

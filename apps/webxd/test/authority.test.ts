@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebxAuthority } from "../src/authority.js";
 import { NormalizedContentStore } from "../src/content-store.js";
 import { PUBLIC_SOURCES } from "../src/fixtures.js";
-import type { AuthorityActor, BrowserDaemonPort } from "../src/ports.js";
+import { BrowserPortError, type AuthorityActor, type BrowserDaemonPort } from "../src/ports.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -359,7 +359,7 @@ describe("WebxAuthority", () => {
     const port = browser();
     const instance = authority(port);
     await call(instance, actor(), "POST", "/v1/browser/sessions", { pathId: "agent-browser/chrome" }, "browser-create-frame");
-    const frame = await call(instance, actor(), "POST", "/v1/browser/sessions/session-1/frame", { tabId: "tab-1" }, "browser-frame-001");
+    const frame = await call(instance, actor(), "GET", "/v1/browser/sessions/session-1/tabs/tab-1/observations/observation-1/image");
     expect(frame).toMatchObject({ status: 200, body: { mediaType: "image/png", observationId: "observation-1" } });
     expect(port.captureFrame).toHaveBeenCalledTimes(1);
   });
@@ -837,6 +837,36 @@ describe("WebxAuthority", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect((await call(instance, actor(), "POST", "/v1/read", { url: "https://shared-fail.test" }, "failure-three")).status).toBe(500);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retain image bytes or ephemeral observation responses in general idempotency", async () => {
+    const port = browser();
+    const image = Buffer.from("phase2b-image-bytes").toString("base64");
+    port.captureFrame = vi.fn(async () => ({ browserSessionId: "session-1", tabId: "tab-1", observationId: "observation-1", mediaType: "image/png" as const, imagePixelWidth: 1, imagePixelHeight: 1, payloadBase64: image, digest: "a".repeat(64), frameSequence: 1, viewportGeneration: 1 }));
+    let observationCalls = 0;
+    port.observe = vi.fn(async () => {
+      if (++observationCalls > 1) throw new BrowserPortError("OBSERVATION_STALE", "expired", 409);
+      return { kind: "screenshot" as const, operationId: "operation-observe", observationId: "observation-1", browserSessionId: "session-1", tabId: "tab-1", url: "https://fixture.invalid/", title: "Fixture", capturedAt: "2026-08-12T00:00:00Z", validUntil: "2026-08-12T00:01:00Z", documentGeneration: 1, viewportGeneration: 1, frameSequence: 1, cssViewportWidth: 1, cssViewportHeight: 1, imagePixelWidth: 1, imagePixelHeight: 1, devicePixelRatio: 1, captureScale: 1, scroll: { x: 0, y: 0 }, digest: "a".repeat(64), mediaType: "image/png" as const, cursor: { x: 0, y: 0, coordinateSpace: "cssViewport" as const, pathSequence: 0, sampleSequence: 0, visible: true }, artifactId: "artifact-1" };
+    });
+    const instance = authority(port);
+    await call(instance, actor(), "POST", "/v1/browser/sessions", { pathId: "agent-browser/chrome" }, "phase2b-create");
+    await call(instance, actor(), "POST", "/v1/browser/sessions/session-1/frame", { tabId: "tab-1" }, "phase2b-frame", 6 * 1024 * 1024);
+    const internal = instance as unknown as { idempotencyStats: { imageBytesRetained: number; byPolicy: Record<string, { entries: number; bytes: number }> } };
+    expect(internal.idempotencyStats.imageBytesRetained).toBe(0);
+    const first = await call(instance, actor(), "POST", "/v1/browser/sessions/session-1/observe", { tabId: "tab-1" }, "phase2b-observe");
+    expect(first.status).toBe(200);
+    const retry = await call(instance, actor(), "POST", "/v1/browser/sessions/session-1/observe", { tabId: "tab-1" }, "phase2b-observe");
+    expect(retry).toMatchObject({ status: 409, body: { code: "OBSERVATION_STALE" } });
+    expect(observationCalls).toBe(2);
+  });
+
+  it("routes exact observation image reads as uncached GET requests", async () => {
+    const port = browser();
+    const instance = authority(port);
+    await call(instance, actor(), "POST", "/v1/browser/sessions", { pathId: "agent-browser/chrome" }, "phase2b-exact-create");
+    const response = await call(instance, actor(), "GET", "/v1/browser/sessions/session-1/tabs/tab-1/observations/observation-1/image");
+    expect(response.status).toBe(200);
+    expect(port.captureFrame).toHaveBeenCalledWith(actor(), "session-1", "tab-1", "observation-1", undefined);
   });
 
   it("bounds idempotency records by entries and bytes", async () => {

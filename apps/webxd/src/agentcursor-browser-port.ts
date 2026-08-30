@@ -20,11 +20,27 @@ interface SessionBinding {
   readonly agentId: string;
   readonly runtimeInstanceId: string;
   descriptor: SessionDescriptor;
-  latestScreenshot?: { readonly observation: ScreenshotObservation; readonly bytes: Buffer };
 }
+interface ObservationBinding {
+  readonly principalId: string;
+  readonly agentId: string;
+  readonly runtimeInstanceId: string;
+  readonly browserSessionId: string;
+  readonly tabId: string;
+  readonly observation: ScreenshotObservation & { image: { kind: "artifact"; artifactId: string } };
+  readonly expiresAtMs: number;
+  readonly metadataBytes: number;
+}
+const MAX_OBSERVATION_METADATA = 1_024;
+const MAX_OBSERVATION_METADATA_BYTES = 1024 * 1024;
+const MAX_OBSERVATIONS_PER_ACTOR = 256;
+const MAX_OBSERVATIONS_PER_SESSION = 128;
+const MAX_OBSERVATIONS_PER_TAB = 64;
 
 export class AgentCursorBrowserPort implements BrowserDaemonPort {
   readonly #sessions = new Map<string, SessionBinding>();
+  readonly #observations = new Map<string, ObservationBinding>();
+  #observationMetadataBytes = 0;
 
   constructor(
     private readonly client: BrowserdClientPool,
@@ -59,7 +75,7 @@ export class AgentCursorBrowserPort implements BrowserDaemonPort {
       const prior = this.#sessions.get(descriptor.browserSessionId);
       if (prior !== undefined && sameOwner(prior, actor) && prior.runtimeInstanceId === runtime) prior.descriptor = descriptor;
     }
-    for (const [id, binding] of this.#sessions) if (sameOwner(binding, actor) && binding.runtimeInstanceId === runtime && !currentIds.has(id)) this.#sessions.delete(id);
+    for (const [id, binding] of this.#sessions) if (sameOwner(binding, actor) && binding.runtimeInstanceId === runtime && !currentIds.has(id)) { this.#sessions.delete(id); this.clearSessionObservations(id); }
     return sessions.map((descriptor) => publicSession(descriptor));
   }
 
@@ -77,22 +93,25 @@ export class AgentCursorBrowserPort implements BrowserDaemonPort {
     const tab = selectedTab(binding.descriptor, tabId);
     if (view === "dom") {
       const raw = domObservation(await this.request(actor, operationIdValue, { kind: "observe.domFallback", address: tab.address, maxNodes: Math.min(200, Math.max(1, maxChars)) }, signal));
-      return { kind: "dom", operationId: operationIdValue, domObservationId: raw.observationId, browserSessionId: raw.address.browserSessionId, tabId: raw.address.tabId, documentGeneration: raw.documentGeneration, observedAt: raw.observedAt, truncated: raw.truncated, nodes: raw.nodes.map((node) => ({ handle: node.handle, role: node.role, name: node.name, ...(node.value === undefined ? {} : { value: node.value }), state: node.state, ...(node.bounds === undefined ? {} : { bounds: node.bounds }) })) };
+      return { kind: "dom", operationId: operationIdValue, domObservationId: raw.observationId, browserSessionId: raw.address.browserSessionId, tabId: raw.address.tabId, documentGeneration: raw.documentGeneration, observedAt: raw.observedAt, validUntil: raw.validUntil, truncated: raw.truncated, nodes: raw.nodes.map((node) => ({ handle: node.handle, role: node.role, name: node.name, ...(node.value === undefined ? {} : { value: node.value }), state: node.state, ...(node.bounds === undefined ? {} : { bounds: node.bounds }) })) };
     }
     const raw = screenshotObservation(await this.request(actor, operationIdValue, { kind: "observe.screenshot", address: tab.address, delivery: "artifact" }, signal));
     if (raw.image.kind !== "artifact") throw new BrowserPortError("backend-failure", "browser service did not return an artifact observation", 502);
-    const bytes = await this.readArtifact(actor, raw.image.artifactId, raw, signal);
-    binding.latestScreenshot = { observation: raw, bytes };
+    this.rememberObservation(actor, binding, raw as ScreenshotObservation & { image: { kind: "artifact"; artifactId: string } });
     binding.descriptor = replaceTab(binding.descriptor, raw.address.tabId, { documentGeneration: raw.documentGeneration, viewportGeneration: raw.viewportGeneration, frameSequence: raw.frameSequence, url: raw.url, title: raw.title });
     return { kind: "screenshot", operationId: operationIdValue, observationId: raw.observationId, browserSessionId: raw.address.browserSessionId, tabId: raw.address.tabId, url: raw.url, title: raw.title, capturedAt: raw.capturedAt, documentGeneration: raw.documentGeneration, viewportGeneration: raw.viewportGeneration, frameSequence: raw.frameSequence, cssViewportWidth: raw.viewport.width, cssViewportHeight: raw.viewport.height, imagePixelWidth: raw.imagePixelWidth, imagePixelHeight: raw.imagePixelHeight, devicePixelRatio: raw.viewport.devicePixelRatio, captureScale: raw.captureScale, scroll: raw.scroll, digest: raw.sha256, mediaType: raw.mediaType, cursor: publicCursor(raw.cursor), validUntil: raw.validUntil, artifactId: raw.image.artifactId };
   }
 
-  async captureFrame(actor: AuthorityActor, sessionId: string, _operationId: string, signal?: AbortSignal, tabId?: string): Promise<BrowserVisualFrame> {
-    const binding = await this.owned(actor, sessionId, signal);
-    const latest = binding.latestScreenshot;
-    if (latest === undefined || tabId !== undefined && latest.observation.address.tabId !== tabId) throw new BrowserPortError("observation-stale", "a screenshot observation is required before image retrieval", 409);
-    const observation = latest.observation;
-    return { browserSessionId: observation.address.browserSessionId, tabId: observation.address.tabId, observationId: observation.observationId, mediaType: observation.mediaType, imagePixelWidth: observation.imagePixelWidth, imagePixelHeight: observation.imagePixelHeight, payloadBase64: latest.bytes.toString("base64"), digest: observation.sha256, frameSequence: observation.frameSequence, viewportGeneration: observation.viewportGeneration };
+  async captureFrame(actor: AuthorityActor, sessionId: string, tabId: string, observationId: string, signal?: AbortSignal): Promise<BrowserVisualFrame> {
+    const session = await this.owned(actor, sessionId, signal);
+    this.pruneObservations();
+    const binding = this.#observations.get(observationId);
+    if (binding === undefined || !sameOwner(binding, actor) || binding.browserSessionId !== sessionId || binding.tabId !== tabId || binding.runtimeInstanceId !== session.runtimeInstanceId) throw new BrowserPortError("OBSERVATION_STALE", "screenshot observation is stale", 409);
+    const observation = binding.observation;
+    const bytes = await this.readArtifact(actor, observation.image.artifactId, observation, signal);
+    const dimensions = imageDimensions(bytes, observation.mediaType);
+    if (dimensions.width !== observation.imagePixelWidth || dimensions.height !== observation.imagePixelHeight) throw new BrowserPortError("backend-failure", "browser artifact dimensions changed during read", 502);
+    return { browserSessionId: observation.address.browserSessionId, tabId: observation.address.tabId, observationId: observation.observationId, mediaType: observation.mediaType, imagePixelWidth: observation.imagePixelWidth, imagePixelHeight: observation.imagePixelHeight, payloadBase64: bytes.toString("base64"), digest: observation.sha256, frameSequence: observation.frameSequence, viewportGeneration: observation.viewportGeneration };
   }
 
   async act(actor: AuthorityActor, sessionId: string, action: BrowserAction, operationIdValue: string, signal?: AbortSignal, tabId?: string): Promise<BrowserOperationResult> {
@@ -110,7 +129,6 @@ export class AgentCursorBrowserPort implements BrowserDaemonPort {
     } else if (isCoordinate(action)) {
       await this.request(actor, operationIdValue, { kind: "action.coordinate", address: tab.address, observationId: action.observationId, coordinateSpace: action.coordinateSpace ?? "imagePixels", action: internalCoordinate(action) }, signal);
     } else throw new BrowserPortError("unsupported", "browser action is not supported by agentcursor/chrome", 400);
-    binding.latestScreenshot = undefined;
     await this.refresh(actor, binding, signal);
     return { operationId: operationIdValue, state: "succeeded" };
   }
@@ -142,6 +160,7 @@ export class AgentCursorBrowserPort implements BrowserDaemonPort {
     const tab = binding.descriptor.tabs.find((item) => item.address.tabId === tabId);
     if (tab === undefined) throw notFound();
     await this.request(actor, operationId("tabClose"), { kind: "tab.close", address: tab.address }, signal);
+    this.clearTabObservations(sessionId, tabId);
     await this.refresh(actor, binding, signal);
   }
 
@@ -149,9 +168,10 @@ export class AgentCursorBrowserPort implements BrowserDaemonPort {
     const binding = await this.owned(actor, sessionId, signal);
     await this.request(actor, operationId("sessionClose"), { kind: "session.close", browserSessionId: sessionId, controlEpoch: binding.descriptor.controlEpoch }, signal);
     this.#sessions.delete(sessionId);
+    this.clearSessionObservations(sessionId);
   }
 
-  async shutdown(): Promise<void> { this.#sessions.clear(); await this.client.close(); }
+  async shutdown(): Promise<void> { this.#sessions.clear(); this.#observations.clear(); this.#observationMetadataBytes = 0; await this.client.close(); }
   async debug(): Promise<BrowserDebugResult> { throw new BrowserPortError("unsupported", "browser diagnostics are not supported by agentcursor/chrome", 400); }
   async workspace(): Promise<BrowserWorkspaceResult> { throw new BrowserPortError("unsupported", "browser workspace is not supported by agentcursor/chrome", 400); }
   async setControl(): Promise<BrowserControlResult> { throw new BrowserPortError("unsupported", "human takeover is not supported by agentcursor/chrome", 400); }
@@ -177,6 +197,31 @@ export class AgentCursorBrowserPort implements BrowserDaemonPort {
     if (authorized.egressBindingId === undefined) throw new BrowserPortError("WEBX_POLICY_EGRESS_REQUIRED", "browser navigation requires a bound egress route", 503, true);
     return { normalizedUrl: authorized.normalizedUrl, token: signNavigationAuthorization({ runtimeInstanceId: descriptor.runtimeInstanceId, principalId: actor.principalId, agentSessionId: actor.agentId, operationId: operationIdValue, normalizedUrl: authorized.normalizedUrl, egressBindingId: authorized.egressBindingId, expiresAt: new Date(Date.now() + 15_000).toISOString() }, descriptor.brokerSigningSecret) };
   }
+
+  private rememberObservation(actor: AuthorityActor, session: SessionBinding, observation: ScreenshotObservation & { image: { kind: "artifact"; artifactId: string } }): void {
+    this.pruneObservations();
+    const expiresAtMs = Date.parse(observation.validUntil);
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) throw new BrowserPortError("OBSERVATION_STALE", "screenshot observation is stale", 409);
+    const metadataBytes = Buffer.byteLength(JSON.stringify(observation), "utf8");
+    if (metadataBytes > MAX_OBSERVATION_METADATA_BYTES) throw new BrowserPortError("LIMIT_EXCEEDED", "screenshot observation metadata exceeds its bound", 503, true);
+    const owner = (item: ObservationBinding): boolean => sameOwner(item, actor);
+    const inSession = (item: ObservationBinding): boolean => owner(item) && item.browserSessionId === observation.address.browserSessionId;
+    const inTab = (item: ObservationBinding): boolean => inSession(item) && item.tabId === observation.address.tabId;
+    while (this.#observations.size >= MAX_OBSERVATION_METADATA || this.#observationMetadataBytes + metadataBytes > MAX_OBSERVATION_METADATA_BYTES || [...this.#observations.values()].filter(owner).length >= MAX_OBSERVATIONS_PER_ACTOR || [...this.#observations.values()].filter(inSession).length >= MAX_OBSERVATIONS_PER_SESSION || [...this.#observations.values()].filter(inTab).length >= MAX_OBSERVATIONS_PER_TAB) {
+      const removable = [...this.#observations].find(([, item]) => owner(item));
+      if (removable === undefined) throw new BrowserPortError("LIMIT_EXCEEDED", "screenshot observation metadata capacity is full", 503, true);
+      this.removeObservation(removable[0], removable[1]);
+    }
+    const prior = this.#observations.get(observation.observationId);
+    if (prior !== undefined) this.removeObservation(observation.observationId, prior);
+    const value: ObservationBinding = { principalId: actor.principalId, agentId: actor.agentId, runtimeInstanceId: session.runtimeInstanceId, browserSessionId: observation.address.browserSessionId, tabId: observation.address.tabId, observation, expiresAtMs, metadataBytes };
+    this.#observations.set(observation.observationId, value); this.#observationMetadataBytes += metadataBytes;
+  }
+
+  private pruneObservations(): void { for (const [id, item] of this.#observations) if (item.expiresAtMs <= Date.now()) this.removeObservation(id, item); }
+  private removeObservation(id: string, expected: ObservationBinding): void { if (this.#observations.get(id) !== expected) return; this.#observations.delete(id); this.#observationMetadataBytes -= expected.metadataBytes; }
+  private clearSessionObservations(sessionId: string): void { for (const [id, item] of this.#observations) if (item.browserSessionId === sessionId) this.removeObservation(id, item); }
+  private clearTabObservations(sessionId: string, tabId: string): void { for (const [id, item] of this.#observations) if (item.browserSessionId === sessionId && item.tabId === tabId) this.removeObservation(id, item); }
 
   private async readArtifact(actor: AuthorityActor, artifactId: string, observation: ScreenshotObservation, signal?: AbortSignal): Promise<Buffer> {
     const chunks: Buffer[] = []; let offset = 0;
@@ -228,10 +273,30 @@ function internalDomAction(action: Extract<BrowserAction, { kind: "dom-click" | 
   return { kind: "type", text: value.text as string, replace: value.kind === "dom-fill" };
 }
 function canonicalBase64(value: string): Buffer { if (value.length % 4 !== 0) throw invalid(); const bytes = Buffer.from(value, "base64"); if (bytes.toString("base64") !== value) throw invalid(); return bytes; }
+function imageDimensions(bytes: Buffer, mediaType: "image/png" | "image/jpeg"): { width: number; height: number } {
+  if (mediaType === "image/png") {
+    if (bytes.byteLength < 24 || bytes.subarray(0, 8).compare(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) !== 0 || bytes.toString("ascii", 12, 16) !== "IHDR") throw invalid();
+    return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+  }
+  if (bytes.byteLength < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) throw invalid();
+  let offset = 2;
+  while (offset + 8 < bytes.byteLength) {
+    if (bytes[offset] !== 0xff) { offset++; continue; }
+    while (bytes[offset] === 0xff) offset++;
+    const marker = bytes[offset++];
+    if (marker === undefined || marker === 0xd8 || marker === 0xd9 || marker === 0x01 || marker >= 0xd0 && marker <= 0xd7) continue;
+    if (offset + 2 > bytes.byteLength) break;
+    const length = bytes.readUInt16BE(offset);
+    if (length < 2 || offset + length > bytes.byteLength) break;
+    if ((marker >= 0xc0 && marker <= 0xc3 || marker >= 0xc5 && marker <= 0xc7 || marker >= 0xc9 && marker <= 0xcb || marker >= 0xcd && marker <= 0xcf) && length >= 7) return { height: bytes.readUInt16BE(offset + 3), width: bytes.readUInt16BE(offset + 5) };
+    offset += length;
+  }
+  throw invalid();
+}
 function operationState(value: unknown): BrowserOperationResult["state"] { if (value === "queued" || value === "running") return value; if (value === "cancelled") return "cancelled"; if (value === "committed") return "succeeded"; return "failed"; }
 function operationId(prefix: string): string { return `${prefix}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`; }
 function healthActor(): AuthorityActor { return { principalId: "webxd.health", agentId: "webxd.health", scopes: new Set(["browser.read"]) }; }
-function sameOwner(binding: SessionBinding, actor: AuthorityActor): boolean { return binding.principalId === actor.principalId && binding.agentId === actor.agentId; }
+function sameOwner(binding: Pick<SessionBinding, "principalId" | "agentId">, actor: AuthorityActor): boolean { return binding.principalId === actor.principalId && binding.agentId === actor.agentId; }
 function notFound(): BrowserPortError { return new BrowserPortError("not-found", "browser session or tab was not found", 404); }
 function invalid(): BrowserPortError { return new BrowserPortError("backend-failure", "browser service returned an invalid result", 502); }
 function mapClientError(error: unknown): BrowserPortError { if (error instanceof BrowserPortError) return error; if (error instanceof BrowserdClientError) { const status = error.code === "INVALID_REQUEST" ? 400 : error.code.includes("NOT_FOUND") || error.code === "ARTIFACT_NOT_FOUND" ? 404 : error.code.includes("STALE") || error.code === "OPERATION_CONFLICT" || error.code === "DOCUMENT_CHANGED" || error.code === "VIEWPORT_CHANGED" || error.code === "CONTROL_EPOCH_STALE" || error.code === "BROWSER_INSTANCE_REPLACED" ? 409 : error.code === "OPERATION_CANCELLED" ? 499 : error.code === "CAPABILITY_UNAVAILABLE" || error.code === "LIMIT_EXCEEDED" ? 503 : 502; return new BrowserPortError(error.code, error.message, status, error.retryable); } if (error instanceof DOMException && error.name === "AbortError") return new BrowserPortError("cancelled", "browser operation was cancelled", 499); return new BrowserPortError("backend-failure", "browser service request failed", 502, true); }

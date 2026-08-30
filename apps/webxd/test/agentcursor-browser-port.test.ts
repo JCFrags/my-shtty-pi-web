@@ -9,7 +9,7 @@ import type { AuthorityActor } from "../src/ports.js";
 
 const owner: AuthorityActor = { principalId: "principal-a", agentId: "agent-a", scopes: new Set(["browser.read", "browser.write"]) };
 const other: AuthorityActor = { principalId: "principal-b", agentId: "agent-b", scopes: new Set(["browser.read", "browser.write"]) };
-const bytes = Buffer.from("verified-image-bytes", "utf8");
+const bytes = (() => { const value = Buffer.alloc(24); Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(value); value.write("IHDR", 12, "ascii"); value.writeUInt32BE(1600, 16); value.writeUInt32BE(1200, 20); return value; })();
 const digest = createHash("sha256").update(bytes).digest("hex");
 const descriptor: BrowserdDescriptor = {
   protocolVersion: "browser.v1",
@@ -56,6 +56,8 @@ class FakeClient {
   currentTabs: TabDescriptor[] = [tab()];
   available = true;
   artifactBase64 = bytes.toString("base64");
+  dynamicObservations = false;
+  readonly dynamicArtifacts = new Map<string, Buffer>();
 
   descriptor = vi.fn(async () => this.currentDescriptor);
 
@@ -88,9 +90,14 @@ class FakeClient {
       this.currentTabs = this.currentTabs.filter((item) => item.address.tabId !== fields.address.tabId);
       return { kind: "ack", operationId };
     }
-    if (fields.kind === "observe.screenshot") return {
+    if (fields.kind === "observe.screenshot") {
+      const dynamicBytes = this.dynamicObservations ? pngBytes(this.calls.filter((call) => call.fields.kind === "observe.screenshot").length) : bytes;
+      const dynamicId = this.dynamicObservations ? `observation_${operationId.replace(/[^A-Za-z0-9]/gu, "_")}` : "observation_identifier_a";
+      const dynamicArtifactId = this.dynamicObservations ? `artifact_${dynamicId}` : "artifact_identifier_a";
+      if (this.dynamicObservations) this.dynamicArtifacts.set(dynamicArtifactId, dynamicBytes);
+      return {
       kind: "screenshotObservation",
-      observationId: "observation_identifier_a",
+      observationId: dynamicId,
       address: fields.address,
       documentGeneration: 2,
       viewportGeneration: 3,
@@ -98,30 +105,31 @@ class FakeClient {
       title: "Fixture",
       capturedAt: "2026-08-29T00:00:01.000Z",
       capturedMonotonicMs: 100,
-      validUntil: "2026-08-29T00:00:31.000Z",
+      validUntil: "2099-08-29T00:00:31.000Z",
       viewport: { width: 800, height: 600, devicePixelRatio: 2 },
       scroll: { x: 0, y: 20 },
       frameSequence: 5,
       mediaType: "image/png",
-      byteLength: bytes.byteLength,
+      byteLength: dynamicBytes.byteLength,
       imagePixelWidth: 1600,
       imagePixelHeight: 1200,
       captureScale: 1,
-      sha256: digest,
+      sha256: createHash("sha256").update(dynamicBytes).digest("hex"),
       cursor: session().cursor,
-      image: { kind: "artifact", artifactId: "artifact_identifier_a" },
+      image: { kind: "artifact", artifactId: dynamicArtifactId },
     };
-    if (fields.kind === "artifact.read") return {
+    }
+    if (fields.kind === "artifact.read") { const artifactBytes = this.dynamicArtifacts.get(fields.artifactId) ?? bytes; return {
       kind: "artifact",
       artifactId: fields.artifactId,
       mediaType: "image/png",
-      byteLength: bytes.byteLength,
-      sha256: digest,
+      byteLength: artifactBytes.byteLength,
+      sha256: createHash("sha256").update(artifactBytes).digest("hex"),
       offset: fields.offset ?? 0,
-      totalBytes: bytes.byteLength,
+      totalBytes: artifactBytes.byteLength,
       eof: true,
-      base64: this.artifactBase64,
-    };
+      base64: this.dynamicArtifacts.has(fields.artifactId) ? artifactBytes.toString("base64") : this.artifactBase64,
+    }; }
     if (fields.kind === "observe.domFallback") return {
       kind: "domObservation",
       observationId: "dom_observation_identifier_a",
@@ -135,6 +143,8 @@ class FakeClient {
     return { kind: "ack", operationId };
   });
 }
+
+function pngBytes(marker: number): Buffer { const value = Buffer.alloc(25); Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(value); value.write("IHDR", 12, "ascii"); value.writeUInt32BE(1600, 16); value.writeUInt32BE(1200, 20); value[24] = marker; return value; }
 
 function destination(egressBindingId: string | null = "proxy-binding-a", ready = true): BrowserDestinationAuthority {
   return {
@@ -238,9 +248,31 @@ describe("AgentCursorBrowserPort", () => {
       digest,
       mediaType: "image/png",
     }));
-    const frame = await value.port.captureFrame(owner, "session-a", "operation-frame", undefined, "tab-a");
+    const frame = await value.port.captureFrame(owner, "session-a", "tab-a", "observation_identifier_a");
     expect(frame).toEqual(expect.objectContaining({ observationId: "observation_identifier_a", payloadBase64: bytes.toString("base64"), digest }));
     expect(JSON.stringify(observation)).not.toContain(bytes.toString("base64"));
+  });
+
+  it("retrieves concurrent exact observations independently across one session and two tabs", async () => {
+    const client = new FakeClient();
+    client.currentTabs = [tab(), tab("tab-b", "target_identifier_b")];
+    client.dynamicObservations = true;
+    const value = port(client);
+    await opened(value);
+    const first = await value.port.observe(owner, "session-a", "screenshot", 200, "observe-first", undefined, "tab-a");
+    const second = await value.port.observe(owner, "session-a", "screenshot", 200, "observe-second", undefined, "tab-a");
+    const otherTab = await value.port.observe(owner, "session-a", "screenshot", 200, "observe-other-tab", undefined, "tab-b");
+    if (first.kind !== "screenshot" || second.kind !== "screenshot" || otherTab.kind !== "screenshot") throw new Error("expected screenshots");
+    const frames = await Promise.all([
+      value.port.captureFrame(owner, "session-a", "tab-a", first.observationId),
+      value.port.captureFrame(owner, "session-a", "tab-a", second.observationId),
+      value.port.captureFrame(owner, "session-a", "tab-b", otherTab.observationId),
+    ]);
+    expect(new Set(frames.map((frame) => frame.digest)).size).toBe(3);
+    expect(frames.map((frame) => frame.observationId)).toEqual([first.observationId, second.observationId, otherTab.observationId]);
+    await expect(value.port.captureFrame(other, "session-a", "tab-a", first.observationId)).rejects.toMatchObject({ status: 404 });
+    await expect(value.port.captureFrame(owner, "session-a", "tab-b", first.observationId)).rejects.toMatchObject({ status: 409 });
+    expect((value.port as unknown as { latestScreenshot?: unknown }).latestScreenshot).toBeUndefined();
   });
 
   it("rejects changed or non-canonical artifact bytes", async () => {
@@ -248,7 +280,8 @@ describe("AgentCursorBrowserPort", () => {
     client.artifactBase64 = Buffer.from("changed").toString("base64");
     const value = port(client);
     await opened(value);
-    await expect(value.port.observe(owner, "session-a", "screenshot", 200, "operation-observe", undefined, "tab-a")).rejects.toMatchObject({ status: 502 });
+    await value.port.observe(owner, "session-a", "screenshot", 200, "operation-observe", undefined, "tab-a");
+    await expect(value.port.captureFrame(owner, "session-a", "tab-a", "observation_identifier_a")).rejects.toMatchObject({ status: 502 });
   });
 
   it("forwards image-pixel and CSS coordinate identity with the exact observation", async () => {

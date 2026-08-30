@@ -71,11 +71,13 @@ interface StoredBinaryArtifact {
   readonly visibility: Visibility;
 }
 
+type IdempotencyPolicy = "durable-mutation" | "ephemeral-observation" | "image-read" | "none";
 interface CachedResult {
   readonly fingerprint: string;
   readonly response: TransportResponse;
   readonly expiresAt: number;
   readonly bytes: number;
+  readonly policy: "durable-mutation";
 }
 
 export interface WebxAuthorityOptions {
@@ -116,17 +118,23 @@ export class WebxAuthority {
     this.#idempotencyTtlMs = positiveOption(options.idempotencyTtlMs ?? IDEMPOTENCY_TTL_MS, "idempotencyTtlMs");
   }
 
+  get idempotencyStats(): { readonly byPolicy: Readonly<Record<"durable-mutation" | "ephemeral-observation" | "image-read", { readonly entries: number; readonly bytes: number }>>; readonly imageBytesRetained: 0 } {
+    this.pruneIdempotency();
+    return { byPolicy: { "durable-mutation": { entries: this.#idempotency.size, bytes: this.#idempotencyBytes }, "ephemeral-observation": { entries: 0, bytes: 0 }, "image-read": { entries: 0, bytes: 0 } }, imageBytesRetained: 0 };
+  }
+
   async handle(actor: AuthorityActor, request: TransportRequest): Promise<TransportResponse> {
     try {
       if (request.signal?.aborted) throw problem(499, "cancelled", "request was cancelled", false);
       const idempotencyKey = header(request, "idempotency-key");
       const mutation = request.method === "POST" || request.method === "DELETE";
+      const policy = idempotencyPolicy(request);
       if (mutation && idempotencyKey === undefined) {
         throw problem(400, "missing-idempotency-key", "mutation requires an idempotency key", false);
       }
       const cacheKey = idempotencyKey === undefined ? undefined : `${actor.principalId}\0${actor.agentId}\0${idempotencyKey}`;
       const fingerprint = stableStringify({ method: request.method, path: request.path, body: request.body });
-      if (cacheKey !== undefined) {
+      if (cacheKey !== undefined && policy === "durable-mutation") {
         const cached = this.#idempotency.get(cacheKey);
         if (cached !== undefined) {
           if (cached.expiresAt <= Date.now()) this.removeIdempotency(cacheKey, cached);
@@ -140,7 +148,7 @@ export class WebxAuthority {
       }
       const response = await this.route(actor, request);
       const bounded = enforceSerializedBound(response, request.maxResponseBytes);
-      if (cacheKey !== undefined && mutation && bounded.status >= 200 && bounded.status < 300) this.rememberIdempotency(cacheKey, fingerprint, bounded);
+      if (cacheKey !== undefined && policy === "durable-mutation" && bounded.status >= 200 && bounded.status < 300) this.rememberIdempotency(cacheKey, fingerprint, bounded);
       return bounded;
     } catch (error) {
       if (isAuthorityFailure(error)) return boundedFailure(error.status, error.body, request.maxResponseBytes);
@@ -768,11 +776,17 @@ export class WebxAuthority {
         if (typeof input.tabId !== "string") throw problem(400, "invalid-request", "explicit tabId is required", false);
         return ok(await this.options.browser.observe(actor, sessionId, input.mode ?? input.view ?? "screenshot", integer(input.maxNodes ?? input.maxChars ?? DEFAULT_CONTENT_CHARS, "observation bound", 1, MAX_CONTENT_CHARS), operationId(request), request.signal, input.tabId));
       }
+      if (request.method === "GET" && segments.length === 9 && segments[4] === "tabs" && segments[6] === "observations" && segments[8] === "image") {
+        requireScope(actor, "browser.read");
+        const tabId = segments[5]; const observationId = segments[7];
+        if (tabId === undefined || observationId === undefined) throw problem(400, "invalid-request", "exact tab and observation IDs are required", false);
+        return ok(await this.options.browser.captureFrame(actor, sessionId, pathId(tabId), pathId(observationId), request.signal));
+      }
       if (request.method === "POST" && segments[4] === "frame") {
         requireScope(actor, "browser.read");
-        const input = body<{ tabId?: string }>(request);
-        if (typeof input.tabId !== "string") throw problem(400, "invalid-request", "explicit tabId is required", false);
-        return ok(await this.options.browser.captureFrame(actor, sessionId, operationId(request), request.signal, input.tabId));
+        const input = body<{ tabId?: string; observationId?: string }>(request);
+        if (typeof input.tabId !== "string" || typeof input.observationId !== "string") throw problem(400, "invalid-request", "explicit tabId and observationId are required", false);
+        return ok(await this.options.browser.captureFrame(actor, sessionId, input.tabId, input.observationId, request.signal));
       }
       if (request.method === "POST" && segments[4] === "actions") {
         requireScope(actor, "browser.write");
@@ -805,17 +819,17 @@ export class WebxAuthority {
     if (bytes > this.#idempotencyMaxBytes) return;
     const prior = this.#idempotency.get(key);
     if (prior !== undefined) this.removeIdempotency(key, prior);
-    this.#idempotency.set(key, { fingerprint, response, expiresAt: Date.now() + this.#idempotencyTtlMs, bytes });
+    this.#idempotency.set(key, { fingerprint, response, expiresAt: Date.now() + this.#idempotencyTtlMs, bytes, policy: "durable-mutation" });
     this.#idempotencyBytes += bytes;
-    for (const [entryKey, entry] of this.#idempotency) {
-      if (entry.expiresAt <= Date.now()) this.removeIdempotency(entryKey, entry);
-    }
+    this.pruneIdempotency();
     while (this.#idempotency.size > this.#idempotencyMaxEntries || this.#idempotencyBytes > this.#idempotencyMaxBytes) {
       const oldest = this.#idempotency.entries().next().value as [string, CachedResult] | undefined;
       if (oldest === undefined) break;
       this.removeIdempotency(oldest[0], oldest[1]);
     }
   }
+
+  private pruneIdempotency(): void { for (const [key, entry] of this.#idempotency) if (entry.expiresAt <= Date.now()) this.removeIdempotency(key, entry); }
 
   private removeIdempotency(key: string, entry: CachedResult): void {
     if (!this.#idempotency.delete(key)) return;
@@ -1201,7 +1215,14 @@ function searxUnavailableEngines(value: unknown): string[] {
 }
 
 function header(request: TransportRequest, name: string): string | undefined { const entry = Object.entries(request.headers ?? {}).find(([key]) => key.toLocaleLowerCase() === name); return entry?.[1]; }
+function pathId(value: string): string { try { return decodeURIComponent(value); } catch { throw problem(400, "invalid-request", "path identity encoding is invalid", false); } }
 function operationId(request: TransportRequest): string { const value = header(request, "idempotency-key"); if (value === undefined) throw problem(400, "missing-idempotency-key", "idempotency key is required", false); return `operation:${createHash("sha256").update(value).digest("hex")}`; }
+function idempotencyPolicy(request: TransportRequest): IdempotencyPolicy {
+  const path = new URL(request.path, "http://webx.local").pathname;
+  if (/^\/v1\/browser\/sessions\/[^/]+\/tabs\/[^/]+\/observations\/[^/]+\/image$/u.test(path) || /^\/v1\/browser\/sessions\/[^/]+\/frame$/u.test(path)) return "image-read";
+  if (request.method === "POST" && /^\/v1\/browser\/sessions\/[^/]+\/observe$/u.test(path)) return "ephemeral-observation";
+  return request.method === "POST" || request.method === "DELETE" ? "durable-mutation" : "none";
+}
 function stableStringify(value: unknown): string { if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`; if (typeof value === "object" && value !== null) return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(",")}}`; return JSON.stringify(value) ?? "undefined"; }
 function enforceSerializedBound(response: TransportResponse, maxBytes: number): TransportResponse { if (new TextEncoder().encode(JSON.stringify(response.body ?? null)).byteLength > maxBytes) throw problem(413, "response-too-large", "response exceeds the requested transport bound", false); return response; }
 function jsonHeaders(): Readonly<Record<string, string>> { return { "content-type": "application/json" }; }
