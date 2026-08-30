@@ -83,7 +83,7 @@ export class WebxFacadeClient {
   }
 
   async decideApproval(): Promise<FacadeResult> { throw unavailable("approval.decide", "this runtime never returns approval placeholders"); }
-  async stop(options: { ownerId: string }): Promise<void> { if (this.#ownerId !== options.ownerId) throw new Error("WebX facade owner mismatch"); this.#browserPathId = undefined; this.#client = undefined; this.#ownerId = undefined; }
+  async stop(options: { ownerId: string }): Promise<void> { if (this.#ownerId !== options.ownerId) throw new Error("WebX facade owner mismatch"); const client = this.#client; this.#browserPathId = undefined; this.#client = undefined; this.#ownerId = undefined; await client?.close(); }
 
   private client(ownerId: string): WebxClient { if (this.#client === undefined || this.#ownerId !== ownerId) throw new Error("WebX facade client is not started for this owner"); return this.#client; }
 

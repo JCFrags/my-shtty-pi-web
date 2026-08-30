@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer, type Server, type Socket } from "node:net";
+import { createConnection, createServer, type Server, type Socket } from "node:net";
 import type { NdjsonConnectionFactory } from "../../../packages/sdk/src/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebxClient, WebxError, WebxFacadeClient, UnixSocketTransport, nodeNdjsonConnectionFactory } from "../../../packages/sdk/src/index.js";
@@ -109,6 +109,20 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   while (cleanup.length > 0) await cleanup.pop()?.();
 });
+
+async function rawConnect(path: string): Promise<Socket> { const socket = createConnection({ path }); await new Promise<void>((resolve, reject) => { const failed = (error: Error) => reject(error); socket.once("error", failed); socket.once("connect", () => { socket.off("error", failed); resolve(); }); }); return socket; }
+async function rawExchange(socket: Socket, parts: readonly Uint8Array[]): Promise<unknown> {
+  const response = new Promise<unknown>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    const received = (chunk: Buffer) => { chunks.push(chunk); const bytes = Buffer.concat(chunks); const newline = bytes.indexOf(0x0a); if (newline >= 0) { cleanupListeners(); try { resolve(JSON.parse(bytes.subarray(0, newline).toString("utf8")) as unknown); } catch (error) { reject(error); } } };
+    const failed = (error: Error) => { cleanupListeners(); reject(error); };
+    const closed = () => { cleanupListeners(); reject(new Error("socket closed before response")); };
+    const cleanupListeners = () => { socket.off("data", received); socket.off("error", failed); socket.off("close", closed); };
+    socket.on("data", received); socket.once("error", failed); socket.once("close", closed);
+  });
+  for (const part of parts) { socket.write(part); await new Promise<void>((resolve) => setImmediate(resolve)); }
+  return await response;
+}
 
 describe("actual WebX Unix runtime", () => {
   it("starts, authenticates persistent browser connections, reconnects, and cleans up", async () => {
@@ -262,6 +276,57 @@ describe("actual WebX Unix runtime", () => {
     controller.abort();
     await expect(pending).rejects.toThrow();
     await readerCancelled.promise;
+  });
+
+  it("reconstructs fragmented UTF-8 requests and binds identity to one bounded client connection", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "webxd-binding-limits-"));
+    const previousRuntimeDirectory = process.env.XDG_RUNTIME_DIR;
+    process.env.XDG_RUNTIME_DIR = directory;
+    cleanup.push(async () => { process.env.XDG_RUNTIME_DIR = previousRuntimeDirectory; });
+    const webxPath = join(directory, "webxd.sock");
+    const runtime = new WebxdRuntime({ socketPath: webxPath, browserSocketPath: join(directory, "unused-browserd.sock"), authenticateActor: sameUserPiActorAuthenticator, maxClientConnections: 2, maxLiveBindings: 1, bindTimeoutMs: 50, maxQueuedRequestsPerClient: 2 });
+    await runtime.start();
+    cleanup.push(() => runtime.stop());
+    const first = await rawConnect(webxPath);
+    const second = await rawConnect(webxPath);
+    const binding = await rawExchange(first, [Buffer.from(`${JSON.stringify({ bind: { ownerId: "fragment-owner" } })}\n`)]) as { bindingId: string; bindingSecret: string };
+    const marker = "😀";
+    for (let split = 1; split < Buffer.byteLength(marker); split += 1) {
+      const wire = Buffer.from(`${JSON.stringify({ binding, request: { method: "POST", path: "/v1/search", headers: { "idempotency-key": `fragment-${split}` }, body: { query: `雪${marker}` }, maxResponseBytes: 6 * 1024 * 1024 } })}\n`, "utf8");
+      const markerOffset = wire.indexOf(Buffer.from(marker));
+      const response = await rawExchange(first, [wire.subarray(0, markerOffset + split), wire.subarray(markerOffset + split)]) as { status: number; body: { query: string } };
+      expect(response.status).toBe(200);
+      expect(response.body.query).toBe(`雪${marker}`);
+    }
+    const crossClient = await rawExchange(second, [Buffer.from(`${JSON.stringify({ binding, request: { method: "GET", path: "/v1/version", maxResponseBytes: 1024 } })}\n`)]) as { status: number; body: { message: string } };
+    expect(crossClient).toMatchObject({ status: 400, body: { message: "runtime actor binding is invalid" } });
+    const replacementWhileLive = await rawExchange(second, [Buffer.from(`${JSON.stringify({ bind: { ownerId: "fragment-owner" } })}\n`)]) as { status: number };
+    expect(replacementWhileLive.status).toBe(400);
+    first.destroy();
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    const rebound = await rawExchange(second, [Buffer.from(`${JSON.stringify({ bind: { ownerId: "fragment-owner" } })}\n`)]) as { bindingId?: string };
+    expect(rebound.bindingId).toMatch(/^[a-f0-9]{32}$/u);
+    second.destroy();
+  });
+
+  it("closes unbound and request-flooding clients at configured bounds", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "webxd-client-bounds-"));
+    const previousRuntimeDirectory = process.env.XDG_RUNTIME_DIR;
+    process.env.XDG_RUNTIME_DIR = directory;
+    cleanup.push(async () => { process.env.XDG_RUNTIME_DIR = previousRuntimeDirectory; });
+    const webxPath = join(directory, "webxd.sock");
+    const runtime = new WebxdRuntime({ socketPath: webxPath, browserSocketPath: join(directory, "unused.sock"), authenticateActor: sameUserPiActorAuthenticator, bindTimeoutMs: 20, maxQueuedRequestsPerClient: 2 });
+    await runtime.start();
+    cleanup.push(() => runtime.stop());
+    const unbound = await rawConnect(webxPath);
+    const timedOut = await new Promise<Buffer>((resolve, reject) => { unbound.once("data", resolve); unbound.once("error", reject); });
+    expect(JSON.parse(timedOut.toString("utf8")) as unknown).toMatchObject({ status: 408 });
+    const flooding = await rawConnect(webxPath);
+    const binding = await rawExchange(flooding, [Buffer.from(`${JSON.stringify({ bind: { ownerId: "flood-owner" } })}\n`)]) as { bindingId: string; bindingSecret: string };
+    const request = JSON.stringify({ binding, request: { method: "GET", path: "/v1/version", maxResponseBytes: 1024 } });
+    const closed = new Promise<void>((resolve) => flooding.once("close", () => resolve()));
+    flooding.write(`${request}\n${request}\n${request}\n`);
+    await closed;
   });
 
   it("refuses actual Unix browser URL requests before Browserd dispatch", async () => {

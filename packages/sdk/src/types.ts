@@ -29,6 +29,7 @@ export interface TransportResponse {
 
 export interface WebxTransport {
   request(request: TransportRequest): Promise<TransportResponse>;
+  close?(): Promise<void>;
 }
 
 export interface VersionInfo {

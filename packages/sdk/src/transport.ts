@@ -92,63 +92,69 @@ export interface UnixActorBinding { readonly bindingId: string; readonly binding
 export class UnixSocketTransport implements WebxTransport {
   #binding?: UnixActorBinding;
   #bindingOwnerId?: string;
-  #bindingRefresh?: Promise<void>;
+  #connection?: NdjsonConnection;
+  #lane: Promise<void> = Promise.resolve();
   constructor(
     private readonly socketPath: string,
     private readonly connect: NdjsonConnectionFactory,
     private readonly actor?: UnixActorIdentity,
   ) {}
 
-  async bind(ownerId: string, signal?: AbortSignal): Promise<void> {
-    if (this.#bindingOwnerId !== undefined && this.#bindingOwnerId !== ownerId) throw new Error("Unix actor binding owner mismatch");
-    this.#bindingOwnerId = ownerId;
-    if (this.#binding !== undefined) return;
-    await this.refreshBinding(undefined, signal);
+  bind(ownerId: string, signal?: AbortSignal): Promise<void> {
+    return this.exclusive(async () => {
+      if (this.#bindingOwnerId !== undefined && this.#bindingOwnerId !== ownerId) throw new Error("Unix actor binding owner mismatch");
+      this.#bindingOwnerId = ownerId;
+      if (this.#binding === undefined) await this.refreshBinding(signal);
+    });
   }
 
-  async request(request: TransportRequest): Promise<TransportResponse> {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const sentBinding = this.#binding;
-      const response = await this.send(request, sentBinding);
-      if (attempt === 0 && sentBinding !== undefined && isInvalidRuntimeBinding(response)) {
-        await this.refreshBinding(sentBinding, request.signal);
-        continue;
+  request(request: TransportRequest): Promise<TransportResponse> {
+    return this.exclusive(async () => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          if (this.#bindingOwnerId !== undefined && this.#binding === undefined) await this.refreshBinding(request.signal);
+          const sentBinding = this.#binding;
+          const response = await this.send(request, sentBinding);
+          if (attempt === 0 && sentBinding !== undefined && isInvalidRuntimeBinding(response)) {
+            await this.resetConnection();
+            continue;
+          }
+          return response;
+        } catch (error) {
+          if (request.signal?.aborted || error instanceof ResponseLimitError || attempt > 0) throw error;
+          await this.resetConnection();
+        }
       }
-      return response;
-    }
-    throw new Error("Unix actor binding recovery failed");
+      throw new Error("Unix actor binding recovery failed");
+    });
   }
 
-  private async refreshBinding(staleBinding: UnixActorBinding | undefined, signal?: AbortSignal): Promise<void> {
-    if (this.#binding !== staleBinding) return;
-    if (this.#bindingRefresh !== undefined) return this.#bindingRefresh;
+  close(): Promise<void> { return this.exclusive(async () => this.resetConnection()); }
+
+  private async refreshBinding(signal?: AbortSignal): Promise<void> {
     const ownerId = this.#bindingOwnerId;
     if (ownerId === undefined) throw new Error("Unix actor binding owner is unavailable");
-    const refresh = (async () => {
-      const connection = await this.connect(this.socketPath);
-      try {
-        const line = await connection.send(JSON.stringify({ bind: { ownerId } }), signal);
-        const response = JSON.parse(line) as { bindingId?: unknown; bindingSecret?: unknown };
-        if (typeof response.bindingId !== "string" || typeof response.bindingSecret !== "string") throw new TypeError("invalid Unix actor binding response");
-        this.#binding = { bindingId: response.bindingId, bindingSecret: response.bindingSecret };
-      } finally { await connection.close(); }
-    })();
-    this.#bindingRefresh = refresh;
-    try { await refresh; } finally { if (this.#bindingRefresh === refresh) this.#bindingRefresh = undefined; }
+    const connection = await this.connection();
+    const line = await connection.send(JSON.stringify({ bind: { ownerId } }), signal);
+    const response = JSON.parse(line) as { bindingId?: unknown; bindingSecret?: unknown };
+    if (typeof response.bindingId !== "string" || typeof response.bindingSecret !== "string") throw new TypeError("invalid Unix actor binding response");
+    this.#binding = { bindingId: response.bindingId, bindingSecret: response.bindingSecret };
   }
 
   private async send(request: TransportRequest, binding: UnixActorBinding | undefined): Promise<TransportResponse> {
-    const connection = await this.connect(this.socketPath);
-    try {
-      const serializable = { ...request, signal: undefined };
-      const wire = binding === undefined ? this.actor === undefined ? serializable : { actor: this.actor, request: serializable } : { binding, request: serializable };
-      const line = await connection.send(JSON.stringify(wire), request.signal);
-      if (new TextEncoder().encode(line).byteLength > request.maxResponseBytes) throw new ResponseLimitError(request.maxResponseBytes);
-      const response = JSON.parse(line) as TransportResponse;
-      if (!Number.isInteger(response.status)) throw new TypeError("invalid Unix transport response status");
-      return response;
-    } finally { await connection.close(); }
+    const connection = await this.connection();
+    const serializable = { ...request, signal: undefined };
+    const wire = binding === undefined ? this.actor === undefined ? serializable : { actor: this.actor, request: serializable } : { binding, request: serializable };
+    const line = await connection.send(JSON.stringify(wire), request.signal);
+    if (new TextEncoder().encode(line).byteLength > request.maxResponseBytes) throw new ResponseLimitError(request.maxResponseBytes);
+    const response = JSON.parse(line) as TransportResponse;
+    if (!Number.isInteger(response.status)) throw new TypeError("invalid Unix transport response status");
+    return response;
   }
+
+  private async connection(): Promise<NdjsonConnection> { this.#connection ??= await this.connect(this.socketPath); return this.#connection; }
+  private async resetConnection(): Promise<void> { const connection = this.#connection; this.#connection = undefined; this.#binding = undefined; if (connection !== undefined) await connection.close().catch(() => undefined); }
+  private exclusive<T>(operation: () => Promise<T>): Promise<T> { const result = this.#lane.then(operation, operation); this.#lane = result.then(() => undefined, () => undefined); return result; }
 }
 
 function isInvalidRuntimeBinding(response: TransportResponse): boolean {

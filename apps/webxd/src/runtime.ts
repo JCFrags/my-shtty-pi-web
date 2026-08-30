@@ -26,7 +26,7 @@ interface RuntimeWireRequest {
   readonly binding: { readonly bindingId: string; readonly bindingSecret: string };
   readonly request: TransportRequest;
 }
-interface ActorBinding { readonly secret: string; readonly actor: AuthorityActor }
+interface ActorBinding { readonly secret: string; readonly actor: AuthorityActor; readonly client: Socket }
 
 export interface WebxdRuntimeOptions {
   readonly socketPath: string;
@@ -44,6 +44,11 @@ export interface WebxdRuntimeOptions {
   readonly cacheDirectory?: string;
   readonly contentDirectory?: string;
   readonly authenticateActor?: WebxActorAuthenticator["authenticate"];
+  readonly maxClientConnections?: number;
+  readonly bindTimeoutMs?: number;
+  readonly maxLiveBindings?: number;
+  readonly maxQueuedRequestsPerClient?: number;
+  readonly maxOutboundBytesPerClient?: number;
 }
 
 /** Runnable same-user Unix API for the complete local WebX authority. */
@@ -52,10 +57,20 @@ export class WebxdRuntime {
   readonly #authority: WebxAuthority;
   readonly #clients = new Set<Socket>();
   readonly #bindings = new Map<string, ActorBinding>();
+  readonly #maxClientConnections: number;
+  readonly #bindTimeoutMs: number;
+  readonly #maxLiveBindings: number;
+  readonly #maxQueuedRequestsPerClient: number;
+  readonly #maxOutboundBytesPerClient: number;
   #server?: Server;
   #started = false;
 
   constructor(private readonly options: WebxdRuntimeOptions) {
+    this.#maxClientConnections = boundedInteger(options.maxClientConnections ?? 64, 1, 1024, "client connection");
+    this.#bindTimeoutMs = boundedInteger(options.bindTimeoutMs ?? 5_000, 10, 60_000, "bind timeout");
+    this.#maxLiveBindings = boundedInteger(options.maxLiveBindings ?? 64, 1, 1024, "live binding");
+    this.#maxQueuedRequestsPerClient = boundedInteger(options.maxQueuedRequestsPerClient ?? 64, 1, 1024, "queued request");
+    this.#maxOutboundBytesPerClient = boundedInteger(options.maxOutboundBytesPerClient ?? 12 * 1024 * 1024, MAX_RESPONSE_BYTES, 32 * 1024 * 1024, "outbound byte");
     const backend = options.browserBackend ?? "legacy";
     if (backend === "legacy") {
       this.#browser = new BrowserDaemonRpcPort(
@@ -108,64 +123,84 @@ export class WebxdRuntime {
   }
 
   private accept(socket: Socket): void {
+    if (this.#clients.size >= this.#maxClientConnections) { socket.end(`${JSON.stringify(failure(503, "connection-capacity", "WebX client connection capacity is full"))}\n`); return; }
     this.#clients.add(socket);
-    let buffer = "";
+    const decoder = new BoundedNdjsonDecoder(MAX_REQUEST_BYTES);
     let chain = Promise.resolve();
+    let queuedRequests = 0;
+    let outboundBytes = 0;
+    let bindingId: string | undefined;
+    let closed = false;
     const controllers = new Set<AbortController>();
+    const writeResponse = (value: unknown): boolean => {
+      if (closed || socket.destroyed) return false;
+      const encoded = `${JSON.stringify(value)}\n`;
+      const bytes = Buffer.byteLength(encoded, "utf8");
+      if (bytes > MAX_RESPONSE_BYTES || outboundBytes + bytes > this.#maxOutboundBytesPerClient) { socket.destroy(); return false; }
+      outboundBytes += bytes;
+      socket.write(encoded, () => { outboundBytes = Math.max(0, outboundBytes - bytes); });
+      return true;
+    };
+    const bindTimer = setTimeout(() => { if (bindingId === undefined) { writeResponse(failure(408, "binding-timeout", "WebX client did not bind in time")); socket.destroy(); } }, this.#bindTimeoutMs);
+    bindTimer.unref?.();
     socket.on("data", (chunk) => {
-      buffer += new TextDecoder().decode(chunk, { stream: true });
-      if (new TextEncoder().encode(buffer).byteLength > MAX_REQUEST_BYTES) {
-        socket.write(`${JSON.stringify(failure(413, "request-too-large", "Unix request exceeds the runtime bound"))}\n`);
-        socket.destroy();
-        return;
-      }
-      for (;;) {
-        const newline = buffer.indexOf("\n");
-        if (newline < 0) break;
-        const line = buffer.slice(0, newline);
-        buffer = buffer.slice(newline + 1);
+      let lines: readonly string[];
+      try { lines = decoder.push(chunk); }
+      catch { writeResponse(failure(413, "request-too-large", "Unix request is invalid or exceeds the runtime bound")); socket.destroy(); return; }
+      for (const line of lines) {
         if (line.trim().length === 0) continue;
+        if (queuedRequests >= this.#maxQueuedRequestsPerClient) { writeResponse(failure(429, "request-capacity", "WebX client request capacity is full")); socket.destroy(); return; }
+        queuedRequests += 1;
         chain = chain.then(async () => {
+          if (closed) return;
           const controller = new AbortController();
           controllers.add(controller);
           try {
             const parsed = JSON.parse(line) as unknown;
             if (isBindRequest(parsed)) {
-              const binding = this.issueBinding(parsed.bind.ownerId);
-              socket.write(`${JSON.stringify(binding)}\n`);
+              if (bindingId !== undefined) throw new Error("client connection is already bound");
+              const binding = this.issueBinding(parsed.bind.ownerId, socket);
+              bindingId = binding.bindingId;
+              clearTimeout(bindTimer);
+              writeResponse(binding);
               return;
             }
             const wire = parseWireRequest(parsed);
-            const response = await this.#authority.handle(this.authenticate(wire), { ...wire.request, signal: controller.signal });
-            socket.write(`${JSON.stringify(response)}\n`);
+            const response = await this.#authority.handle(this.authenticate(wire, socket), { ...wire.request, signal: controller.signal });
+            writeResponse(response);
           } catch (error) {
-            socket.write(`${JSON.stringify(failure(400, "invalid-wire-request", safeError(error)))}\n`);
+            writeResponse(failure(400, "invalid-wire-request", safeError(error)));
           } finally {
             controllers.delete(controller);
           }
-        });
+        }).finally(() => { queuedRequests -= 1; });
       }
     });
     socket.on("error", () => undefined);
     socket.on("close", () => {
+      if (closed) return;
+      closed = true;
+      clearTimeout(bindTimer);
       this.#clients.delete(socket);
+      if (bindingId !== undefined && this.#bindings.get(bindingId)?.client === socket) this.#bindings.delete(bindingId);
       for (const controller of controllers) controller.abort();
     });
   }
 
-  private issueBinding(ownerId: string): { bindingId: string; bindingSecret: string } {
+  private issueBinding(ownerId: string, client: Socket): { bindingId: string; bindingSecret: string } {
     if (!ACTOR_ID.test(ownerId)) throw new TypeError("binding ownerId is invalid");
+    if (this.#bindings.size >= this.#maxLiveBindings) throw new Error("runtime actor binding capacity is full");
     const authenticate = this.options.authenticateActor;
     if (authenticate === undefined) throw new Error("same-user Pi actor authenticator is not configured");
     const bindingId = randomBytes(16).toString("hex");
     const bindingSecret = randomBytes(32).toString("hex");
-    this.#bindings.set(bindingId, { secret: bindingSecret, actor: authenticate({ principalId: ownerId, agentId: ownerId }) });
+    this.#bindings.set(bindingId, { secret: bindingSecret, actor: authenticate({ principalId: ownerId, agentId: ownerId }), client });
     return { bindingId, bindingSecret };
   }
 
-  private authenticate(wire: RuntimeWireRequest): AuthorityActor {
+  private authenticate(wire: RuntimeWireRequest, client: Socket): AuthorityActor {
     const binding = this.#bindings.get(wire.binding.bindingId);
-    if (binding === undefined || !constantTimeEqual(binding.secret, wire.binding.bindingSecret)) throw new Error("runtime actor binding is invalid");
+    if (binding === undefined || binding.client !== client || !constantTimeEqual(binding.secret, wire.binding.bindingSecret)) throw new Error("runtime actor binding is invalid");
     return binding.actor;
   }
 }
@@ -180,7 +215,7 @@ export function createBrowserRpcConnectionFactory(browserSocketPath: string, cwd
 
 class PersistentBrowserConnection implements BrowserRpcConnection {
   #socket?: Socket;
-  #buffer = "";
+  #decoder?: BoundedNdjsonDecoder;
   #nextId = 1;
   #pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
   #closed = false;
@@ -230,7 +265,7 @@ class PersistentBrowserConnection implements BrowserRpcConnection {
     try {
       await connected(socket);
       this.#socket = socket;
-      this.#buffer = "";
+      this.#decoder = new BoundedNdjsonDecoder(MAX_RESPONSE_BYTES);
       socket.on("data", (chunk) => this.receive(chunk));
       socket.on("error", (error) => this.disconnected(socket, error));
       socket.on("close", () => this.disconnected(socket, new Error("browser daemon connection closed")));
@@ -272,17 +307,10 @@ class PersistentBrowserConnection implements BrowserRpcConnection {
   }
 
   private receive(chunk: Uint8Array): void {
-    this.#buffer += new TextDecoder().decode(chunk, { stream: true });
-    if (new TextEncoder().encode(this.#buffer).byteLength > MAX_RESPONSE_BYTES) {
-      this.#socket?.destroy();
-      this.rejectPending(new Error("browser daemon response exceeds the runtime bound"));
-      return;
-    }
-    for (;;) {
-      const newline = this.#buffer.indexOf("\n");
-      if (newline < 0) return;
-      const line = this.#buffer.slice(0, newline);
-      this.#buffer = this.#buffer.slice(newline + 1);
+    let lines: readonly string[];
+    try { lines = this.#decoder?.push(chunk) ?? []; }
+    catch (error) { this.#socket?.destroy(error instanceof Error ? error : undefined); this.rejectPending(new Error("browser daemon returned invalid or oversized UTF-8 NDJSON")); return; }
+    for (const line of lines) {
       if (line.trim().length === 0) continue;
       try {
         const response = JSON.parse(line) as { id?: unknown; result?: unknown; error?: { code?: unknown; message?: unknown } };
@@ -303,12 +331,62 @@ class PersistentBrowserConnection implements BrowserRpcConnection {
     if (this.#heartbeat !== undefined) clearInterval(this.#heartbeat);
     this.#heartbeat = undefined;
     this.#socket = undefined;
+    this.#decoder = undefined;
     this.rejectPending(error);
   }
 
   private rejectPending(error: Error): void {
     for (const pending of this.#pending.values()) pending.reject(error);
     this.#pending.clear();
+  }
+}
+
+class BoundedNdjsonDecoder {
+  readonly #decoder = new TextDecoder("utf-8", { fatal: true });
+  #buffer = "";
+  #frameBytes = 0;
+  #expectedContinuations = 0;
+  #incompleteBytes = 0;
+
+  constructor(private readonly maxFrameBytes: number) {}
+
+  push(chunk: Uint8Array): readonly string[] {
+    const lines: string[] = [];
+    let start = 0;
+    for (let index = 0; index < chunk.byteLength; index += 1) {
+      if (chunk[index] !== 0x0a) continue;
+      this.decode(chunk.subarray(start, index));
+      if (this.#expectedContinuations !== 0) throw new Error("incomplete UTF-8 frame");
+      this.#buffer += this.#decoder.decode();
+      lines.push(this.#buffer);
+      this.#buffer = "";
+      this.#frameBytes = 0;
+      this.#expectedContinuations = 0;
+      this.#incompleteBytes = 0;
+      start = index + 1;
+    }
+    this.decode(chunk.subarray(start));
+    return lines;
+  }
+
+  private decode(bytes: Uint8Array): void {
+    if (bytes.byteLength === 0) return;
+    this.#frameBytes += bytes.byteLength;
+    if (this.#frameBytes > this.maxFrameBytes) throw new Error("NDJSON frame exceeds bound");
+    for (const byte of bytes) {
+      if (this.#expectedContinuations > 0) {
+        if (byte < 0x80 || byte > 0xbf) throw new Error("invalid UTF-8 continuation");
+        this.#expectedContinuations -= 1;
+        this.#incompleteBytes += 1;
+        if (this.#expectedContinuations === 0) this.#incompleteBytes = 0;
+      } else if (byte <= 0x7f) this.#incompleteBytes = 0;
+      else if (byte >= 0xc2 && byte <= 0xdf) { this.#expectedContinuations = 1; this.#incompleteBytes = 1; }
+      else if (byte >= 0xe0 && byte <= 0xef) { this.#expectedContinuations = 2; this.#incompleteBytes = 1; }
+      else if (byte >= 0xf0 && byte <= 0xf4) { this.#expectedContinuations = 3; this.#incompleteBytes = 1; }
+      else throw new Error("invalid UTF-8 leading byte");
+      if (this.#incompleteBytes > 4) throw new Error("incomplete UTF-8 exceeds bound");
+    }
+    this.#buffer += this.#decoder.decode(bytes, { stream: true });
   }
 }
 
@@ -349,3 +427,4 @@ async function prepareSocket(path: string): Promise<void> {
 }
 function closeServer(server: Server): Promise<void> { return new Promise((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error))); }
 function isMissing(error: unknown): boolean { return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "ENOENT"; }
+function boundedInteger(value: number, minimum: number, maximum: number, name: string): number { if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw new Error(`${name} bound is invalid`); return value; }

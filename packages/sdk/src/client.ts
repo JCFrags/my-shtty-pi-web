@@ -57,6 +57,8 @@ export class WebxClient {
     return transport.bind === undefined ? Promise.resolve() : transport.bind(ownerId, signal);
   }
 
+  async close(): Promise<void> { await this.transport.close?.(); }
+
   version(signal?: AbortSignal): Promise<VersionInfo> {
     return this.call("GET", "/v1/version", undefined, { signal }, false);
   }
