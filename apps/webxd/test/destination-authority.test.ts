@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   FailClosedBrowserDestinationAuthority,
   ProxyBoundBrowserDestinationAuthority,
+  proxyBoundDestinationAuthorityFromUrl,
   type DestinationResolver,
 } from "../src/destination-authority.js";
 import type { AuthorityActor } from "../src/ports.js";
@@ -15,6 +16,13 @@ function resolver(addresses: readonly string[]): DestinationResolver {
 }
 
 describe("fail-closed browser destination authority", () => {
+  it("parses plain IPv4 and bracketed IPv6 loopback proxy configuration", () => {
+    expect(proxyBoundDestinationAuthorityFromUrl("http://127.0.0.1:8877").egressBindingId).toBe("forward-proxy://127.0.0.1:8877");
+    expect(proxyBoundDestinationAuthorityFromUrl("http://[::1]:8877").egressBindingId).toBe("forward-proxy://[::1]:8877");
+    expect(() => proxyBoundDestinationAuthorityFromUrl("http://192.168.1.2:8877")).toThrow("loopback listener");
+    expect(() => proxyBoundDestinationAuthorityFromUrl("http://user@127.0.0.1:8877")).toThrow("plain loopback HTTP proxy URL");
+  });
+
   it.each([
     ["http://127.0.0.1/", ["127.0.0.1"], "WEBX_POLICY_PRIVATE_ADDRESS"],
     ["http://10.0.0.8/", ["10.0.0.8"], "WEBX_POLICY_PRIVATE_ADDRESS"],

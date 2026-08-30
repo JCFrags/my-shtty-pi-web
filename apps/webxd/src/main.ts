@@ -1,6 +1,6 @@
 import process from "node:process";
 import { browserBackendSelection } from "./browser-backend-selection.js";
-import { ProxyBoundBrowserDestinationAuthority } from "./destination-authority.js";
+import { proxyBoundDestinationAuthorityFromUrl } from "./destination-authority.js";
 import { WebxdRuntime, sameUserPiActorAuthenticator } from "./runtime.js";
 
 const runtimeDirectory = process.env.XDG_RUNTIME_DIR;
@@ -8,7 +8,7 @@ if (runtimeDirectory === undefined) throw new Error("XDG_RUNTIME_DIR is required
 
 const cacheHome = process.env.XDG_CACHE_HOME ?? `${process.env.HOME ?? process.cwd()}/.cache`;
 const proxyUrl = process.env.WEBX_EGRESS_PROXY;
-const destinationAuthority = proxyUrl === undefined ? undefined : proxyDestinationAuthority(proxyUrl);
+const destinationAuthority = proxyUrl === undefined ? undefined : proxyBoundDestinationAuthorityFromUrl(proxyUrl);
 const browserBackend = browserBackendSelection(process.env.WEBX_BROWSER_BACKEND);
 const browserRuntimeDirectory = process.env.BROWSERD_RUNTIME_DIR ?? `${runtimeDirectory}/pi-browserd`;
 
@@ -27,14 +27,6 @@ const runtime = new WebxdRuntime({
   authenticateActor: sameUserPiActorAuthenticator,
   browserDestinationAuthority: destinationAuthority,
 });
-
-function proxyDestinationAuthority(raw: string): ProxyBoundBrowserDestinationAuthority {
-  const parsed = new URL(raw);
-  if (parsed.protocol !== "http:" || parsed.username !== "" || parsed.password !== "" || parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== "") {
-    throw new Error("WEBX_EGRESS_PROXY must be a plain loopback HTTP proxy URL");
-  }
-  return new ProxyBoundBrowserDestinationAuthority(parsed.hostname, parsed.port === "" ? 80 : Number(parsed.port));
-}
 
 let stopping = false;
 const stop = () => {

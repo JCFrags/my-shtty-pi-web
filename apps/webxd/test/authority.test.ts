@@ -321,6 +321,11 @@ describe("WebxAuthority", () => {
     expect((await call(instance, actor(), "POST", "/v1/browser/sessions", request, "browser-create-1")).status).toBe(201);
     expect((await call(instance, actor(), "POST", "/v1/browser/sessions", request, "browser-create-1")).status).toBe(201);
     expect(port.createSession).toHaveBeenCalledTimes(1);
+    const focusPath = "/v1/browser/sessions/session-1/tabs/tab-1/focus";
+    expect((await call(instance, actor(), "POST", focusPath, {}, "browser-focus-1")).status).toBe(200);
+    expect((await call(instance, actor(), "POST", focusPath, {}, "browser-focus-1")).status).toBe(200);
+    expect(port.focusTab).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(port.focusTab).mock.calls[0]?.[3]).toBe(`operation:${createHash("sha256").update("browser-focus-1").digest("hex")}`);
     const conflict = await call(instance, actor(), "POST", "/v1/browser/sessions", { pathId: "pinchtab/chrome" }, "browser-create-1");
     expect(conflict).toMatchObject({ status: 409, body: { code: "idempotency-conflict" } });
   });
@@ -346,20 +351,38 @@ describe("WebxAuthority", () => {
     expect(vi.mocked(port.closeTab).mock.calls[0]?.[3]).toBe(`operation:${createHash("sha256").update("browser-tab-close-1").digest("hex")}`);
   });
 
-  it("preserves stable public operation IDs when close responses are lost and retried", async () => {
+  it("preserves stable public operation IDs and one backend side effect when close responses are lost", async () => {
     const port = browser();
     const tabOperations: string[] = [];
     const sessionOperations: string[] = [];
-    vi.mocked(port.closeTab).mockImplementation(async (_actor, _sessionId, _tabId, operationId) => { tabOperations.push(operationId); if (tabOperations.length === 1) throw new Error("response lost after commit"); });
-    vi.mocked(port.close).mockImplementation(async (_actor, _sessionId, operationId) => { sessionOperations.push(operationId); if (sessionOperations.length === 1) throw new Error("response lost after commit"); });
+    const committedTabOperations = new Set<string>();
+    const committedSessionOperations = new Set<string>();
+    let tabSideEffects = 0;
+    let sessionSideEffects = 0;
+    vi.mocked(port.closeTab).mockImplementation(async (_actor, _sessionId, _tabId, operationId) => {
+      tabOperations.push(operationId);
+      if (committedTabOperations.has(operationId)) return;
+      committedTabOperations.add(operationId); tabSideEffects += 1;
+      throw new Error("response lost after commit");
+    });
+    vi.mocked(port.close).mockImplementation(async (_actor, _sessionId, operationId) => {
+      sessionOperations.push(operationId);
+      if (committedSessionOperations.has(operationId)) return;
+      committedSessionOperations.add(operationId); sessionSideEffects += 1;
+      throw new Error("response lost after commit");
+    });
     const instance = authority(port);
     await call(instance, actor(), "POST", "/v1/browser/sessions", { pathId: "agent-browser/chrome" }, "close-retry-create");
     expect(await call(instance, actor(), "DELETE", "/v1/browser/sessions/session-1/tabs/tab-1", undefined, "close-tab-retry")).toMatchObject({ status: 502 });
     expect(await call(instance, actor(), "DELETE", "/v1/browser/sessions/session-1/tabs/tab-1", undefined, "close-tab-retry")).toMatchObject({ status: 204 });
+    expect(tabOperations).toHaveLength(2);
     expect(new Set(tabOperations)).toEqual(new Set([`operation:${createHash("sha256").update("close-tab-retry").digest("hex")}`]));
+    expect(tabSideEffects).toBe(1);
     expect(await call(instance, actor(), "DELETE", "/v1/browser/sessions/session-1", undefined, "close-session-retry")).toMatchObject({ status: 502 });
     expect(await call(instance, actor(), "DELETE", "/v1/browser/sessions/session-1", undefined, "close-session-retry")).toMatchObject({ status: 204 });
+    expect(sessionOperations).toHaveLength(2);
     expect(new Set(sessionOperations)).toEqual(new Set([`operation:${createHash("sha256").update("close-session-retry").digest("hex")}`]));
+    expect(sessionSideEffects).toBe(1);
   });
 
   it("routes browser list and safe debug while refusing secret debug before dispatch", async () => {

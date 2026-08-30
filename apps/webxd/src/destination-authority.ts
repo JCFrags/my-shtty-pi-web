@@ -55,6 +55,14 @@ export class SystemDestinationResolver implements DestinationResolver {
  * browser connection. URL parsing and DNS checks alone do not stop rebinding or
  * redirects, so this class never treats them as sufficient authority.
  */
+export function proxyBoundDestinationAuthorityFromUrl(raw: string): ProxyBoundBrowserDestinationAuthority {
+  let parsed: URL;
+  try { parsed = new URL(raw); } catch { throw new Error("WEBX_EGRESS_PROXY must be a plain loopback HTTP proxy URL"); }
+  if (parsed.protocol !== "http:" || parsed.username !== "" || parsed.password !== "" || parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== "") throw new Error("WEBX_EGRESS_PROXY must be a plain loopback HTTP proxy URL");
+  const hostname = parsed.hostname === "[::1]" ? "::1" : parsed.hostname;
+  return new ProxyBoundBrowserDestinationAuthority(hostname, parsed.port === "" ? 80 : Number(parsed.port));
+}
+
 export class ProxyBoundBrowserDestinationAuthority implements BrowserDestinationAuthority {
   readonly egressBindingId: string;
 

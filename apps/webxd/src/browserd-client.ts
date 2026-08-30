@@ -146,7 +146,8 @@ export class BrowserdClientPool {
     try {
       await entry.connection.call(this.makeRequest(operationId, { kind: "frames.subscribe", address, subscriptionId }), signal);
     } catch (error) {
-      entry.connection.removeSubscription(subscriptionId);
+      entry.connection.failSubscriptionTeardown(subscriptionId);
+      await entry.connection.close(new BrowserdClientError("CAPABILITY_UNAVAILABLE", "frame subscription could not be confirmed; actor connection was closed", true, entry.connection.runtimeInstanceId));
       throw error;
     } finally {
       entry.lastUsedMs = Date.now();
@@ -425,7 +426,7 @@ class BoundBrowserdConnection {
     if (message.kind === "frame.available") { this.dispatchFrame(message); return; }
     const pending = this.#pending.get(message.requestId);
     if (pending === undefined) return;
-    if (message.kind !== "bound" && message.operationId !== undefined && message.operationId !== pending.operationId) {
+    if (message.kind !== "bound" && message.operationId !== pending.operationId) {
       const error = new BrowserdClientError("INTERNAL_ERROR", "browser service response operation identity changed");
       this.#pending.delete(message.requestId); pending.cleanup(); pending.reject(error);
       void this.close(error);

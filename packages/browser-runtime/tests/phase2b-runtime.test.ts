@@ -46,7 +46,9 @@ describe("Phase 2B download denial", () => {
     let failedClosed = false;
     const remove = await installDownloadDenial(fake as unknown as CdpConnection, (event) => denied.push(event), () => { failedClosed = true; });
     assert.deepEqual(fake.commands[0], { method: "Browser.setDownloadBehavior", params: { behavior: "deny", eventsEnabled: true } });
-    assert.equal("downloadPath" in fake.commands[0]!.params, false);
+    const downloadBehavior = fake.commands[0];
+    assert.ok(downloadBehavior !== undefined);
+    assert.equal("downloadPath" in downloadBehavior.params, false);
     fake.emit("event", { method: "Browser.downloadWillBegin", params: { guid: "download-guid-a", url: "https://secret.invalid/file" } });
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.deepEqual(denied, [{ code: "DOWNLOAD_DENIED", guid: "download-guid-a", state: "cancel-requested" }]);

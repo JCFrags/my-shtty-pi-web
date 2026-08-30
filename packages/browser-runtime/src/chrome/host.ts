@@ -159,7 +159,7 @@ export async function installDownloadDenial(cdp: CdpConnection, onDenied: (event
   };
   cdp.on("event", listener);
   try { await cdp.send("Browser.setDownloadBehavior", { behavior: "deny", eventsEnabled: true }, undefined, signal ? { signal } : {}); }
-  catch (error) { cdp.off("event", listener); throw new BrowserProtocolError("BROWSER_START_FAILED", "Chrome cannot enforce download denial.", false); }
+  catch { cdp.off("event", listener); throw new BrowserProtocolError("BROWSER_START_FAILED", "Chrome cannot enforce download denial.", false); }
   return () => cdp.off("event", listener);
 }
 

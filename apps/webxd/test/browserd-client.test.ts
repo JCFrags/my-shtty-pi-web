@@ -390,12 +390,25 @@ describe("BrowserdClientPool transport", () => {
     await client.close();
   });
 
-  it("rejects a response whose operation identity does not match its request", async () => {
+  it("rejects success or error responses whose operation identity does not match the request", async () => {
     const fixture = await FakeBrowserd.start();
     fixture.handler = (message, socket) => fixture.respondAck(socket, message, "operation-other");
     const client = pool(fixture);
     await expect(client.request(actorA, "operation-a", { kind: "capabilities.get" })).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
     await client.close();
+
+    const missing = await FakeBrowserd.start();
+    missing.handler = (message, socket) => missing.send(socket, {
+      protocolVersion: PROTOCOL_VERSION,
+      kind: "response",
+      requestId: message.requestId,
+      ok: false,
+      error: { code: "INTERNAL_ERROR", message: "failed without operation identity", retryable: false },
+    });
+    const missingClient = pool(missing);
+    await expect(missingClient.request(actorA, "operation-b", { kind: "capabilities.get" })).rejects.toMatchObject({ code: "INTERNAL_ERROR", message: "browser service response operation identity changed" });
+    await waitUntil(() => missing.sockets.size === 0);
+    await missingClient.close();
   });
 
   it("reconstructs exact multibyte response, error, frame title, and frame URL across every UTF-8 byte boundary", async () => {
@@ -450,6 +463,17 @@ describe("BrowserdClientPool transport", () => {
     now.mockReturnValue(2_151);
     await expect(client.request(actorB, "other-after-close", { kind: "capabilities.get" })).resolves.toMatchObject({ operationId: "other-after-close" });
     expect(client.connectionCount).toBe(1);
+    await client.close();
+  });
+
+  it("closes the actor connection when subscription admission cannot be confirmed", async () => {
+    const fixture = await FakeBrowserd.start();
+    fixture.handler = (message, socket) => { if (message.kind !== "frames.subscribe" && message.kind !== "operation.cancel") fixture.respondAck(socket, message); };
+    const client = pool(fixture, { requestTimeoutMs: 20 });
+    await expect(client.subscribeFrames(actorA, "subscribe-admission-loss", address, () => undefined)).rejects.toMatchObject({ code: "DEADLINE_EXCEEDED" });
+    expect(fixture.messages.filter((message) => message.kind === "frames.subscribe")).toHaveLength(1);
+    await waitUntil(() => fixture.sockets.size === 0);
+    expect(client.connectionCount).toBe(0);
     await client.close();
   });
 

@@ -198,7 +198,6 @@ export class SessionMotor extends EventEmitter {
     const from = this.cursor;
     const samples = this.path(from, to);
     const nominal = samples.at(-1)?.t ?? 0;
-    const started = performance.now();
     const replay = await this.replay(tab, samples, 0, context);
     this.cursor = to;
     return {
