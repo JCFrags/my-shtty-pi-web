@@ -28,6 +28,27 @@ class FakeMotor extends EventEmitter {
   async ensureOverlay(): Promise<void> {}
 }
 
+class BlockingCaptureConnection {
+  readonly release = deferred();
+  activeScreenshots = 0;
+  maxActiveScreenshots = 0;
+  screenshotCalls = 0;
+
+  async send<T>(method: string): Promise<T> {
+    if (method === "Runtime.evaluate") return { result: { value: layout() } } as T;
+    if (method !== "Page.captureScreenshot") throw new Error(`Unexpected method ${method}`);
+    this.screenshotCalls++;
+    this.activeScreenshots++;
+    this.maxActiveScreenshots = Math.max(this.maxActiveScreenshots, this.activeScreenshots);
+    try {
+      await this.release.promise;
+      return { data: fakePngBase64() } as T;
+    } finally {
+      this.activeScreenshots--;
+    }
+  }
+}
+
 describe("connection-scoped frame schedules", () => {
   it("keeps subscription keys unique, idempotent, epoch-scoped, and timer-bounded", async () => {
     const first = tab("a");
@@ -332,6 +353,41 @@ describe("screenshot consistency transaction", () => {
     await assert.rejects(() => store.capture(address(target), "artifact", controller.signal), /cancelled/);
     assert.equal(artifacts.entryCount, 0);
   });
+});
+
+describe("same-session screenshot overlap reproduction", () => {
+  for (const ordering of ["frame-first", "observation-first"] as const) {
+    it(`proves independent frame and observation transactions overlap when ${ordering}`, async () => {
+      const target = tab(`overlap-${ordering}`);
+      const registry = registryFor([target]);
+      const artifacts = new BrowserArtifactStore();
+      const motor = new FakeMotor();
+      const connection = new BlockingCaptureConnection();
+      bindObservationTab(target, connection);
+      bindFrameTab(target, connection);
+      const store = new ObservationStore(actor, registry, artifacts, motor as never);
+      const scheduler = new FrameScheduler(actor, registry, artifacts, motor as never, () => 1, { selectedIntervalMs: 10_000 });
+      const events: FrameEvent[] = [];
+      scheduler.on("frame", (event) => events.push(event));
+      let observation: Promise<unknown>;
+      if (ordering === "frame-first") {
+        scheduler.subscribe(`connection\0${ordering}`, address(target));
+        await waitFor(() => connection.activeScreenshots === 1);
+        observation = store.capture(address(target), "artifact");
+      } else {
+        observation = store.capture(address(target), "artifact");
+        await waitFor(() => connection.activeScreenshots === 1);
+        scheduler.subscribe(`connection\0${ordering}`, address(target));
+      }
+      await waitFor(() => connection.activeScreenshots === 2);
+      assert.equal(connection.maxActiveScreenshots, 2);
+      connection.release.resolve();
+      await observation;
+      await waitFor(() => events.length === 1);
+      assert.equal(connection.screenshotCalls, 2);
+      await scheduler.close();
+    });
+  }
 });
 
 describe("image-pixel observation grounding", () => {
