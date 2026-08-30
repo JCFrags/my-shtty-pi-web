@@ -21,6 +21,7 @@ interface SoakBrowserReplacement {
   readonly identityB: BrowserIdentity;
   readonly secondTabId: string;
   readonly searchReadHealthyDuringOutage: true;
+  readonly piReconnects: number;
 }
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const MAX_ROUTE_SAMPLES = 2_048;
@@ -73,7 +74,9 @@ class ManagedChild {
       const pending = this.#pending.get(message.id); if (pending === undefined) return; this.#pending.delete(message.id);
       if (message.ok) pending.resolve(message.result); else pending.reject(new Error(String(message.error ?? "child command failed")));
     });
-    this.process.once("exit", (code, signal) => { const error = new Error(`${role} exited (${code ?? signal})\n${this.#stderr.join("")}`); for (const pending of this.#pending.values()) pending.reject(error); this.#pending.clear(); });
+    const rejectPending = (error: Error) => { for (const pending of this.#pending.values()) pending.reject(error); this.#pending.clear(); };
+    this.process.once("exit", (code, signal) => rejectPending(new Error(`${role} exited (${code ?? signal})\n${this.#stderr.join("")}`)));
+    this.process.on("error", (error) => rejectPending(error));
   }
 
   async call(command: string, fields: Record<string, unknown> = {}, timeoutMs = 30_000): Promise<unknown> {
@@ -82,14 +85,20 @@ class ManagedChild {
     return await new Promise((resolveCall, rejectCall) => {
       const timer = setTimeout(() => { this.#pending.delete(id); rejectCall(new Error(`${command} timed out\n${this.#stderr.join("")}`)); }, timeoutMs);
       this.#pending.set(id, { resolve: (value) => { clearTimeout(timer); resolveCall(value); }, reject: (error) => { clearTimeout(timer); rejectCall(error); } });
-      this.process.send?.({ id, command, ...fields });
+      if (!this.process.connected || this.process.send === undefined) {
+        const pending = this.#pending.get(id); this.#pending.delete(id); pending?.reject(new Error(`${command} cannot use a closed child IPC channel`)); return;
+      }
+      this.process.send({ id, command, ...fields }, (error) => {
+        if (error === null) return;
+        const pending = this.#pending.get(id); this.#pending.delete(id); pending?.reject(error);
+      });
     });
   }
 
   async stop(): Promise<void> {
-    if (this.process.exitCode !== null || this.process.killed) return;
-    await this.call("stop", {}, 30_000).catch(() => undefined);
-    this.process.disconnect();
+    if (this.process.exitCode !== null || this.process.signalCode !== null) return;
+    if (this.process.connected) await this.call("stop", {}, 30_000).catch(() => undefined);
+    if (this.process.connected) this.process.disconnect();
     await waitExit(this.process, 5_000).catch(() => { this.process.kill("SIGKILL"); });
   }
 }
@@ -286,6 +295,11 @@ async function main(): Promise<void> {
       await current.stop(); removeChild(current);
       if (workspace !== undefined) { await workspace.waitForSessionAbsent(oldA.browserSessionId, workspaceIndex); await workspace.capture("empty"); }
       await proxy.call("set-health", { healthy: false });
+      // Rebind both long-lived Pi extension clients before the outage health proof.
+      // This avoids using capabilities that may have been sampled during the earlier
+      // webxd restart and also exercises recovery through the normal Pi lifecycle.
+      await Promise.all([primaryPi.stop(), currentPiB.stop()]);
+      await Promise.all([primaryPi.start(), currentPiB.start()]);
       const [search, read] = await Promise.all([primaryPi.execute("web_search", { query: "WebX" }), currentPiB.execute("web_read", { url: "https://fixture.invalid/webx", maxChars: 1_000 })]);
       assert.match(textOf(search), /WebX/); assert.match(textOf(read), /fixture/i);
       await proxy.call("set-health", { healthy: true });
@@ -296,6 +310,12 @@ async function main(): Promise<void> {
         const gateway = asRecord(metrics.workspace); const broker = asRecord(gateway.broker);
         return broker.connected === true && broker.runtimeInstanceId === ready.runtimeInstanceId;
       }, 20_000);
+      // The outage lifecycle intentionally sampled capabilities while browserd was
+      // unavailable. Rebind after replacement readiness so browser tools are
+      // registered against the new browserd runtime rather than waiting for the
+      // periodic capability refresh.
+      await Promise.all([primaryPi.stop(), currentPiB.stop()]);
+      await Promise.all([primaryPi.start(), currentPiB.start()]);
       await waitFor(async () => await primaryPi.execute("browser_tabs", { action: "list" }).then(() => true, () => false), 20_000);
       await assert.rejects(primaryPi.execute("browser_observe", oldA), /restarted|replaced|instance/i);
       const [openedReplacementA, openedReplacementB] = await Promise.all([
@@ -308,7 +328,7 @@ async function main(): Promise<void> {
       if (nextSecondTabId === undefined) throw new Error("replacement soak session did not create its second tab");
       if (workspace !== undefined) { await workspace.waitForSessions([nextA.browserSessionId, nextB.browserSessionId]); await workspace.select(nextA.browserSessionId, nextA.tabId); }
       await currentWebxd.call("subscribe", { ownerId: "phase2b-agent-a", browserSessionId: nextA.browserSessionId, tabId: nextA.tabId });
-      return { browserd: next, ready, identityA: nextA, identityB: nextB, secondTabId: nextSecondTabId, searchReadHealthyDuringOutage: true };
+      return { browserd: next, ready, identityA: nextA, identityB: nextB, secondTabId: nextSecondTabId, searchReadHealthyDuringOutage: true, piReconnects: 4 };
     },
   }) : undefined;
   if (soakRun !== undefined) { piB = soakRun.piB; webxd = soakRun.webxd; browserd = soakRun.browserd; activeBrowserd = browserd; identityA = soakRun.identityA; }
@@ -817,6 +837,7 @@ async function runProcessSoak(options: {
         workloadBrowserBeforeReplacement = asRecord(await currentBrowserd.call("metrics"));
         browserReplacement = await options.replaceBrowserd(currentBrowserd, currentWebxd, currentPiB, currentIdentityA, currentIdentityB);
         currentBrowserd = browserReplacement.browserd; currentIdentityA = browserReplacement.identityA; currentIdentityB = browserReplacement.identityB;
+        piReconnects += browserReplacement.piReconnects;
         browserdReplacements += 1;
       }
       const now = performance.now();
