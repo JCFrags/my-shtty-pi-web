@@ -76,6 +76,7 @@ class FakeClient {
       displayAvailable: true,
       profileRootUsable: true,
       egressConfigured: true,
+      egressBindingId: "proxy-binding-a",
       runtimeState: "open",
       sessionCapacity: { current: 0, limit: 8, available: 8 },
     };
@@ -151,6 +152,7 @@ function pngBytes(marker: number): Buffer { const value = Buffer.alloc(25); Buff
 
 function destination(egressBindingId: string | null = "proxy-binding-a", ready = true): BrowserDestinationAuthority {
   return {
+    ...(egressBindingId === null ? {} : { egressBindingId }),
     assertReady: vi.fn(async () => {
       if (!ready) throw new Error("test egress is unavailable");
     }),
@@ -197,6 +199,15 @@ describe("AgentCursorBrowserPort", () => {
     ]);
     value.client.available = false;
     await expect(value.port.capabilities()).resolves.toEqual([]);
+  });
+
+  it("reports browser health only when the functional egress probe and binding identity agree", async () => {
+    const healthy = port();
+    await expect(healthy.port.capabilities()).resolves.toEqual([expect.objectContaining({ pathId: "agentcursor/chrome" })]);
+    const mismatched = port(new FakeClient(), destination("different-proxy-binding"));
+    await expect(mismatched.port.capabilities()).resolves.toEqual([]);
+    const unavailable = port(new FakeClient(), destination("proxy-binding-a", false));
+    await expect(unavailable.port.capabilities()).resolves.toEqual([]);
   });
 
   it("creates a clean public session and signs the normalized initial URL for the actor and runtime", async () => {

@@ -37,15 +37,27 @@ describe("fail-closed browser destination authority", () => {
     });
   });
 
-  it("requires a live loopback proxy before reporting session readiness", async () => {
-    const server = createServer((socket) => socket.end());
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(0, "127.0.0.1", resolve);
-    });
+  it("requires the exact bounded branded functional probe and detects proxy restarts", async () => {
+    const healthy = "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    let mode: "healthy" | "wrong" | "malformed" | "stall" = "healthy";
+    const server = createServer((socket) => socket.on("data", () => {
+      if (mode === "healthy") socket.end(healthy);
+      else if (mode === "wrong") socket.end("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+      else if (mode === "malformed") socket.end("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n");
+    }));
+    await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
     const address = server.address();
     if (address === null || typeof address === "string") throw new Error("proxy fixture did not bind");
     const authority = new ProxyBoundBrowserDestinationAuthority("127.0.0.1", address.port, resolver(["93.184.216.34"]));
+    expect(authority.egressBindingId).toBe(`forward-proxy://127.0.0.1:${address.port}`);
+    await expect(authority.assertReady()).resolves.toBeUndefined();
+    mode = "wrong";
+    await expect(authority.assertReady()).rejects.toMatchObject({ code: "WEBX_EGRESS_UNAVAILABLE", status: 503, retryable: true });
+    mode = "malformed";
+    await expect(authority.assertReady()).rejects.toMatchObject({ code: "WEBX_EGRESS_UNAVAILABLE" });
+    mode = "stall";
+    await expect(authority.assertReady()).rejects.toMatchObject({ code: "WEBX_EGRESS_UNAVAILABLE" });
+    mode = "healthy";
     await expect(authority.assertReady()).resolves.toBeUndefined();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await expect(authority.assertReady()).rejects.toMatchObject({ code: "WEBX_EGRESS_UNAVAILABLE", status: 503, retryable: true });

@@ -3,6 +3,8 @@ import { EventEmitter } from "node:events";
 import { describe, it } from "vitest";
 import { BrowserProtocolError, type TabAddress } from "@webx/browser-protocol";
 import { BrowserArtifactStore } from "../src/artifacts/store.js";
+import type { CdpConnection } from "../src/cdp/connection.js";
+import { installDownloadDenial, type DownloadDenialEvent } from "../src/chrome/host.js";
 import { bindMotorTab, SessionMotor } from "../src/motor/session-motor.js";
 import { bindDomTab, DomObservationStore } from "../src/observations/dom-store.js";
 import { bindObservationTab, ObservationStore, type Layout } from "../src/observations/store.js";
@@ -31,6 +33,34 @@ function fakePng(): string {
   return bytes.toString("base64");
 }
 class FakeMotor extends EventEmitter { readonly state = { x: 80, y: 80, pathSequence: 0, sampleSequence: 0, personaId: "persona", visible: true }; async ensureOverlay(): Promise<void> {} }
+
+describe("Phase 2B download denial", () => {
+  it("installs browser-wide deny without a path and cancels typed bounded download events", async () => {
+    class FakeCdp extends EventEmitter {
+      readonly commands: Array<{ method: string; params: Readonly<Record<string, unknown>> }> = [];
+      failCancel = false;
+      async send(method: string, params: Readonly<Record<string, unknown>>): Promise<unknown> { this.commands.push({ method, params }); if (method === "Browser.cancelDownload" && this.failCancel) throw new Error("cancel failed"); return {}; }
+    }
+    const fake = new FakeCdp();
+    const denied: DownloadDenialEvent[] = [];
+    let failedClosed = false;
+    const remove = await installDownloadDenial(fake as unknown as CdpConnection, (event) => denied.push(event), () => { failedClosed = true; });
+    assert.deepEqual(fake.commands[0], { method: "Browser.setDownloadBehavior", params: { behavior: "deny", eventsEnabled: true } });
+    assert.equal("downloadPath" in fake.commands[0]!.params, false);
+    fake.emit("event", { method: "Browser.downloadWillBegin", params: { guid: "download-guid-a", url: "https://secret.invalid/file" } });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(denied, [{ code: "DOWNLOAD_DENIED", guid: "download-guid-a", state: "cancel-requested" }]);
+    assert.deepEqual(fake.commands[1], { method: "Browser.cancelDownload", params: { guid: "download-guid-a" } });
+    fake.failCancel = true;
+    fake.emit("event", { method: "Browser.downloadWillBegin", params: { guid: "download-guid-b" } });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(failedClosed, true);
+    assert.deepEqual(denied.at(-1), { code: "DOWNLOAD_DENIED", guid: "download-guid-b", state: "cancel-failed" });
+    remove();
+    fake.emit("event", { method: "Browser.downloadWillBegin", params: { guid: "download-guid-c" } });
+    assert.equal(denied.some((event) => event.guid === "download-guid-c"), false);
+  });
+});
 
 describe("Phase 2B production observation leases", () => {
   it("uses a 60 second monotonic screenshot lease by default and fails after expiry", async () => {

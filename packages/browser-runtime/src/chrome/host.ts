@@ -4,7 +4,7 @@ import { constants } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 import { BrowserProtocolError } from "@webx/browser-protocol";
-import { CdpConnection } from "../cdp/connection.js";
+import { CdpConnection, type CdpEvent } from "../cdp/connection.js";
 import { cleanupLegacyOrphanProfiles, ProfileManager, type ProfileLease, readProcessStartTicks } from "./profile-manager.js";
 
 const EXECUTABLES = ["/usr/bin/google-chrome-stable", "/usr/bin/google-chrome", "/usr/bin/chromium-browser", "/usr/bin/chromium"];
@@ -23,6 +23,8 @@ export interface ChromeHostOptions {
   egressProxy?: { readonly host: "127.0.0.1" | "::1"; readonly port: number };
 }
 
+export interface DownloadDenialEvent { readonly code: "DOWNLOAD_DENIED"; readonly guid: string; readonly state: "cancel-requested" | "cancel-failed" }
+
 export class ChromeHost extends EventEmitter {
   readonly startupMs: number;
   readonly pid: number;
@@ -30,6 +32,8 @@ export class ChromeHost extends EventEmitter {
   private cdpDisconnected = false;
   private closeState: "open" | "closing" | "closed" | "cleanup-failed" = "open";
   private closePromise: Promise<void> | undefined;
+  private readonly downloadDenials: DownloadDenialEvent[] = [];
+  private removeDownloadDenial: (() => void) | undefined;
 
   private constructor(
     readonly hostId: string,
@@ -85,8 +89,10 @@ export class ChromeHost extends EventEmitter {
       const cdp = await CdpConnection.connect(`ws://127.0.0.1:${port}${browserPath}`, { timeoutMs: 5_000, ...(signal ? { signal } : {}) });
       await cdp.send("Browser.getVersion", {}, undefined, signal ? { signal } : {});
       await cdp.send("Target.setDiscoverTargets", { discover: true }, undefined, signal ? { signal } : {});
+      const host = new ChromeHost(options.hostId, executable, manager.baseRoot, lease.directory, lease, child, cdp, startedAt);
+      host.removeDownloadDenial = await installDownloadDenial(cdp, (event) => host.recordDownloadDenial(event), () => { void host.close(); }, signal);
       signal?.throwIfAborted();
-      return new ChromeHost(options.hostId, executable, manager.baseRoot, lease.directory, lease, child, cdp, startedAt);
+      return host;
     } catch (error) {
       if (child !== undefined) await stopChild(child);
       await lease.remove().catch(() => undefined);
@@ -98,6 +104,7 @@ export class ChromeHost extends EventEmitter {
 
   get running(): boolean { return !this.processExited && isRunning(this.child); }
   get connected(): boolean { return !this.cdpDisconnected && this.cdp.connected; }
+  get deniedDownloads(): readonly DownloadDenialEvent[] { return [...this.downloadDenials]; }
 
   async close(): Promise<void> {
     if (this.closeState === "closed") return;
@@ -126,12 +133,33 @@ export class ChromeHost extends EventEmitter {
       await waitForExit(this.child, 1_000);
     }
     if (this.running) failures.push(new BrowserProtocolError("BROWSER_EXITED", "Chrome did not settle during cleanup.", true));
+    this.removeDownloadDenial?.();
+    this.removeDownloadDenial = undefined;
     try { this.cdp.close(); } catch (error) { failures.push(error); }
     try { await this.lease.remove(); } catch (error) { failures.push(error); }
     if (failures.length > 0) throw new AggregateError(failures, "Chrome cleanup failed.");
   }
 
   killForTest(signal: NodeJS.Signals = "SIGKILL"): void { if (this.running) this.child.kill(signal); }
+
+  private recordDownloadDenial(event: DownloadDenialEvent): void {
+    this.downloadDenials.push(event);
+    while (this.downloadDenials.length > 32) this.downloadDenials.shift();
+    this.emit("downloadDenied", event);
+  }
+}
+
+export async function installDownloadDenial(cdp: CdpConnection, onDenied: (event: DownloadDenialEvent) => void, failClosed: () => void, signal?: AbortSignal): Promise<() => void> {
+  const listener = (event: CdpEvent): void => {
+    if (event.method !== "Browser.downloadWillBegin") return;
+    const guid = typeof event.params.guid === "string" && event.params.guid.length > 0 && event.params.guid.length <= 256 ? event.params.guid : "invalid-download-guid";
+    onDenied({ code: "DOWNLOAD_DENIED", guid, state: "cancel-requested" });
+    void cdp.send("Browser.cancelDownload", { guid }, undefined, { timeoutMs: 1_000 }).catch(() => { onDenied({ code: "DOWNLOAD_DENIED", guid, state: "cancel-failed" }); failClosed(); });
+  };
+  cdp.on("event", listener);
+  try { await cdp.send("Browser.setDownloadBehavior", { behavior: "deny", eventsEnabled: true }, undefined, signal ? { signal } : {}); }
+  catch (error) { cdp.off("event", listener); throw new BrowserProtocolError("BROWSER_START_FAILED", "Chrome cannot enforce download denial.", false); }
+  return () => cdp.off("event", listener);
 }
 
 export async function findChromeExecutable(configured = process.env.BROWSERD_CHROME_BIN): Promise<string> {

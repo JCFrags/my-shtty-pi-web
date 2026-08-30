@@ -29,6 +29,7 @@ export interface BrowserRuntimeOptions {
   /** @deprecated Use screenshotObservationTtlMs. */
   observationFreshnessMsForTest?: number;
   egressConfigured?: boolean;
+  egressBindingId?: string;
   requireEgressForSessions?: boolean;
 }
 
@@ -52,6 +53,7 @@ export class BrowserRuntime extends EventEmitter {
   private readonly screenshotObservationTtlMs: number;
   private readonly domObservationTtlMs: number;
   private readonly egressConfigured: boolean;
+  private readonly egressBindingId: string | undefined;
   private readonly requireEgressForSessions: boolean;
 
   constructor(options: BrowserRuntimeOptions = {}) {
@@ -69,6 +71,8 @@ export class BrowserRuntime extends EventEmitter {
     this.screenshotObservationTtlMs = observationTtl(options.screenshotObservationTtlMs ?? options.observationFreshnessMsForTest ?? DEFAULT_SCREENSHOT_OBSERVATION_TTL_MS, "Screenshot observation TTL");
     this.domObservationTtlMs = observationTtl(options.domObservationTtlMs ?? DEFAULT_DOM_OBSERVATION_TTL_MS, "DOM observation TTL");
     this.egressConfigured = options.egressConfigured ?? options.chrome?.egressProxy !== undefined;
+    const proxy = options.chrome?.egressProxy;
+    this.egressBindingId = options.egressBindingId ?? (proxy === undefined ? undefined : `forward-proxy://${proxy.host === "::1" ? "[::1]" : proxy.host}:${proxy.port}`);
     this.requireEgressForSessions = options.requireEgressForSessions ?? false;
   }
 
@@ -219,6 +223,7 @@ export class BrowserRuntime extends EventEmitter {
       displayAvailable,
       profileRootUsable,
       egressConfigured: this.egressConfigured,
+      ...(this.egressBindingId === undefined ? {} : { egressBindingId: this.egressBindingId }),
       runtimeState,
       sessionCapacity: { current, limit: this.maxSessionsGlobal, available: availableCapacity },
     };

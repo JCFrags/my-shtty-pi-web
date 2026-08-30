@@ -261,6 +261,7 @@ const capabilityResult = Type.Object({
   displayAvailable: Type.Boolean(),
   profileRootUsable: Type.Boolean(),
   egressConfigured: Type.Boolean(),
+  egressBindingId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
   runtimeState: Type.Union([Type.Literal("open"), Type.Literal("closing"), Type.Literal("cleanup-failed")]),
   sessionCapacity: Type.Object({ current: Type.Integer({ minimum: 0, maximum: 256 }), limit: Type.Integer({ minimum: 1, maximum: 256 }), available: Type.Integer({ minimum: 0, maximum: 256 }) }, strict),
 }, strict);

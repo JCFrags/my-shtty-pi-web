@@ -126,7 +126,7 @@ class PrivateBrowserdFixture {
       this.success(socket, request, {
         kind: "capabilities", available: true, headed: true, screenshotFirst: true, domFallback: true,
         virtualMouse: true, osMouse: false, executableAvailable: true, displayAvailable: true,
-        profileRootUsable: true, egressConfigured: true, runtimeState: "open",
+        profileRootUsable: true, egressConfigured: true, egressBindingId: "test-route-proxy", runtimeState: "open",
         sessionCapacity: { current: this.sessionCount(), limit: 8, available: 8 - this.sessionCount() },
       });
       return;
@@ -270,6 +270,7 @@ describe("actual AgentCursor WebX Unix route", () => {
       browserDescriptorPath: browserd.descriptorPath,
       browserRuntimeDirectory: directory,
       browserDestinationAuthority: {
+        egressBindingId: "test-route-proxy",
         assertReady: async () => undefined,
         authorize: async ({ url }) => ({ mode: "egress-bound", normalizedUrl: url, asciiHostname: new URL(url).hostname, port: 443, resolvedAddresses: ["93.184.216.34"], redirectPolicy: { revalidateEveryHop: true, maxRedirects: 10 }, egressBindingId: "test-route-proxy" }),
       },

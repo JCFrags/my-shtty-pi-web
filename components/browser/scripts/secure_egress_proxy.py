@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import os
+import re
 import socket
 from urllib.parse import urlsplit
 
@@ -19,6 +20,8 @@ PORT = int(os.getenv("PI_WEB_EGRESS_PORT", "8877"))
 HEADER_LIMIT = 64 * 1024
 CONNECT_TIMEOUT = 15.0
 IDLE_TIMEOUT = 120.0
+HEALTH_TARGET = "http://webx-egress.invalid/.well-known/webx-egress-health"
+CONNECT_AUTHORITY = re.compile(r"^(?:\[[0-9A-Fa-f:.]+\]|[^\[\]:/?#@\s]+)(?::[0-9]{1,5})?$")
 
 
 class ProxyDenied(Exception):
@@ -82,6 +85,8 @@ async def open_pinned(host: str, port: int) -> tuple[asyncio.StreamReader, async
 
 
 def parse_authority(authority: str, default_port: int) -> tuple[str, int]:
+    if not CONNECT_AUTHORITY.fullmatch(authority):
+        raise ProxyDenied("CONNECT requires strict authority-form")
     parsed = urlsplit(f"//{authority}")
     if parsed.username is not None or parsed.password is not None:
         raise ProxyDenied("destination credentials denied")
@@ -134,6 +139,14 @@ async def handle_connect(
     await tunnel(reader, writer, remote_reader, remote_writer)
 
 
+def format_host_header(host: str, port: int, default_port: int = 80) -> str:
+    try:
+        literal = f"[{host}]" if ipaddress.ip_address(host).version == 6 else host
+    except ValueError:
+        literal = host
+    return literal if port == default_port else f"{literal}:{port}"
+
+
 async def handle_http(
     method: str,
     target: str,
@@ -161,7 +174,7 @@ async def handle_http(
         name = line.split(b":", 1)[0].strip().lower()
         if name not in {b"proxy-authorization", b"proxy-connection", b"host", b"connection"}:
             retained.append(line)
-    host_header = host if port == 80 else f"{host}:{port}"
+    host_header = format_host_header(host, port)
     request = [f"{method} {path} {version}\r\n".encode(), f"Host: {host_header}\r\n".encode()]
     request.extend(line + b"\r\n" for line in retained)
     request.append(b"Connection: close\r\n\r\n")
@@ -182,7 +195,15 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
         method, target, version = parts
         if version not in {"HTTP/1.0", "HTTP/1.1"}:
             raise ProxyDenied("HTTP version denied")
-        if method.upper() == "CONNECT":
+        if method == "GET" and target == HEALTH_TARGET:
+            writer.write(
+                b"HTTP/1.1 204 No Content\r\n"
+                b"WebX-Egress-Proxy: secure-egress/1\r\n"
+                b"Content-Length: 0\r\n"
+                b"Connection: close\r\n\r\n"
+            )
+            await writer.drain()
+        elif method.upper() == "CONNECT":
             await handle_connect(target, reader, writer)
         else:
             await handle_http(method, target, version, lines[1:], reader, writer)

@@ -27,6 +27,7 @@ export interface BrowserDestinationAuthorization {
 }
 
 export interface BrowserDestinationAuthority {
+  readonly egressBindingId?: string;
   assertReady(signal?: AbortSignal): Promise<void>;
   authorize(request: BrowserDestinationRequest, signal?: AbortSignal): Promise<BrowserDestinationAuthorization>;
 }
@@ -55,6 +56,8 @@ export class SystemDestinationResolver implements DestinationResolver {
  * redirects, so this class never treats them as sufficient authority.
  */
 export class ProxyBoundBrowserDestinationAuthority implements BrowserDestinationAuthority {
+  readonly egressBindingId: string;
+
   constructor(
     private readonly proxyHost: string,
     private readonly proxyPort: number,
@@ -62,6 +65,7 @@ export class ProxyBoundBrowserDestinationAuthority implements BrowserDestination
   ) {
     if (proxyHost !== "127.0.0.1" && proxyHost !== "::1") throw new Error("browser egress proxy must use a loopback listener");
     if (!Number.isInteger(proxyPort) || proxyPort < 1 || proxyPort > 65535) throw new Error("browser egress proxy port is invalid");
+    this.egressBindingId = `forward-proxy://${proxyHost === "::1" ? "[::1]" : proxyHost}:${proxyPort}`;
   }
 
   async assertReady(signal?: AbortSignal): Promise<void> {
@@ -90,7 +94,7 @@ export class ProxyBoundBrowserDestinationAuthority implements BrowserDestination
       port: destination.port,
       resolvedAddresses: Object.freeze([...addresses]),
       redirectPolicy: Object.freeze({ revalidateEveryHop: true, maxRedirects: 10 }),
-      egressBindingId: `forward-proxy://${this.proxyHost === "::1" ? "[::1]" : this.proxyHost}:${this.proxyPort}`,
+      egressBindingId: this.egressBindingId,
     });
   }
 }
@@ -146,29 +150,38 @@ async function probeProxy(host: string, port: number, signal?: AbortSignal): Pro
   if (signal?.aborted) throw new DOMException("egress probe was cancelled", "AbortError");
   await new Promise<void>((resolve, reject) => {
     const socket = createConnection({ host, port });
-    const timeout = setTimeout(() => {
-      socket.destroy();
-      reject(new BrowserPortError("WEBX_EGRESS_UNAVAILABLE", "browser egress proxy is unavailable", 503, true));
-    }, 1_000);
-    const abort = () => {
-      clearTimeout(timeout);
-      socket.destroy();
-      reject(new DOMException("egress probe was cancelled", "AbortError"));
-    };
-    const error = () => {
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let settled = false;
+    const unavailable = () => new BrowserPortError("WEBX_EGRESS_UNAVAILABLE", "browser egress proxy failed its functional readiness probe", 503, true);
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timeout);
       signal?.removeEventListener("abort", abort);
-      reject(new BrowserPortError("WEBX_EGRESS_UNAVAILABLE", "browser egress proxy is unavailable", 503, true));
+      socket.removeAllListeners();
+      socket.destroy();
+      if (error === undefined) resolve(); else reject(error);
     };
+    const validate = () => {
+      const response = Buffer.concat(chunks).toString("latin1");
+      const boundary = response.indexOf("\r\n\r\n");
+      if (boundary < 0) return;
+      const lines = response.slice(0, boundary).split("\r\n");
+      if (lines.shift() !== "HTTP/1.1 204 No Content") { finish(unavailable()); return; }
+      const headers = new Map(lines.map((line) => { const index = line.indexOf(":"); return index <= 0 ? ["", ""] : [line.slice(0, index).trim().toLowerCase(), line.slice(index + 1).trim()]; }));
+      if (headers.get("webx-egress-proxy") !== "secure-egress/1" || headers.get("content-length") !== "0" || response.length !== boundary + 4) { finish(unavailable()); return; }
+      finish();
+    };
+    const timeout = setTimeout(() => finish(unavailable()), 1_000);
+    timeout.unref?.();
+    const abort = () => finish(new DOMException("egress probe was cancelled", "AbortError"));
     signal?.addEventListener("abort", abort, { once: true });
-    socket.once("error", error);
-    socket.once("connect", () => {
-      clearTimeout(timeout);
-      signal?.removeEventListener("abort", abort);
-      socket.off("error", error);
-      socket.end();
-      resolve();
-    });
+    socket.once("error", () => finish(unavailable()));
+    socket.on("data", (chunk: Buffer) => { bytes += chunk.byteLength; if (bytes > 4_096) { finish(unavailable()); return; } chunks.push(chunk); validate(); });
+    socket.once("end", () => { if (!settled) validate(); if (!settled) finish(unavailable()); });
+    socket.once("connect", () => socket.write("GET http://webx-egress.invalid/.well-known/webx-egress-health HTTP/1.1\r\nHost: webx-egress.invalid\r\nConnection: close\r\n\r\n"));
+    if (signal?.aborted) abort();
   });
 }
 

@@ -2001,6 +2001,11 @@
                     "egressConfigured": {
                       "type": "boolean"
                     },
+                    "egressBindingId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
                     "runtimeState": {
                       "anyOf": [
                         {

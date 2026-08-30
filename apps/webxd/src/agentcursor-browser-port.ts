@@ -52,7 +52,9 @@ export class AgentCursorBrowserPort implements BrowserDaemonPort {
   async capabilities(signal?: AbortSignal): Promise<readonly BrowserPathCapability[]> {
     try {
       const result = record(await this.client.request(healthActor(), operationId("capabilities"), { kind: "capabilities.get" }, signal));
-      return result.available === true ? [PATH] : [];
+      await this.destinationAuthority.assertReady(signal);
+      const expectedBinding = this.destinationAuthority.egressBindingId;
+      return result.available === true && expectedBinding !== undefined && result.egressBindingId === expectedBinding ? [PATH] : [];
     } catch (error) { if (signal?.aborted) throw error; return []; }
   }
 
