@@ -99,6 +99,32 @@ impl WorkspaceClientService {
 
 impl Drop for WorkspaceClientService { fn drop(&mut self) { self.stop_task(); } }
 
+enum PendingSelectionEvidence {
+    Selected(SelectedTab),
+    Cleared,
+}
+
+#[derive(Default)]
+struct SelectionEvidenceGate {
+    pending: Option<PendingSelectionEvidence>,
+}
+
+impl SelectionEvidenceGate {
+    fn stage(&mut self, evidence: PendingSelectionEvidence, frame_inflight: bool) -> Option<PendingSelectionEvidence> {
+        if frame_inflight {
+            self.pending = Some(evidence);
+            None
+        } else {
+            self.pending = None;
+            Some(evidence)
+        }
+    }
+
+    fn settle_frame(&mut self) -> Option<PendingSelectionEvidence> {
+        self.pending.take()
+    }
+}
+
 struct Worker {
     shared: SharedPublicState,
     state_channel: Channel<FrontendStateRecord>,
@@ -112,6 +138,7 @@ struct Worker {
     inflight_delivery_id: Option<u64>,
     inflight_header: Option<FrameHeader>,
     pending_frame: Option<(FrameHeader, Vec<u8>)>,
+    selection_evidence_gate: SelectionEvidenceGate,
     dropped: u64,
     last_frame_sequence: u64,
     pending_launch_selection: Arc<Mutex<Option<(String, Option<String>)>>>,
@@ -120,7 +147,7 @@ struct Worker {
 
 impl Worker {
     fn new(shared: SharedPublicState, state_channel: Channel<FrontendStateRecord>, frame_channel: Channel<Response>, commands: mpsc::Receiver<ClientCommand>, pending_launch_selection: Arc<Mutex<Option<(String, Option<String>)>>>, acceptance: AcceptanceDiagnostics) -> Self {
-        Self { shared, state_channel, frame_channel, commands, selected: None, transport: None, webxd_runtime_instance_id: None, browserd_runtime_instance_id: None, next_delivery_id: 1, inflight_delivery_id: None, inflight_header: None, pending_frame: None, dropped: 0, last_frame_sequence: 0, pending_launch_selection, acceptance }
+        Self { shared, state_channel, frame_channel, commands, selected: None, transport: None, webxd_runtime_instance_id: None, browserd_runtime_instance_id: None, next_delivery_id: 1, inflight_delivery_id: None, inflight_header: None, pending_frame: None, selection_evidence_gate: SelectionEvidenceGate::default(), dropped: 0, last_frame_sequence: 0, pending_launch_selection, acceptance }
     }
 
     async fn run(mut self) {
@@ -187,7 +214,7 @@ impl Worker {
                 let mut fields = BTreeMap::new(); fields.insert("browserSessionId", json!(browser_session_id)); fields.insert("tabId", json!(tab_id)); fields.insert("selectionId", json!(selection_id));
                 match self.request("frame.select", fields).await {
                     Ok(ResponseResult::Selection { selection_id, browser_session_id, tab_id }) => {
-                        let selected = SelectedTab { selection_id, browser_session_id, tab_id }; self.acceptance.selection(&selected.selection_id, &selected.browser_session_id, &selected.tab_id); self.selected = Some(selected.clone()); self.update_selected(Some(selected.clone())).await; self.send_state(FrontendStateRecord::Selection { selected })?;
+                        let selected = SelectedTab { selection_id, browser_session_id, tab_id }; self.selected = Some(selected.clone()); self.update_selected(Some(selected.clone())).await; self.send_state(FrontendStateRecord::Selection { selected: selected.clone() })?; self.record_selection_evidence(PendingSelectionEvidence::Selected(selected));
                     }
                     Ok(_) => return Err(WorkspaceError::Protocol),
                     Err(error) => {
@@ -232,7 +259,7 @@ impl Worker {
                     Ok(ResponseResult::Selection { selection_id, browser_session_id, tab_id }) => {
                         let selected = SelectedTab { selection_id: selection_id.clone(), browser_session_id: browser_session_id.clone(), tab_id: tab_id.clone() };
                         *self.pending_launch_selection.lock().expect("workspace launch selection lock") = None;
-                        self.acceptance.selection(&selected.selection_id, &selected.browser_session_id, &selected.tab_id); self.selected = Some(selected.clone()); self.update_selected(Some(selected.clone())).await; let _ = self.send_state(FrontendStateRecord::Selection { selected });
+                        self.pending_frame = None; self.selected = Some(selected.clone()); self.update_selected(Some(selected.clone())).await; let _ = self.send_state(FrontendStateRecord::Selection { selected: selected.clone() }); self.record_selection_evidence(PendingSelectionEvidence::Selected(selected));
                         Ok(SelectionResult { selection_id, browser_session_id, tab_id })
                     }
                     Ok(_) => Err(WorkspaceError::Protocol.public()),
@@ -323,12 +350,25 @@ impl Worker {
         let rust_retained_frames = 1 + u8::from(self.pending_frame.is_some());
         if let Some(header) = self.inflight_header.take() { self.acceptance.frame_settled(delivery_id, &header, &disposition, rust_retained_frames); }
         self.inflight_delivery_id = None;
+        self.flush_selection_evidence();
         if let Some((header, payload)) = self.pending_frame.take() { self.send_frame(header, payload)?; } else { self.update_frame_metrics(); }
         Ok(())
     }
 
     async fn clear_local_selection(&mut self) {
-        self.selected = None; self.pending_frame = None; self.last_frame_sequence = 0; self.acceptance.selection_cleared(); self.update_selected(None).await; let _ = self.send_state(FrontendStateRecord::SelectionCleared);
+        self.selected = None; self.pending_frame = None; self.last_frame_sequence = 0; self.update_selected(None).await; let _ = self.send_state(FrontendStateRecord::SelectionCleared); self.record_selection_evidence(PendingSelectionEvidence::Cleared);
+    }
+    fn record_selection_evidence(&mut self, evidence: PendingSelectionEvidence) {
+        if let Some(evidence) = self.selection_evidence_gate.stage(evidence, self.inflight_delivery_id.is_some()) { self.emit_selection_evidence(evidence); }
+    }
+    fn flush_selection_evidence(&mut self) {
+        if let Some(evidence) = self.selection_evidence_gate.settle_frame() { self.emit_selection_evidence(evidence); }
+    }
+    fn emit_selection_evidence(&self, evidence: PendingSelectionEvidence) {
+        match evidence {
+            PendingSelectionEvidence::Selected(selected) => self.acceptance.selection(&selected.selection_id, &selected.browser_session_id, &selected.tab_id),
+            PendingSelectionEvidence::Cleared => self.acceptance.selection_cleared(),
+        }
     }
     async fn update_selected(&self, selected: Option<SelectedTab>) { self.shared.0.write().await.selected = selected; }
     async fn set_connection(&self, connection: &str) { self.acceptance.connection(connection); let mut state = self.shared.0.write().await; state.connection = connection.to_owned(); let _ = self.send_state(FrontendStateRecord::Current { state: state.clone() }); }
@@ -360,6 +400,15 @@ mod tests {
     fn validates_selection_ids_without_paths_or_urls() {
         assert!(protocol::valid_id("session:one")); assert!(protocol::valid_id("tab-one"));
         assert!(!protocol::valid_id("/tmp/socket")); assert!(!protocol::valid_id("https://example.test"));
+    }
+
+    #[test]
+    fn selection_barrier_waits_for_the_prior_frontend_frame_to_settle() {
+        let mut gate = SelectionEvidenceGate::default();
+        let selected = SelectedTab { selection_id: "selection-one".into(), browser_session_id: "session-one".into(), tab_id: "tab-one".into() };
+        assert!(gate.stage(PendingSelectionEvidence::Selected(selected), true).is_none());
+        assert!(matches!(gate.settle_frame(), Some(PendingSelectionEvidence::Selected(selected)) if selected.selection_id == "selection-one"));
+        assert!(matches!(gate.stage(PendingSelectionEvidence::Cleared, false), Some(PendingSelectionEvidence::Cleared)));
     }
 
     #[tokio::test]
