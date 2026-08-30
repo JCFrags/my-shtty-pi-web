@@ -329,6 +329,72 @@ describe("actual WebX Unix runtime", () => {
     await closed;
   });
 
+  it("runs every shutdown stage, shares concurrent attempts, retries residue, and stays one-shot", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "webxd-cleanup-final-"));
+    const previousRuntimeDirectory = process.env.XDG_RUNTIME_DIR;
+    process.env.XDG_RUNTIME_DIR = directory;
+    cleanup.push(async () => { process.env.XDG_RUNTIME_DIR = previousRuntimeDirectory; });
+    const webxPath = join(directory, "webxd.sock");
+    const stageCalls: string[] = [];
+    const runtime = new WebxdRuntime({
+      socketPath: webxPath,
+      browserSocketPath: join(directory, "unused-browserd.sock"),
+      authenticateActor: sameUserPiActorAuthenticator,
+      cleanupStageForTest: (stage, attempt) => {
+        stageCalls.push(`${attempt}:${stage}`);
+        if (stage === "browser" && attempt === 1) throw new Error("injected browser cleanup failure");
+      },
+    });
+    await runtime.start();
+    cleanup.push(async () => runtime.stop().catch(() => undefined));
+    const client = await rawConnect(webxPath);
+    await rawExchange(client, [Buffer.from(`${JSON.stringify({ bind: { ownerId: "cleanup-owner" } })}\n`)]);
+    expect(runtime.diagnostics).toMatchObject({ clientConnections: 1, liveBindings: 1 });
+
+    const first = runtime.stop();
+    const concurrent = runtime.stop();
+    await expect(first).rejects.toBeInstanceOf(AggregateError);
+    await expect(concurrent).rejects.toBeInstanceOf(AggregateError);
+    expect(stageCalls).toEqual(["1:clients", "1:server", "1:bindings", "1:browser", "1:socket"]);
+    expect(runtime.diagnostics).toMatchObject({ clientConnections: 0, liveBindings: 0 });
+    await expect(stat(webxPath)).rejects.toMatchObject({ code: "ENOENT" });
+
+    await runtime.stop();
+    expect(stageCalls).toEqual(["1:clients", "1:server", "1:bindings", "1:browser", "1:socket", "2:browser"]);
+    await expect(runtime.start()).rejects.toThrow("cannot restart");
+  });
+
+  it("does not unlink a replacement socket while retrying failed socket cleanup", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "webxd-replacement-safe-"));
+    const previousRuntimeDirectory = process.env.XDG_RUNTIME_DIR;
+    process.env.XDG_RUNTIME_DIR = directory;
+    cleanup.push(async () => { process.env.XDG_RUNTIME_DIR = previousRuntimeDirectory; });
+    const webxPath = join(directory, "webxd.sock");
+    const oldRuntime = new WebxdRuntime({
+      socketPath: webxPath,
+      browserSocketPath: join(directory, "unused-old-browserd.sock"),
+      authenticateActor: sameUserPiActorAuthenticator,
+      cleanupStageForTest: (stage, attempt) => { if (stage === "socket" && attempt === 1) throw new Error("injected socket cleanup failure"); },
+    });
+    await oldRuntime.start();
+    cleanup.push(async () => oldRuntime.stop().catch(() => undefined));
+    await expect(oldRuntime.stop()).rejects.toBeInstanceOf(AggregateError);
+    await expect(stat(webxPath)).rejects.toMatchObject({ code: "ENOENT" });
+
+    const replacement = new WebxdRuntime({ socketPath: webxPath, browserSocketPath: join(directory, "unused-new-browserd.sock"), authenticateActor: sameUserPiActorAuthenticator });
+    await replacement.start();
+    cleanup.push(async () => replacement.stop().catch(() => undefined));
+    const replacementIdentity = await stat(webxPath);
+    await oldRuntime.stop();
+    const afterRetry = await stat(webxPath);
+    expect(afterRetry.isSocket()).toBe(true);
+    expect({ dev: afterRetry.dev, ino: afterRetry.ino }).toEqual({ dev: replacementIdentity.dev, ino: replacementIdentity.ino });
+    const client = await rawConnect(webxPath);
+    client.destroy();
+    await replacement.stop();
+    await expect(stat(webxPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("refuses actual Unix browser URL requests before Browserd dispatch", async () => {
     const directory = await mkdtemp(join(tmpdir(), "webxd-ssrf-"));
     const previousRuntimeDirectory = process.env.XDG_RUNTIME_DIR;

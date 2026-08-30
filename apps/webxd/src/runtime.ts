@@ -51,7 +51,13 @@ export interface WebxdRuntimeOptions {
   readonly maxOutboundBytesPerClient?: number;
   /** Test-only fault injection. Production entry points never set this option. */
   readonly dropResponseForIdempotencyKeyForTest?: string;
+  /** Test-only cleanup fault injection. Production entry points never set this option. */
+  readonly cleanupStageForTest?: (stage: WebxdCleanupStage, attempt: number) => void | Promise<void>;
 }
+
+export type WebxdCleanupStage = "clients" | "server" | "bindings" | "browser" | "socket";
+type SocketIdentity = { readonly dev: number; readonly ino: number };
+type CleanupState = Record<WebxdCleanupStage, boolean>;
 
 /** Runnable same-user Unix API for the complete local WebX authority. */
 export class WebxdRuntime {
@@ -59,6 +65,8 @@ export class WebxdRuntime {
   readonly #authority: WebxAuthority;
   readonly #clients = new Set<Socket>();
   readonly #bindings = new Map<string, ActorBinding>();
+  readonly #controllers = new Set<AbortController>();
+  readonly #requestTasks = new Set<Promise<void>>();
   readonly #maxClientConnections: number;
   readonly #bindTimeoutMs: number;
   readonly #maxLiveBindings: number;
@@ -66,6 +74,12 @@ export class WebxdRuntime {
   readonly #maxOutboundBytesPerClient: number;
   #server?: Server;
   #started = false;
+  #everStopped = false;
+  #stopState: "open" | "stopping" | "stopped" | "cleanup-failed" = "open";
+  #stopPromise?: Promise<void>;
+  #stopAttempt = 0;
+  #socketIdentity?: SocketIdentity;
+  #cleanupState: CleanupState = { clients: false, server: false, bindings: false, browser: false, socket: false };
   #testResponseDropped = false;
 
   constructor(private readonly options: WebxdRuntimeOptions) {
@@ -115,6 +129,7 @@ export class WebxdRuntime {
   }
 
   async start(): Promise<void> {
+    if (this.#everStopped) throw new Error("A stopped WebX runtime object cannot restart");
     if (this.#started) return;
     assertSameUserRuntimeDirectory(this.options.socketPath);
     await prepareSocket(this.options.socketPath);
@@ -124,21 +139,61 @@ export class WebxdRuntime {
       server.listen(this.options.socketPath, resolve);
     });
     await chmod(this.options.socketPath, 0o600);
+    const info = await lstat(this.options.socketPath);
+    if (!info.isSocket()) throw new Error("WebX endpoint is not a Unix socket");
+    this.#socketIdentity = { dev: info.dev, ino: info.ino };
+    this.#cleanupState = { clients: false, server: false, bindings: false, browser: false, socket: false };
     this.#server = server;
     this.#started = true;
   }
 
   async stop(): Promise<void> {
-    if (!this.#started) return;
+    this.#everStopped = true;
     this.#started = false;
-    for (const client of this.#clients) client.destroy();
-    this.#clients.clear();
-    const server = this.#server;
-    this.#server = undefined;
-    if (server !== undefined) await closeServer(server);
-    this.#bindings.clear();
-    await this.#browser.shutdown();
-    await unlink(this.options.socketPath).catch((error: unknown) => { if (!isMissing(error)) throw error; });
+    if (this.#stopState === "stopped") return;
+    if (this.#stopPromise !== undefined) return await this.#stopPromise;
+    this.#stopState = "stopping";
+    const promise = this.stopInternal();
+    this.#stopPromise = promise;
+    try { await promise; this.#stopState = "stopped"; }
+    catch (error) { this.#stopState = "cleanup-failed"; throw error; }
+    finally { if (this.#stopPromise === promise) this.#stopPromise = undefined; }
+  }
+
+  private async stopInternal(): Promise<void> {
+    const attempt = ++this.#stopAttempt;
+    const failures: unknown[] = [];
+    await this.cleanupStage("clients", attempt, async () => {
+      const clients = [...this.#clients];
+      const closed = clients.map(async (client) => {
+        if (client.destroyed) return;
+        await new Promise<void>((resolve) => { client.once("close", resolve); client.destroy(); });
+      });
+      for (const controller of this.#controllers) controller.abort(new Error("WebX runtime is stopping"));
+      await Promise.all(closed);
+      await Promise.allSettled([...this.#requestTasks]);
+      this.#clients.clear();
+      this.#controllers.clear();
+      this.#requestTasks.clear();
+    }, failures);
+    await this.cleanupStage("server", attempt, async () => {
+      const server = this.#server;
+      if (server !== undefined) await closeServer(server);
+      this.#server = undefined;
+    }, failures);
+    await this.cleanupStage("bindings", attempt, async () => { this.#bindings.clear(); }, failures);
+    await this.cleanupStage("browser", attempt, async () => { await this.#browser.shutdown(); }, failures);
+    await this.cleanupStage("socket", attempt, async () => { await unlinkOwnedSocket(this.options.socketPath, this.#socketIdentity); }, failures);
+    if (failures.length > 0) throw new AggregateError(failures, "WebX runtime shutdown cleanup failed.");
+  }
+
+  private async cleanupStage(stage: WebxdCleanupStage, attempt: number, action: () => Promise<void>, failures: unknown[]): Promise<void> {
+    if (this.#cleanupState[stage]) return;
+    try {
+      await this.options.cleanupStageForTest?.(stage, attempt);
+      await action();
+      this.#cleanupState[stage] = true;
+    } catch (error) { failures.push(error); }
   }
 
   private accept(socket: Socket): void {
@@ -170,10 +225,11 @@ export class WebxdRuntime {
         if (line.trim().length === 0) continue;
         if (queuedRequests >= this.#maxQueuedRequestsPerClient) { writeResponse(failure(429, "request-capacity", "WebX client request capacity is full")); socket.destroy(); return; }
         queuedRequests += 1;
-        chain = chain.then(async () => {
+        const task = chain.then(async () => {
           if (closed) return;
           const controller = new AbortController();
           controllers.add(controller);
+          this.#controllers.add(controller);
           try {
             const parsed = JSON.parse(line) as unknown;
             if (isBindRequest(parsed)) {
@@ -192,8 +248,12 @@ export class WebxdRuntime {
             writeResponse(failure(400, "invalid-wire-request", safeError(error)));
           } finally {
             controllers.delete(controller);
+            this.#controllers.delete(controller);
           }
         }).finally(() => { queuedRequests -= 1; });
+        this.#requestTasks.add(task);
+        void task.then(() => this.#requestTasks.delete(task), () => this.#requestTasks.delete(task));
+        chain = task;
       }
     });
     socket.on("error", () => undefined);
@@ -204,6 +264,7 @@ export class WebxdRuntime {
       this.#clients.delete(socket);
       if (bindingId !== undefined && this.#bindings.get(bindingId)?.client === socket) this.#bindings.delete(bindingId);
       for (const controller of controllers) controller.abort();
+      for (const controller of controllers) this.#controllers.delete(controller);
     });
   }
 
@@ -454,6 +515,13 @@ async function prepareSocket(path: string): Promise<void> {
     catch (error) { probe.destroy(); if (error instanceof Error && error.message.startsWith("WebX is already")) throw error; await unlink(path); }
   } catch (error) { if (!isMissing(error)) throw error; }
 }
-function closeServer(server: Server): Promise<void> { return new Promise((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error))); }
+function closeServer(server: Server): Promise<void> { if (!server.listening) return Promise.resolve(); return new Promise((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error))); }
+async function unlinkOwnedSocket(path: string, expected: SocketIdentity | undefined): Promise<void> {
+  const current = await lstat(path).catch((error: unknown) => { if (isMissing(error)) return undefined; throw error; });
+  if (current === undefined || expected === undefined) return;
+  if (current.dev !== expected.dev || current.ino !== expected.ino) return;
+  if (!current.isSocket()) throw new Error("Owned WebX endpoint changed type during cleanup");
+  await unlink(path).catch((error: unknown) => { if (!isMissing(error)) throw error; });
+}
 function isMissing(error: unknown): boolean { return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "ENOENT"; }
 function boundedInteger(value: number, minimum: number, maximum: number, name: string): number { if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw new Error(`${name} bound is invalid`); return value; }
