@@ -67,13 +67,6 @@ export function App({ bridge: suppliedBridge, initialState }: AppProps) {
     }
   }, [bridge, renderer, selectionPending]);
 
-  useEffect(() => {
-    if (view.status.connection !== "ready" || view.publicState.selected || selectionPending) return;
-    const session = sessions.find((candidate) => candidate.state !== "closed" && candidate.tabs.some((tab) => tab.state === "ready"));
-    const tab = session?.tabs.find((candidate) => candidate.state === "ready");
-    if (session && tab) void select(session, tab);
-  }, [select, selectionPending, sessions, view.publicState.selected, view.status.connection]);
-
   const frameAgeMs = renderer.metrics.metadata ? Math.max(0, now - Date.parse(renderer.metrics.metadata.capturedAt)) : undefined;
   const viewportState = deriveViewportState(selected?.tab, Boolean(selectionPending), renderer.metrics, frameAgeMs);
   const agents = groupAgents(sessions);

@@ -28,7 +28,7 @@ const runtimeGlobals = Object.fromEntries(
 
 export default tseslint.config(
   {
-    ignores: ["**/node_modules/**", "**/.venv/**", "**/dist/**", "**/coverage/**"],
+    ignores: ["**/node_modules/**", "**/.venv/**", "**/dist/**", "**/coverage/**", "**/target/**"],
   },
   eslint.configs.recommended,
   ...tseslint.configs.strict,
@@ -43,6 +43,7 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
       "no-control-regex": "off",
       "no-empty": "off",
+      "no-unused-private-class-members": "off",
       "preserve-caught-error": "off",
     },
   },

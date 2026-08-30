@@ -2615,6 +2615,7 @@ dependencies = [
 name = "pi-browser-workspace"
 version = "0.1.0"
 dependencies = [
+ "cairo-rs",
  "chrono",
  "serde",
  "serde_json",
@@ -2626,6 +2627,7 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "uuid",
+ "webkit2gtk",
 ]
 
 [[package]]

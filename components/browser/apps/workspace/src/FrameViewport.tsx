@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import {
   decodeFrameEnvelope,
+  frontendBinaryType,
   verifyFrameDigest,
+  type FrameDisposition,
+  type FrameDispositionCore,
   type FrameMetadata,
   type PublicWorkspaceState,
   type WorkspaceApi,
@@ -89,7 +92,10 @@ export function useFrameRenderer(bridge: WorkspaceApi, publicState: PublicWorksp
 
   const handleFrame = useCallback(async (record: ArrayBuffer) => {
     const frontendReceived = performance.now();
+    const receivedType = frontendBinaryType(record);
     let deliveryId: number | undefined;
+    let disposition: FrameDispositionCore = { outcome: "dropped", frontendType: receivedType, reason: "malformed" };
+    let maximumFrontendImageBitmaps: 0 | 1 = 0;
     let frame;
     try {
       frame = decodeFrameEnvelope(record);
@@ -102,28 +108,34 @@ export function useFrameRenderer(bridge: WorkspaceApi, publicState: PublicWorksp
     try {
       const beforeReason = acceptingRef.current ? frameRejectionReason(frame.metadata, publicStateRef.current, sequenceRef.current.current()) : "selection";
       if (beforeReason) {
+        disposition = { outcome: "dropped", frontendType: receivedType, reason: beforeReason === "selection" ? "selection" : "selection-changed" };
         setMetrics((current) => ({ ...current, droppedBeforeDecode: current.droppedBeforeDecode + 1, lastDropReason: beforeReason }));
         return;
       }
       const generation = generationRef.current;
       const decodeStarted = performance.now();
       if (!(await verifyFrameDigest(frame))) {
+        disposition = { outcome: "dropped", frontendType: receivedType, reason: "digest" };
         setMetrics((current) => ({ ...current, digestFailures: current.digestFailures + 1, lastDropReason: "digest" }));
         return;
       }
       if (!acceptingRef.current || generation !== generationRef.current || frameRejectionReason(frame.metadata, publicStateRef.current, sequenceRef.current.current())) {
+        disposition = { outcome: "dropped", frontendType: receivedType, reason: "selection-changed" };
         setMetrics((current) => ({ ...current, droppedDuringDecode: current.droppedDuringDecode + 1, lastDropReason: "selection-changed" }));
         return;
       }
 
       const blob = new Blob([frame.bytes.slice()], { type: frame.metadata.mediaType });
       const bitmap = await createImageBitmap(blob);
+      maximumFrontendImageBitmaps = 1;
       try {
         if (bitmap.width !== frame.metadata.width || bitmap.height !== frame.metadata.height) {
+          disposition = { outcome: "dropped", frontendType: receivedType, reason: "decoded-dimensions" };
           setMetrics((current) => ({ ...current, dimensionFailures: current.dimensionFailures + 1, lastDropReason: "decoded-dimensions" }));
           return;
         }
         if (!acceptingRef.current || generation !== generationRef.current || frameRejectionReason(frame.metadata, publicStateRef.current, sequenceRef.current.current())) {
+          disposition = { outcome: "dropped", frontendType: receivedType, reason: "selection-changed" };
           setMetrics((current) => ({ ...current, droppedDuringDecode: current.droppedDuringDecode + 1, lastDropReason: "selection-changed" }));
           return;
         }
@@ -131,12 +143,13 @@ export function useFrameRenderer(bridge: WorkspaceApi, publicState: PublicWorksp
         const decodedAt = performance.now();
         await nextPaint();
         if (!acceptingRef.current || generation !== generationRef.current || frameRejectionReason(frame.metadata, publicStateRef.current, sequenceRef.current.current())) {
+          disposition = { outcome: "dropped", frontendType: receivedType, reason: "selection-changed" };
           setMetrics((current) => ({ ...current, droppedDuringDecode: current.droppedDuringDecode + 1, lastDropReason: "selection-changed" }));
           return;
         }
         const canvas = canvasRef.current;
         const context = canvas?.getContext("2d", { alpha: false });
-        if (!canvas || !context) return;
+        if (!canvas || !context) { disposition = { outcome: "dropped", frontendType: receivedType, reason: "missing-canvas" }; return; }
         canvas.width = bitmap.width;
         canvas.height = bitmap.height;
         fitCanvas(canvas);
@@ -147,6 +160,15 @@ export function useFrameRenderer(bridge: WorkspaceApi, publicState: PublicWorksp
         canvas.dataset.frameSequence = String(frame.metadata.frameSequence);
         const published = Date.parse(frame.metadata.publishedAt);
         const received = Date.parse(frame.metadata.receivedAt);
+        disposition = {
+          outcome: "painted",
+          frontendType: receivedType,
+          decodeMs: decodedAt - decodeStarted,
+          paintMs: paintedAt - paintStarted,
+          totalMs: boundedDifference(performance.timeOrigin + paintedAt, published) ?? 0,
+          decodedAt: new Date(performance.timeOrigin + decodedAt).toISOString(),
+          paintedAt: new Date(performance.timeOrigin + paintedAt).toISOString(),
+        };
         setMetrics((current) => ({
           ...current,
           metadata: frame.metadata,
@@ -163,9 +185,18 @@ export function useFrameRenderer(bridge: WorkspaceApi, publicState: PublicWorksp
         bitmap.close();
       }
     } catch {
+      disposition = { outcome: "dropped", frontendType: receivedType, reason: "decode" };
       setMetrics((current) => ({ ...current, malformedFrames: current.malformedFrames + 1, lastDropReason: "decode" }));
     } finally {
-      if (deliveryId !== undefined) await bridge.acknowledgeFrame(deliveryId).catch(() => undefined);
+      if (deliveryId !== undefined) {
+        const retention: FrameDisposition = {
+          ...disposition,
+          frontendRetainedFrames: sequenceRef.current.current() > 0 ? 1 : 0,
+          frontendImageBitmaps: 0,
+          maximumFrontendImageBitmaps,
+        };
+        await bridge.acknowledgeFrame(deliveryId, retention).catch(() => undefined);
+      }
     }
   }, [bridge]);
 
@@ -203,7 +234,11 @@ function fitCanvas(canvas: HTMLCanvasElement): void {
 }
 
 function nextPaint(): Promise<void> {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = window.setTimeout(() => { if (!settled) { settled = true; resolve(); } }, 100);
+    requestAnimationFrame(() => { if (!settled) { settled = true; window.clearTimeout(timer); resolve(); } });
+  });
 }
 
 function boundedDifference(later: number, earlier: number): number | undefined {

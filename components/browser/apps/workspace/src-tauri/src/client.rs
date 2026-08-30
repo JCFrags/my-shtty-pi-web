@@ -1,4 +1,5 @@
 use crate::{
+    acceptance::{AcceptanceDiagnostics, FrameDisposition},
     descriptor::WorkspaceDescriptor,
     error::{PublicError, WorkspaceError},
     frame::{admit_frame_sequence, encode_frame_delivery},
@@ -7,7 +8,7 @@ use crate::{
 };
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, sync::Mutex, time::Duration};
+use std::{collections::BTreeMap, path::Path, sync::{Arc, Mutex}, time::Duration};
 use tauri::{async_runtime::JoinHandle, ipc::{Channel, Response}};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::UnixStream, sync::{mpsc, oneshot}, time::{Instant, sleep}};
 use uuid::Uuid;
@@ -26,7 +27,7 @@ pub struct SelectionResult { pub selection_id: String, pub browser_session_id: S
 enum ClientCommand {
     Select { browser_session_id: String, tab_id: String, expires: Instant, reply: oneshot::Sender<Result<SelectionResult, PublicError>> },
     Clear { expires: Instant, reply: oneshot::Sender<Result<(), PublicError>> },
-    FrameAck { delivery_id: u64 },
+    FrameAck { delivery_id: u64, disposition: FrameDisposition },
     Stop,
 }
 
@@ -34,11 +35,12 @@ pub struct WorkspaceClientService {
     state: SharedPublicState,
     sender: Mutex<Option<mpsc::Sender<ClientCommand>>>,
     task: Mutex<Option<JoinHandle<()>>>,
-    pending_launch_selection: Mutex<Option<(String, Option<String>)>>,
+    pending_launch_selection: Arc<Mutex<Option<(String, Option<String>)>>>,
+    acceptance: AcceptanceDiagnostics,
 }
 
 impl Default for WorkspaceClientService {
-    fn default() -> Self { Self { state: SharedPublicState::default(), sender: Mutex::new(None), task: Mutex::new(None), pending_launch_selection: Mutex::new(None) } }
+    fn default() -> Self { Self { state: SharedPublicState::default(), sender: Mutex::new(None), task: Mutex::new(None), pending_launch_selection: Arc::new(Mutex::new(None)), acceptance: AcceptanceDiagnostics::default() } }
 }
 
 impl WorkspaceClientService {
@@ -47,8 +49,10 @@ impl WorkspaceClientService {
         let (sender, receiver) = mpsc::channel(COMMAND_CAPACITY);
         *self.sender.lock().expect("workspace sender lock") = Some(sender);
         let shared = self.state.clone();
-        let launch_selection = self.pending_launch_selection.lock().expect("workspace launch selection lock").take();
-        let task = tauri::async_runtime::spawn(async move { Worker::new(shared, state_channel, frame_channel, receiver, launch_selection).run().await; });
+        let pending_launch_selection = self.pending_launch_selection.clone();
+        let acceptance = self.acceptance.clone();
+        acceptance.frontend_ready();
+        let task = tauri::async_runtime::spawn(async move { Worker::new(shared, state_channel, frame_channel, receiver, pending_launch_selection, acceptance).run().await; });
         *self.task.lock().expect("workspace task lock") = Some(task);
         Ok(OpenResult { opened: true })
     }
@@ -66,7 +70,12 @@ impl WorkspaceClientService {
         tokio::time::timeout(COMMAND_TTL, received).await.map_err(|_| WorkspaceError::Unavailable.public())?.map_err(|_| WorkspaceError::Closed.public())?
     }
 
-    pub async fn frame_ack(&self, delivery_id: u64) -> Result<(), PublicError> { self.send(ClientCommand::FrameAck { delivery_id }).await }
+    pub async fn frame_ack(&self, delivery_id: u64, disposition: FrameDisposition) -> Result<(), PublicError> {
+        if !disposition.validate() { return Err(WorkspaceError::Protocol.public()); }
+        self.send(ClientCommand::FrameAck { delivery_id, disposition }).await
+    }
+    pub fn configure_acceptance(&self, path: &Path) -> Result<(), String> { self.acceptance.configure(path) }
+    pub fn record_window_action(&self, action: &str) { self.acceptance.window_action(action); }
     pub fn queue_launch_selection(&self, browser_session_id: String, tab_id: Option<String>) { *self.pending_launch_selection.lock().expect("workspace launch selection lock") = Some((browser_session_id, tab_id)); }
     pub async fn current(&self) -> PublicWorkspaceState { self.state.current().await }
 
@@ -94,15 +103,17 @@ struct Worker {
     browserd_runtime_instance_id: Option<String>,
     next_delivery_id: u64,
     inflight_delivery_id: Option<u64>,
+    inflight_header: Option<FrameHeader>,
     pending_frame: Option<(FrameHeader, Vec<u8>)>,
     dropped: u64,
     last_frame_sequence: u64,
-    launch_selection: Option<(String, Option<String>)>,
+    pending_launch_selection: Arc<Mutex<Option<(String, Option<String>)>>>,
+    acceptance: AcceptanceDiagnostics,
 }
 
 impl Worker {
-    fn new(shared: SharedPublicState, state_channel: Channel<FrontendStateRecord>, frame_channel: Channel<Response>, commands: mpsc::Receiver<ClientCommand>, launch_selection: Option<(String, Option<String>)>) -> Self {
-        Self { shared, state_channel, frame_channel, commands, selected: None, transport: None, webxd_runtime_instance_id: None, browserd_runtime_instance_id: None, next_delivery_id: 1, inflight_delivery_id: None, pending_frame: None, dropped: 0, last_frame_sequence: 0, launch_selection }
+    fn new(shared: SharedPublicState, state_channel: Channel<FrontendStateRecord>, frame_channel: Channel<Response>, commands: mpsc::Receiver<ClientCommand>, pending_launch_selection: Arc<Mutex<Option<(String, Option<String>)>>>, acceptance: AcceptanceDiagnostics) -> Self {
+        Self { shared, state_channel, frame_channel, commands, selected: None, transport: None, webxd_runtime_instance_id: None, browserd_runtime_instance_id: None, next_delivery_id: 1, inflight_delivery_id: None, inflight_header: None, pending_frame: None, dropped: 0, last_frame_sequence: 0, pending_launch_selection, acceptance }
     }
 
     async fn run(mut self) {
@@ -128,14 +139,16 @@ impl Worker {
     }
 
     async fn connect(&mut self) -> Result<(), WorkspaceError> {
+        self.acceptance.milestone("descriptor-discovery-started");
         let descriptor = tokio::task::spawn_blocking(WorkspaceDescriptor::discover).await.map_err(|_| WorkspaceError::Unavailable)??;
+        self.acceptance.milestone("descriptor-discovered");
         let mut transport = Transport::connect(&descriptor).await?;
         let bind_request = request_id("bind");
         transport.write(&protocol::bind_header(&bind_request, &descriptor.binding_secret)).await?;
         loop {
             let (record, payload) = transport.read().await?;
             match record {
-                ServerRecord::Bound { request_id, webxd_runtime_instance_id } if request_id == bind_request && webxd_runtime_instance_id == descriptor.webxd_runtime_instance_id => { self.webxd_runtime_instance_id = Some(webxd_runtime_instance_id); break; }
+                ServerRecord::Bound { request_id, webxd_runtime_instance_id } if request_id == bind_request && webxd_runtime_instance_id == descriptor.webxd_runtime_instance_id => { self.webxd_runtime_instance_id = Some(webxd_runtime_instance_id); self.acceptance.milestone("gateway-bound"); break; }
                 ServerRecord::Status(status) => { self.send_state(FrontendStateRecord::Status { status })?; }
                 _ => return Err(WorkspaceError::Protocol),
             }
@@ -147,18 +160,32 @@ impl Worker {
             ResponseResult::Snapshot(snapshot) => self.apply_snapshot(snapshot).await?,
             _ => return Err(WorkspaceError::Protocol),
         }
-        let restoring_prior_selection = self.selected.is_some();
-        if self.selected.is_none() {
-            if let Some((browser_session_id, requested_tab)) = self.launch_selection.take() {
-                let tab_id = match requested_tab {
-                    Some(value) => Some(value),
-                    None => self.shared.0.read().await.snapshot.as_ref().and_then(|snapshot| snapshot.sessions.iter().find(|session| session.browser_session_id == browser_session_id)).and_then(|session| session.tabs.first()).map(|tab| tab.tab_id.clone()),
-                };
-                if let Some(tab_id) = tab_id {
-                    let selection_id = Uuid::new_v4().simple().to_string();
-                    let mut fields = BTreeMap::new(); fields.insert("browserSessionId", json!(browser_session_id)); fields.insert("tabId", json!(tab_id)); fields.insert("selectionId", json!(selection_id));
-                    if let ResponseResult::Selection { selection_id, browser_session_id, tab_id } = self.request("frame.select", fields).await? {
-                        let selected = SelectedTab { selection_id, browser_session_id, tab_id }; self.selected = Some(selected.clone()); self.update_selected(Some(selected.clone())).await; self.send_state(FrontendStateRecord::Selection { selected })?;
+        let requested = self.pending_launch_selection.lock().expect("workspace launch selection lock").take();
+        let requested_retry = requested.clone();
+        let restoring_prior_selection = requested.is_none() && self.selected.is_some();
+        if requested.is_some() || self.selected.is_none() {
+            let candidate = {
+                let state = self.shared.0.read().await;
+                match requested {
+                    Some((browser_session_id, requested_tab)) => {
+                        let tab_id = requested_tab.or_else(|| state.snapshot.as_ref().and_then(|snapshot| snapshot.sessions.iter().find(|session| session.browser_session_id == browser_session_id)).and_then(|session| session.tabs.iter().find(|tab| tab.state == "ready").or_else(|| session.tabs.first())).map(|tab| tab.tab_id.clone()));
+                        tab_id.map(|tab_id| (browser_session_id, tab_id))
+                    }
+                    None => state.snapshot.as_ref().and_then(|snapshot| snapshot.sessions.iter().find_map(|session| session.tabs.iter().find(|tab| tab.state == "ready").map(|tab| (session.browser_session_id.clone(), tab.tab_id.clone())))),
+                }
+            };
+            if let Some((browser_session_id, tab_id)) = candidate {
+                self.acceptance.selection_requested(&browser_session_id, &tab_id);
+                let selection_id = Uuid::new_v4().simple().to_string();
+                let mut fields = BTreeMap::new(); fields.insert("browserSessionId", json!(browser_session_id)); fields.insert("tabId", json!(tab_id)); fields.insert("selectionId", json!(selection_id));
+                match self.request("frame.select", fields).await {
+                    Ok(ResponseResult::Selection { selection_id, browser_session_id, tab_id }) => {
+                        let selected = SelectedTab { selection_id, browser_session_id, tab_id }; self.acceptance.selection(&selected.selection_id, &selected.browser_session_id, &selected.tab_id); self.selected = Some(selected.clone()); self.update_selected(Some(selected.clone())).await; self.send_state(FrontendStateRecord::Selection { selected })?;
+                    }
+                    Ok(_) => return Err(WorkspaceError::Protocol),
+                    Err(error) => {
+                        if let Some(requested) = requested_retry { *self.pending_launch_selection.lock().expect("workspace launch selection lock") = Some(requested); }
+                        return Err(error);
                     }
                 }
             }
@@ -187,19 +214,25 @@ impl Worker {
     async fn handle_command(&mut self, command: Option<ClientCommand>) -> Result<bool, WorkspaceError> {
         match command {
             None | Some(ClientCommand::Stop) => Ok(false),
-            Some(ClientCommand::FrameAck { delivery_id }) => { self.ack_frame(delivery_id)?; Ok(true) }
+            Some(ClientCommand::FrameAck { delivery_id, disposition }) => { self.ack_frame(delivery_id, disposition)?; Ok(true) }
             Some(ClientCommand::Select { browser_session_id, tab_id, expires, reply }) => {
                 if Instant::now() > expires { let _ = reply.send(Err(WorkspaceError::Unavailable.public())); return Ok(true); }
                 self.pending_frame = None; self.last_frame_sequence = 0;
+                self.acceptance.selection_requested(&browser_session_id, &tab_id);
                 let selection_id = Uuid::new_v4().simple().to_string();
                 let mut fields = BTreeMap::new(); fields.insert("browserSessionId", json!(browser_session_id)); fields.insert("tabId", json!(tab_id)); fields.insert("selectionId", json!(selection_id));
                 let result = match self.request("frame.select", fields).await {
                     Ok(ResponseResult::Selection { selection_id, browser_session_id, tab_id }) => {
                         let selected = SelectedTab { selection_id: selection_id.clone(), browser_session_id: browser_session_id.clone(), tab_id: tab_id.clone() };
-                        self.selected = Some(selected.clone()); self.update_selected(Some(selected.clone())).await; let _ = self.send_state(FrontendStateRecord::Selection { selected });
+                        *self.pending_launch_selection.lock().expect("workspace launch selection lock") = None;
+                        self.acceptance.selection(&selected.selection_id, &selected.browser_session_id, &selected.tab_id); self.selected = Some(selected.clone()); self.update_selected(Some(selected.clone())).await; let _ = self.send_state(FrontendStateRecord::Selection { selected });
                         Ok(SelectionResult { selection_id, browser_session_id, tab_id })
                     }
-                    Ok(_) => Err(WorkspaceError::Protocol.public()), Err(error) => Err(error.public()),
+                    Ok(_) => Err(WorkspaceError::Protocol.public()),
+                    Err(error) => {
+                        if matches!(&error, WorkspaceError::Unavailable | WorkspaceError::Io(_) | WorkspaceError::Closed) { *self.pending_launch_selection.lock().expect("workspace launch selection lock") = Some((browser_session_id, Some(tab_id))); }
+                        Err(error.public())
+                    },
                 };
                 let _ = reply.send(result); Ok(true)
             }
@@ -215,8 +248,8 @@ impl Worker {
     async fn offline_command(&mut self, command: Option<ClientCommand>) -> bool {
         match command {
             None | Some(ClientCommand::Stop) => false,
-            Some(ClientCommand::FrameAck { delivery_id }) => { let _ = self.ack_frame(delivery_id); true }
-            Some(ClientCommand::Select { reply, .. }) => { let _ = reply.send(Err(WorkspaceError::Unavailable.public())); true }
+            Some(ClientCommand::FrameAck { delivery_id, disposition }) => { let _ = self.ack_frame(delivery_id, disposition); true }
+            Some(ClientCommand::Select { browser_session_id, tab_id, reply, .. }) => { *self.pending_launch_selection.lock().expect("workspace launch selection lock") = Some((browser_session_id, Some(tab_id))); let _ = reply.send(Err(WorkspaceError::Unavailable.public())); true }
             Some(ClientCommand::Clear { reply, .. }) => { self.clear_local_selection().await; let _ = reply.send(Ok(())); true }
         }
     }
@@ -249,6 +282,7 @@ impl Worker {
         if runtime_changed { self.clear_local_selection().await; }
         if self.selected.as_ref().is_some_and(|selected| !snapshot.contains(&selected.browser_session_id, &selected.tab_id)) { self.clear_local_selection().await; }
         { let mut state = self.shared.0.write().await; state.snapshot = Some(snapshot.clone()); state.webxd_runtime_instance_id = self.webxd_runtime_instance_id.clone(); }
+        self.acceptance.snapshot(&snapshot);
         self.send_state(FrontendStateRecord::Snapshot { snapshot })
     }
 
@@ -272,21 +306,25 @@ impl Worker {
         let delivery_id = self.next_delivery_id; self.next_delivery_id = self.next_delivery_id.saturating_add(1);
         let envelope = encode_frame_delivery(delivery_id, &header, &payload)?;
         self.frame_channel.send(Response::new(envelope)).map_err(|_| WorkspaceError::Closed)?;
+        self.acceptance.frame_received(delivery_id, &header);
+        self.inflight_header = Some(header);
         self.inflight_delivery_id = Some(delivery_id); self.update_frame_metrics(); Ok(())
     }
 
-    fn ack_frame(&mut self, delivery_id: u64) -> Result<(), WorkspaceError> {
+    fn ack_frame(&mut self, delivery_id: u64, disposition: FrameDisposition) -> Result<(), WorkspaceError> {
         if self.inflight_delivery_id != Some(delivery_id) { return Ok(()); }
+        let rust_retained_frames = 1 + u8::from(self.pending_frame.is_some());
+        if let Some(header) = self.inflight_header.take() { self.acceptance.frame_settled(delivery_id, &header, &disposition, rust_retained_frames); }
         self.inflight_delivery_id = None;
         if let Some((header, payload)) = self.pending_frame.take() { self.send_frame(header, payload)?; } else { self.update_frame_metrics(); }
         Ok(())
     }
 
     async fn clear_local_selection(&mut self) {
-        self.selected = None; self.pending_frame = None; self.last_frame_sequence = 0; self.update_selected(None).await; let _ = self.send_state(FrontendStateRecord::SelectionCleared);
+        self.selected = None; self.pending_frame = None; self.last_frame_sequence = 0; self.acceptance.selection_cleared(); self.update_selected(None).await; let _ = self.send_state(FrontendStateRecord::SelectionCleared);
     }
     async fn update_selected(&self, selected: Option<SelectedTab>) { self.shared.0.write().await.selected = selected; }
-    async fn set_connection(&self, connection: &str) { let mut state = self.shared.0.write().await; state.connection = connection.to_owned(); let _ = self.send_state(FrontendStateRecord::Current { state: state.clone() }); }
+    async fn set_connection(&self, connection: &str) { self.acceptance.connection(connection); let mut state = self.shared.0.write().await; state.connection = connection.to_owned(); let _ = self.send_state(FrontendStateRecord::Current { state: state.clone() }); }
     fn update_frame_metrics(&self) { if let Ok(mut state) = self.shared.0.try_write() { state.dropped_before_frontend = self.dropped; state.inflight_frame = self.inflight_delivery_id.is_some(); } }
     fn send_state(&self, record: FrontendStateRecord) -> Result<(), WorkspaceError> { self.state_channel.send(record).map_err(|_| WorkspaceError::Closed) }
 }

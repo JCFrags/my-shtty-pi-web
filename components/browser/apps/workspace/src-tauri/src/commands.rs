@@ -1,4 +1,4 @@
-use crate::{client::{OpenResult, SelectionResult, WorkspaceClientService}, error::PublicError, probe::{BinaryProbeService, ProbeStatus}, state::{FrontendStateRecord, PublicWorkspaceState}, window::{WindowAction, apply_window_action}};
+use crate::{acceptance::FrameDisposition, client::{OpenResult, SelectionResult, WorkspaceClientService}, error::PublicError, probe::{BinaryProbeService, ProbeStatus}, state::{FrontendStateRecord, PublicWorkspaceState}, window::{WindowAction, apply_window_action}};
 use tauri::{State, WebviewWindow, ipc::{Channel, Response}};
 
 #[tauri::command]
@@ -22,7 +22,7 @@ pub async fn workspace_select(service: State<'_, WorkspaceClientService>, browse
 pub async fn workspace_clear_selection(service: State<'_, WorkspaceClientService>) -> Result<(), PublicError> { service.clear().await }
 
 #[tauri::command]
-pub async fn workspace_frame_ack(service: State<'_, WorkspaceClientService>, delivery_id: u64) -> Result<(), PublicError> { service.frame_ack(delivery_id).await }
+pub async fn workspace_frame_ack(service: State<'_, WorkspaceClientService>, delivery_id: u64, disposition: FrameDisposition) -> Result<(), PublicError> { service.frame_ack(delivery_id, disposition).await }
 
 #[tauri::command]
 pub async fn workspace_current_state(service: State<'_, WorkspaceClientService>) -> Result<PublicWorkspaceState, PublicError> { Ok(service.current().await) }

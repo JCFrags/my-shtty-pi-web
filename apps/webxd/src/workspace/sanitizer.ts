@@ -69,5 +69,12 @@ function sanitizePersona(value: string): string {
   const safe = value.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 32);
   return safe.length === 0 ? "unknown" : safe;
 }
-function safeText(value: string, max: number): string { return value.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, "�").slice(0, max); }
+function safeText(value: string, max: number): string {
+  return [...value].map((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    const control = code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+    const directional = (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069);
+    return control || directional ? "�" : character;
+  }).join("").slice(0, max);
+}
 function validTimestamp(value: string): string { return Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : new Date().toISOString(); }

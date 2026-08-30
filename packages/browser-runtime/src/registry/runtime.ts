@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { BrowserProtocolError, type ActorIdentity, type BrowserRequest, type FrameEvent, type OperationStatus, type SessionDescriptor, type TabAddress, type WorkspaceBrokerRequest, type WorkspaceFrameEvent, type WorkspaceSnapshot, type WorkspaceStateEvent } from "@webx/browser-protocol";
+import { BrowserProtocolError, type ActorIdentity, type BrowserRequest, type FrameEvent, type OperationStatus, type SessionDescriptor, type TabAddress, type WorkspaceBrokerRequest, type WorkspaceSnapshot, type WorkspaceStateEvent } from "@webx/browser-protocol";
 import { actorKey, DenyNavigationAuthorization, type NavigationAuthorization } from "../actor/identity.js";
 import { BrowserArtifactStore } from "../artifacts/store.js";
 import { findChromeExecutable, type ChromeHostOptions } from "../chrome/host.js";

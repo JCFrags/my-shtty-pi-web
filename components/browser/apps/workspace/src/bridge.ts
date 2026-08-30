@@ -23,8 +23,21 @@ export interface FrameMetadata {
   mediaType: "image/png" | "image/jpeg"; byteLength: number; sha256: string; width: number; height: number;
 }
 export interface FrameEnvelope { metadata: FrameMetadata; bytes: Uint8Array }
+export type FrameDropReason = "malformed" | "selection" | "selection-changed" | "digest" | "decode" | "decoded-dimensions" | "missing-canvas";
+export type FrontendBinaryType = "ArrayBuffer" | "Uint8Array";
+export interface FrameRetention {
+  frontendRetainedFrames: 0 | 1;
+  frontendImageBitmaps: 0;
+  maximumFrontendImageBitmaps: 0 | 1;
+}
+export type FrameDispositionCore =
+  | { outcome: "painted"; frontendType: FrontendBinaryType; decodeMs: number; paintMs: number; totalMs: number; decodedAt: string; paintedAt: string }
+  | { outcome: "dropped"; frontendType: FrontendBinaryType; reason: FrameDropReason };
+export type FrameDisposition = FrameDispositionCore & FrameRetention;
 
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
+const frontendBinaryTypes = new WeakMap<ArrayBuffer, FrontendBinaryType>();
+export function frontendBinaryType(value: ArrayBuffer): FrontendBinaryType { return frontendBinaryTypes.get(value) ?? "ArrayBuffer"; }
 const ID = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/;
 const OPAQUE_ID = /^[A-Za-z0-9_-]{16,128}$/;
 
@@ -33,21 +46,30 @@ export interface WorkspaceApi {
   select(browserSessionId: string, tabId?: string): Promise<SelectedTab>;
   clearSelection(): Promise<void>;
   currentState(): Promise<PublicWorkspaceState>;
-  acknowledgeFrame(deliveryId: number): Promise<void>;
+  acknowledgeFrame(deliveryId: number, disposition: FrameDisposition): Promise<void>;
   windowAction(action: "raise" | "hide"): Promise<void>;
 }
 
 export class WorkspaceBridge implements WorkspaceApi {
   #stateChannel?: Channel<FrontendStateRecord>;
-  #frameChannel?: Channel<ArrayBuffer>;
+  #frameChannel?: Channel<ArrayBuffer | Uint8Array>;
 
   async open(onState: (record: FrontendStateRecord) => void, onFrame: (frame: ArrayBuffer) => void): Promise<void> {
     const stateChannel = new Channel<FrontendStateRecord>();
-    const frameChannel = new Channel<ArrayBuffer>();
+    const frameChannel = new Channel<ArrayBuffer | Uint8Array>();
     stateChannel.onmessage = (record) => onState(record);
     frameChannel.onmessage = (value) => {
-      if (!(value instanceof ArrayBuffer)) throw new TypeError("Tauri frame channel did not deliver an ArrayBuffer");
-      onFrame(value);
+      if (value instanceof ArrayBuffer) { frontendBinaryTypes.set(value, "ArrayBuffer"); onFrame(value); return; }
+      if (value instanceof Uint8Array) {
+        const exact = value.byteOffset === 0 && value.byteLength === value.buffer.byteLength
+          ? value.buffer
+          : value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
+        if (!(exact instanceof ArrayBuffer)) throw new TypeError("Tauri frame channel delivered an unsupported shared buffer");
+        frontendBinaryTypes.set(exact, "Uint8Array");
+        onFrame(exact);
+        return;
+      }
+      throw new TypeError("Tauri frame channel did not deliver a binary buffer");
     };
     this.#stateChannel = stateChannel; this.#frameChannel = frameChannel;
     await invoke("workspace_open", { stateChannel, frameChannel });
@@ -56,7 +78,7 @@ export class WorkspaceBridge implements WorkspaceApi {
   select(browserSessionId: string, tabId?: string): Promise<SelectedTab> { return invoke("workspace_select", { browserSessionId, tabId }); }
   clearSelection(): Promise<void> { return invoke("workspace_clear_selection"); }
   currentState(): Promise<PublicWorkspaceState> { return invoke("workspace_current_state"); }
-  acknowledgeFrame(deliveryId: number): Promise<void> { return invoke("workspace_frame_ack", { deliveryId }); }
+  acknowledgeFrame(deliveryId: number, disposition: FrameDisposition): Promise<void> { return invoke<undefined>("workspace_frame_ack", { deliveryId, disposition }); }
   windowAction(action: "raise" | "hide"): Promise<void> { return invoke("workspace_window_action", { action }); }
 }
 

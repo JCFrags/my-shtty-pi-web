@@ -145,6 +145,8 @@ async function startBrowserd(): Promise<void> {
       sessions: sessions.length,
       tabs: sessions.reduce((count, session) => count + session.listTabs().length, 0),
       subscriptions: runtime.subscriptionCount,
+      workspaceSubscriptions: runtime.workspaceSubscriptionCount,
+      workspaceLedgerEntries: runtime.workspaceLedgerCount,
       operations: runtime.operations.size,
       artifacts: runtime.artifacts.entryCount,
       artifactBytes: runtime.artifacts.totalBytes,
@@ -183,6 +185,7 @@ async function startWebxd(): Promise<void> {
     browserBackend: "agentcursor",
     browserDescriptorPath: join(browserdDirectory, "browserd.json"),
     browserRuntimeDirectory: browserdDirectory,
+    workspaceRuntimeDirectory: join(runtimeDirectory, "pi-web", "workspace"),
     browserDestinationAuthority: authority,
     cwd: "/deterministic/phase2b-process",
     authenticateActor: sameUserPiActorAuthenticator,
@@ -205,6 +208,7 @@ async function startWebxd(): Promise<void> {
     }
     if (command.command === "subscribe") {
       if (subscription !== undefined) throw new Error("process frame subscription already exists");
+      frameSequences.clear(); lastFrameSequence = 0;
       const ownerId = text(command.ownerId, "ownerId");
       const sessionId = text(command.browserSessionId, "browserSessionId");
       const tabId = text(command.tabId, "tabId");
