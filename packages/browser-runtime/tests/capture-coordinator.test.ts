@@ -155,6 +155,20 @@ describe("session capture coordinator", () => {
     assert.equal(coordinator.diagnostics.closed, true);
   });
 
+  it("settles close even when an active transaction does not cooperate with cancellation", async () => {
+    const coordinator = new SessionCaptureCoordinator();
+    const never = new Promise<void>(() => undefined);
+    const active = coordinator.runAgent("active", undefined, async () => await never);
+    await waitFor(() => coordinator.diagnostics.active === 1);
+    const queued = coordinator.runFrame("queued", undefined, async () => undefined);
+    await coordinator.close();
+    await assert.rejects(() => active, cancelled);
+    await assert.rejects(() => queued, cancelled);
+    assert.equal(coordinator.diagnostics.active, 0);
+    assert.equal(coordinator.diagnostics.agentQueued, 0);
+    assert.equal(coordinator.diagnostics.frameQueued, 0);
+  });
+
   it("reports bounded wait and timeout diagnostics without payload data", async () => {
     let now = 100;
     const coordinator = new SessionCaptureCoordinator({ monotonicNow: () => now });

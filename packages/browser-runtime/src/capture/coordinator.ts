@@ -200,8 +200,7 @@ export class SessionCaptureCoordinator {
     if (job.kind === "agent") this.agentWaitMaxMs = Math.max(this.agentWaitMaxMs, waitMs);
     else this.frameWaitMaxMs = Math.max(this.frameWaitMaxMs, waitMs);
     this.maxObservedConcurrent = Math.max(this.maxObservedConcurrent, 1);
-    const promise = Promise.resolve()
-      .then(async () => await job.transaction(job.controller.signal))
+    const promise = this.execute(job)
       .then((value) => this.resolveActive(job, value), (error: unknown) => this.rejectActive(job, error))
       .finally(() => {
         if (this.activeJob === job) this.activeJob = undefined;
@@ -209,6 +208,26 @@ export class SessionCaptureCoordinator {
         if (!this.closed) this.pump();
       });
     this.activePromise = promise;
+  }
+
+  private async execute(job: CaptureJob): Promise<unknown> {
+    const signal = job.controller.signal;
+    signal.throwIfAborted();
+    return await new Promise<unknown>((resolve, reject) => {
+      let settled = false;
+      const finish = (callback: (value: unknown) => void, value: unknown): void => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", abort);
+        callback(value);
+      };
+      const abort = (): void => finish(reject, signal.reason ?? cancelled("Capture transaction was cancelled."));
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) { abort(); return; }
+      void Promise.resolve()
+        .then(async () => await job.transaction(signal))
+        .then((value) => finish(resolve, value), (error: unknown) => finish(reject, error));
+    });
   }
 
   private takeNext(): CaptureJob | undefined {

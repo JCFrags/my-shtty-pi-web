@@ -185,7 +185,7 @@ export class FrameScheduler extends EventEmitter {
     let artifactId: string | undefined;
     const transaction = async (captureSignal: AbortSignal): Promise<void> => {
       try {
-        await this.motor.ensureOverlay(tab);
+        await this.motor.ensureOverlay(tab, captureSignal);
         this.assertCurrent(schedule, generation, captureSignal);
         const targetId = tab.targetId;
         const cdpSessionId = tab.cdpSessionId;

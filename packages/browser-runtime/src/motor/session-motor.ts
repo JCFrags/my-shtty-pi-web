@@ -71,8 +71,8 @@ export class SessionMotor extends EventEmitter {
     await this.installOverlay(tab);
   }
 
-  async ensureOverlay(tab: TabRecord): Promise<void> {
-    if (!(await this.evaluate<boolean>(tab, overlayVerifySource(this.overlay)))) await this.installOverlay(tab);
+  async ensureOverlay(tab: TabRecord, signal?: AbortSignal): Promise<void> {
+    if (!(await this.evaluate<boolean>(tab, overlayVerifySource(this.overlay), signal))) await this.installOverlay(tab, signal);
   }
 
   async coordinate(tab: TabRecord, action: CoordinateAction, context: OperationContext, postPathGuard: PostPathGuard): Promise<ActionTimings> {
@@ -274,9 +274,9 @@ export class SessionMotor extends EventEmitter {
     else if (!(await this.evaluate<boolean>(tab, overlayVerifySource(this.overlay)))) await this.installOverlay(tab);
   }
 
-  private async installOverlay(tab: TabRecord): Promise<void> {
-    await this.evaluate(tab, overlayInstallSource(this.overlay));
-    await this.evaluate(tab, overlayUpdateSource(this.overlay, this.cursor.x, this.cursor.y, this.pathSequence, this.sampleSequence));
+  private async installOverlay(tab: TabRecord, signal?: AbortSignal): Promise<void> {
+    await this.evaluate(tab, overlayInstallSource(this.overlay), signal);
+    await this.evaluate(tab, overlayUpdateSource(this.overlay, this.cursor.x, this.cursor.y, this.pathSequence, this.sampleSequence), signal);
   }
 
   private async press(tab: TabRecord, button: MouseButton, at: Point, clickCount: number, context: OperationContext): Promise<void> {
@@ -319,8 +319,8 @@ export class SessionMotor extends EventEmitter {
     }
   }
 
-  private async evaluate<T>(tab: TabRecord, expression: string): Promise<T> {
-    const response = await this.command<{ result?: { value?: unknown }; exceptionDetails?: unknown }>(tab, "Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+  private async evaluate<T>(tab: TabRecord, expression: string, signal?: AbortSignal): Promise<T> {
+    const response = await this.command<{ result?: { value?: unknown }; exceptionDetails?: unknown }>(tab, "Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, signal);
     if (response.exceptionDetails !== undefined) throw new Error("Internal page helper failed.");
     return response.result?.value as T;
   }

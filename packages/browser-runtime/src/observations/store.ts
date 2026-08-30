@@ -201,7 +201,7 @@ export class ObservationStore {
       const targetId = tab.targetId;
       const documentGeneration = tab.documentGeneration;
       const viewportGeneration = tab.viewportGeneration;
-      await this.motor.ensureOverlay(tab);
+      await this.motor.ensureOverlay(tab, captureSignal);
       captureSignal?.throwIfAborted();
       const before = await this.layout(tab, captureSignal);
       claimScreenshotAttempt();
