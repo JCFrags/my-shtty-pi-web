@@ -10,6 +10,11 @@ import { BrowserSession, type DomFallbackAction } from "./session.js";
 
 interface RuntimeSubscription { readonly actor: string; readonly connectionId: string; readonly subscriptionId: string; readonly address: TabAddress; readonly interest: "idle" | "selected"; readonly consumerKey: string }
 
+export const DEFAULT_SCREENSHOT_OBSERVATION_TTL_MS = 60_000;
+export const DEFAULT_DOM_OBSERVATION_TTL_MS = 60_000;
+export const MIN_OBSERVATION_TTL_MS = 10_000;
+export const MAX_OBSERVATION_TTL_MS = 120_000;
+
 export interface BrowserRuntimeOptions {
   navigationAuthorization?: NavigationAuthorization;
   chrome?: Omit<ChromeHostOptions, "hostId" | "profileManager">;
@@ -19,6 +24,9 @@ export interface BrowserRuntimeOptions {
   maxSubscriptionsPerActor?: number;
   personaSeedForTest?: number;
   motorMinimumPathMsForTest?: number;
+  screenshotObservationTtlMs?: number;
+  domObservationTtlMs?: number;
+  /** @deprecated Use screenshotObservationTtlMs. */
   observationFreshnessMsForTest?: number;
   egressConfigured?: boolean;
   requireEgressForSessions?: boolean;
@@ -41,7 +49,8 @@ export class BrowserRuntime extends EventEmitter {
   private readonly maxSubscriptionsPerActor: number;
   private readonly personaSeedForTest: number | undefined;
   private readonly motorMinimumPathMsForTest: number;
-  private readonly observationFreshnessMsForTest: number | undefined;
+  private readonly screenshotObservationTtlMs: number;
+  private readonly domObservationTtlMs: number;
   private readonly egressConfigured: boolean;
   private readonly requireEgressForSessions: boolean;
 
@@ -57,7 +66,8 @@ export class BrowserRuntime extends EventEmitter {
     this.maxSubscriptionsPerActor = options.maxSubscriptionsPerActor ?? 256;
     this.personaSeedForTest = options.personaSeedForTest;
     this.motorMinimumPathMsForTest = options.motorMinimumPathMsForTest ?? 0;
-    this.observationFreshnessMsForTest = options.observationFreshnessMsForTest;
+    this.screenshotObservationTtlMs = observationTtl(options.screenshotObservationTtlMs ?? options.observationFreshnessMsForTest ?? DEFAULT_SCREENSHOT_OBSERVATION_TTL_MS, "Screenshot observation TTL");
+    this.domObservationTtlMs = observationTtl(options.domObservationTtlMs ?? DEFAULT_DOM_OBSERVATION_TTL_MS, "DOM observation TTL");
     this.egressConfigured = options.egressConfigured ?? options.chrome?.egressProxy !== undefined;
     this.requireEgressForSessions = options.requireEgressForSessions ?? false;
   }
@@ -120,7 +130,8 @@ export class BrowserRuntime extends EventEmitter {
             ...(request.initialUrl !== undefined ? { initialUrl: request.initialUrl, initialNavigationContext: { operationId: request.operationId, ...(request.navigationAuthorization !== undefined ? { authorization: request.navigationAuthorization } : {}) } } : {}),
             ...(this.personaSeedForTest !== undefined ? { personaSeed: this.personaSeedForTest } : {}),
             motorMinimumPathMs: this.motorMinimumPathMsForTest,
-            ...(this.observationFreshnessMsForTest !== undefined ? { observationFreshnessMs: this.observationFreshnessMsForTest } : {}),
+            screenshotObservationTtlMs: this.screenshotObservationTtlMs,
+            domObservationTtlMs: this.domObservationTtlMs,
           }, context.signal, () => context.markDispatched());
           if (context.signal.aborted) { await session.close(); throw context.signal.reason; }
           this.sessions.set(session.browserSessionId, session);
@@ -287,3 +298,7 @@ function requireConnectionId(connectionId: string | undefined): string { if (con
 function ensureRequestLive(request: BrowserRequest): void { if (Date.parse(request.deadline) <= Date.now()) throw new BrowserProtocolError("DEADLINE_EXCEEDED", "Request deadline has expired."); }
 function sameAddress(left: TabAddress, right: TabAddress): boolean { return left.browserSessionId === right.browserSessionId && left.tabId === right.tabId && left.targetId === right.targetId && left.controlEpoch === right.controlEpoch; }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function observationTtl(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value < MIN_OBSERVATION_TTL_MS || value > MAX_OBSERVATION_TTL_MS) throw new BrowserProtocolError("INVALID_REQUEST", `${name} must be an integer from ${MIN_OBSERVATION_TTL_MS} to ${MAX_OBSERVATION_TTL_MS} milliseconds.`);
+  return value;
+}

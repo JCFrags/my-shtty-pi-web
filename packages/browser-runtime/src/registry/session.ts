@@ -34,11 +34,12 @@ export class BrowserSession {
     private readonly navigationAuthorization: NavigationAuthorization,
     personaSeed: number,
     motorMinimumPathMs: number,
-    observationFreshnessMs: number,
+    screenshotObservationTtlMs: number,
+    domObservationTtlMs: number,
   ) {
     this.motor = new SessionMotor(browserSessionId, personaSeed, motorMinimumPathMs);
-    this.observations = new ObservationStore(actor, targets, artifacts, this.motor, { freshnessMs: observationFreshnessMs, currentEpoch: () => this.controlEpoch });
-    this.dom = new DomObservationStore(targets);
+    this.observations = new ObservationStore(actor, targets, artifacts, this.motor, { freshnessMs: screenshotObservationTtlMs, currentEpoch: () => this.controlEpoch });
+    this.dom = new DomObservationStore(targets, { retentionMs: domObservationTtlMs });
     this.frames = new FrameScheduler(actor, targets, artifacts, this.motor, () => this.controlEpoch);
     host.on("exit", this.onHostExit);
     host.on("disconnect", this.onHostDisconnect);
@@ -46,15 +47,15 @@ export class BrowserSession {
     targets.on("tabRegistered", this.onTabRegistered);
   }
 
-  static async create(actor: ActorIdentity, operations: OperationRegistry, artifacts: BrowserArtifactStore, navigationAuthorization: NavigationAuthorization, options: Omit<ChromeHostOptions, "hostId"> & { initialUrl?: string; initialNavigationContext?: NavigationAuthorizationContext; personaSeed?: number; motorMinimumPathMs?: number; observationFreshnessMs?: number } = {}, signal?: AbortSignal, markProcessDispatched?: () => void): Promise<BrowserSession> {
+  static async create(actor: ActorIdentity, operations: OperationRegistry, artifacts: BrowserArtifactStore, navigationAuthorization: NavigationAuthorization, options: Omit<ChromeHostOptions, "hostId"> & { initialUrl?: string; initialNavigationContext?: NavigationAuthorizationContext; personaSeed?: number; motorMinimumPathMs?: number; screenshotObservationTtlMs?: number; domObservationTtlMs?: number; observationFreshnessMs?: number } = {}, signal?: AbortSignal, markProcessDispatched?: () => void): Promise<BrowserSession> {
     signal?.throwIfAborted();
     const browserSessionId = opaqueId("session");
-    const { initialUrl, initialNavigationContext, personaSeed, motorMinimumPathMs, observationFreshnessMs, ...hostOptions } = options;
+    const { initialUrl, initialNavigationContext, personaSeed, motorMinimumPathMs, screenshotObservationTtlMs, domObservationTtlMs, observationFreshnessMs, ...hostOptions } = options;
     const host = await ChromeHost.launch({ hostId: browserSessionId, ...hostOptions }, signal, markProcessDispatched);
     try {
       signal?.throwIfAborted();
       const targets = await TargetRegistry.create(browserSessionId, host);
-      const session = new BrowserSession(actor, browserSessionId, host, targets, operations, artifacts, navigationAuthorization, personaSeed ?? randomBytes(4).readUInt32BE(), motorMinimumPathMs ?? 0, observationFreshnessMs ?? 3_000);
+      const session = new BrowserSession(actor, browserSessionId, host, targets, operations, artifacts, navigationAuthorization, personaSeed ?? randomBytes(4).readUInt32BE(), motorMinimumPathMs ?? 0, screenshotObservationTtlMs ?? observationFreshnessMs ?? 60_000, domObservationTtlMs ?? 60_000);
       const tab = await session.createTab(undefined, signal);
       if (initialUrl !== undefined) await session.navigate(session.address(tab), initialUrl, signal ?? new AbortController().signal, undefined, initialNavigationContext ?? { operationId: "session.create" });
       return session;

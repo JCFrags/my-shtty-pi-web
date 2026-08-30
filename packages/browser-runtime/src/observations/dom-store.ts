@@ -5,14 +5,17 @@ import type { TargetRegistry, TabRecord } from "../targets/registry.js";
 interface AxValue { value?: string | number | boolean }
 interface AxNode { nodeId: string; backendDOMNodeId?: number; ignored?: boolean; role?: AxValue; name?: AxValue; value?: AxValue; properties?: Array<{ name: string; value: AxValue }> }
 interface FrameTreeNode { frame: { id: string }; childFrames?: FrameTreeNode[] }
-interface HandleRecord { handle: string; address: TabAddress; backendNodeId: number; documentGeneration: number; expiresAtMs: number }
-interface DomObservationRecord { address: TabAddress; documentGeneration: number; handles: string[]; expiresAtMs: number }
+interface HandleRecord { handle: string; address: TabAddress; backendNodeId: number; documentGeneration: number; expiresAtMonotonicMs: number }
+interface DomObservationRecord { address: TabAddress; documentGeneration: number; handles: string[]; expiresAtMonotonicMs: number }
 export interface ResolvedHandle { tab: TabRecord; bounds: { x: number; y: number; width: number; height: number }; center: { x: number; y: number } }
 export interface DomObservationStoreOptions {
   maxObservations?: number;
   maxHandles?: number;
   maxHandlesPerObservation?: number;
   retentionMs?: number;
+  monotonicNow?: () => number;
+  wallNow?: () => number;
+  /** @deprecated Tests should use monotonicNow and wallNow explicitly. */
   now?: () => number;
 }
 
@@ -23,14 +26,16 @@ export class DomObservationStore {
   private readonly maxHandles: number;
   private readonly maxHandlesPerObservation: number;
   private readonly retentionMs: number;
-  private readonly now: () => number;
+  private readonly monotonicNow: () => number;
+  private readonly wallNow: () => number;
 
   constructor(private readonly registry: TargetRegistry, options: DomObservationStoreOptions = {}) {
     this.maxObservations = options.maxObservations ?? 64;
     this.maxHandles = options.maxHandles ?? 512;
     this.maxHandlesPerObservation = Math.min(options.maxHandlesPerObservation ?? 200, this.maxHandles);
     this.retentionMs = options.retentionMs ?? 60_000;
-    this.now = options.now ?? Date.now;
+    this.monotonicNow = options.monotonicNow ?? options.now ?? (() => performance.now());
+    this.wallNow = options.wallNow ?? options.now ?? Date.now;
   }
 
   get handleCount(): number { return this.handles.size; }
@@ -57,7 +62,8 @@ export class DomObservationStore {
     const limit = Math.min(maxNodes, this.maxHandlesPerObservation, this.maxHandles);
     const nodes: DomObservation["nodes"] = [];
     const pending: HandleRecord[] = [];
-    const expiresAtMs = this.now() + this.retentionMs;
+    const observedWallMs = this.wallNow();
+    const expiresAtMonotonicMs = this.monotonicNow() + this.retentionMs;
     for (const node of candidates) {
       if (nodes.length >= limit) break;
       signal?.throwIfAborted();
@@ -73,7 +79,7 @@ export class DomObservationStore {
       const handle = opaqueId("handle");
       const state: Record<string, string | number | boolean> = {};
       for (const property of node.properties ?? []) if (["checked", "disabled", "expanded", "focused", "required", "selected"].includes(property.name) && property.value.value !== undefined) state[property.name] = property.value.value;
-      pending.push({ handle, address: { ...address }, backendNodeId, documentGeneration, expiresAtMs });
+      pending.push({ handle, address: { ...address }, backendNodeId, documentGeneration, expiresAtMonotonicMs });
       const role = String(node.role?.value ?? "unknown");
       const name = String(node.name?.value ?? "").slice(0, 4096);
       nodes.push({ handle, role, name, ...(node.value?.value !== undefined ? { value: String(node.value.value).slice(0, 8192) } : {}), state, bounds, locatorDescription: `AX role=${JSON.stringify(role)} name=${JSON.stringify(name)}`.slice(0, 1024) });
@@ -86,8 +92,8 @@ export class DomObservationStore {
     }
     const observationId = opaqueId("domObservation");
     for (const record of pending) this.handles.set(record.handle, record);
-    this.observations.set(observationId, { address: { ...address }, documentGeneration, handles: pending.map((record) => record.handle), expiresAtMs });
-    return { kind: "domObservation", observationId, address: { ...address }, documentGeneration, observedAt: new Date(this.now()).toISOString(), truncated: candidates.length > nodes.length, nodes };
+    this.observations.set(observationId, { address: { ...address }, documentGeneration, handles: pending.map((record) => record.handle), expiresAtMonotonicMs });
+    return { kind: "domObservation", observationId, address: { ...address }, documentGeneration, observedAt: new Date(observedWallMs).toISOString(), validUntil: new Date(observedWallMs + this.retentionMs).toISOString(), truncated: candidates.length > nodes.length, nodes };
   }
 
   async resolve(address: TabAddress, observationId: string, handle: string, signal?: AbortSignal): Promise<ResolvedHandle> {
@@ -110,9 +116,9 @@ export class DomObservationStore {
   }
 
   private prune(): void {
-    const now = this.now();
-    for (const [id, record] of this.observations) if (record.expiresAtMs <= now) this.deleteObservation(id);
-    for (const [id, record] of this.handles) if (record.expiresAtMs <= now) this.handles.delete(id);
+    const now = this.monotonicNow();
+    for (const [id, record] of this.observations) if (record.expiresAtMonotonicMs <= now) this.deleteObservation(id);
+    for (const [id, record] of this.handles) if (record.expiresAtMonotonicMs <= now) this.handles.delete(id);
   }
 
   private removeOldestObservation(): boolean {

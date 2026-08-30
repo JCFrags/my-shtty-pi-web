@@ -20,7 +20,20 @@ export interface CursorState extends Point {
   visible: boolean;
 }
 
-export interface ActionTimings { pathDurationMs: number; pathWallMs: number; completionAfterPathMs: number; totalMs: number }
+export interface ActionTimings {
+  /** Backward-compatible aliases for the generated and replay durations. */
+  pathDurationMs: number;
+  pathWallMs: number;
+  generatedNominalPathDurationMs: number;
+  sampleReplayWallMs: number;
+  cdpInputLatencyMs: number;
+  overlayUpdateLatencyMs: number;
+  postPathGuardMs: number;
+  sampleCount: number;
+  completionAfterPathMs: number;
+  totalMs: number;
+}
+interface ReplayTimings { sampleReplayWallMs: number; cdpInputLatencyMs: number; overlayUpdateLatencyMs: number; sampleCount: number }
 export type PostPathGuard = () => Promise<void>;
 
 export class SessionMotor extends EventEmitter {
@@ -66,14 +79,17 @@ export class SessionMotor extends EventEmitter {
     context.checkpoint();
     this.persona.tick();
     this.emit("actionStart", { tabId: tab.tabId });
+    let result: ActionTimings | undefined;
     try {
-      if (action.kind === "move" || action.kind === "hover") return await this.moveTo(tab, action.to, context, started);
+      if (action.kind === "move" || action.kind === "hover") { result = await this.moveTo(tab, action.to, context, started); return result; }
       if (action.kind === "click" || action.kind === "doubleClick") {
         const move = await this.moveTo(tab, action.at, context, started);
         const afterPath = performance.now();
         await sleep(sampleDwellMs(this.persona.rng, this.persona.traits().dwellScale), context.signal);
         context.checkpoint();
+        const guardStarted = performance.now();
         await postPathGuard();
+        const postPathGuardMs = performance.now() - guardStarted;
         context.checkpoint();
         const count = action.kind === "doubleClick" ? 2 : 1;
         for (let index = 1; index <= count; index++) {
@@ -88,35 +104,54 @@ export class SessionMotor extends EventEmitter {
           }
           if (index < count) await sleep(70, context.signal);
         }
-        return { ...move, completionAfterPathMs: performance.now() - afterPath, totalMs: performance.now() - started };
+        result = { ...move, postPathGuardMs, completionAfterPathMs: performance.now() - afterPath, totalMs: performance.now() - started };
+        return result;
       }
       if (action.kind === "wheel") {
-        await this.moveTo(tab, action.at, context, started);
+        const move = await this.moveTo(tab, action.at, context, started);
         context.checkpoint();
+        const guardStarted = performance.now();
         await postPathGuard();
+        const postPathGuardMs = performance.now() - guardStarted;
         context.checkpoint();
         context.markDispatched();
+        const cdpStarted = performance.now();
         await this.command(tab, "Input.dispatchMouseEvent", { type: "mouseWheel", ...action.at, button: "none", buttons: 0, deltaX: action.deltaX, deltaY: action.deltaY }, context.signal, 30_000);
-        return { pathDurationMs: 0, pathWallMs: 0, completionAfterPathMs: 0, totalMs: performance.now() - started };
+        result = { ...move, cdpInputLatencyMs: move.cdpInputLatencyMs + performance.now() - cdpStarted, postPathGuardMs, completionAfterPathMs: performance.now() - guardStarted, totalMs: performance.now() - started };
+        return result;
       }
       if (action.kind !== "drag") throw new Error("Unsupported coordinate action.");
-      await this.moveTo(tab, action.from, context, started);
+      const approach = await this.moveTo(tab, action.from, context, started);
       context.checkpoint();
+      const guardStarted = performance.now();
       await postPathGuard();
+      const postPathGuardMs = performance.now() - guardStarted;
       context.checkpoint();
       await this.press(tab, "left", action.from, 1, context);
       try {
         const moveStarted = performance.now();
         const samples = this.path(action.from, action.to);
         const nominal = samples.at(-1)?.t ?? 0;
-        await this.replay(tab, samples, 1, context);
+        const replay = await this.replay(tab, samples, 1, context);
         this.cursor = action.to;
         context.markDispatched();
-        return { pathDurationMs: nominal, pathWallMs: performance.now() - moveStarted, completionAfterPathMs: 0, totalMs: performance.now() - started };
+        result = {
+          pathDurationMs: approach.pathDurationMs + nominal,
+          pathWallMs: approach.pathWallMs + replay.sampleReplayWallMs,
+          generatedNominalPathDurationMs: approach.generatedNominalPathDurationMs + nominal,
+          sampleReplayWallMs: approach.sampleReplayWallMs + replay.sampleReplayWallMs,
+          cdpInputLatencyMs: approach.cdpInputLatencyMs + replay.cdpInputLatencyMs,
+          overlayUpdateLatencyMs: approach.overlayUpdateLatencyMs + replay.overlayUpdateLatencyMs,
+          postPathGuardMs,
+          sampleCount: approach.sampleCount + replay.sampleCount,
+          completionAfterPathMs: performance.now() - moveStarted - replay.sampleReplayWallMs,
+          totalMs: performance.now() - started,
+        };
+        return result;
       } finally {
         await this.releaseAfterDrag(tab, "left", this.cursor, 1);
       }
-    } finally { this.emit("actionEnd", { tabId: tab.tabId }); }
+    } finally { this.emit("actionEnd", { tabId: tab.tabId, ...(result === undefined ? {} : { timings: result }) }); }
   }
 
   async typeText(tab: TabRecord, text: string, replace: boolean, context: OperationContext): Promise<void> {
@@ -161,9 +196,20 @@ export class SessionMotor extends EventEmitter {
     const samples = this.path(from, to);
     const nominal = samples.at(-1)?.t ?? 0;
     const started = performance.now();
-    await this.replay(tab, samples, 0, context);
+    const replay = await this.replay(tab, samples, 0, context);
     this.cursor = to;
-    return { pathDurationMs: nominal, pathWallMs: performance.now() - started, completionAfterPathMs: 0, totalMs: performance.now() - totalStarted };
+    return {
+      pathDurationMs: nominal,
+      pathWallMs: replay.sampleReplayWallMs,
+      generatedNominalPathDurationMs: nominal,
+      sampleReplayWallMs: replay.sampleReplayWallMs,
+      cdpInputLatencyMs: replay.cdpInputLatencyMs,
+      overlayUpdateLatencyMs: replay.overlayUpdateLatencyMs,
+      postPathGuardMs: 0,
+      sampleCount: replay.sampleCount,
+      completionAfterPathMs: 0,
+      totalMs: performance.now() - totalStarted,
+    };
   }
 
   private path(from: Point, to: Point): CursorSample[] {
@@ -183,33 +229,32 @@ export class SessionMotor extends EventEmitter {
     return reduced;
   }
 
-  private async replay(tab: TabRecord, samples: CursorSample[], buttons: number, context: OperationContext): Promise<void> {
+  private async replay(tab: TabRecord, samples: CursorSample[], buttons: number, context: OperationContext): Promise<ReplayTimings> {
     this.pathSequence++;
     const started = performance.now();
-    const pending: Array<Promise<unknown>> = [];
-    let loopError: unknown;
-    try {
-      for (let index = 0; index < samples.length; index++) {
-        const sample = samples[index];
-        if (sample === undefined) throw new Error("Path sample is missing.");
-        const elapsed = performance.now() - started;
-        if (index < samples.length - 1 && sample.t < elapsed - 50) continue;
-        await sleep(Math.max(0, sample.t - elapsed), context.signal);
-        context.checkpoint();
-        context.markPartiallyDispatched();
-        this.sampleSequence++;
-        pending.push(Promise.all([
-          this.command(tab, "Input.dispatchMouseEvent", { type: "mouseMoved", x: sample.x, y: sample.y, button: "none", buttons }),
-          this.evaluate(tab, overlayUpdateSource(this.overlay, sample.x, sample.y, this.pathSequence, this.sampleSequence)),
-        ]));
-        this.cursor = { x: sample.x, y: sample.y };
-        this.emit("sample", { tabId: tab.tabId, cursor: this.state });
-      }
-    } catch (error) { loopError = error; }
-    const settled = await Promise.allSettled(pending);
-    if (loopError !== undefined) throw loopError;
-    const failed = settled.find((result) => result.status === "rejected");
-    if (failed?.status === "rejected") throw failed.reason;
+    let cdpInputLatencyMs = 0;
+    let overlayUpdateLatencyMs = 0;
+    let sampleCount = 0;
+    for (let index = 0; index < samples.length; index++) {
+      const sample = samples[index];
+      if (sample === undefined) throw new Error("Path sample is missing.");
+      const elapsed = performance.now() - started;
+      if (index < samples.length - 1 && sample.t < elapsed - 50) continue;
+      await sleep(Math.max(0, sample.t - elapsed), context.signal);
+      context.checkpoint();
+      context.markPartiallyDispatched();
+      this.sampleSequence++;
+      const cdpStarted = performance.now();
+      await this.command(tab, "Input.dispatchMouseEvent", { type: "mouseMoved", x: sample.x, y: sample.y, button: "none", buttons }, context.signal);
+      cdpInputLatencyMs += performance.now() - cdpStarted;
+      const overlayStarted = performance.now();
+      await this.evaluate(tab, overlayUpdateSource(this.overlay, sample.x, sample.y, this.pathSequence, this.sampleSequence));
+      overlayUpdateLatencyMs += performance.now() - overlayStarted;
+      sampleCount++;
+      this.cursor = { x: sample.x, y: sample.y };
+      this.emit("sample", { tabId: tab.tabId, cursor: this.state });
+    }
+    return { sampleReplayWallMs: performance.now() - started, cdpInputLatencyMs, overlayUpdateLatencyMs, sampleCount };
   }
 
   private async activate(tab: TabRecord): Promise<void> {

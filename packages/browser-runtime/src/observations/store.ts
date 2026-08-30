@@ -30,6 +30,8 @@ export interface ObservationStoreOptions {
   freshnessMs?: number;
   inlineLimitBytes?: number;
   currentEpoch?: () => number;
+  monotonicNow?: () => number;
+  wallNow?: () => number;
   commitBarrierForTest?: (stage: "afterDigest" | "afterArtifactPut") => Promise<void>;
 }
 
@@ -58,6 +60,8 @@ export class ObservationStore {
   private readonly freshnessMs: number;
   private readonly inlineLimitBytes: number;
   private readonly currentEpoch: (() => number) | undefined;
+  private readonly monotonicNow: () => number;
+  private readonly wallNow: () => number;
   private readonly commitBarrierForTest: ((stage: "afterDigest" | "afterArtifactPut") => Promise<void>) | undefined;
 
   constructor(
@@ -68,9 +72,11 @@ export class ObservationStore {
     options: ObservationStoreOptions = {},
   ) {
     this.maxRecords = options.maxRecords ?? 64;
-    this.freshnessMs = options.freshnessMs ?? 3_000;
+    this.freshnessMs = options.freshnessMs ?? 60_000;
     this.inlineLimitBytes = options.inlineLimitBytes ?? 768 * 1024;
     this.currentEpoch = options.currentEpoch;
+    this.monotonicNow = options.monotonicNow ?? (() => performance.now());
+    this.wallNow = options.wallNow ?? Date.now;
     this.commitBarrierForTest = options.commitBarrierForTest;
   }
 
@@ -135,7 +141,7 @@ export class ObservationStore {
     if (record === undefined || !sameAddress(record.address, address)) throw new BrowserProtocolError("OBSERVATION_NOT_FOUND", "Observation not found.");
     if (record.documentGeneration !== tab.documentGeneration) throw new BrowserProtocolError("DOCUMENT_CHANGED", "Document changed after observation.");
     if (record.viewportGeneration !== tab.viewportGeneration) throw new BrowserProtocolError("VIEWPORT_CHANGED", "Viewport changed after observation.");
-    if (performance.now() > record.validUntilMonotonicMs) throw new BrowserProtocolError("OBSERVATION_STALE", "Observation is stale.");
+    if (this.monotonicNow() > record.validUntilMonotonicMs) throw new BrowserProtocolError("OBSERVATION_STALE", "Observation is stale.");
     if (riskPolicy === "newer-observation" && this.latestByTab.get(tab.tabId) !== observationId) throw new BrowserProtocolError("OBSERVATION_STALE", "A newer observation is required.");
     if (riskPolicy === "local-region") throw new BrowserProtocolError("CAPABILITY_UNAVAILABLE", "Local region comparison is not configured.");
     const layout = await this.layout(tab, signal);
@@ -191,7 +197,7 @@ export class ObservationStore {
       tab, address: { ...address }, targetId, cdpSessionId: tab.cdpSessionId,
       documentGeneration, viewportGeneration, controlEpoch: address.controlEpoch,
       layout: after, bytes, mediaType, imagePixelWidth: dimensions.width, imagePixelHeight: dimensions.height,
-      captureScale: (captureScaleX + captureScaleY) / 2, capturedMonotonicMs: performance.now(), capturedWall: Date.now(),
+      captureScale: (captureScaleX + captureScaleY) / 2, capturedMonotonicMs: this.monotonicNow(), capturedWall: this.wallNow(),
     };
   }
 
@@ -209,7 +215,7 @@ export class ObservationStore {
     if (current.viewportGeneration !== captured.viewportGeneration) throw new BrowserProtocolError("VIEWPORT_CHANGED", "Viewport changed before screenshot commit.");
   }
 
-  private prune(): void { const now = performance.now(); for (const [id, record] of this.records) if (record.validUntilMonotonicMs <= now) this.records.delete(id); while (this.records.size > this.maxRecords) { const id = this.records.keys().next().value; if (typeof id !== "string") break; this.records.delete(id); } }
+  private prune(): void { const now = this.monotonicNow(); for (const [id, record] of this.records) if (record.validUntilMonotonicMs <= now) this.records.delete(id); while (this.records.size > this.maxRecords) { const id = this.records.keys().next().value; if (typeof id !== "string") break; this.records.delete(id); } }
 
   private async layout(tab: TabRecord, signal?: AbortSignal): Promise<Layout> {
     const expression = "({url:location.href,title:document.title,width:innerWidth,height:innerHeight,dpr:devicePixelRatio,scrollX:scrollX,scrollY:scrollY})";

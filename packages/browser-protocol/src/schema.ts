@@ -225,6 +225,7 @@ export const DomObservationSchema = Type.Object({
   address: TabAddressSchema,
   documentGeneration: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
   observedAt: TimestampSchema,
+  validUntil: TimestampSchema,
   truncated: Type.Boolean(),
   nodes: Type.Array(domNode, { maxItems: 200 }),
 }, strict);
