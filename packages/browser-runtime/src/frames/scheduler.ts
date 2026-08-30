@@ -195,6 +195,7 @@ export class FrameScheduler extends EventEmitter {
         const address: TabAddress = { browserSessionId: tab.browserSessionId, tabId: tab.tabId, targetId, controlEpoch };
         const before = await layout(tab, captureSignal);
         this.assertCurrent(schedule, generation, captureSignal);
+        this.captureCoordinator?.recordFrameScreenshotAttempt();
         const result = await frameConnection(tab).send<{ data: string }>("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false }, tab.cdpSessionId, { signal: captureSignal });
         await this.afterScreenshotForTest?.();
         this.assertCurrent(schedule, generation, captureSignal);

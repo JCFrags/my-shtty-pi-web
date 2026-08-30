@@ -104,6 +104,7 @@ export class ObservationStore {
     const claimScreenshotAttempt = (): void => {
       if (screenshotAttempts >= 2) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Agent screenshot attempt limit was reached.", true);
       screenshotAttempts++;
+      this.captureCoordinator?.recordAgentScreenshotAttempt();
     };
     for (;;) {
       try {
@@ -114,7 +115,11 @@ export class ObservationStore {
         if (error instanceof CdpCommandTimeoutError && error.method === "Page.captureScreenshot") {
           this.captureCoordinator?.recordAgentScreenshotTimeout();
           timeoutSeen = true;
-          if (!signal?.aborted && timeoutRetries < 1 && screenshotAttempts < 2) { timeoutRetries++; continue; }
+          if (!signal?.aborted && timeoutRetries < 1 && screenshotAttempts < 2) {
+            timeoutRetries++;
+            this.captureCoordinator?.recordAgentScreenshotRetry();
+            continue;
+          }
         } else if (!signal?.aborted && error instanceof BrowserProtocolError && (error.code === "DOCUMENT_CHANGED" || error.code === "VIEWPORT_CHANGED") && consistencyRetries < 1) {
           consistencyRetries++;
           continue;

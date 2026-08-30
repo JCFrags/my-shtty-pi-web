@@ -177,6 +177,9 @@ describe("session capture coordinator", () => {
     await waitFor(() => coordinator.diagnostics.active === 1);
     const agent = coordinator.runAgent("agent", undefined, async () => undefined);
     now = 145;
+    coordinator.recordAgentScreenshotAttempt();
+    coordinator.recordAgentScreenshotRetry();
+    coordinator.recordFrameScreenshotAttempt();
     coordinator.recordAgentScreenshotTimeout();
     coordinator.recordRecoveredAgentScreenshotTimeout();
     coordinator.recordFrameScreenshotTimeout();
@@ -184,6 +187,13 @@ describe("session capture coordinator", () => {
     await Promise.all([active, agent]);
     const diagnostics = coordinator.diagnostics;
     assert.equal(diagnostics.agentWaitMaxMs, 45);
+    assert.equal(diagnostics.agentRequests, 1);
+    assert.equal(diagnostics.frameRequests, 1);
+    assert.equal(diagnostics.agentScreenshotAttempts, 1);
+    assert.equal(diagnostics.frameScreenshotAttempts, 1);
+    assert.equal(diagnostics.agentScreenshotRetries, 1);
+    assert.equal(diagnostics.agentQueueWaitMs.count, 1);
+    assert.equal(diagnostics.frameTransactionMs.count, 1);
     assert.equal(diagnostics.agentScreenshotTimeouts, 1);
     assert.equal(diagnostics.recoveredAgentScreenshotTimeouts, 1);
     assert.equal(diagnostics.frameScreenshotTimeouts, 1);

@@ -136,6 +136,7 @@ async function startBrowserd(): Promise<void> {
   commandHandler = async (command) => {
     if (command.command !== "metrics") throw new Error(`unsupported browserd command: ${command.command}`);
     const sessions = runtimeSessions(runtime);
+    const captureCoordinators = sessions.map((session) => ({ browserSessionId: session.browserSessionId, ...session.captureCoordinator.diagnostics }));
     return {
       pid: process.pid,
       heapUsedBytes: process.memoryUsage().heapUsed,
@@ -148,8 +149,10 @@ async function startBrowserd(): Promise<void> {
       artifacts: runtime.artifacts.entryCount,
       artifactBytes: runtime.artifacts.totalBytes,
       heldInput: sessions.map((session) => ({ browserSessionId: session.browserSessionId, ...session.motor.heldInputState })),
-      chrome: sessions.map((session) => ({ pid: session.host.pid, deniedDownloads: session.host.deniedDownloads, profileDirectory: session.host.profileDirectory })),
+      chrome: sessions.map((session) => ({ pid: session.host.pid, running: session.host.running, connected: session.host.connected, cdpPendingCount: session.host.cdp.pendingCount, deniedDownloads: session.host.deniedDownloads, profileDirectory: session.host.profileDirectory })),
       droppedFrames: sessions.reduce((count, session) => count + session.frames.droppedFrames, 0),
+      captureCoordinators,
+      captureCoordinator: aggregateCaptureDiagnostics(captureCoordinators),
       actionTimings: [...actionTimings],
       dispatchTimings: [...dispatchTimings],
     };
@@ -190,11 +193,15 @@ async function startWebxd(): Promise<void> {
   let subscription: BrowserdFrameSubscription | undefined;
   let frameCount = 0;
   let latestFrame: unknown;
+  let duplicateFrameSequences = 0;
+  let nonMonotonicFrameSequences = 0;
+  let lastFrameSequence = 0;
+  const frameSequences = new Set<number>();
   stopRole = async () => { await subscription?.close().catch(() => undefined); await streamPool.close(); await runtime.stop(); };
   commandHandler = async (command) => {
     if (command.command === "metrics") {
       await streamPool.request(systemActor(), `process-health-${Date.now()}`, { kind: "capabilities.get" }).catch(() => undefined);
-      return { pid: process.pid, heapUsedBytes: process.memoryUsage().heapUsed, ...runtime.diagnostics, stream: { connectionCount: streamPool.connectionCount, active: subscription !== undefined, frameCount, latestFrame } };
+      return { pid: process.pid, heapUsedBytes: process.memoryUsage().heapUsed, ...runtime.diagnostics, stream: { connectionCount: streamPool.connectionCount, active: subscription !== undefined, frameCount, duplicateFrameSequences, nonMonotonicFrameSequences, uniqueFrameSequences: frameSequences.size, lastFrameSequence, latestFrame } };
     }
     if (command.command === "subscribe") {
       if (subscription !== undefined) throw new Error("process frame subscription already exists");
@@ -209,7 +216,15 @@ async function startWebxd(): Promise<void> {
       const tab = session.tabs.map(asRecord).find((item) => asRecord(item.address).tabId === tabId);
       if (tab === undefined) throw new Error("process stream tab was not found");
       const address = asRecord(tab.address) as unknown as import("../../../packages/browser-protocol/src/index.js").TabAddress;
-      subscription = await streamPool.subscribeFrames(actor, `process-subscribe-${Date.now()}`, address, (event) => { frameCount += 1; latestFrame = event; });
+      subscription = await streamPool.subscribeFrames(actor, `process-subscribe-${Date.now()}`, address, (event) => {
+        frameCount += 1;
+        if (frameSequences.has(event.frameSequence)) duplicateFrameSequences += 1;
+        if (event.frameSequence <= lastFrameSequence) nonMonotonicFrameSequences += 1;
+        frameSequences.add(event.frameSequence);
+        if (frameSequences.size > 50_000) frameSequences.delete(frameSequences.values().next().value as number);
+        lastFrameSequence = event.frameSequence;
+        latestFrame = event;
+      });
       return { subscriptionId: subscription.subscriptionId };
     }
     if (command.command === "unsubscribe") {
@@ -234,6 +249,49 @@ function attachMotorListeners(runtime: BrowserRuntime, attached: Set<string>, ti
   }
 }
 
+function aggregateCaptureDiagnostics(items: ReadonlyArray<Record<string, unknown>>): Record<string, unknown> {
+  const sum = (name: string): number => items.reduce((total, item) => total + (typeof item[name] === "number" ? item[name] as number : 0), 0);
+  const maximum = (name: string): number => Math.max(0, ...items.map((item) => typeof item[name] === "number" ? item[name] as number : 0));
+  const timing = (name: string): Record<string, unknown> => {
+    const values = items.map((item) => isRecord(item[name]) ? item[name] as Record<string, unknown> : {});
+    const minima = values.filter((value) => typeof value.retainedCount === "number" && value.retainedCount > 0 && typeof value.min === "number").map((value) => value.min as number);
+    return {
+      count: values.reduce((total, value) => total + (typeof value.count === "number" ? value.count : 0), 0),
+      retainedCount: values.reduce((total, value) => total + (typeof value.retainedCount === "number" ? value.retainedCount : 0), 0),
+      min: minima.length === 0 ? 0 : Math.min(...minima),
+      medianUpperBound: maximumTiming(values, "median"),
+      p95UpperBound: maximumTiming(values, "p95"),
+      max: maximumTiming(values, "max"),
+      meanUpperBound: maximumTiming(values, "mean"),
+    };
+  };
+  return {
+    sessionCount: items.length,
+    sameSessionMaximumConcurrency: maximum("maxObservedConcurrent"),
+    processActiveTransactions: maximum("processActiveTransactions"),
+    processMaximumConcurrency: maximum("processMaxObservedConcurrent"),
+    agentRequests: sum("agentRequests"),
+    workspaceRequests: sum("frameRequests"),
+    agentScreenshotAttempts: sum("agentScreenshotAttempts"),
+    workspaceScreenshotAttempts: sum("frameScreenshotAttempts"),
+    agentScreenshotRetries: sum("agentScreenshotRetries"),
+    typedTimeouts: sum("agentScreenshotTimeouts") + sum("frameScreenshotTimeouts"),
+    agentTypedTimeouts: sum("agentScreenshotTimeouts"),
+    workspaceTypedTimeouts: sum("frameScreenshotTimeouts"),
+    recoveredAgentTimeouts: sum("recoveredAgentScreenshotTimeouts"),
+    unrecoveredAgentTimeouts: sum("unrecoveredAgentScreenshotTimeouts"),
+    unrecoveredAgentFailures: sum("failedAgent"),
+    droppedWorkspaceRequests: sum("droppedFrame"),
+    coalescedWorkspaceRequests: sum("coalescedFrame"),
+    maximumAgentQueueDepth: maximum("maxObservedAgentQueue"),
+    maximumWorkspaceQueueDepth: maximum("maxObservedFrameQueue"),
+    agentQueueWaitMs: timing("agentQueueWaitMs"),
+    workspaceQueueWaitMs: timing("frameQueueWaitMs"),
+    agentTransactionMs: timing("agentTransactionMs"),
+    workspaceTransactionMs: timing("frameTransactionMs"),
+  };
+}
+function maximumTiming(values: ReadonlyArray<Record<string, unknown>>, name: string): number { return Math.max(0, ...values.map((value) => typeof value[name] === "number" ? value[name] as number : 0)); }
 function runtimeSessions(runtime: BrowserRuntime): BrowserSession[] { return [...(runtime as unknown as { sessions: Map<string, BrowserSession> }).sessions.values()]; }
 function browserdConnectionCount(server: BrowserdServer): number { return (server as unknown as { connections: Set<unknown> }).connections.size; }
 function systemActor() { return sameUserPiActorAuthenticator({ principalId: "process-system", agentId: "process-system" }); }

@@ -1,6 +1,17 @@
 import { BrowserProtocolError } from "@webx/browser-protocol";
 
 const MAX_COUNTER = Number.MAX_SAFE_INTEGER;
+const MAX_TIMING_SAMPLES = 2_048;
+
+export interface CaptureTimingDistribution {
+  readonly count: number;
+  readonly retainedCount: number;
+  readonly min: number;
+  readonly median: number;
+  readonly p95: number;
+  readonly max: number;
+  readonly mean: number;
+}
 
 export interface SessionCaptureCoordinatorOptions {
   maxAgentQueue?: number;
@@ -18,8 +29,14 @@ export interface SessionCaptureDiagnostics {
   readonly maxObservedConcurrent: number;
   readonly maxObservedAgentQueue: number;
   readonly maxObservedFrameQueue: number;
+  readonly agentRequests: number;
+  readonly frameRequests: number;
+  readonly agentScreenshotAttempts: number;
+  readonly frameScreenshotAttempts: number;
+  readonly agentScreenshotRetries: number;
   readonly completedAgent: number;
   readonly completedFrame: number;
+  readonly failedAgent: number;
   readonly rejectedAgent: number;
   readonly droppedFrame: number;
   readonly coalescedFrame: number;
@@ -30,6 +47,12 @@ export interface SessionCaptureDiagnostics {
   readonly recoveredAgentScreenshotTimeouts: number;
   readonly unrecoveredAgentScreenshotTimeouts: number;
   readonly frameScreenshotTimeouts: number;
+  readonly agentQueueWaitMs: CaptureTimingDistribution;
+  readonly frameQueueWaitMs: CaptureTimingDistribution;
+  readonly agentTransactionMs: CaptureTimingDistribution;
+  readonly frameTransactionMs: CaptureTimingDistribution;
+  readonly processActiveTransactions: number;
+  readonly processMaxObservedConcurrent: number;
   readonly closed: boolean;
 }
 
@@ -47,6 +70,8 @@ interface CaptureJob {
 }
 
 export class SessionCaptureCoordinator {
+  private static processActiveTransactions = 0;
+  private static processMaxObservedConcurrent = 0;
   private readonly maxAgentQueue: number;
   private readonly maxFrameTabs: number;
   private readonly maxConsecutiveAgents: number;
@@ -61,8 +86,14 @@ export class SessionCaptureCoordinator {
   private maxObservedConcurrent = 0;
   private maxObservedAgentQueue = 0;
   private maxObservedFrameQueue = 0;
+  private agentRequests = 0;
+  private frameRequests = 0;
+  private agentScreenshotAttempts = 0;
+  private frameScreenshotAttempts = 0;
+  private agentScreenshotRetries = 0;
   private completedAgent = 0;
   private completedFrame = 0;
+  private failedAgent = 0;
   private rejectedAgent = 0;
   private droppedFrame = 0;
   private coalescedFrame = 0;
@@ -73,6 +104,14 @@ export class SessionCaptureCoordinator {
   private recoveredAgentScreenshotTimeouts = 0;
   private unrecoveredAgentScreenshotTimeouts = 0;
   private frameScreenshotTimeouts = 0;
+  private readonly agentQueueWaitSamples: number[] = [];
+  private readonly frameQueueWaitSamples: number[] = [];
+  private readonly agentTransactionSamples: number[] = [];
+  private readonly frameTransactionSamples: number[] = [];
+  private agentQueueWaitCount = 0;
+  private frameQueueWaitCount = 0;
+  private agentTransactionCount = 0;
+  private frameTransactionCount = 0;
 
   constructor(options: SessionCaptureCoordinatorOptions = {}) {
     this.maxAgentQueue = boundedInteger(options.maxAgentQueue ?? 8, 1, 8, "agent capture queue");
@@ -90,8 +129,14 @@ export class SessionCaptureCoordinator {
       maxObservedConcurrent: this.maxObservedConcurrent,
       maxObservedAgentQueue: this.maxObservedAgentQueue,
       maxObservedFrameQueue: this.maxObservedFrameQueue,
+      agentRequests: this.agentRequests,
+      frameRequests: this.frameRequests,
+      agentScreenshotAttempts: this.agentScreenshotAttempts,
+      frameScreenshotAttempts: this.frameScreenshotAttempts,
+      agentScreenshotRetries: this.agentScreenshotRetries,
       completedAgent: this.completedAgent,
       completedFrame: this.completedFrame,
+      failedAgent: this.failedAgent,
       rejectedAgent: this.rejectedAgent,
       droppedFrame: this.droppedFrame,
       coalescedFrame: this.coalescedFrame,
@@ -102,11 +147,18 @@ export class SessionCaptureCoordinator {
       recoveredAgentScreenshotTimeouts: this.recoveredAgentScreenshotTimeouts,
       unrecoveredAgentScreenshotTimeouts: this.unrecoveredAgentScreenshotTimeouts,
       frameScreenshotTimeouts: this.frameScreenshotTimeouts,
+      agentQueueWaitMs: distribution(this.agentQueueWaitCount, this.agentQueueWaitSamples),
+      frameQueueWaitMs: distribution(this.frameQueueWaitCount, this.frameQueueWaitSamples),
+      agentTransactionMs: distribution(this.agentTransactionCount, this.agentTransactionSamples),
+      frameTransactionMs: distribution(this.frameTransactionCount, this.frameTransactionSamples),
+      processActiveTransactions: SessionCaptureCoordinator.processActiveTransactions,
+      processMaxObservedConcurrent: SessionCaptureCoordinator.processMaxObservedConcurrent,
       closed: this.closed,
     };
   }
 
   runAgent<T>(tabId: string, signal: AbortSignal | undefined, transaction: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    this.agentRequests = increment(this.agentRequests);
     if (this.closed) return Promise.reject(cancelled("Session capture coordinator is closed."));
     signal?.throwIfAborted();
     if (this.agentQueue.length >= this.maxAgentQueue) {
@@ -117,6 +169,7 @@ export class SessionCaptureCoordinator {
   }
 
   runFrame<T>(tabId: string, signal: AbortSignal | undefined, transaction: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    this.frameRequests = increment(this.frameRequests);
     if (this.closed) return Promise.reject(cancelled("Session capture coordinator is closed."));
     signal?.throwIfAborted();
     const existing = this.frameQueue.get(tabId);
@@ -153,6 +206,9 @@ export class SessionCaptureCoordinator {
     finally { if (this.closePromise === promise) this.closePromise = undefined; }
   }
 
+  recordAgentScreenshotAttempt(): void { this.agentScreenshotAttempts = increment(this.agentScreenshotAttempts); }
+  recordFrameScreenshotAttempt(): void { this.frameScreenshotAttempts = increment(this.frameScreenshotAttempts); }
+  recordAgentScreenshotRetry(): void { this.agentScreenshotRetries = increment(this.agentScreenshotRetries); }
   recordAgentScreenshotTimeout(): void { this.agentScreenshotTimeouts = increment(this.agentScreenshotTimeouts); }
   recordRecoveredAgentScreenshotTimeout(): void { this.recoveredAgentScreenshotTimeouts = increment(this.recoveredAgentScreenshotTimeouts); }
   recordUnrecoveredAgentScreenshotTimeout(): void { this.unrecoveredAgentScreenshotTimeouts = increment(this.unrecoveredAgentScreenshotTimeouts); }
@@ -197,12 +253,31 @@ export class SessionCaptureCoordinator {
     if (job === undefined) return;
     this.activeJob = job;
     const waitMs = Math.max(0, this.monotonicNow() - job.queuedAtMs);
-    if (job.kind === "agent") this.agentWaitMaxMs = Math.max(this.agentWaitMaxMs, waitMs);
-    else this.frameWaitMaxMs = Math.max(this.frameWaitMaxMs, waitMs);
+    const transactionStartedMs = this.monotonicNow();
+    if (job.kind === "agent") {
+      this.agentWaitMaxMs = Math.max(this.agentWaitMaxMs, waitMs);
+      this.agentQueueWaitCount = increment(this.agentQueueWaitCount);
+      recordTiming(this.agentQueueWaitSamples, waitMs);
+    } else {
+      this.frameWaitMaxMs = Math.max(this.frameWaitMaxMs, waitMs);
+      this.frameQueueWaitCount = increment(this.frameQueueWaitCount);
+      recordTiming(this.frameQueueWaitSamples, waitMs);
+    }
     this.maxObservedConcurrent = Math.max(this.maxObservedConcurrent, 1);
+    SessionCaptureCoordinator.processActiveTransactions = increment(SessionCaptureCoordinator.processActiveTransactions);
+    SessionCaptureCoordinator.processMaxObservedConcurrent = Math.max(SessionCaptureCoordinator.processMaxObservedConcurrent, SessionCaptureCoordinator.processActiveTransactions);
     const promise = this.execute(job)
       .then((value) => this.resolveActive(job, value), (error: unknown) => this.rejectActive(job, error))
       .finally(() => {
+        const durationMs = Math.max(0, this.monotonicNow() - transactionStartedMs);
+        SessionCaptureCoordinator.processActiveTransactions = Math.max(0, SessionCaptureCoordinator.processActiveTransactions - 1);
+        if (job.kind === "agent") {
+          this.agentTransactionCount = increment(this.agentTransactionCount);
+          recordTiming(this.agentTransactionSamples, durationMs);
+        } else {
+          this.frameTransactionCount = increment(this.frameTransactionCount);
+          recordTiming(this.frameTransactionSamples, durationMs);
+        }
         if (this.activeJob === job) this.activeJob = undefined;
         if (this.activePromise === promise) this.activePromise = undefined;
         if (!this.closed) this.pump();
@@ -262,6 +337,7 @@ export class SessionCaptureCoordinator {
     job.settled = true;
     job.removeCallerAbort();
     if (job.controller.signal.aborted) this.cancelled = increment(this.cancelled);
+    else if (job.kind === "agent") this.failedAgent = increment(this.failedAgent);
     job.reject(error);
   }
 
@@ -281,6 +357,24 @@ export class SessionCaptureCoordinator {
 
 function cancelled(message: string): BrowserProtocolError { return new BrowserProtocolError("OPERATION_CANCELLED", message); }
 function increment(value: number): number { return Math.min(MAX_COUNTER, value + 1); }
+function recordTiming(samples: number[], value: number): void {
+  samples.push(Number.isFinite(value) ? Math.max(0, value) : 0);
+  if (samples.length > MAX_TIMING_SAMPLES) samples.splice(0, samples.length - MAX_TIMING_SAMPLES);
+}
+function distribution(count: number, values: readonly number[]): CaptureTimingDistribution {
+  if (values.length === 0) return { count, retainedCount: 0, min: 0, median: 0, p95: 0, max: 0, mean: 0 };
+  const sorted = [...values].sort((left, right) => left - right);
+  const at = (fraction: number): number => sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction))] ?? 0;
+  return {
+    count,
+    retainedCount: values.length,
+    min: sorted[0] ?? 0,
+    median: at(0.5),
+    p95: at(0.95),
+    max: sorted.at(-1) ?? 0,
+    mean: values.reduce((sum, value) => sum + value, 0) / values.length,
+  };
+}
 function boundedInteger(value: number, minimum: number, maximum: number, name: string): number {
   if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw new BrowserProtocolError("INVALID_REQUEST", `${name} bound is invalid.`);
   return value;

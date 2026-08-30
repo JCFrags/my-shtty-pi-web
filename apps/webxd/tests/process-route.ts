@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fork, type ChildProcess } from "node:child_process";
+import { execFileSync, fork, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -11,6 +11,7 @@ interface ToolPresentation { readonly content: Array<{ readonly type: "text"; re
 interface RegisteredTool { readonly name: string; readonly execute: (toolCallId: string, input: unknown, signal: AbortSignal, onUpdate: unknown, context: unknown) => Promise<ToolPresentation> }
 type EventHandler = (event?: unknown, context?: unknown) => Promise<unknown> | unknown;
 interface ChildReady extends Record<string, unknown> { readonly kind: "ready"; readonly role: string }
+const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 class PiHarness {
   readonly tools = new Map<string, RegisteredTool>();
@@ -84,11 +85,21 @@ let piA: PiHarness | undefined;
 let piB: PiHarness | undefined;
 let facade: WebxFacadeClient | undefined;
 let facadeController: AbortController | undefined;
+let activeBrowserd: ManagedChild | undefined;
+let activeWebxd: ManagedChild | undefined;
+const routeStarted = performance.now();
+const failureContext: Record<string, unknown> = { currentOperation: "startup" };
 
 async function main(): Promise<void> {
   const runtimeDirectory = process.env.XDG_RUNTIME_DIR; if (runtimeDirectory === undefined) throw new Error("XDG_RUNTIME_DIR is required for the process route");
-  const outputPath = resolve(argument("--output") ?? "../../docs/browser-rebuild/evidence/phase2b-process-route-results.json");
+  const outputPath = resolve(argument("--output") ?? "../../docs/browser-rebuild/evidence/phase2b1-process-route-results.json");
   const delayMs = numberArgument("--model-delay-ms", 10_000);
+  const testedSha = gitOutput(["rev-parse", "HEAD"]);
+  const workingTreeClean = gitOutput(["status", "--porcelain"]) === "";
+  if (argument("--require-clean") === "true" && !workingTreeClean) throw new Error("qualification requires a clean tested SHA");
+  const contentionTransactions = boundedNumberArgument("--contention-transactions", 0, 0, 10_000);
+  const contentionObservations = boundedNumberArgument("--contention-observations", 0, 0, 10_000);
+  if (contentionTransactions > 0 && (contentionObservations < 300 || contentionTransactions < 1_000)) throw new Error("capture contention requires at least 1,000 transactions and 300 observations");
   root = await mkdtemp(join(runtimeDirectory, "phase2b-process-route-"));
   const browserdDirectory = join(root, "browserd");
   const profileRoot = join(root, "profiles");
@@ -99,8 +110,9 @@ async function main(): Promise<void> {
   const fixture = spawn("fixture", {}); const fixtureReady = await fixture.ready;
   const origin = textField(fixtureReady, "origin");
   const common = { XDG_RUNTIME_DIR: runtimeDirectory, PROCESS_ROUTE_BROWSERD_DIR: browserdDirectory, PROCESS_ROUTE_PROFILE_ROOT: profileRoot, PROCESS_ROUTE_ORIGIN: origin, PROCESS_ROUTE_PROXY_PORT: String(proxyPort), BROWSERD_CHROME_BIN: process.env.BROWSERD_CHROME_BIN ?? "/usr/bin/chromium-browser" };
-  let browserd = spawn("browserd", common); const browserdReady = await browserd.ready;
+  let browserd = spawn("browserd", common); activeBrowserd = browserd; const browserdReady = await browserd.ready;
   let webxd = spawn("webxd", { ...common, PROCESS_ROUTE_WEBXD_SOCKET: webxPath, PROCESS_ROUTE_DROP_RESPONSE_KEY: "phase2b-close-response-loss" }); const webxdReady = await webxd.ready;
+  activeWebxd = webxd;
   assert.notEqual(browserdReady.pid, webxdReady.pid);
   assert.notEqual(browserdReady.pid, process.pid);
   assert.notEqual(webxdReady.pid, process.pid);
@@ -141,31 +153,52 @@ async function main(): Promise<void> {
   assert.equal(new Set(exactProof.map((item) => item.digest)).size, 3);
 
   await webxd.call("subscribe", { ownerId: "phase2b-agent-a", browserSessionId: identityA.browserSessionId, tabId: identityA.tabId });
+  const captureContention = contentionTransactions > 0 ? await runCaptureContention({
+    requestedTransactions: contentionTransactions,
+    minimumObservations: contentionObservations,
+    piA,
+    piB,
+    identityA,
+    identityB,
+    secondTabId,
+    browserd,
+    webxd,
+  }) : undefined;
   await sleep(1_500);
   const streamMetrics = asRecord(await webxd.call("metrics"));
   const stream = asRecord(streamMetrics.stream);
   assert.equal(stream.active, true); assert.ok(numberField(stream, "connectionCount") >= 1); assert.ok(numberField(stream, "frameCount") >= 1);
   const settledStream = asRecord(await webxd.call("unsubscribe")); assert.equal(settledStream.active, false);
+  if (captureContention !== undefined) {
+    await waitFor(async () => {
+      const metrics = asRecord(await browserd.call("metrics"));
+      const coordinators = arrayOfRecords(metrics.captureCoordinators);
+      return numberField(metrics, "subscriptions") === 0 && coordinators.every((item) => numberField(item, "active") === 0 && numberField(item, "agentQueued") === 0 && numberField(item, "frameQueued") === 0);
+    });
+    const settled = asRecord(await browserd.call("metrics"));
+    captureContention.settlement = { subscriptions: settled.subscriptions, captureCoordinators: settled.captureCoordinators, heldInput: settled.heldInput };
+  }
 
   await piA.stop();
   piA = new PiHarness("phase2b-agent-a", webxPath, join(root, "exports-a-rebound")); await piA.start();
   const reboundList = await piA.execute("browser_tabs", { action: "list" }); assert.match(textOf(reboundList), new RegExp(identityA.browserSessionId));
 
   await webxd.stop(); children.splice(children.indexOf(webxd), 1);
-  webxd = spawn("webxd", { ...common, PROCESS_ROUTE_WEBXD_SOCKET: webxPath, PROCESS_ROUTE_DROP_RESPONSE_KEY: "phase2b-close-response-loss" }); await webxd.ready;
+  webxd = spawn("webxd", { ...common, PROCESS_ROUTE_WEBXD_SOCKET: webxPath, PROCESS_ROUTE_DROP_RESPONSE_KEY: "phase2b-close-response-loss" }); activeWebxd = webxd; await webxd.ready;
   const rehydratedList = await piA.execute("browser_tabs", { action: "list" }); assert.match(textOf(rehydratedList), new RegExp(identityA.browserSessionId));
   const rehydratedFrame = await piA.execute("browser_observe", identityA); assertPiImage(rehydratedFrame);
 
   const soakDurationSeconds = numberArgument("--soak-duration-seconds", 0);
   const soakRun = soakDurationSeconds > 0 ? await runProcessSoak({
     durationSeconds: soakDurationSeconds,
+    testedSha,
     sampleSeconds: numberArgument("--sample-seconds", 15),
     modelDelayMs: numberArgument("--soak-model-delay-ms", 10_000),
     root, profileRoot, webxPath, origin, identityA, identityB, piA, piB, browserd, webxd,
     restartWebxd: async (current) => {
       await current.stop(); removeChild(current);
       const next = spawn("webxd", { ...common, PROCESS_ROUTE_WEBXD_SOCKET: webxPath, PROCESS_ROUTE_DROP_RESPONSE_KEY: "phase2b-close-response-loss" });
-      await next.ready; webxd = next; return next;
+      await next.ready; webxd = next; activeWebxd = next; return next;
     },
   }) : undefined;
   if (soakRun !== undefined) { piB = soakRun.piB; webxd = soakRun.webxd; }
@@ -180,7 +213,7 @@ async function main(): Promise<void> {
   const [searchDuringOutage, readDuringOutage] = await Promise.all([piA.execute("web_search", { query: "WebX" }), piB.execute("web_read", { url: "https://fixture.invalid/webx", maxChars: 1_000 })]);
   assert.match(textOf(searchDuringOutage), /WebX/); assert.match(textOf(readDuringOutage), /fixture/i);
   await proxy.call("set-health", { healthy: true });
-  browserd = spawn("browserd", { ...common, PROCESS_ROUTE_PERSONA_SEED: "8192" }); const replacementReady = await browserd.ready;
+  browserd = spawn("browserd", { ...common, PROCESS_ROUTE_PERSONA_SEED: "8192" }); activeBrowserd = browserd; const replacementReady = await browserd.ready;
   assert.notEqual(replacementReady.runtimeInstanceId, browserdReady.runtimeInstanceId);
   await assert.rejects(piA.execute("browser_observe", identityA), /restarted|replaced|instance/i);
   const replacement = browserIdentity(await piA.execute("browser_open", { url: `${origin}/alpha?replacement=1` }));
@@ -222,12 +255,15 @@ async function main(): Promise<void> {
 
   const result = {
     passed: true,
+    testedSha,
+    workingTreeClean,
     processIsolation: { piHarnessPid: process.pid, browserdPid: browserdReady.pid, webxdPid: webxdReady.pid, distinct: true },
     productionObservationLease: { configuredMs: 60_000, testOverrideUsed: false, requestedModelDelayMs: delayMs, actualModelDelayMs: actualDelayMs, validUntil: delayedObservation.validUntil, clickSucceeded: true, clickRouteMs: delayedClickRouteMs },
     motor: { generatedNominalPathDurationMs: distribution(nominal), sampleReplayWallMs: distributionResult, sampleCount: distribution(samples) },
     exactObservationImages: { concurrent: true, observations: exactProof, distinctObservationIds: true, distinctDigests: true },
     domFallback: { succeeded: true, value: "phase2b process" },
-    frameSubscription: { survivedIdleTimeoutMs: 1_000, waitedMs: 1_500, frameCount: stream.frameCount, settled: true },
+    frameSubscription: { survivedIdleTimeoutMs: 1_000, waitedMs: 1_500, frameCount: stream.frameCount, duplicateFrameSequences: stream.duplicateFrameSequences, nonMonotonicFrameSequences: stream.nonMonotonicFrameSequences, settled: true },
+    ...(captureContention === undefined ? {} : { captureContention }),
     piReconnect: { sameActorSessionUsable: true },
     webxdRestart: { browserdRuntimePreserved: true, sessionRehydrated: true, screenshotSucceeded: true },
     browserdReplacement: { oldRuntimeInstanceId: browserdReady.runtimeInstanceId, newRuntimeInstanceId: replacementReady.runtimeInstanceId, oldSessionRejected: true, newSessionWorked: true },
@@ -249,8 +285,141 @@ async function main(): Promise<void> {
   await rm(root, { recursive: true, force: true }); root = undefined;
 }
 
+async function runCaptureContention(options: {
+  readonly requestedTransactions: number;
+  readonly minimumObservations: number;
+  readonly piA: PiHarness;
+  readonly piB: PiHarness;
+  readonly identityA: { browserSessionId: string; tabId: string };
+  readonly identityB: { browserSessionId: string; tabId: string };
+  readonly secondTabId: string;
+  readonly browserd: ManagedChild;
+  readonly webxd: ManagedChild;
+}): Promise<Record<string, unknown>> {
+  const beforeBrowser = asRecord(await options.browserd.call("metrics"));
+  const beforeCoordinator = asRecord(beforeBrowser.captureCoordinator);
+  const beforeAttempts = numberField(beforeCoordinator, "agentScreenshotAttempts") + numberField(beforeCoordinator, "workspaceScreenshotAttempts");
+  const beforeAgentFailures = numberField(beforeCoordinator, "unrecoveredAgentFailures");
+  const beforeTimeouts = numberField(beforeCoordinator, "typedTimeouts");
+  const beforeAgentTimeouts = numberField(beforeCoordinator, "agentTypedTimeouts");
+  const beforeRetries = numberField(beforeCoordinator, "agentScreenshotRetries");
+  const beforeRecovered = numberField(beforeCoordinator, "recoveredAgentTimeouts");
+  const beforeUnrecoveredTimeouts = numberField(beforeCoordinator, "unrecoveredAgentTimeouts");
+  const observationIds = new Set<string>();
+  const ledgerHash = createHash("sha256");
+  const ledgerHead: Record<string, unknown>[] = [];
+  const ledgerTail: Record<string, unknown>[] = [];
+  const observationRouteLatencyMs: number[] = [];
+  const actionRouteLatencyMs: number[] = [];
+  let explicitObservations = 0;
+  let motorActions = 0;
+  let batches = 0;
+  let browserMetrics = beforeBrowser;
+  const started = performance.now();
+  const deadline = started + 15 * 60_000;
+  for (;;) {
+    const coordinator = asRecord(browserMetrics.captureCoordinator);
+    const attempts = numberField(coordinator, "agentScreenshotAttempts") + numberField(coordinator, "workspaceScreenshotAttempts") - beforeAttempts;
+    if (explicitObservations >= options.minimumObservations && attempts >= options.requestedTransactions) break;
+    if (performance.now() >= deadline) throw new Error(`capture contention did not reach ${options.requestedTransactions} transactions before its bounded deadline`);
+    batches += 1;
+    const actorARequest = batches % 2 === 0
+      ? { actor: "a-primary", pi: options.piA, identity: options.identityA }
+      : { actor: "a-second", pi: options.piA, identity: { browserSessionId: options.identityA.browserSessionId, tabId: options.secondTabId } };
+    const requests = [actorARequest, { actor: "b-primary", pi: options.piB, identity: options.identityB }] as const;
+    const presentations = await Promise.all(requests.map(async (request) => await timed(() => request.pi.execute("browser_observe", request.identity), observationRouteLatencyMs)));
+    for (let index = 0; index < presentations.length; index++) {
+      const presentation = presentations[index];
+      const request = requests[index];
+      if (presentation === undefined || request === undefined) throw new Error("contention ledger fixture lost a request result");
+      assertPiImage(presentation);
+      const image = imageIdentity(presentation);
+      explicitObservations += 1;
+      if (observationIds.has(image.observationId)) throw new Error("duplicate contention observation identity");
+      observationIds.add(image.observationId);
+      const record = { ordinal: explicitObservations, actor: request.actor, browserSessionId: request.identity.browserSessionId, tabId: request.identity.tabId, observationId: image.observationId, digest: image.digest, bytes: image.bytes };
+      ledgerHash.update(`${JSON.stringify(record)}\n`);
+      if (ledgerHead.length < 16) ledgerHead.push(record);
+      ledgerTail.push(record); if (ledgerTail.length > 16) ledgerTail.shift();
+    }
+    if (batches % 24 === 0) {
+      const first = presentations[0]; const second = presentations[1];
+      if (first === undefined || second === undefined || actorARequest.actor !== "a-primary") throw new Error("contention motor fixture lost a selected-tab observation");
+      const alternate = batches % 48 === 0;
+      await Promise.all([
+        timed(() => options.piA.execute("browser_act", { ...options.identityA, action: { kind: "move", observationId: observationIdentity(first).observationId, coordinateSpace: "cssViewport", x: alternate ? 520 : 260, y: alternate ? 420 : 300 } }), actionRouteLatencyMs),
+        timed(() => options.piB.execute("browser_act", { ...options.identityB, action: { kind: "move", observationId: observationIdentity(second).observationId, coordinateSpace: "cssViewport", x: alternate ? 260 : 520, y: alternate ? 300 : 420 } }), actionRouteLatencyMs),
+      ]);
+      motorActions += 2;
+    }
+    if (batches % 4 === 0 || explicitObservations >= options.minimumObservations) browserMetrics = asRecord(await options.browserd.call("metrics"));
+  }
+  browserMetrics = asRecord(await options.browserd.call("metrics"));
+  const coordinator = asRecord(browserMetrics.captureCoordinator);
+  const webMetrics = asRecord(await options.webxd.call("metrics"));
+  const stream = asRecord(webMetrics.stream);
+  const idempotency = asRecord(webMetrics.idempotency);
+  const agentAttempts = numberField(coordinator, "agentScreenshotAttempts") - numberField(beforeCoordinator, "agentScreenshotAttempts");
+  const workspaceAttempts = numberField(coordinator, "workspaceScreenshotAttempts") - numberField(beforeCoordinator, "workspaceScreenshotAttempts");
+  const totalAttempts = agentAttempts + workspaceAttempts;
+  const timeoutCount = numberField(coordinator, "typedTimeouts") - beforeTimeouts;
+  const agentTimeoutCount = numberField(coordinator, "agentTypedTimeouts") - beforeAgentTimeouts;
+  const retryCount = numberField(coordinator, "agentScreenshotRetries") - beforeRetries;
+  const recoveredRetries = numberField(coordinator, "recoveredAgentTimeouts") - beforeRecovered;
+  const unrecoveredTimeouts = numberField(coordinator, "unrecoveredAgentTimeouts") - beforeUnrecoveredTimeouts;
+  const unrecoveredFailures = numberField(coordinator, "unrecoveredAgentFailures") - beforeAgentFailures;
+  assert.ok(totalAttempts >= options.requestedTransactions, `governed screenshot transaction count is ${totalAttempts}`);
+  assert.ok(explicitObservations >= options.minimumObservations);
+  assert.equal(numberField(coordinator, "sameSessionMaximumConcurrency"), 1);
+  assert.ok(numberField(coordinator, "processMaximumConcurrency") >= 2, "cross-session capture concurrency was not observed");
+  assert.equal(unrecoveredFailures, 0);
+  assert.equal(unrecoveredTimeouts, 0);
+  assert.ok(retryCount <= 3 && recoveredRetries / Math.max(1, agentAttempts) <= 0.005, `contention recovery policy exceeded: ${recoveredRetries}/${agentAttempts}`);
+  assert.equal(numberField(idempotency, "imageBytesRetained"), 0);
+  assert.equal(numberField(stream, "duplicateFrameSequences"), 0);
+  assert.equal(numberField(stream, "nonMonotonicFrameSequences"), 0);
+  assert.ok(numberField(stream, "frameCount") > 0);
+  return {
+    passed: true,
+    requestedTransactions: options.requestedTransactions,
+    governedScreenshotTransactions: totalAttempts,
+    explicitAgentObservations: explicitObservations,
+    agentScreenshotAttempts: agentAttempts,
+    workspaceScreenshotAttempts: workspaceAttempts,
+    motorActions,
+    durationSeconds: (performance.now() - started) / 1_000,
+    sameSessionMaximumConcurrency: numberField(coordinator, "sameSessionMaximumConcurrency"),
+    crossSessionConcurrencyObserved: numberField(coordinator, "processMaximumConcurrency") >= 2,
+    processMaximumConcurrency: numberField(coordinator, "processMaximumConcurrency"),
+    maximumAgentQueueDepth: numberField(coordinator, "maximumAgentQueueDepth"),
+    maximumWorkspaceQueueDepth: numberField(coordinator, "maximumWorkspaceQueueDepth"),
+    agentQueueWaitMs: coordinator.agentQueueWaitMs,
+    workspaceQueueWaitMs: coordinator.workspaceQueueWaitMs,
+    agentTransactionMs: coordinator.agentTransactionMs,
+    workspaceTransactionMs: coordinator.workspaceTransactionMs,
+    typedTimeouts: timeoutCount,
+    agentTypedTimeouts: agentTimeoutCount,
+    retries: retryCount,
+    recoveredRetries,
+    unrecoveredTimeouts,
+    unrecoveredAgentFailures: unrecoveredFailures,
+    droppedWorkspaceRequests: numberField(coordinator, "droppedWorkspaceRequests"),
+    coalescedWorkspaceRequests: numberField(coordinator, "coalescedWorkspaceRequests"),
+    observationRouteLatencyMs: distribution(observationRouteLatencyMs),
+    actionRouteLatencyMs: distribution(actionRouteLatencyMs),
+    exactImageReads: explicitObservations,
+    distinctObservationIds: observationIds.size,
+    imageBytesInGeneralCache: numberField(idempotency, "imageBytesRetained"),
+    frameCount: numberField(stream, "frameCount"),
+    duplicateFrameSequences: numberField(stream, "duplicateFrameSequences"),
+    nonMonotonicFrameSequences: numberField(stream, "nonMonotonicFrameSequences"),
+    ledger: { algorithm: "sha256-ndjson", digest: ledgerHash.digest("hex"), recordCount: explicitObservations, head: ledgerHead, tail: ledgerTail },
+  };
+}
+
 async function runProcessSoak(options: {
   readonly durationSeconds: number;
+  readonly testedSha: string;
   readonly sampleSeconds: number;
   readonly modelDelayMs: number;
   readonly root: string;
@@ -275,6 +444,9 @@ async function runProcessSoak(options: {
   const searchReadLatencyMs: number[] = [];
   const modelDelaysMs: number[] = [];
   const samples: Record<string, unknown>[] = [];
+  const streamSegments: Record<string, unknown>[] = [];
+  const initialBrowser = asRecord(await options.browserd.call("metrics"));
+  const initialCapture = asRecord(initialBrowser.captureCoordinator);
   let iterations = 0;
   let tabCycles = 0;
   let closeRetryPairs = 0;
@@ -294,6 +466,11 @@ async function runProcessSoak(options: {
   try {
     while (performance.now() < end) {
       iterations += 1;
+      failureContext.currentOperation = "soak.observe";
+      failureContext.actor = "phase2b-agent-a/phase2b-agent-b";
+      failureContext.browserSessionId = `${options.identityA.browserSessionId}/${options.identityB.browserSessionId}`;
+      failureContext.tabId = `${options.identityA.tabId}/${options.identityB.tabId}`;
+      failureContext.iteration = iterations;
       const observed = await Promise.all([
         timed(() => options.piA.execute("browser_observe", options.identityA), screenshotLatencyMs),
         timed(() => currentPiB.execute("browser_observe", options.identityB), screenshotLatencyMs),
@@ -302,6 +479,7 @@ async function runProcessSoak(options: {
       const observations = observed.map(observationIdentity);
       for (const item of observed) { const verifyStarted = performance.now(); imageIdentity(item); imageRetrievalLatencyMs.push(performance.now() - verifyStarted); }
       const alternate = iterations % 2 === 0;
+      failureContext.currentOperation = "soak.action";
       const act = async (pi: PiHarness, identity: { browserSessionId: string; tabId: string }, observationId: string, x: number, y: number) => await pi.execute("browser_act", { ...identity, action: { kind: "move", observationId, coordinateSpace: "cssViewport", x, y } });
       if (iterations === 1 || iterations % 24 === 0) {
         const delayStarted = performance.now(); await sleep(Math.min(options.modelDelayMs, Math.max(0, end - performance.now()))); modelDelaysMs.push(performance.now() - delayStarted);
@@ -343,6 +521,8 @@ async function runProcessSoak(options: {
         reconnected = true; piReconnects += 1;
       }
       if (!restarted && elapsed >= options.durationSeconds * 1_000 / 2) {
+        const beforeRestart = asRecord(await currentWebxd.call("metrics"));
+        streamSegments.push(asRecord(beforeRestart.stream));
         currentWebxd = await options.restartWebxd(currentWebxd);
         const listed = await options.piA.execute("browser_tabs", { action: "list" }); assert.match(textOf(listed), new RegExp(options.identityA.browserSessionId));
         await currentWebxd.call("subscribe", { ownerId: "phase2b-agent-a", browserSessionId: options.identityA.browserSessionId, tabId: options.identityA.tabId });
@@ -353,7 +533,7 @@ async function runProcessSoak(options: {
         const browser = asRecord(await options.browserd.call("metrics"));
         const web = asRecord(await currentWebxd.call("metrics"));
         const chrome = await Promise.all(arrayOfRecords(browser.chrome).map(async (item) => await processTreeMemory(numberField(item, "pid"))));
-        samples.push({ elapsedSeconds: (now - started) / 1_000, browserdHeapUsedBytes: browser.heapUsedBytes, webxdHeapUsedBytes: web.heapUsedBytes, browserdConnections: browser.connections, actorConnections: isRecord(web.browser) ? web.browser.actorConnections : 0, activeFrameSubscriptions: browser.subscriptions, operations: browser.operations, artifacts: browser.artifacts, artifactBytes: browser.artifactBytes, observationMetadata: isRecord(web.browser) ? web.browser.observationMetadata : {}, idempotency: web.idempotency, profileBytes: await directoryBytes(options.profileRoot), chrome, heldInput: browser.heldInput });
+        samples.push({ elapsedSeconds: (now - started) / 1_000, browserdHeapUsedBytes: browser.heapUsedBytes, webxdHeapUsedBytes: web.heapUsedBytes, browserdConnections: browser.connections, actorConnections: isRecord(web.browser) ? web.browser.actorConnections : 0, activeFrameSubscriptions: browser.subscriptions, operations: browser.operations, artifacts: browser.artifacts, artifactBytes: browser.artifactBytes, observationMetadata: isRecord(web.browser) ? web.browser.observationMetadata : {}, idempotency: web.idempotency, captureCoordinator: browser.captureCoordinator, profileBytes: await directoryBytes(options.profileRoot), chrome, heldInput: browser.heldInput });
         nextSample += options.sampleSeconds * 1_000;
       }
       nextIteration += 5_000;
@@ -368,9 +548,30 @@ async function runProcessSoak(options: {
   const dispatch = arrayOfRecords(finalBrowser.dispatchTimings);
   const actions = arrayOfRecords(finalBrowser.actionTimings);
   const web = asRecord(await currentWebxd.call("metrics"));
+  streamSegments.push(asRecord(web.stream));
   const idempotency = asRecord(web.idempotency);
+  const capture = asRecord(finalBrowser.captureCoordinator);
+  const delta = (name: string): number => numberField(capture, name) - numberField(initialCapture, name);
+  const agentScreenshotAttempts = delta("agentScreenshotAttempts");
+  const workspaceScreenshotAttempts = delta("workspaceScreenshotAttempts");
+  const typedTimeouts = delta("typedTimeouts");
+  const agentTypedTimeouts = delta("agentTypedTimeouts");
+  const retries = delta("agentScreenshotRetries");
+  const recoveredRetries = delta("recoveredAgentTimeouts");
+  const unrecoveredTimeouts = delta("unrecoveredAgentTimeouts");
+  const unrecoveredAgentFailures = delta("unrecoveredAgentFailures");
+  const frameCount = streamSegments.reduce((total, item) => total + numberField(item, "frameCount"), 0);
+  const duplicateFrameSequences = streamSegments.reduce((total, item) => total + numberField(item, "duplicateFrameSequences"), 0);
+  const nonMonotonicFrameSequences = streamSegments.reduce((total, item) => total + numberField(item, "nonMonotonicFrameSequences"), 0);
   assert.equal(idempotency.imageBytesRetained, 0);
   assert.ok(actualDurationSeconds >= options.durationSeconds);
+  assert.equal(numberField(capture, "sameSessionMaximumConcurrency"), 1);
+  assert.ok(numberField(capture, "processMaximumConcurrency") >= 2, "soak did not observe cross-session capture concurrency");
+  assert.equal(unrecoveredTimeouts, 0);
+  assert.equal(unrecoveredAgentFailures, 0);
+  assert.ok(retries <= 3 && recoveredRetries / Math.max(1, agentScreenshotAttempts) <= 0.005, `soak recovery policy exceeded: ${recoveredRetries}/${agentScreenshotAttempts}`);
+  assert.equal(duplicateFrameSequences, 0);
+  assert.equal(nonMonotonicFrameSequences, 0);
   assert.ok(samples.length >= Math.max(1, Math.floor(options.durationSeconds / (options.sampleSeconds * 4))), "soak did not collect enough bounded process samples");
   assert.ok(arrayOfRecords(finalBrowser.heldInput).every((item) => Array.isArray(item.buttons) && item.buttons.length === 0 && Array.isArray(item.keys) && item.keys.length === 0));
   const actionPath = actions.map((item) => numberField(item, "sampleReplayWallMs"));
@@ -385,6 +586,7 @@ async function runProcessSoak(options: {
     piB: currentPiB,
     webxd: currentWebxd,
     result: {
+      testedSha: options.testedSha,
       requestedDurationSeconds: options.durationSeconds,
       actualDurationSeconds,
       uninterrupted: true,
@@ -393,6 +595,33 @@ async function runProcessSoak(options: {
       sampleCount: samples.length,
       sampleCadenceNote: "Samples are collected at the first safe workload boundary after each requested interval; long routed actions can coalesce intervals.",
       delayedActions: { attempts: delayedActions, successes: delayedActions, modelDelayMs: distribution(modelDelaysMs) },
+      explicitScreenshotObservations: screenshotLatencyMs.length,
+      workspaceCaptures: workspaceScreenshotAttempts,
+      screenshotAttempts: agentScreenshotAttempts + workspaceScreenshotAttempts,
+      captureCoordinator: {
+        sameSessionMaximumConcurrency: numberField(capture, "sameSessionMaximumConcurrency"),
+        crossSessionConcurrencyObserved: numberField(capture, "processMaximumConcurrency") >= 2,
+        processMaximumConcurrency: numberField(capture, "processMaximumConcurrency"),
+        agentRequests: delta("agentRequests"),
+        workspaceRequests: delta("workspaceRequests"),
+        agentScreenshotAttempts,
+        workspaceScreenshotAttempts,
+        maximumAgentQueueDepth: numberField(capture, "maximumAgentQueueDepth"),
+        maximumWorkspaceQueueDepth: numberField(capture, "maximumWorkspaceQueueDepth"),
+        agentQueueWaitMs: capture.agentQueueWaitMs,
+        workspaceQueueWaitMs: capture.workspaceQueueWaitMs,
+        agentTransactionMs: capture.agentTransactionMs,
+        workspaceTransactionMs: capture.workspaceTransactionMs,
+        typedTimeouts,
+        agentTypedTimeouts,
+        retries,
+        recoveredRetries,
+        unrecoveredTimeouts,
+        unrecoveredAgentFailures,
+        droppedWorkspaceRequests: delta("droppedWorkspaceRequests"),
+        coalescedWorkspaceRequests: delta("coalescedWorkspaceRequests"),
+      },
+      frames: { delivered: frameCount, duplicateSequences: duplicateFrameSequences, nonMonotonicSequences: nonMonotonicFrameSequences, segments: streamSegments },
       screenshotAndImageRouteLatencyMs: distribution(screenshotLatencyMs),
       imageRetrievalPresentationBytesCheckMs: distribution(imageRetrievalLatencyMs),
       actionRouteLatencyMs: distribution(actionRouteLatencyMs),
@@ -441,6 +670,10 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 
 function waitExit(child: ChildProcess, timeoutMs: number): Promise<void> { if (child.exitCode !== null) return Promise.resolve(); return new Promise((resolveWait, rejectWait) => { const timer = setTimeout(() => { cleanup(); rejectWait(new Error("child exit timed out")); }, timeoutMs); const exited = () => { cleanup(); resolveWait(); }; const cleanup = () => { clearTimeout(timer); child.off("exit", exited); }; child.once("exit", exited); }); }
 function argument(name: string): string | undefined { const prefix = `${name}=`; return process.argv.find((item) => item.startsWith(prefix))?.slice(prefix.length); }
 function numberArgument(name: string, fallback: number): number { const value = Number(argument(name) ?? fallback); if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be non-negative`); return value; }
+function boundedNumberArgument(name: string, fallback: number, minimum: number, maximum: number): number { const value = numberArgument(name, fallback); if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw new Error(`${name} must be an integer from ${minimum} to ${maximum}`); return value; }
+function gitOutput(args: readonly string[]): string { return execFileSync("git", [...args], { cwd: REPOSITORY_ROOT, encoding: "utf8", maxBuffer: 1_048_576 }).trim(); }
+function safeError(error: unknown): string { return (error instanceof Error ? `${error.name}: ${error.message}` : String(error)).slice(0, 1_000); }
+function failureArtifactPath(path: string): string { return path.endsWith(".json") ? `${path.slice(0, -5)}-failure.json` : `${path}-failure.json`; }
 function asRecord(value: unknown): Record<string, unknown> { if (!isRecord(value)) throw new Error("expected object"); return value; }
 function arrayOfRecords(value: unknown): Record<string, unknown>[] { if (!Array.isArray(value)) throw new Error("expected array"); return value.map(asRecord); }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
@@ -452,9 +685,34 @@ function sleep(ms: number): Promise<void> { return new Promise((resolveSleep) =>
 try { await main(); }
 catch (error) {
   console.error(error);
+  const browserMetrics = await activeBrowserd?.call("metrics", {}, 5_000).then(asRecord, () => undefined);
+  const webxdMetrics = await activeWebxd?.call("metrics", {}, 5_000).then(asRecord, () => undefined);
+  const chrome = browserMetrics === undefined ? [] : arrayOfRecords(browserMetrics.chrome).map((item) => ({ pid: item.pid, running: item.running, connected: item.connected, cdpPendingCount: item.cdpPendingCount }));
+  const failure: Record<string, unknown> = {
+    passed: false,
+    testedSha: (() => { try { return gitOutput(["rev-parse", "HEAD"]); } catch { return "unavailable"; } })(),
+    elapsedSeconds: (performance.now() - routeStarted) / 1_000,
+    ...failureContext,
+    error: { name: error instanceof Error ? error.name : "Error", message: safeError(error) },
+    coordinatorState: browserMetrics?.captureCoordinator ?? {},
+    cdpPendingCount: chrome.reduce((total, item) => total + (typeof item.cdpPendingCount === "number" ? item.cdpPendingCount : 0), 0),
+    captureAttempt: isRecord(browserMetrics?.captureCoordinator) ? browserMetrics.captureCoordinator.agentScreenshotAttempts : undefined,
+    timeoutType: error instanceof Error ? error.name : "unknown",
+    chrome,
+    webxd: webxdMetrics === undefined ? {} : { clientConnections: webxdMetrics.clientConnections, liveBindings: webxdMetrics.liveBindings, browser: webxdMetrics.browser, stream: webxdMetrics.stream },
+  };
   await piA?.stop().catch(() => undefined); await piB?.stop().catch(() => undefined);
   facadeController?.abort(); if (facade !== undefined) await facade.stop({ ownerId: "phase2b-agent-a" }).catch(() => undefined);
   await Promise.allSettled([...children].reverse().map(async (child) => await child.stop()));
-  if (root !== undefined) await rm(root, { recursive: true, force: true });
+  const cleanupRoot = root;
+  if (cleanupRoot !== undefined) await rm(cleanupRoot, { recursive: true, force: true });
+  root = undefined;
+  failure.cleanupOutcome = { childrenStillRunning: children.filter((child) => child.process.exitCode === null).length, temporaryRootRemoved: cleanupRoot === undefined || !(await exists(cleanupRoot)) };
+  const soakOutput = argument("--soak-output");
+  if (soakOutput !== undefined) {
+    const path = resolve(failureArtifactPath(soakOutput));
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, `${JSON.stringify(failure, null, 2)}\n`);
+  }
   process.exitCode = 1;
 }
