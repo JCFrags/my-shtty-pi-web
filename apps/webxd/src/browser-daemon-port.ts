@@ -312,11 +312,11 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     });
   }
 
-  async cancel(actor: AuthorityActor, operationId: string, signal?: AbortSignal): Promise<BrowserOperationResult> {
-    const raw = record(await (await this.connection(actor)).call("operation.cancel", { operationId }, signal));
+  async cancel(actor: AuthorityActor, targetOperationId: string, _operationId: string, signal?: AbortSignal): Promise<BrowserOperationResult> {
+    const raw = record(await (await this.connection(actor)).call("operation.cancel", { operationId: targetOperationId }, signal));
     const state = raw.state;
     if (state !== "queued" && state !== "running" && state !== "cancelling" && state !== "succeeded" && state !== "failed" && state !== "cancelled") throw new TypeError("invalid operation state");
-    return { operationId, state };
+    return { operationId: targetOperationId, state };
   }
 
   async createTab(actor: AuthorityActor, sessionId: string, url: string | undefined, operationId: string, signal?: AbortSignal): Promise<BrowserSession> {
@@ -332,24 +332,24 @@ export class BrowserDaemonRpcPort implements BrowserDaemonPort {
     return publicLegacySession(binding);
   }
 
-  async closeTab(actor: AuthorityActor, sessionId: string, tabId: string, signal?: AbortSignal): Promise<void> {
+  async closeTab(actor: AuthorityActor, sessionId: string, tabId: string, operationId: string, signal?: AbortSignal): Promise<void> {
     await this.withSessionLane(sessionId, async () => {
       const binding = this.owned(actor, sessionId);
       if (binding.session.tabId !== tabId) throw new BrowserPortError("wrong-owner", "tab does not belong to the owned session", 403);
       await this.invalidatePendingFrame(sessionId);
       const connection = await this.connection(actor);
       await connection.call("workspace.hide", {}, signal);
-      await connection.call("tab.close", { browserSessionId: sessionId, tabId }, signal);
+      await connection.call("tab.close", { browserSessionId: sessionId, tabId, operationId }, signal);
     });
   }
 
-  async close(actor: AuthorityActor, sessionId: string, signal?: AbortSignal): Promise<void> {
+  async close(actor: AuthorityActor, sessionId: string, operationId: string, signal?: AbortSignal): Promise<void> {
     await this.withSessionLane(sessionId, async () => {
       const binding = this.owned(actor, sessionId);
       await this.invalidatePendingFrame(sessionId);
       const connection = await this.connection(actor);
       await connection.call("workspace.hide", {}, signal);
-      await connection.call("session.close", { browserSessionId: sessionId }, signal);
+      await connection.call("session.close", { browserSessionId: sessionId, operationId }, signal);
       this.#sessions.set(sessionId, { ...binding, session: { ...binding.session, state: "closed" } });
     });
   }

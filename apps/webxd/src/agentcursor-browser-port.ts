@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { signNavigationAuthorization, type DomObservation, type ScreenshotObservation, type SessionDescriptor, type TabDescriptor } from "../../../packages/browser-protocol/src/index.js";
 import type {
   BrowserAction, BrowserControlResult, BrowserDebugResult, BrowserObservation, BrowserOperationResult,
@@ -40,7 +40,9 @@ const MAX_OBSERVATIONS_PER_TAB = 64;
 export class AgentCursorBrowserPort implements BrowserDaemonPort {
   readonly #sessions = new Map<string, SessionBinding>();
   readonly #observations = new Map<string, ObservationBinding>();
+  readonly #replacedSessionIds = new Set<string>();
   #observationMetadataBytes = 0;
+  #runtimeInstanceId?: string;
 
   constructor(
     private readonly client: BrowserdClientPool,
@@ -57,26 +59,33 @@ export class AgentCursorBrowserPort implements BrowserDaemonPort {
   async createSession(actor: AuthorityActor, request: BrowserSessionRequest, operationIdValue: string, signal?: AbortSignal): Promise<BrowserSession> {
     if (request.pathId !== "agentcursor/chrome") throw new BrowserPortError("unsupported", "selected browser backend supports only agentcursor/chrome", 400);
     await this.destinationAuthority.assertReady(signal);
-    const descriptor = await this.client.descriptor();
-    const authorization = request.url === undefined ? undefined : await this.authorize(actor, descriptor, operationIdValue, "initial", request.url, signal);
-    const raw = sessionDescriptor(await this.request(actor, operationIdValue, { kind: "session.create", ...(authorization === undefined ? {} : { initialUrl: authorization.normalizedUrl, navigationAuthorization: authorization.token }) }, signal));
-    const binding: SessionBinding = { principalId: actor.principalId, agentId: actor.agentId, runtimeInstanceId: descriptor.runtimeInstanceId, descriptor: raw };
+    const pinned = await this.requestWithDescriptor(actor, operationIdValue, async (descriptor) => {
+      const authorization = request.url === undefined ? undefined : await this.authorize(actor, descriptor, operationIdValue, "initial", request.url, signal);
+      return { kind: "session.create", ...(authorization === undefined ? {} : { initialUrl: authorization.normalizedUrl, navigationAuthorization: authorization.token }) };
+    }, signal);
+    const raw = sessionDescriptor(pinned.result);
+    if (this.#replacedSessionIds.has(raw.browserSessionId)) throw new BrowserPortError("BROWSER_INSTANCE_REPLACED", "browser service reused a replaced session identity", 409, true);
+    const binding: SessionBinding = { principalId: actor.principalId, agentId: actor.agentId, runtimeInstanceId: pinned.runtimeInstanceId, descriptor: raw };
     this.#sessions.set(raw.browserSessionId, binding);
     return publicSession(raw);
   }
 
   async listSessions(actor: AuthorityActor, signal?: AbortSignal): Promise<readonly BrowserSession[]> {
-    const runtime = await this.currentRuntime(signal);
-    const result = record(await this.request(actor, operationId("sessionList"), { kind: "session.list" }, signal));
+    const pinned = await this.requestPinned(actor, operationId("sessionList"), { kind: "session.list" }, signal);
+    const runtime = pinned.runtimeInstanceId;
+    const result = record(pinned.result);
     const sessions = array(result.sessions).map(sessionDescriptor);
     const currentIds = new Set<string>();
     for (const descriptor of sessions) {
+      if (this.#replacedSessionIds.has(descriptor.browserSessionId)) continue;
       currentIds.add(descriptor.browserSessionId);
       const prior = this.#sessions.get(descriptor.browserSessionId);
-      if (prior !== undefined && sameOwner(prior, actor) && prior.runtimeInstanceId === runtime) prior.descriptor = descriptor;
+      if (prior === undefined) this.#sessions.set(descriptor.browserSessionId, { principalId: actor.principalId, agentId: actor.agentId, runtimeInstanceId: runtime, descriptor });
+      else if (sameOwner(prior, actor) && prior.runtimeInstanceId === runtime) prior.descriptor = descriptor;
+      else throw new BrowserPortError("backend-failure", "browser service returned a conflicting session identity", 502);
     }
     for (const [id, binding] of this.#sessions) if (sameOwner(binding, actor) && binding.runtimeInstanceId === runtime && !currentIds.has(id)) { this.#sessions.delete(id); this.clearSessionObservations(id); }
-    return sessions.map((descriptor) => publicSession(descriptor));
+    return sessions.filter((descriptor) => !this.#replacedSessionIds.has(descriptor.browserSessionId)).map((descriptor) => publicSession(descriptor));
   }
 
   async getSession(actor: AuthorityActor, sessionId: string, signal?: AbortSignal): Promise<BrowserSession> {
@@ -118,10 +127,11 @@ export class AgentCursorBrowserPort implements BrowserDaemonPort {
     const binding = await this.owned(actor, sessionId, signal);
     const tab = selectedTab(binding.descriptor, tabId);
     if (action.kind === "navigate") {
-      const descriptor = await this.client.descriptor();
-      this.assertRuntime(binding, descriptor.runtimeInstanceId);
-      const authorization = await this.authorize(actor, descriptor, operationIdValue, "navigate", action.url, signal);
-      await this.request(actor, operationIdValue, { kind: "navigate", address: tab.address, url: authorization.normalizedUrl, navigationAuthorization: authorization.token }, signal);
+      await this.requestWithDescriptor(actor, operationIdValue, async (descriptor) => {
+        this.assertRuntime(binding, descriptor.runtimeInstanceId);
+        const authorization = await this.authorize(actor, descriptor, operationIdValue, "navigate", action.url, signal);
+        return { kind: "navigate", address: tab.address, url: authorization.normalizedUrl, navigationAuthorization: authorization.token };
+      }, signal);
     } else if (action.kind === "key-press") await this.request(actor, operationIdValue, { kind: "input.key", address: tab.address, key: action.key }, signal);
     else if (action.kind === "text-input") await this.request(actor, operationIdValue, { kind: "input.text", address: tab.address, text: action.text, ...(action.replace === undefined ? {} : { replace: action.replace }) }, signal);
     else if (action.kind === "dom-click" || action.kind === "dom-double-click" || action.kind === "dom-hover" || action.kind === "dom-type" || action.kind === "dom-fill" || action.kind === "dom-key-press") {
@@ -133,16 +143,18 @@ export class AgentCursorBrowserPort implements BrowserDaemonPort {
     return { operationId: operationIdValue, state: "succeeded" };
   }
 
-  async cancel(actor: AuthorityActor, targetOperationId: string, signal?: AbortSignal): Promise<BrowserOperationResult> {
-    const raw = record(await this.request(actor, operationId("cancel"), { kind: "operation.cancel", targetOperationId }, signal));
+  async cancel(actor: AuthorityActor, targetOperationId: string, operationIdValue: string, signal?: AbortSignal): Promise<BrowserOperationResult> {
+    const raw = record(await this.request(actor, operationIdValue, { kind: "operation.cancel", targetOperationId }, signal));
     return { operationId: targetOperationId, state: operationState(raw.state) };
   }
 
   async createTab(actor: AuthorityActor, sessionId: string, url: string | undefined, operationIdValue: string, signal?: AbortSignal): Promise<BrowserSession> {
     const binding = await this.owned(actor, sessionId, signal);
-    const descriptor = await this.client.descriptor(); this.assertRuntime(binding, descriptor.runtimeInstanceId);
-    const authorization = url === undefined ? undefined : await this.authorize(actor, descriptor, operationIdValue, "new-tab", url, signal);
-    await this.request(actor, operationIdValue, { kind: "tab.create", browserSessionId: sessionId, controlEpoch: binding.descriptor.controlEpoch, ...(authorization === undefined ? {} : { url: authorization.normalizedUrl, navigationAuthorization: authorization.token }) }, signal);
+    await this.requestWithDescriptor(actor, operationIdValue, async (descriptor) => {
+      this.assertRuntime(binding, descriptor.runtimeInstanceId);
+      const authorization = url === undefined ? undefined : await this.authorize(actor, descriptor, operationIdValue, "new-tab", url, signal);
+      return { kind: "tab.create", browserSessionId: sessionId, controlEpoch: binding.descriptor.controlEpoch, ...(authorization === undefined ? {} : { url: authorization.normalizedUrl, navigationAuthorization: authorization.token }) };
+    }, signal);
     await this.refresh(actor, binding, signal);
     return publicSession(binding.descriptor);
   }
@@ -155,35 +167,35 @@ export class AgentCursorBrowserPort implements BrowserDaemonPort {
     return publicSession(binding.descriptor);
   }
 
-  async closeTab(actor: AuthorityActor, sessionId: string, tabId: string, signal?: AbortSignal): Promise<void> {
+  async closeTab(actor: AuthorityActor, sessionId: string, tabId: string, operationIdValue: string, signal?: AbortSignal): Promise<void> {
     const binding = await this.owned(actor, sessionId, signal);
     const tab = binding.descriptor.tabs.find((item) => item.address.tabId === tabId);
     if (tab === undefined) throw notFound();
-    await this.request(actor, operationId("tabClose"), { kind: "tab.close", address: tab.address }, signal);
+    await this.request(actor, operationIdValue, { kind: "tab.close", address: tab.address }, signal);
     this.clearTabObservations(sessionId, tabId);
     await this.refresh(actor, binding, signal);
   }
 
-  async close(actor: AuthorityActor, sessionId: string, signal?: AbortSignal): Promise<void> {
+  async close(actor: AuthorityActor, sessionId: string, operationIdValue: string, signal?: AbortSignal): Promise<void> {
     const binding = await this.owned(actor, sessionId, signal);
-    await this.request(actor, operationId("sessionClose"), { kind: "session.close", browserSessionId: sessionId, controlEpoch: binding.descriptor.controlEpoch }, signal);
+    await this.request(actor, operationIdValue, { kind: "session.close", browserSessionId: sessionId, controlEpoch: binding.descriptor.controlEpoch }, signal);
     this.#sessions.delete(sessionId);
     this.clearSessionObservations(sessionId);
   }
 
-  async shutdown(): Promise<void> { this.#sessions.clear(); this.#observations.clear(); this.#observationMetadataBytes = 0; await this.client.close(); }
+  async shutdown(): Promise<void> { this.#sessions.clear(); this.#observations.clear(); this.#replacedSessionIds.clear(); this.#observationMetadataBytes = 0; await this.client.close(); }
   async debug(): Promise<BrowserDebugResult> { throw new BrowserPortError("unsupported", "browser diagnostics are not supported by agentcursor/chrome", 400); }
   async workspace(): Promise<BrowserWorkspaceResult> { throw new BrowserPortError("unsupported", "browser workspace is not supported by agentcursor/chrome", 400); }
   async setControl(): Promise<BrowserControlResult> { throw new BrowserPortError("unsupported", "human takeover is not supported by agentcursor/chrome", 400); }
 
   private async owned(actor: AuthorityActor, sessionId: string, signal?: AbortSignal): Promise<SessionBinding> {
-    const binding = this.#sessions.get(sessionId);
+    if (this.#replacedSessionIds.has(sessionId)) throw new BrowserPortError("BROWSER_INSTANCE_REPLACED", "browser service restarted; open a new browser session", 409, true);
+    let binding = this.#sessions.get(sessionId);
+    if (binding !== undefined && !sameOwner(binding, actor)) throw notFound();
+    await this.listSessions(actor, signal);
+    if (this.#replacedSessionIds.has(sessionId)) throw new BrowserPortError("BROWSER_INSTANCE_REPLACED", "browser service restarted; open a new browser session", 409, true);
+    binding = this.#sessions.get(sessionId);
     if (binding === undefined || !sameOwner(binding, actor)) throw notFound();
-    this.assertRuntime(binding, await this.currentRuntime(signal));
-    const listed = record(await this.request(actor, operationId("ownerLookup"), { kind: "session.list" }, signal));
-    const descriptor = array(listed.sessions).map(sessionDescriptor).find((item) => item.browserSessionId === sessionId);
-    if (descriptor === undefined) throw notFound();
-    binding.descriptor = descriptor;
     return binding;
   }
 
@@ -239,10 +251,26 @@ export class AgentCursorBrowserPort implements BrowserDaemonPort {
   }
 
   private async request(actor: AuthorityActor, operationIdValue: string, fields: BrowserdRequestFields, signal?: AbortSignal): Promise<unknown> {
-    try { return await this.client.request(actor, operationIdValue, fields, signal); }
-    catch (error) { throw mapClientError(error); }
+    return (await this.requestPinned(actor, operationIdValue, fields, signal)).result;
   }
-  private async currentRuntime(signal?: AbortSignal): Promise<string> { try { return (await this.client.descriptor()).runtimeInstanceId; } catch (error) { if (signal?.aborted) throw error; throw mapClientError(error); } }
+  private async requestPinned(actor: AuthorityActor, operationIdValue: string, fields: BrowserdRequestFields, signal?: AbortSignal): Promise<{ readonly runtimeInstanceId: string; readonly result: unknown }> {
+    try { const pinned = await this.client.requestPinned(actor, operationIdValue, fields, signal); this.acceptRuntime(pinned.runtimeInstanceId); return pinned; }
+    catch (error) { if (error instanceof BrowserdClientError && error.runtimeInstanceId !== undefined) this.acceptRuntime(error.runtimeInstanceId); throw mapClientError(error); }
+  }
+  private async requestWithDescriptor(actor: AuthorityActor, operationIdValue: string, fields: (descriptor: BrowserdDescriptor) => Promise<BrowserdRequestFields>, signal?: AbortSignal): Promise<{ readonly runtimeInstanceId: string; readonly result: unknown }> {
+    try { const pinned = await this.client.requestWithDescriptor(actor, operationIdValue, fields, signal); this.acceptRuntime(pinned.runtimeInstanceId); return pinned; }
+    catch (error) { if (error instanceof BrowserdClientError && error.runtimeInstanceId !== undefined) this.acceptRuntime(error.runtimeInstanceId); throw mapClientError(error); }
+  }
+  private acceptRuntime(runtimeInstanceId: string): void {
+    const prior = this.#runtimeInstanceId;
+    if (prior === undefined) { this.#runtimeInstanceId = runtimeInstanceId; return; }
+    if (prior === runtimeInstanceId) return;
+    this.#runtimeInstanceId = runtimeInstanceId;
+    for (const sessionId of this.#sessions.keys()) { this.#replacedSessionIds.add(sessionId); while (this.#replacedSessionIds.size > 1_024) { const oldest = this.#replacedSessionIds.values().next().value as string | undefined; if (oldest === undefined) break; this.#replacedSessionIds.delete(oldest); } }
+    this.#sessions.clear();
+    this.#observations.clear();
+    this.#observationMetadataBytes = 0;
+  }
   private assertRuntime(binding: SessionBinding, runtime: string): void { if (binding.runtimeInstanceId !== runtime) throw new BrowserPortError("BROWSER_INSTANCE_REPLACED", "browser service restarted; open a new browser session", 409, true); }
 }
 
@@ -294,7 +322,7 @@ function imageDimensions(bytes: Buffer, mediaType: "image/png" | "image/jpeg"): 
   throw invalid();
 }
 function operationState(value: unknown): BrowserOperationResult["state"] { if (value === "queued" || value === "running") return value; if (value === "cancelled") return "cancelled"; if (value === "committed") return "succeeded"; return "failed"; }
-function operationId(prefix: string): string { return `${prefix}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`; }
+function operationId(prefix: string): string { return `${prefix}:${randomBytes(18).toString("base64url")}`; }
 function healthActor(): AuthorityActor { return { principalId: "webxd.health", agentId: "webxd.health", scopes: new Set(["browser.read"]) }; }
 function sameOwner(binding: Pick<SessionBinding, "principalId" | "agentId">, actor: AuthorityActor): boolean { return binding.principalId === actor.principalId && binding.agentId === actor.agentId; }
 function notFound(): BrowserPortError { return new BrowserPortError("not-found", "browser session or tab was not found", 404); }

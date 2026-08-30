@@ -55,9 +55,9 @@ export interface BrowserDaemonPort {
   debug(actor: AuthorityActor, sessionId: string, request: BrowserDebugRequest, operationId: string, signal?: AbortSignal): Promise<BrowserDebugResult>;
   workspace(actor: AuthorityActor, request: BrowserWorkspaceRequest, operationId: string, signal?: AbortSignal): Promise<BrowserWorkspaceResult>;
   setControl(actor: AuthorityActor, sessionId: string, controller: "human" | "agent", operationId: string, signal?: AbortSignal): Promise<BrowserControlResult>;
-  cancel(actor: AuthorityActor, operationId: string, signal?: AbortSignal): Promise<BrowserOperationResult>;
-  closeTab(actor: AuthorityActor, sessionId: string, tabId: string, signal?: AbortSignal): Promise<void>;
-  close(actor: AuthorityActor, sessionId: string, signal?: AbortSignal): Promise<void>;
+  cancel(actor: AuthorityActor, targetOperationId: string, operationId: string, signal?: AbortSignal): Promise<BrowserOperationResult>;
+  closeTab(actor: AuthorityActor, sessionId: string, tabId: string, operationId: string, signal?: AbortSignal): Promise<void>;
+  close(actor: AuthorityActor, sessionId: string, operationId: string, signal?: AbortSignal): Promise<void>;
   shutdown(): Promise<void>;
 }
 

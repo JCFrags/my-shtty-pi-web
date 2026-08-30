@@ -766,10 +766,10 @@ export class WebxAuthority {
     if (sessionId !== undefined && segments[2] === "sessions") {
       this.assertBrowserOwner(actor, sessionId);
       if (request.method === "GET" && segments.length === 4) { requireScope(actor, "browser.read"); return ok(await this.options.browser.getSession(actor, sessionId, request.signal)); }
-      if (request.method === "DELETE" && segments.length === 4) { requireScope(actor, "browser.write"); await this.options.browser.close(actor, sessionId, request.signal); this.#browserOwners.delete(sessionId); return { status: 204, headers: jsonHeaders() }; }
+      if (request.method === "DELETE" && segments.length === 4) { requireScope(actor, "browser.write"); await this.options.browser.close(actor, sessionId, operationId(request), request.signal); this.#browserOwners.delete(sessionId); return { status: 204, headers: jsonHeaders() }; }
       if (request.method === "POST" && segments.length === 5 && segments[4] === "tabs") { requireScope(actor, "browser.write"); const input = body<{ url?: string }>(request); return ok(await this.options.browser.createTab(actor, sessionId, input.url, operationId(request), request.signal), 201); }
       if (request.method === "POST" && segments[4] === "tabs" && segments[5] !== undefined && segments[6] === "focus") { requireScope(actor, "browser.write"); return ok(await this.options.browser.focusTab(actor, sessionId, segments[5], operationId(request), request.signal)); }
-      if (request.method === "DELETE" && segments[4] === "tabs" && segments[5] !== undefined) { requireScope(actor, "browser.write"); await this.options.browser.closeTab(actor, sessionId, segments[5], request.signal); return { status: 204, headers: jsonHeaders() }; }
+      if (request.method === "DELETE" && segments[4] === "tabs" && segments[5] !== undefined) { requireScope(actor, "browser.write"); await this.options.browser.closeTab(actor, sessionId, segments[5], operationId(request), request.signal); return { status: 204, headers: jsonHeaders() }; }
       if (request.method === "POST" && segments[4] === "observe") {
         requireScope(actor, "browser.read");
         const input = body<{ view?: string; mode?: string; maxChars?: number; maxNodes?: number; tabId?: string }>(request);
@@ -809,7 +809,7 @@ export class WebxAuthority {
     }
     if (request.method === "POST" && segments[2] === "operations" && segments[4] === "cancel") {
       requireScope(actor, "browser.write");
-      return ok(await this.options.browser.cancel(actor, segments[3] ?? "", request.signal));
+      return ok(await this.options.browser.cancel(actor, segments[3] ?? "", operationId(request), request.signal));
     }
     throw problem(404, "not-found", "browser operation was not found", false);
   }

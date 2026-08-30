@@ -142,6 +142,9 @@ class FakeClient {
     if (fields.kind === "operation.cancel") return { kind: "operation", operationId: fields.targetOperationId, state: "cancelled", dispatchState: "not-dispatched", queuedAt: "2026-08-29T00:00:00.000Z", finishedAt: "2026-08-29T00:00:01.000Z" };
     return { kind: "ack", operationId };
   });
+
+  requestPinned = vi.fn(async (actor: AuthorityActor, operationId: string, fields: BrowserdRequestFields, signal?: AbortSignal) => ({ runtimeInstanceId: this.currentDescriptor.runtimeInstanceId, result: await this.request(actor, operationId, fields, signal) }));
+  requestWithDescriptor = vi.fn(async (actor: AuthorityActor, operationId: string, fields: (value: BrowserdDescriptor) => Promise<BrowserdRequestFields>, signal?: AbortSignal) => ({ runtimeInstanceId: this.currentDescriptor.runtimeInstanceId, result: await this.request(actor, operationId, await fields(this.currentDescriptor), signal) }));
 }
 
 function pngBytes(marker: number): Buffer { const value = Buffer.alloc(25); Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(value); value.write("IHDR", 12, "ascii"); value.writeUInt32BE(1600, 16); value.writeUInt32BE(1200, 20); value[24] = marker; return value; }
@@ -325,7 +328,7 @@ describe("AgentCursorBrowserPort", () => {
     const withSecond = await value.port.createTab(owner, "session-a", undefined, "operation-new-tab");
     expect(withSecond.tabs.map((item) => item.tabId)).toEqual(["tab-a", "tab-b"]);
     await expect(value.port.focusTab(owner, "session-a", "tab-b", "operation-focus")).resolves.toMatchObject({ tabs: expect.any(Array) });
-    await value.port.closeTab(owner, "session-a", "tab-b");
+    await value.port.closeTab(owner, "session-a", "tab-b", "operation-close-tab");
     await expect(value.port.getSession(owner, "session-a")).resolves.toMatchObject({ tabs: [expect.objectContaining({ tabId: "tab-a" })] });
     expect(callOf(value.client, "tab.focus").fields).toEqual(expect.objectContaining({ address: expect.objectContaining({ tabId: "tab-b" }) }));
     expect(callOf(value.client, "tab.close").fields).toEqual(expect.objectContaining({ address: expect.objectContaining({ tabId: "tab-b" }) }));
@@ -341,6 +344,17 @@ describe("AgentCursorBrowserPort", () => {
     expect(value.client.calls.some((call) => call.fields.kind === "session.list")).toBe(true);
   });
 
+  it("rehydrates actor-owned sessions after a webxd port restart without recreating Chrome", async () => {
+    const client = new FakeClient();
+    const restarted = port(client);
+    await expect(restarted.port.listSessions(owner)).resolves.toHaveLength(1);
+    const observation = await restarted.port.observe(owner, "session-a", "screenshot", 200, "rehydrated-observe", undefined, "tab-a");
+    if (observation.kind !== "screenshot") throw new Error("expected screenshot");
+    await expect(restarted.port.captureFrame(owner, "session-a", "tab-a", observation.observationId)).resolves.toMatchObject({ observationId: observation.observationId, digest });
+    await expect(restarted.port.act(owner, "session-a", { kind: "click", observationId: observation.observationId, x: 10, y: 20 }, "rehydrated-action", undefined, "tab-a")).resolves.toMatchObject({ state: "succeeded" });
+    expect(client.calls.filter((call) => call.fields.kind === "session.create")).toHaveLength(0);
+  });
+
   it("marks old sessions replaced after browserd runtime identity changes", async () => {
     const value = port();
     await opened(value);
@@ -352,7 +366,7 @@ describe("AgentCursorBrowserPort", () => {
   it("forwards cancellation and settles shutdown without closing browser sessions", async () => {
     const value = port();
     await opened(value);
-    await expect(value.port.cancel(owner, "operation-running")).resolves.toEqual({ operationId: "operation-running", state: "cancelled" });
+    await expect(value.port.cancel(owner, "operation-running", "operation-cancel-request")).resolves.toEqual({ operationId: "operation-running", state: "cancelled" });
     await value.port.shutdown();
     expect(value.client.close).toHaveBeenCalledOnce();
     expect(value.client.calls.some((call) => call.fields.kind === "session.close")).toBe(false);

@@ -25,13 +25,13 @@ function browser(): BrowserDaemonPort {
       return { browserSessionId: "session-1", pathId: request.pathId, controlEpoch: 1, state: "ready" as const, tabs: [{ tabId: "tab-1", url: "https://fixture.invalid/", title: "Fixture", state: "ready" as const, documentGeneration: 1, viewportGeneration: 1, frameSequence: 1 }] };
     }),
     getSession: vi.fn(async (owner: AuthorityActor, sessionId: string) => { void owner; void sessionId; return { browserSessionId: "session-1", pathId: "agent-browser/chrome" as const, controlEpoch: 1, state: "ready" as const, tabs: [{ tabId: "tab-1", url: "https://fixture.invalid/", title: "Fixture", state: "ready" as const, documentGeneration: 1, viewportGeneration: 1, frameSequence: 1 }] }; }),
-    observe: vi.fn(async () => ({ kind: "dom" as const, operationId: "op-observe", domObservationId: "dom-1", browserSessionId: "session-1", tabId: "tab-1", documentGeneration: 1, observedAt: "2026-08-12T00:00:00Z", truncated: false, nodes: [] })),
+    observe: vi.fn(async () => ({ kind: "dom" as const, operationId: "op-observe", domObservationId: "dom-1", browserSessionId: "session-1", tabId: "tab-1", documentGeneration: 1, observedAt: "2026-08-12T00:00:00Z", validUntil: "2026-08-12T00:01:00Z", truncated: false, nodes: [] })),
     captureFrame: vi.fn(async () => ({ browserSessionId: "session-1", tabId: "tab-1", observationId: "observation-1", mediaType: "image/png" as const, imagePixelWidth: 1, imagePixelHeight: 1, payloadBase64: "", digest: "a".repeat(64), frameSequence: 1, viewportGeneration: 1 })),
     act: vi.fn(async (_owner, _session, _action, operationId) => ({ operationId, state: "succeeded" as const })),
     debug: vi.fn(async (_owner, _sessionId, request, operationId) => ({ operationId, operation: request.operation, ok: true, data: {} })),
     workspace: vi.fn(async (_owner, request) => ({ action: request.action, data: {} })),
     setControl: vi.fn(async (_owner, sessionId, controller) => ({ sessionId, tabId: "tab-1", controller, controlEpoch: 2 })),
-    cancel: vi.fn(async (_owner, operationId) => ({ operationId, state: "cancelled" as const })),
+    cancel: vi.fn(async (_owner, targetOperationId) => ({ operationId: targetOperationId, state: "cancelled" as const })),
     createTab: vi.fn(async () => ({ browserSessionId: "session-1", pathId: "agent-browser/chrome" as const, controlEpoch: 1, state: "ready" as const, tabs: [] })),
     focusTab: vi.fn(async () => ({ browserSessionId: "session-1", pathId: "agent-browser/chrome" as const, controlEpoch: 1, state: "ready" as const, tabs: [] })),
     closeTab: vi.fn(async () => undefined),
@@ -343,6 +343,23 @@ describe("WebxAuthority", () => {
     expect(await call(instance, actor(), "DELETE", "/v1/browser/sessions/session-1/tabs/tab-1", undefined, "browser-tab-close-1")).toMatchObject({ status: 204 });
     expect(port.workspace).toHaveBeenCalledTimes(1);
     expect(port.closeTab).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(port.closeTab).mock.calls[0]?.[3]).toBe(`operation:${createHash("sha256").update("browser-tab-close-1").digest("hex")}`);
+  });
+
+  it("preserves stable public operation IDs when close responses are lost and retried", async () => {
+    const port = browser();
+    const tabOperations: string[] = [];
+    const sessionOperations: string[] = [];
+    vi.mocked(port.closeTab).mockImplementation(async (_actor, _sessionId, _tabId, operationId) => { tabOperations.push(operationId); if (tabOperations.length === 1) throw new Error("response lost after commit"); });
+    vi.mocked(port.close).mockImplementation(async (_actor, _sessionId, operationId) => { sessionOperations.push(operationId); if (sessionOperations.length === 1) throw new Error("response lost after commit"); });
+    const instance = authority(port);
+    await call(instance, actor(), "POST", "/v1/browser/sessions", { pathId: "agent-browser/chrome" }, "close-retry-create");
+    expect(await call(instance, actor(), "DELETE", "/v1/browser/sessions/session-1/tabs/tab-1", undefined, "close-tab-retry")).toMatchObject({ status: 502 });
+    expect(await call(instance, actor(), "DELETE", "/v1/browser/sessions/session-1/tabs/tab-1", undefined, "close-tab-retry")).toMatchObject({ status: 204 });
+    expect(new Set(tabOperations)).toEqual(new Set([`operation:${createHash("sha256").update("close-tab-retry").digest("hex")}`]));
+    expect(await call(instance, actor(), "DELETE", "/v1/browser/sessions/session-1", undefined, "close-session-retry")).toMatchObject({ status: 502 });
+    expect(await call(instance, actor(), "DELETE", "/v1/browser/sessions/session-1", undefined, "close-session-retry")).toMatchObject({ status: 204 });
+    expect(new Set(sessionOperations)).toEqual(new Set([`operation:${createHash("sha256").update("close-session-retry").digest("hex")}`]));
   });
 
   it("routes browser list and safe debug while refusing secret debug before dispatch", async () => {
@@ -411,7 +428,7 @@ describe("WebxAuthority", () => {
     const response = await call(instance, actor(), "GET", "/v1/capabilities");
     expect(response.status).toBe(200);
     expect((response.body as { capabilities: unknown[] }).capabilities[0]).toMatchObject({ id: "search", enabled: true, healthy: false, reason: expect.stringContaining(reason) });
-    expect(new URL(String(healthFetch.mock.calls[0]?.[0])).pathname).toBe("/config");
+    expect(new URL(String((healthFetch.mock.calls as unknown[][])[0]?.[0])).pathname).toBe("/config");
   });
 
   it("reports a dead local SearXNG process as unhealthy", async () => {
