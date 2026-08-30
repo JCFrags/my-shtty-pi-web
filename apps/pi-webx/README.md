@@ -28,7 +28,7 @@ Browser work follows open, screenshot observe, one bound action, observe again, 
 
 Public browser API major 3 supports the new `agentcursor/chrome` route. Screenshot and DOM results expose exact `validUntil`; their production defaults are separate bounded 60-second leases. Backend selection occurs once in webxd. Pi requests cannot select or fall back to another backend. The legacy route remains selected by default for rollback.
 
-Pi does not receive frame subscription operations. A future trusted local workspace gateway will sit above webxd/browserd authority and use the internal bounded latest-frame stream. It will not connect Tauri directly to browserd or expose aggregate cross-agent viewing through the normal actor-bound Pi API.
+Pi does not receive frame subscription operations. The Phase 3A trusted local workspace gateway sits above webxd/browserd authority and uses the internal bounded latest-frame stream. It will not connect Tauri directly to browserd or expose aggregate cross-agent viewing through the normal actor-bound Pi API.
 
 Only the user changes modes. Run `/web` with no options to open one settings menu for capability modes and read-only browser workspace controls. For the AgentCursor backend, the Phase 3A direct forms are `/web workspace show`, `/web workspace hide`, and `/web workspace attach <browserSessionId> [tabId]`. These commands launch the fixed local Tauri executable directly without a shell; they do not call legacy workspace RPC. Takeover and return report that human control is unavailable until Phase 3B, and `list` is no longer a workspace command. Browser tools are available by default. There is no separate browser slash command or model-facing workspace or upgrade tool.
 

@@ -72,3 +72,9 @@ This cache reduces repeated search-provider and website traffic. It is not a dur
 The Pi-facing authority covers search, read, stored normalized content, capabilities, and browser create/list/get/observe/frame/act/cancel/close-session/close-tab. Legacy backend capabilities can also expose workspace, debug, and control. The AgentCursor backend does not. Page-library functions are reserved for a future separate research-archive extension. Internal artifact routes support bounded component transfers and are not Pi tools.
 
 Page history search returns explicit `501 unavailable`. Safe browser debug permits `console`, `network`, `html`, `pdf`, `record-start`, and `record-stop`. Secret-bearing `evaluate`, `cookies`, and `storage` operations are refused.
+
+## Phase 3A private workspace gateway
+
+In AgentCursor mode, webxd is also the only browserd workspace-broker client. It reads the separate browserd workspace secret, receives sanitized aggregate snapshots and exact subscribed frames, and publishes `workspace.v1` under `$XDG_RUNTIME_DIR/pi-web/workspace/`. The directory is `0700`; the descriptor and unique socket are `0600`; descriptor publication and cleanup are instance-safe.
+
+The gateway accepts only bounded bind, snapshot, local selection, clear, ping, and close commands. State records are non-droppable. Screenshot records use bounded length-prefixed JSON plus raw payload bytes and latest-only backpressure. Tauri Rust receives the descriptor and secret; JavaScript does not. Webxd restart reconnects to a surviving browserd. Browserd replacement clears old subscriptions and sessions. The gateway is read-only and is not part of the Pi model contract.

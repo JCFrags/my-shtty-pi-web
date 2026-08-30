@@ -149,3 +149,11 @@ Phase 2A Gate 0 replaces stale filesystem ownership recovery with kernel-owned a
 Phase 2B adds production observation leases, practical motor timing, exact image GETs, route-aware idempotency, persistent UTF-8 transport, bounded subscription and client lifecycles, webxd restart rehydration, pinned runtime identity, stable public mutation IDs, functional branded egress health, explicit download denial, and process-isolated acceptance.
 
 Phase 2B.1 confirms barrier-reproduced same-session overlap, one session capture coordinator, typed bounded screenshot recovery, non-cooperative close settlement, cleanup-final webxd shutdown, clean externally pinned evidence, 1,001-transaction Fedora Chromium contention, and a final-code uninterrupted 1,800-second soak. Production-default routing remains disabled and ADR-012 remains unresolved.
+
+## ADR-018 through ADR-020: Phase 3A trusted read-only workspace
+
+**Decision:** Add a distinct browserd workspace-broker role used only by trusted webxd, expose a separate authenticated `workspace.v1` Unix gateway to Tauri Rust, and deliver screenshot bytes to React as bounded Tauri-channel `ArrayBuffer` records. Qualify cross-agent viewing before adding any human control.
+
+**Reason:** Aggregate viewing crosses actor boundaries and needs its own narrow authority. Descriptor discovery and secrets must remain outside JavaScript. Binary frames need latest-only backpressure without base64 or global events. Human input adds controller-epoch and action-settlement risks that are independent of viewing.
+
+**Consequence:** Phase 3A is read-only. Tauri has no direct browserd connection; JavaScript has no socket, descriptor, secret, fetch, or WebSocket. Former-selection frames cannot paint after the measured switch barrier. Human takeover remains Phase 3B, production routing still defaults to `legacy`, and ADR-012 remains unresolved. See `ADR-018-TRUSTED-WORKSPACE-AUTHORITY.md`, `ADR-019-BINARY-TAURI-FRAME-DELIVERY.md`, and `ADR-020-READ-ONLY-BEFORE-TAKEOVER.md`.

@@ -59,3 +59,16 @@ Phase 2B.1 qualifies the new development route only behind the non-default switc
 7. Hostile same-UID code remains outside the ADR-011 boundary. Use a separate Unix user or stronger sandbox only if that threat enters scope.
 
 The Phase 0 viewer is not a security reference. The Phase 2B.1 native route does not use Tauri. Its final-code 30-minute process soak does not resolve ADR-012. See `PHASE2B1-RESULTS.md` and ADR-015 through ADR-017.
+
+## Phase 3A workspace risk updates
+
+| Risk | Impact | Likelihood | Mitigation and acceptance evidence |
+|---|---|---|---|
+| Aggregate viewing leaks another actor's authority or private browser internals | Critical | Low–medium | Use a separate secret and exclusive browserd workspace role, sanitized schemas, trusted webxd labels, exact read-only commands, and per-connection delivered-frame ledgers. Frontend receives no authority or internal identity. |
+| A late frame paints after a session or tab switch | High | Medium | Bind every delivery to runtime, selection, subscription, session, tab, sequence, document, viewport, length, digest, media, and dimensions. Settle an old in-flight frontend frame before the selection barrier. Final soak reports zero stale or cross-agent paints. |
+| Binary frame queues or decoder objects grow | High | Medium | Cap payload at 4 MiB; apply socket backpressure and latest-only frame replacement; retain at most one in-flight and one pending Rust frame, one frontend frame, and one live `ImageBitmap`. |
+| Workspace descriptor or secret reaches JavaScript | Critical | Low | Tauri Rust exclusively validates runtime directory, descriptor, mode, socket, PID/start ticks, and secret. Custom commands expose only sanitized state and channel bytes. CSP and capabilities deny network, filesystem, shell, process, and remote content. |
+| Continuous graphical capture creates transient compositor timeouts after browser replacement | Medium | Medium | Serialize each session through its capture coordinator, drop timed-out frames, permit one exact typed agent retry, dwell before handing the permit on frame timeout, and bound the graphical soak at 32 recoveries, 5%, and 64 typed timeouts with zero unrecovered failures. Final result is 14/628 recovered and 27 typed timeouts. Treat latency as an open optimization before Phase 3B. |
+| Human-control scope enters the viewer without a qualified epoch boundary | Critical | Medium | Phase 3A contains no input or control mutation. Keep unavailable commands explicit. Design and qualify controller epochs, settlement, interrupt, return, and ABA behavior separately in Phase 3B. |
+
+Phase 3A removes the former “production Tauri frame bridge” residual item. It does not remove the human-takeover, Google Chrome, packaging, display, long-term memory, same-UID, or ADR-012 risks. Production-default AgentCursor routing remains disabled.

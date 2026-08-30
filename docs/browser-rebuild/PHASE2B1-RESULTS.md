@@ -166,3 +166,7 @@ A fresh independent read-only acceptance review of the frozen code, documents, a
 Phase 2B.1 closes its capture arbitration and final qualification gate. Phase 3 development may begin as a separate task for the trusted local screenshot workspace and human-control boundary. It must remain above webxd/browserd authority, must not connect Tauri directly to browserd, must not expose model-facing frame subscriptions, and must not change the production backend default.
 
 Production-default AgentCursor routing remains blocked by ADR-012 and later deployment, packaging, Chrome, display, and resource gates. This Phase 2B.1 soak does not prove a long-term Chrome memory plateau.
+
+## Phase 3A follow-up
+
+Phase 3A subsequently added and qualified the trusted read-only Tauri workspace without changing the Phase 2B.1 actor contract or its non-graphical recovery gate. Browserd private protocol is now `browser.v2`; the actor role remains connection-bound, while trusted webxd alone uses the separate workspace-broker role. See `PHASE3A-RESULTS.md`. Human takeover is still absent, production routing still defaults to `legacy`, and ADR-012 remains unresolved.

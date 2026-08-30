@@ -6,7 +6,7 @@ It contains:
 
 - web search, direct page reading, and bounded multi-source research;
 - browser automation with explicit sessions and tabs;
-- a Tauri desktop workspace for live viewing and user control;
+- a read-only Tauri desktop workspace for live multi-agent screenshot viewing;
 - PDF and office-document conversion;
 - the Pi extension that presents one clear tool set;
 - one Fedora installer and uninstaller.
@@ -27,7 +27,7 @@ The separate research archive concept is recorded in [`FUTURE_FEATURES.md`](FUTU
 
 ## Browser support
 
-`agent-browser/chrome` is the required visual browser path. It supports the visible workspace and user takeover. `pinchtab/chrome` is an optional non-visual adapter. Optional adapters never block the main browser path from starting.
+The public AgentCursor path is `agentcursor/chrome`. Its Phase 3A Tauri workspace is a read-only screenshot viewer; human takeover remains deferred to Phase 3B. Production `WEBX_BROWSER_BACKEND` still defaults to `legacy`, and the legacy runtime remains installed and selectable. The AgentCursor route is not the production default. Search and direct read remain independent of either browser backend.
 
 ## Install on Fedora
 

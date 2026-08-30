@@ -1,12 +1,12 @@
 # Internal browser protocol
 
-Status: Phase 2B.1 executable internal contract. This is the private browserd protocol, not public WebX API major 3.
+Status: Phase 3A executable internal contracts. This is the private browserd protocol, not public WebX API major 3.
 
 The authoritative source is `packages/browser-protocol/src/schema.ts`. The deterministic machine-readable artifact is `packages/browser-protocol/schema/browser-protocol.schema.json`. Conformance fixtures and parser tests are in `packages/browser-protocol/tests/`.
 
 ## Framing and version
 
-`browserd` uses bounded newline-delimited JSON on an owner-only Unix socket. Every record has `protocolVersion: "browser.v1"`. Request and response objects reject unknown fields. IDs, strings, URLs, numbers, lists, screenshots, and frame sizes have explicit bounds.
+`browserd` uses bounded newline-delimited JSON on an owner-only Unix socket. Every record has `protocolVersion: "browser.v2"`. Request and response objects reject unknown fields. IDs, strings, URLs, numbers, lists, screenshots, and frame sizes have explicit bounds.
 
 Each browserd and webxd client connection owns one persistent fatal UTF-8 decoder. Bounds for one frame, accumulated incomplete UTF-8 bytes, pending requests, active subscriptions, and queued outbound bytes are independent. A history of valid small frames does not consume a cumulative frame budget. An already-aborted request is rejected before write. A queued socket write is admitted; later caller cancellation sends one bounded `operation.cancel`. Socket drain controls backpressure and connection failure rejects all pending callers.
 
@@ -14,7 +14,7 @@ Mutation and observation requests contain:
 
 ```ts
 {
-  protocolVersion: "browser.v1";
+  protocolVersion: "browser.v2";
   kind: string;
   requestId: string;
   operationId: string;
@@ -30,7 +30,7 @@ The first client record is:
 
 ```ts
 {
-  protocolVersion: "browser.v1";
+  protocolVersion: "browser.v2";
   kind: "bind";
   requestId: string;
   bindingSecret: string;
@@ -208,3 +208,13 @@ The public browser contract is version `3.0.0`. It removes CDP target IDs and pr
 POST screenshot observation returns metadata only. GET `/v1/browser/sessions/<session>/tabs/<tab>/observations/<observation>/image` reads the exact current artifact. Webxd verifies canonical base64, complete bytes, digest, media type, and PNG/JPEG dimensions before immediate presentation. Durable small mutations use the general WebX idempotency map. Screenshot and DOM observations and image reads bypass it, so it retains zero image bytes and cannot revive expired browserd resources.
 
 A daemon runtime-instance change closes old connections. Old sessions are not recreated. New actor connections can bind to the replacement for new work. Search and read do not use this transport.
+
+## Phase 3A browser.v2 role separation
+
+The first `browser.v2` record binds exactly one role. Actor bind remains bound to one principal and Pi agent session. Workspace-broker bind accepts only the separate `workspaceBrokerSecret`, contains no actor selector, and permits only snapshot, event subscription, frame subscription, exact delivered-frame read, and ping. Actor commands on a workspace connection, workspace commands on an actor connection, wrong secrets, and rebinding are rejected; role changes close the connection.
+
+Workspace snapshots and revision events are bounded and sanitized. Cursor/frame samples do not create aggregate revision churn. Workspace frame subscriptions name one exact browser session and tab. Per-connection ledgers authorize only matching frame artifacts delivered to that connection and expire on bounded retention, unsubscribe, disconnect, tab/session close, or restart.
+
+## workspace.v1 gateway protocol
+
+The separate `packages/workspace-protocol/` TypeBox schema is authoritative. Each record is a 32-bit header length, 32-bit payload length, UTF-8 JSON header, and optional raw payload capped at 4 MiB. Commands are bind, snapshot.get, snapshot.subscribe, frame.select, frame.clear, ping, and close. Selection is connection-local and atomic. State is not droppable; frames are latest-only. Tauri JavaScript never sees this socket or its binding secret.

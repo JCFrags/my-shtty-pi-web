@@ -1,121 +1,49 @@
-# Pi Web Workspace
+# Browser component
 
-Pi Web Workspace is a local browser operating environment for the Pi coding agent on Fedora. It keeps Pi terminal-native while adding self-hosted search, low-context reading, fast JavaScript execution, persistent Chromium profiles, live visual supervision, human takeover, and explicit coordination across several simultaneous Pi agents.
+This directory contains the retained legacy browser stack, reader/document services, and the replacement AgentCursor runtime and read-only Tauri workspace developed on `rebuild/screenshot-first-browser`.
 
-The architecture is capability-first. Browser features are not removed to simplify policy: normal clicks, typing, keyboard input, tabs, uploads, downloads, screenshots, PDFs, JavaScript evaluation, network/console/storage inspection, persistent profiles, and extensions remain available whenever the selected backend supports them. Model context is reduced through bounded main-content observations, compact interactive references, deltas, and content-addressed artifacts rather than by weakening the browser.
+## Current Phase 3A architecture
 
-## Architecture
-
-```text
-Pi terminals ── newline JSON-RPC / Unix socket ── pi-browserd
-                                                       ├── SearXNG search
-                                                       ├── HTTP/Markdown/Trafilatura reader
-                                                       ├── Docling worker
-                                                       ├── artifact store
-                                                       └── BrowserController
-                                                            ├── agent-browser + Chromium (required visual path)
-                                                            └── PinchTab + Chromium (optional non-visual path)
-                                                                  │
-                                                                  ▼
-                                                        Pi Browser Workspace
-                                                        Tauri 2 + React canvas
-```
-
-The daemon owns stable agent, client, profile, host, browser-session, tab, and artifact IDs. There is no process-global current browser. Persistent profiles use one Chromium host per user-data directory; agent-owned tabs can share that host. Backend operations that require focus are serialized per host, while unrelated hosts execute concurrently.
-
-## Repository
-
-- `crates/browserd`: native coordinator, Unix/HTTP/WebSocket transports, recovery, queues, browser routing, human takeover, artifacts.
-- `crates/backend-agent-browser`: external agent-browser adapter with version validation, namespaces, named sessions, atomic tab focus/action/observation, viewport discovery, and structured errors.
-- `../../apps/pi-webx`: Pi tools, unified `/web` settings, lifecycle handling, and compact result formatting.
-- `apps/workspace`: one Tauri/React desktop window containing the agent tree, tabs, live JPEG viewport, activity, artifacts, and debug panels.
-- `services/reader`: Markdown negotiation, `.md`, `llms.txt`, Trafilatura, and explicit render escalation.
-- `services/docling`: optional bounded document conversion. Text PDFs use `pdftotext`. Office and scanned PDFs require an acceptance-tested asset set from the release allowlist. This release has no validated set and does not claim those capabilities.
-- `packages/browserd-reference`: zero-dependency executable reference coordinator used for deterministic concurrency tests and environments without Rust.
-- `deploy`: service configuration templates and local defaults used by the root installer.
-- `fixtures` and `tests`: browser, reader, multi-agent, protocol, observation, extension, and workspace fixtures.
-
-## Install on Fedora
-
-```bash
-../../install-fedora.sh
-```
-
-The root installer validates the Fedora/Tauri toolchain, Node/pnpm, uv, Chromium, Podman, and Agent Browser. It builds the repository, installs user services, deploys loopback-only SearXNG, and links the extension at `~/.pi/agent/extensions/pi-web`.
-
-Then start Pi normally. New sessions default to browser mode, so no command is required. Run `/web` with no options to open one settings menu. The menu controls capability modes and browser workspace actions.
-
-All direct forms use the same slash command:
+The replacement browser path is explicit and screenshot-first:
 
 ```text
-/web
-/web status
-/web mode off|read|browser|debug
-/web workspace show|hide|list
-/web workspace attach|takeover|return <sessionId>
+Pi extension -> webxd -> actor-bound browser.v2 connection -> browserd -> isolated Chromium session
+Tauri React -> Tauri Rust -> private workspace.v1 webxd gateway -> browser.v2 workspace-broker role
 ```
 
-There is no separate browser slash command.
+Trusted webxd is the only production browserd client. Actor connections remain bound to one Pi actor. The separate workspace-broker role is read-only and supplies sanitized aggregate state plus exact subscribed frames. Tauri does not connect directly to browserd. React receives no descriptor, secret, Unix-socket path, CDP endpoint, profile path, or proxy detail.
 
-Diagnostics:
+The workspace under `apps/workspace/` renders local UI and raw binary screenshot frames on a canvas. It can list and select concurrent agent sessions and explicit tabs, show the captured virtual cursor, and recover from webxd restart or browserd replacement. It has no browser pointer/keyboard input, takeover, return, cancellation, navigation, or model-facing workspace operation. Human control remains Phase 3B.
 
-```bash
-pi-web doctor --json
-systemctl --user status pi-browserd pi-web-reader pi-web-docling pi-web-searxng
-journalctl --user -u pi-browserd -f
+## Backend selection
+
+`WEBX_BROWSER_BACKEND` is immutable for one webxd process, accepts `legacy` or `agentcursor`, and defaults to `legacy`. The legacy browser runtime remains installed and selectable. AgentCursor uses the public path `agentcursor/chrome`; it is not the production default. Search and direct read do not depend on browserd.
+
+## User workspace commands
+
+For the AgentCursor backend, the user-only commands are:
+
+```text
+/web workspace show
+/web workspace hide
+/web workspace attach <browserSessionId> [tabId]
 ```
 
+They launch one fixed validated Tauri executable directly without a shell and use single-instance forwarding. Takeover and return explicitly report unavailable until Phase 3B. The model receives no aggregate workspace or launcher tool.
 
-## Pi tool surface
+## Main implementation paths
 
-`web_search`, `web_read`, `browser_open`, `browser_tabs`, `browser_observe`, `browser_act`, and `browser_debug` form the Pi-facing surface. Every daemon browser operation resolves through an explicit agent, session, and tab address. Tool defaults only reuse the invoking agent’s own last tab.
+- `../../packages/browser-protocol/`: private `browser.v2` actor and workspace-broker schemas.
+- `../../packages/browser-runtime/`: persistent CDP runtime, isolated sessions, capture coordinator, snapshots, and frame subscriptions.
+- `../../apps/browserd/`: private browser authority service.
+- `../../apps/webxd/`: trusted actor adapter and private workspace gateway.
+- `../../packages/workspace-protocol/`: bounded `workspace.v1` schema and binary framing.
+- `apps/workspace/`: Tauri Rust client and React read-only viewer.
+- `services/reader/`: direct-reading support.
+- `services/docling/`: optional bounded document conversion.
 
-Only the user changes capability modes. `browser_tabs` lets the model review its owned sessions and tabs, reuse relevant ones, and close transient tabs or sessions when they are no longer needed. Internal artifacts and short-lived caches are implementation details rather than separate Pi tools.
+## Verification
 
-The default observation is `main`. `interactive` returns compact refs, `visual` adds an optional image artifact, `full` keeps the complete structure artifact-backed, and `diff` reports page changes after actions. Typed JSON stays internal. TOON is considered only for regular model-facing arrays and only when it is measurably smaller than compact JSON or line format.
+Use repository commands from `docs/browser-rebuild/PHASE3A-RESULTS.md`. Normal CI includes protocol, runtime, browserd, webxd, Pi, SDK, frontend, Rust, typecheck, lint, build, binary IPC, and security tests. The graphical live route and exact-SHA 30-minute soak are opt-in and use Fedora Chromium plus the real Tauri app.
 
-## Development
-
-Required local versions are recorded in `VERSION_PINS.toml` and `deploy/versions.env`.
-
-```bash
-corepack enable
-pnpm install
-uv sync --all-packages
-cargo test --workspace
-pnpm test
-python -m pytest tests/reader tests/docling
-```
-
-Run the dependency-free coordinator tests without installing Rust or pnpm dependencies:
-
-```bash
-node --test packages/browserd-reference/test/*.test.mjs tests/multi-agent/*.test.mjs
-```
-
-Run the target-machine browser checks when their installed dependencies are available:
-
-```bash
-node scripts/password-manager-spike.mjs
-node scripts/benchmark-agent-browser.mjs
-```
-
-These commands require Fedora, the pinned Agent Browser release, Chromium, and a disposable extension test profile. The dependency-free reference tests verify coordinator semantics but do not replace these target-machine checks.
-
-Run the fixture server:
-
-```bash
-node packages/test-fixtures/src/server.mjs
-```
-
-Protocol details and the retained architecture are under `docs/`.
-
-## Operational boundaries
-
-The initial release is a single trusted Fedora user’s local system. The daemon uses a user-owned Unix socket and capability-token-protected loopback HTTP/WebSocket endpoints; it is not an Internet-facing multi-user service. Direct reader acquisitions always use finite timeout, raw-size, decompressed-size, redirect, and concurrency limits. Other optional redaction, confirmation, allowlisting, resource ceilings, and isolation controls can be added around the stable protocol where they do not reduce the baseline browser capability.
-
-Alternate backends currently expose explicit capability metadata and structured `unsupported` responses. They are intentionally not selected automatically and cannot silently replace an active engine or lose browser state.
-
-## License
-
-Apache-2.0. Upstream components retain their own licenses and attribution; see `docs/upstream.md`.
+ADR-012, production-default AgentCursor routing, human takeover, packaging, broader display coverage, Google Chrome coverage, and long-term Chrome memory policy remain open.

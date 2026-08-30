@@ -106,3 +106,18 @@ Any OS driver must implement the same target-aware action contract. It must requ
 - Browser file upload or download in the initial release.
 - Polishing or preserving the current browser stack because it exists.
 - Replacing general search and direct read with browser automation.
+
+## Phase 3A trusted workspace criteria
+
+| ID | Criterion | Acceptance test |
+|---|---|---|
+| BR-52 | Browserd actor and workspace roles are exclusive. | Reject cross-role commands, wrong workspace secret, and rebinding; close on role change; keep actor list scope unchanged. |
+| BR-53 | Aggregate workspace state is sanitized and bounded. | List two agents/sessions/tabs and prove snapshots contain no principal secret, target/CDP identity, PID, profile, proxy, typed text, DOM, cookie, header, storage, or action payload. |
+| BR-54 | Tauri uses only trusted webxd authority. | Prove Rust validates the private webxd descriptor and Tauri has no direct browserd path; prove JavaScript receives no descriptor, secret, socket, endpoint, profile, or raw authority value. |
+| BR-55 | Frame delivery is binary and bounded. | Fragment records at header and payload boundaries; deliver 100 distinct 1 MiB payloads; require frontend `ArrayBuffer`, zero base64/number arrays, latest-only queues, and bounded retained frames/decoder objects. |
+| BR-56 | Multi-agent selection cannot paint stale or foreign frames. | Switch agents, sessions, and tabs in real Tauri; validate full identity/generations/digest/dimensions and require zero former-selection, wrong-tab, cross-agent, or non-monotonic paints. |
+| BR-57 | The Phase 3A workspace is read-only. | Expose no browser pointer/keyboard input, takeover, return, cancellation, mutation, or model-facing workspace tool. User-only show/hide/attach use one fixed executable and bounded arguments. |
+| BR-58 | Restart and cleanup behavior is explicit. | Preserve sessions across webxd restart, invalidate them across browserd replacement, reconnect Tauri, and finish with zero sockets, descriptors, subscriptions, ledgers, frames, processes, and profiles. |
+| BR-59 | Final graphical qualification is exact and uninterrupted. | From an externally pinned clean SHA, run the real Tauri app with two Pi agents and Chromium sessions for at least 1,800 seconds; record binary, cursor, switch, restart, timeout, resource, and cleanup evidence. |
+
+Phase 3A completes BR-03, BR-15, and BR-52 through BR-59 for read-only viewing. Human takeover is not part of these criteria and remains Phase 3B.

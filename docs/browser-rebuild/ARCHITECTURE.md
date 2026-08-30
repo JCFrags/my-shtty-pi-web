@@ -14,13 +14,13 @@ flowchart LR
   Browserd -->|explicit browser CDP| ChromeA[headed Chrome A\ntemporary profile A]
   Browserd -->|explicit browser CDP| ChromeB[headed Chrome B\ntemporary profile B]
   Browserd --> Artifacts[owner-scoped artifacts]
-  Workspace[Tauri local workspace] -->|future trusted workspace gateway| Webxd
-  Webxd -->|actor-bound frame subscription| Browserd
+  Workspace[Tauri local workspace] -->|workspace.v1 private Unix socket| Webxd
+  Webxd -->|browser.v2 workspace-broker role| Browserd
   Artifacts --> Webxd
   Webxd --> Workspace
 ```
 
-Phase 2A connects `packages/browser-protocol`, `packages/browser-runtime`, and `apps/browserd` to trusted webxd, the public SDK, and native Pi tools. Phase 2B makes that route usable under model latency, fragmented transport, long-lived frame streams, Pi reconnect, and webxd restart. Phase 2B.1 adds one capture coordinator per browser session, typed bounded screenshot timeout recovery, cleanup-final webxd shutdown, and final process qualification. The immutable `WEBX_BROWSER_BACKEND` startup switch defaults to `legacy`. The new `agentcursor` selection has no request-level fallback. It does not connect the Tauri workspace and it is not the production default.
+Phase 2A connects `packages/browser-protocol`, `packages/browser-runtime`, and `apps/browserd` to trusted webxd, the public SDK, and native Pi tools. Phase 2B makes that route usable under model latency, fragmented transport, long-lived frame streams, Pi reconnect, and webxd restart. Phase 2B.1 adds one capture coordinator per browser session, typed bounded screenshot timeout recovery, cleanup-final webxd shutdown, and final process qualification. The immutable `WEBX_BROWSER_BACKEND` startup switch defaults to `legacy`. The new `agentcursor` selection has no request-level fallback and is not the production default. Phase 3A connects the read-only Tauri workspace only through a separate authenticated webxd gateway and browserd workspace-broker role.
 
 ## Process responsibilities
 
@@ -197,3 +197,9 @@ The executable comes only from reviewed service configuration. Prefer Google Chr
 Linux resource evidence uses `/proc/<pid>/smaps_rollup` PSS as the primary memory metric. Summed RSS can double-count shared pages and is not the production decision metric. Keep one Chrome process per browser session until PSS evidence and a separate architecture decision justify a change.
 
 The Phase 1.2 two-hour mixed run did not prove a memory plateau. Total PSS slopes were +41,613 KiB/hour over the full run, +61,198 KiB/hour in the final hour, and +29,914 KiB/hour in the final 30 minutes. Browserd, bounded stores, process counts, and one Chrome session were nearly flat late in the run. Most final-hour growth was in the other Chrome tree. The Phase 2A, Phase 2B, and final-code Phase 2B.1 30-minute routed soaks are development-route gates only. The Phase 2B.1 evidence explicitly sets `chromePlateauClaimedResolved` to false. Production-default routing still requires either credible longer plateau evidence or a tested bounded Chrome session recycling and recovery policy.
+
+## Phase 3A trusted read-only workspace
+
+Browserd `browser.v2` adds an exclusive workspace-broker role with a separate secret, bounded read-only commands, aggregate sanitized snapshots, revision events, exact frame subscriptions, and a per-connection delivered-artifact ledger. Webxd derives bounded agent labels and is the only browserd workspace client. It publishes `workspace.v1` through a private `0700` runtime directory and `0600` descriptor/socket.
+
+Tauri Rust alone validates the webxd descriptor and secret. React receives escaped sanitized state and `ArrayBuffer` frame deliveries through Tauri channels. It has no descriptor, socket, secret, network API, remote webview content, or browser input. The viewer retains at most one displayed and one pending frame across Rust, and one displayed frame with one live decoder object in the frontend. Human takeover remains Phase 3B. See ADR-018 through ADR-020 and `PHASE3A-RESULTS.md`.

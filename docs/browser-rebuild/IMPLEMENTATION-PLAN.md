@@ -139,29 +139,29 @@ Each phase has one acceptance gate. Keep the old browser production path until t
 
 **Handoff:** Phase 3 development may begin as a separate task under the existing trusted-workspace boundary. ADR-012 and later deployment gates still block production-default routing.
 
-## Phase 3 — production Tauri workspace and human control
+## Phase 3A — trusted read-only Tauri workspace
 
-**Goal:** replace the spike viewer with a local screenshot workspace and safe user takeover.
+**Status:** complete on `rebuild/screenshot-first-browser`. Frozen production and harness code `7ae05ad6f747f42790d579ab168b9b7fba6f0214` passed the real Tauri graphical route and an externally pinned, clean-tree, uninterrupted 1,803.144-second soak.
 
-**Files/modules:** rewrite `components/browser/apps/workspace/` or move it to `apps/browser-workspace/`; browser frame subscription; control operations.
+**Goal:** replace the legacy workspace with a local multi-agent screenshot viewer while keeping cross-agent view authority separate from browser control.
 
-**Tasks:**
+**Delivered:** private `browser.v2` actor/workspace role separation; separate `workspace.v1` package; sanitized aggregate snapshots; exact connection-scoped frame subscriptions and ledgers; authenticated private webxd gateway; secure Rust descriptor client; raw Tauri-channel `ArrayBuffer` frames; bounded React canvas viewer; user-only show/hide/attach; single instance; actual Tauri evidence.
 
-- Render only local UI and screenshot bytes.
-- List and select full session/tab identities.
-- Show connected state, URL, frame age/sequence, controller, and cursor.
-- Add latest-frame backpressure and selected-session frame priority.
-- Implement takeover/return as authority operations that increment control epoch.
-- Cancel stale queued agent work and handle the agent-user-agent ABA case.
-- Authenticate workspace transport without URL tokens.
+**Acceptance:** two agents and isolated Chromium sessions are listed and selectable; tabs update; virtual-cursor intermediate frames paint; webxd restart preserves visibility; browserd replacement invalidates old sessions; zero stale or cross-agent paints; bounded binary queues; full cleanup. See `PHASE3A-RESULTS.md` and ADR-018 through ADR-020.
 
-**Tests:** session switch race; closed-session frame clearing; cross-agent frame read rejection; slow consumer; reconnect; takeover during queued and running actions; return; stale-epoch rejection; no remote page navigation in the Tauri webview.
+**Boundary:** Phase 3A has no human takeover, Tauri browser input, cancellation, model-facing workspace tool, or direct Tauri-to-browserd connection. Production routing remains `legacy` by default.
 
-**Acceptance gate:** a user can switch between two live sessions, see repeated cursor-bearing frames, take and return control, and never cause an old agent action to execute after an epoch change.
+**Deletions completed:** the old workspace RPC, descriptor frontend command, fixtures, model, viewport, human-input paths, base64 transport, and legacy tests listed in `PHASE3A-LEGACY-WORKSPACE-SURGERY.md`.
 
-**Deletions enabled:** `components/browser/tools/stream-viewer/` and the old workspace model, viewport, RPC, and browser-specific Rust command code.
+**Rollback:** do not launch the workspace and start webxd with the default `legacy` backend. The legacy browser runtime remains installed and selectable.
 
-**Rollback:** restore the old workspace package. Runtime and Pi browser control remain usable without a workspace.
+## Phase 3B — human-control authority
+
+**Status:** deferred. Do not infer authorization from Phase 3A.
+
+**Goal:** add safe user takeover and return only after separate controller-epoch, queued/running action settlement, interrupt, and agent-user-agent ABA design and qualification.
+
+**Entry recommendation:** first reduce or explicitly accept the Phase 3A post-browser-replacement capture latency and stable switch-latency gap. Then perform a fresh security and graphical acceptance phase for input authority.
 
 ## Phase 4 — Fedora deployment, recovery, and performance
 

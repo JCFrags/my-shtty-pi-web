@@ -18,6 +18,7 @@ The following legacy implementation files are deleted rather than wrapped:
 - `components/browser/apps/workspace/src/components/Viewport.tsx`
 - `components/browser/apps/workspace/test/model.test.mjs`
 - `components/browser/apps/workspace/test/contract.test.mjs`
+- `components/browser/tests/workspace/human-control-contract.test.mjs`
 
 The old contents of these files are also removed or replaced completely:
 
