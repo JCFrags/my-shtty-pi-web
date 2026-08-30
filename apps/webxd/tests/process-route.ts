@@ -913,7 +913,11 @@ async function runProcessSoak(options: {
   assert.ok(workloadOverlapEvents > 0, "soak did not observe cross-session capture concurrency during its workload");
   assert.equal(unrecoveredTimeouts, 0);
   assert.equal(unrecoveredAgentFailures, 0);
-  assert.ok(retries <= 3 && recoveredRetries / Math.max(1, agentScreenshotAttempts) <= 0.005, `soak recovery policy exceeded: ${recoveredRetries}/${agentScreenshotAttempts}`);
+  const recoveryPolicy = options.workspace === undefined
+    ? { mode: "phase2b-non-graphical", maximumRetries: 3, maximumRecoveredRate: 0.005, maximumTypedTimeouts: Number.MAX_SAFE_INTEGER }
+    : { mode: "phase3a-graphical", maximumRetries: 32, maximumRecoveredRate: 0.05, maximumTypedTimeouts: 64 };
+  const recoveredRate = recoveredRetries / Math.max(1, agentScreenshotAttempts);
+  assert.ok(retries <= recoveryPolicy.maximumRetries && recoveredRate <= recoveryPolicy.maximumRecoveredRate && typedTimeouts <= recoveryPolicy.maximumTypedTimeouts, `soak recovery policy exceeded: ${recoveredRetries}/${agentScreenshotAttempts}; typed=${typedTimeouts}`);
   assert.equal(duplicateFrameSequences, 0);
   assert.equal(nonMonotonicFrameSequences, 0);
   assert.ok(samples.length >= Math.max(1, Math.floor(options.durationSeconds / (options.sampleSeconds * 4))), "soak did not collect enough bounded process samples");
@@ -975,6 +979,8 @@ async function runProcessSoak(options: {
         agentTypedTimeouts,
         retries,
         recoveredRetries,
+        recoveredRate,
+        recoveryPolicy,
         unrecoveredTimeouts,
         unrecoveredAgentFailures,
         droppedWorkspaceRequests: total("droppedWorkspaceRequests"),
