@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for Phase 3A.
+Accepted for Phase 3A. Retained by `workspace.v2` in Phase 3B.
 
 ## Decision
 
@@ -33,3 +33,7 @@ Slow consumers receive the latest useful frame rather than an unbounded history.
 ## Rejected alternatives
 
 Base64 increases size and copies. JSON byte arrays are much larger and expensive to parse. Global events do not provide the required bounded binary stream. Frontend network access would violate the trusted workspace boundary.
+
+## Phase 3B extension
+
+`workspace.v2` retains the same bounded binary framing, 4 MiB payload cap, latest-only frame backpressure, and frontend `ArrayBuffer` delivery. It adds control and input JSON headers without adding a second screenshot path. An exact frame becomes control-eligible only after React paint acknowledgement reaches Rust; receipt or decode alone is insufficient. See ADR-022 and `PHASE3B-RESULTS.md`.

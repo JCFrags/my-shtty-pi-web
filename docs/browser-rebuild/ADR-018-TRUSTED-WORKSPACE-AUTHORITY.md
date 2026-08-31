@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for Phase 3A.
+Accepted for Phase 3A. Extended by ADR-021 through ADR-023 for Phase 3B.
 
 ## Decision
 
@@ -33,6 +33,10 @@ Workspace snapshots exclude principal secrets, browser target and CDP identities
 - Webxd restart can reconnect to the surviving browserd and restore visibility.
 - The boundary protects against untrusted page content and accidental authority exposure. It does not protect against malicious code already running as the same Unix user.
 - Phase 3A adds no model-facing workspace operation and no browser mutation.
+
+## Phase 3B extension
+
+Phase 3B preserves this authority path and role separation while versioning the private protocols as `browser.v3` and `workspace.v2`. The workspace-broker role now carries bounded control and input commands for trusted webxd. Browserd owns the lease and epoch; webxd holds the raw lease for one trusted desktop connection; Tauri Rust receives only the private epoch, input-target generation, exact painted-frame binding, and sequence needed for the next bounded request. React receives no raw authority or internal identity. No model-facing workspace control operation was added. See ADR-021 through ADR-023 and `PHASE3B-RESULTS.md`.
 
 ## Rejected alternatives
 

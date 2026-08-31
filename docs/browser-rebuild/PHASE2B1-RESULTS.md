@@ -169,4 +169,6 @@ Production-default AgentCursor routing remains blocked by ADR-012 and later depl
 
 ## Phase 3A follow-up
 
-Phase 3A subsequently added and qualified the trusted read-only Tauri workspace without changing the Phase 2B.1 actor contract or its non-graphical recovery gate. Browserd private protocol is now `browser.v2`; the actor role remains connection-bound, while trusted webxd alone uses the separate workspace-broker role. See `PHASE3A-RESULTS.md`. Human takeover is still absent, production routing still defaults to `legacy`, and ADR-012 remains unresolved.
+Phase 3A subsequently added and qualified the trusted read-only Tauri workspace without changing the Phase 2B.1 actor contract or its non-graphical recovery gate. It introduced the connection-bound actor role and the trusted-webxd-only workspace-broker role. See `PHASE3A-RESULTS.md`.
+
+Phase 3B later versioned the private protocols as `browser.v3` and `workspace.v2` and qualified user-only human control without adding model-facing authority. Production routing still defaults to `legacy`, and ADR-012 remains unresolved. See `PHASE3B-RESULTS.md`.

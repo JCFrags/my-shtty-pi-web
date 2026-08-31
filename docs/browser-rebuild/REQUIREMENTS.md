@@ -120,4 +120,21 @@ Any OS driver must implement the same target-aware action contract. It must requ
 | BR-58 | Restart and cleanup behavior is explicit. | Preserve sessions across webxd restart, invalidate them across browserd replacement, reconnect Tauri, and finish with zero sockets, descriptors, subscriptions, ledgers, frames, processes, and profiles. |
 | BR-59 | Final graphical qualification is exact and uninterrupted. | From an externally pinned clean SHA, run the real Tauri app with two Pi agents and Chromium sessions for at least 1,800 seconds; record binary, cursor, switch, restart, timeout, resource, and cleanup evidence. |
 
-Phase 3A completes BR-03, BR-15, and BR-52 through BR-59 for read-only viewing. Human takeover is not part of these criteria and remains Phase 3B.
+Phase 3A completes BR-03, BR-15, and BR-52 through BR-59 for read-only viewing. Its qualification remains the baseline for Phase 3B.
+
+## Phase 3B human-control criteria
+
+| ID | Criterion | Acceptance test |
+|---|---|---|
+| BR-60 | Private control contracts version together without changing public WebX. | Require `browser.v3` and `workspace.v2` schemas, fixtures, TypeScript and Rust parsers, and descriptors to agree while the public browser contract remains `3.0.0`. |
+| BR-61 | Browserd alone owns control authority. | Prove compare-and-swap acquire/return, monotonic epochs, connection-bound expiring leases, no reconnect reclaim, one session input lane, and cleanup on every connection/session/tab failure. |
+| BR-62 | Human control excludes model mutation. | Reject agent observations and actions with typed retryable `CONTROL_HELD_BY_HUMAN` during transfer/human control; never queue them; keep unrelated actors and read-only visibility usable. |
+| BR-63 | Takeover and input bind to the exact frame the user saw. | Require authoritative selection and exact paint acknowledgement; validate runtime, session, tab, target, selection, subscription, epoch, generations, sequence, geometry, DPR, freshness, rate, and coordinates before input. |
+| BR-64 | The private input union is complete and bounded. | Exercise move, left/middle/right click, double click, drag, horizontal/vertical wheel, key press/release/repeat, and Unicode text; cap batches at 32; preserve held transitions and release on all failure paths. |
+| BR-65 | Return is independent and fail safe. | Fill or block the ordinary input queue, then prove explicit return, hide, close, emergency return, frontend loss, webxd loss, heartbeat expiry, and replacement settle held input and authority or remain visibly failed. |
+| BR-66 | Control entry is user-only and explicit. | Require explicit session and optional tab through one fixed executable with bounded shell-free arguments; expose no model/SDK takeover, return, input, lease, selection-authority, generic-command, or launcher tool. |
+| BR-67 | The frontend and retained evidence preserve privacy. | Prove React receives no raw authority/internal IDs and Pi receives no human frames or input. Scan retained JSON and screenshots for generated private-input canaries and raw authority patterns in literal and encoded forms with zero matches. |
+| BR-68 | Real graphical control is isolated and recoverable. | Use two Pi worker processes, two Chromium sessions, real Tauri Rust and React; prove actor isolation, blocked controlled actor, unrelated actor progress, reconnect, webxd restart, browserd replacement, abandoned takeover fencing, return/resume, and complete cleanup. |
+| BR-69 | Final control qualification is clean, exact, and uninterrupted. | From an externally pinned clean SHA, run at least 1,800 seconds and 100 takeover/return cycles; record process, input, privacy, restart, replacement, latency, resource, screenshot, and cleanup evidence with zero unrecovered failures. |
+
+Phase 3B completes BR-60 through BR-69 on the frozen runtime and harness SHA recorded in `PHASE3B-RESULTS.md`. It does not resolve ADR-012 or authorize production-default AgentCursor routing.

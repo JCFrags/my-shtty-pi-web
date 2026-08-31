@@ -157,11 +157,17 @@ Each phase has one acceptance gate. Keep the old browser production path until t
 
 ## Phase 3B — human-control authority
 
-**Status:** deferred. Do not infer authorization from Phase 3A.
+**Status:** complete on `rebuild/screenshot-first-browser`. Frozen production and harness SHA `90fae06d42db5a3f62d0ad08a79e6cd0b38d1ef7` passed the real Tauri graphical route and an externally pinned, clean-tree, uninterrupted 1,888.734-second soak with 100 takeover/return cycles.
 
-**Goal:** add safe user takeover and return only after separate controller-epoch, queued/running action settlement, interrupt, and agent-user-agent ABA design and qualification.
+**Goal:** add safe user-only takeover and return with browserd-owned epochs, connection-bound leases, exact painted-frame input, agent exclusion, and fail-safe lifecycle cleanup.
 
-**Entry recommendation:** first reduce or explicitly accept the Phase 3A post-browser-replacement capture latency and stable switch-latency gap. Then perform a fresh security and graphical acceptance phase for input authority.
+**Delivered:** Gate 0 atomic selection and capture readiness; private `browser.v3` and `workspace.v2`; compare-and-swap control epochs; expiring no-reclaim leases; one session input lane; exact painted-frame binding; bounded pointer, wheel, key, repeat, and Unicode input; held-release cleanup; independent return/hide/close lane; sanitized Rust/React boundary; fixed user-only launcher commands; privacy proof; process-isolated acceptance.
+
+**Acceptance:** Gate 0 passed 200 switches at median 21 ms and p95 28 ms with zero stale/cross paints or leaks. The final soak completed 100/100 control cycles, 120 bounded samples, 716 agent and 4,701 workspace screenshot attempts, zero typed capture timeouts/retries/unrecovered failures, zero retained human input/privacy matches, restart/replacement/disconnect/close coverage, and complete cleanup. See `PHASE3B-RESULTS.md` and ADR-021 through ADR-023.
+
+**Boundary:** Tauri connects only to webxd. No model-facing takeover, return, lease, input, selection-authority, generic command, or launcher tool exists. Production routing remains `legacy` by default; ADR-012 remains unresolved.
+
+**Rollback:** do not launch the workspace and use webxd's default `legacy` backend. The legacy browser runtime remains installed and selectable.
 
 ## Phase 4 — Fedora deployment, recovery, and performance
 

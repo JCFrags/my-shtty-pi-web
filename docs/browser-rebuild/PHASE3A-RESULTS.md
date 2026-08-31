@@ -172,4 +172,8 @@ Added modules include `packages/workspace-protocol/`, `apps/webxd/src/workspace/
 
 Phase 3A is read-only and does not prove human-control authority. Human takeover remains Phase 3B. The stable switch p95 development target was missed, and Fedora Chromium showed concentrated but fully recovered screenshot timeouts after browserd replacement. Long-term Chrome memory plateau evidence, packaging, Wayland/multi-monitor behavior, Google Chrome coverage, and production-default routing also remain open.
 
-Do not start Phase 3B implementation yet. First reduce or explicitly accept the post-replacement capture latency and switch-latency gap, then design the privileged controller-epoch boundary as a separate reviewed phase. Phase 3B planning may proceed, but Phase 3A must not be treated as authorization for browser input. Production-default AgentCursor routing remains disabled.
+Do not start Phase 3B implementation from this Phase 3A result alone. First reduce or explicitly accept the post-replacement capture latency and switch-latency gap, then design the privileged controller-epoch boundary as a separate reviewed phase. Phase 3A must not be treated as authorization for browser input. Production-default AgentCursor routing remains disabled.
+
+## Phase 3B follow-up
+
+Phase 3B subsequently passed a separate control-readiness gate, versioned the private protocols as `browser.v3` and `workspace.v2`, added browserd-owned human-control authority, and qualified user-only exact-painted-frame input. It did not alter this historical Phase 3A qualification or enable production-default routing. See `PHASE3B-RESULTS.md` and ADR-021 through ADR-023.

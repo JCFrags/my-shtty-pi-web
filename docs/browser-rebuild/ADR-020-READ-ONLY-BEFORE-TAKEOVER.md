@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for Phase 3A.
+Accepted for Phase 3A. Superseded for current control behavior by ADR-021 through ADR-023.
 
 ## Decision
 
@@ -23,3 +23,7 @@ The workspace broker can observe every local agent session, so it crosses actor 
 - Tauri capabilities grant no shell, process, filesystem, HTTP, WebSocket, opener, clipboard, upload, or download permission.
 - Production-default AgentCursor routing remains disabled. `WEBX_BROWSER_BACKEND` still defaults to `legacy`, and the legacy runtime remains installed and selectable.
 - ADR-012 remains unresolved.
+
+## Phase 3B follow-up
+
+Phase 3B preserved this staged boundary and added human control only after a separate Gate 0, private protocol version, authority implementation, graphical acceptance, privacy proof, and exact-SHA soak. Current control behavior is defined by ADR-021 through ADR-023 and `PHASE3B-RESULTS.md`. The Phase 3A read-only decision remains the historical qualification baseline.

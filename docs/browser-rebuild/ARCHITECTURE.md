@@ -14,13 +14,13 @@ flowchart LR
   Browserd -->|explicit browser CDP| ChromeA[headed Chrome A\ntemporary profile A]
   Browserd -->|explicit browser CDP| ChromeB[headed Chrome B\ntemporary profile B]
   Browserd --> Artifacts[owner-scoped artifacts]
-  Workspace[Tauri local workspace] -->|workspace.v1 private Unix socket| Webxd
-  Webxd -->|browser.v2 workspace-broker role| Browserd
+  Workspace[Tauri local workspace] -->|workspace.v2 private Unix socket| Webxd
+  Webxd -->|browser.v3 workspace-broker role| Browserd
   Artifacts --> Webxd
   Webxd --> Workspace
 ```
 
-Phase 2A connects `packages/browser-protocol`, `packages/browser-runtime`, and `apps/browserd` to trusted webxd, the public SDK, and native Pi tools. Phase 2B makes that route usable under model latency, fragmented transport, long-lived frame streams, Pi reconnect, and webxd restart. Phase 2B.1 adds one capture coordinator per browser session, typed bounded screenshot timeout recovery, cleanup-final webxd shutdown, and final process qualification. The immutable `WEBX_BROWSER_BACKEND` startup switch defaults to `legacy`. The new `agentcursor` selection has no request-level fallback and is not the production default. Phase 3A connects the read-only Tauri workspace only through a separate authenticated webxd gateway and browserd workspace-broker role.
+Phase 2A connects `packages/browser-protocol`, `packages/browser-runtime`, and `apps/browserd` to trusted webxd, the public SDK, and native Pi tools. Phase 2B makes that route usable under model latency, fragmented transport, long-lived frame streams, Pi reconnect, and webxd restart. Phase 2B.1 adds one capture coordinator per browser session, typed bounded screenshot timeout recovery, cleanup-final webxd shutdown, and final process qualification. Phase 3A connects the Tauri viewer only through a separate authenticated webxd gateway and browserd workspace-broker role. Phase 3B adds browserd-owned human-control epochs, connection-bound leases, exact painted-frame input, and fail-safe user-only takeover and return without adding model-facing control. The immutable `WEBX_BROWSER_BACKEND` startup switch defaults to `legacy`; `agentcursor` has no request-level fallback and is not the production default.
 
 ## Process responsibilities
 
@@ -60,7 +60,7 @@ The runtime does not accept a profile path or arbitrary Chrome flags from a requ
 
 ### Tauri workspace
 
-The future Tauri workspace renders local UI and screenshot bytes only. It must not embed arbitrary remote sites. Workspace selection is presentation state. It does not grant browser authority or create an implicit active tab.
+The Tauri workspace renders local UI and screenshot bytes only. It must not embed arbitrary remote sites. Workspace selection is presentation state and does not grant authority or create an implicit active tab. Tauri Rust can request browserd-owned human control only through authenticated webxd after an exact selected frame is painted. React never receives raw leases, epochs, generations, runtime/session/tab/target identities, descriptors, secrets, socket paths, or human input history.
 
 ## Actor and authority model
 
@@ -130,7 +130,7 @@ A workspace frame is a separate, short-lived product. A bounded scheduler keeps 
 
 Each frame subscription has a bounded opaque ID. It belongs to one browserd connection, actor, full tab address, control epoch, and interest level. An identical duplicate is idempotent. Conflicting ID reuse fails. Disconnect, epoch change, tab close, and session close remove the subscription and stop an unused schedule. A frame is sent only to a connection that owns a matching live subscription.
 
-A workspace frame does not create an agent observation. Its complete capture transaction uses the same session coordinator as explicit observations. A frame timeout is dropped without immediate retry; the next normal scheduler tick may try again. Frame bytes use owner-scoped artifacts in Phase 1. A later Tauri bridge can use a more direct bounded byte channel after review.
+A workspace frame does not create an agent observation. Its complete capture transaction uses the same session coordinator as explicit observations. A frame timeout is dropped without immediate retry; the next normal scheduler tick may try again. Browserd uses owner-scoped artifacts internally; webxd and Tauri Rust use bounded binary `workspace.v2` records, and React receives frame bytes only as an `ArrayBuffer` through a Tauri channel.
 
 ## Screenshot-bound input
 
@@ -162,7 +162,7 @@ States are `queued`, `running`, `committed`, `failed`, `cancelled`, and `expired
 
 Each absolute deadline is converted to a monotonic budget at admission. Expired queue entries do not dispatch. Each actor-scoped mutation stores a bounded SHA-256 fingerprint of its canonical semantic request. The fingerprint includes kind, identity, epoch, action, and relevant options. It excludes request ID and deadline. The runtime checks an existing operation before resolving the current session or tab. An exact operation-ID retry can therefore return its original result after close, rollback, or target failure. Changed semantics return `OPERATION_CONFLICT` before resource lookup and do not execute. Connection-scoped frame mutations include the internal connection identity. A reconnect cannot inherit a disconnected connection's successful subscription. Status, cancellation, count, and retention are bounded.
 
-A control takeover increments the session epoch. It cancels queued old-epoch work and stops running work at the next cancellable boundary. A later epoch cannot make an old action valid again. Phase 1 tests this mechanism but does not expose user takeover.
+A control takeover increments the session epoch. It cancels queued old-epoch work and stops running work at the next cancellable boundary. A later epoch cannot make an old action valid again. Phase 3B exposes takeover only through browserd's connection-bound expiring lease and the user-only Tauri path. Agent observations and mutations are rejected, not queued, while control is human-owned or transferring.
 
 ## Transport and artifacts
 
@@ -198,8 +198,10 @@ Linux resource evidence uses `/proc/<pid>/smaps_rollup` PSS as the primary memor
 
 The Phase 1.2 two-hour mixed run did not prove a memory plateau. Total PSS slopes were +41,613 KiB/hour over the full run, +61,198 KiB/hour in the final hour, and +29,914 KiB/hour in the final 30 minutes. Browserd, bounded stores, process counts, and one Chrome session were nearly flat late in the run. Most final-hour growth was in the other Chrome tree. The Phase 2A, Phase 2B, and final-code Phase 2B.1 30-minute routed soaks are development-route gates only. The Phase 2B.1 evidence explicitly sets `chromePlateauClaimedResolved` to false. Production-default routing still requires either credible longer plateau evidence or a tested bounded Chrome session recycling and recovery policy.
 
-## Phase 3A trusted read-only workspace
+## Phase 3A viewer and Phase 3B human control
 
-Browserd `browser.v2` adds an exclusive workspace-broker role with a separate secret, bounded read-only commands, aggregate sanitized snapshots, revision events, exact frame subscriptions, and a per-connection delivered-artifact ledger. Webxd derives bounded agent labels and is the only browserd workspace client. It publishes `workspace.v1` through a private `0700` runtime directory and `0600` descriptor/socket.
+Phase 3A introduced the exclusive workspace-broker role, aggregate sanitized snapshots, revision events, exact frame subscriptions, a per-connection delivered-artifact ledger, and the private authenticated Tauri route. Its historical `browser.v2` and `workspace.v1` contracts are qualified in `PHASE3A-RESULTS.md` and ADR-018 through ADR-020.
 
-Tauri Rust alone validates the webxd descriptor and secret. React receives escaped sanitized state and `ArrayBuffer` frame deliveries through Tauri channels. It has no descriptor, socket, secret, network API, remote webview content, or browser input. The viewer retains at most one displayed and one pending frame across Rust, and one displayed frame with one live decoder object in the frontend. Human takeover remains Phase 3B. See ADR-018 through ADR-020 and `PHASE3A-RESULTS.md`.
+Phase 3B versions those private contracts together as `browser.v3` and `workspace.v2`. Browserd owns compare-and-swap control epochs, connection-bound expiring leases, actor exclusion, the exact delivered-frame ledger, and the single physical input lane. Webxd remains the only browserd workspace client and keeps raw leases per trusted desktop connection. Tauri Rust alone validates the webxd descriptor and secret, retains private epoch, input-target, frame, and sequence authority but no raw lease, and requires an exact paint acknowledgement before acquire or mutation. React receives escaped sanitized state, display handles, bounded delivery fences, and `ArrayBuffer` frames; it has no descriptor, socket, secret, network API, remote webview content, or raw authority.
+
+Explicit return, hide, close, emergency return, and shutdown use an independent lifecycle lane that settles held releases before authority or visibility changes. Takeover and return are user-only fixed launcher actions and do not exist in the model contract. See ADR-021 through ADR-023 and `PHASE3B-RESULTS.md`.
