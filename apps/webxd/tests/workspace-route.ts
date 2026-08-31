@@ -71,12 +71,12 @@ export class WorkspaceRoute {
     });
   }
 
-  async waitForSessions(sessionIds: readonly string[], timeoutMs = 20_000): Promise<WorkspaceDiagnostic> {
+  async waitForSessions(sessionIds: readonly string[], from = 0, timeoutMs = 20_000): Promise<WorkspaceDiagnostic> {
     return await this.waitForRecord((record) => {
       if (record.kind !== "snapshot" || !Array.isArray(record.sessions)) return false;
       const visible = new Set(record.sessions.filter(isRecord).map((session) => session.browserSessionId).filter((value): value is string => typeof value === "string"));
       return sessionIds.every((id) => visible.has(id));
-    }, 0, timeoutMs);
+    }, from, timeoutMs);
   }
 
   async waitForTab(browserSessionId: string, tabId: string, present: boolean, from = 0, timeoutMs = 20_000): Promise<WorkspaceDiagnostic> {

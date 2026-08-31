@@ -411,7 +411,7 @@ async function main(): Promise<void> {
   const rehydratedList = await piA.execute("browser_tabs", { action: "list" }); assert.match(textOf(rehydratedList), new RegExp(identityA.browserSessionId));
   const rehydratedFrame = await piA.execute("browser_observe", identityA); assertPiImage(rehydratedFrame);
   if (workspace !== undefined) {
-    await workspace.waitForSessions([identityA.browserSessionId, identityB.browserSessionId]);
+    await workspace.waitForSessions([identityA.browserSessionId, identityB.browserSessionId], beforeWebxdRestart);
     let recovered;
     try { recovered = await workspace.select(identityB.browserSessionId, identityB.tabId); }
     catch (cause) {

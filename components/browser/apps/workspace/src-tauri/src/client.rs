@@ -76,7 +76,12 @@ impl WorkspaceClientService {
     }
     pub fn configure_acceptance(&self, path: &Path) -> Result<(), String> { self.acceptance.configure(path) }
     pub fn record_window_action(&self, action: &str) { self.acceptance.window_action(action); }
-    pub fn queue_launch_selection(&self, browser_session_id: String, tab_id: Option<String>) { *self.pending_launch_selection.lock().expect("workspace launch selection lock") = Some((browser_session_id, tab_id)); }
+    pub fn stage_launch_selection_if_offline(&self, browser_session_id: String, tab_id: Option<String>) -> bool {
+        let sender = self.sender.lock().expect("workspace sender lock");
+        if sender.as_ref().is_some_and(|value| !value.is_closed()) { return false; }
+        *self.pending_launch_selection.lock().expect("workspace launch selection lock") = Some((browser_session_id, tab_id));
+        true
+    }
     pub async fn current(&self) -> PublicWorkspaceState { self.state.current().await }
 
     pub fn stop_task(&self) {
@@ -413,6 +418,23 @@ mod tests {
         assert!(gate.stage(PendingSelectionEvidence::Selected(selected), true).is_none());
         assert!(matches!(gate.settle_frame(), Some(PendingSelectionEvidence::Selected(selected)) if selected.selection_id == "selection-one"));
         assert!(matches!(gate.stage(PendingSelectionEvidence::Cleared, false), Some(PendingSelectionEvidence::Cleared)));
+    }
+
+    #[test]
+    fn launch_selection_uses_exactly_one_offline_or_live_route() {
+        let service = WorkspaceClientService::default();
+        assert!(service.stage_launch_selection_if_offline("session-one".into(), Some("tab-one".into())));
+        assert_eq!(*service.pending_launch_selection.lock().expect("workspace launch selection lock"), Some(("session-one".into(), Some("tab-one".into()))));
+
+        *service.pending_launch_selection.lock().expect("workspace launch selection lock") = None;
+        let (sender, receiver) = mpsc::channel(1);
+        *service.sender.lock().expect("workspace sender lock") = Some(sender);
+        assert!(!service.stage_launch_selection_if_offline("session-two".into(), Some("tab-two".into())));
+        assert!(service.pending_launch_selection.lock().expect("workspace launch selection lock").is_none());
+
+        drop(receiver);
+        assert!(service.stage_launch_selection_if_offline("session-three".into(), None));
+        assert_eq!(*service.pending_launch_selection.lock().expect("workspace launch selection lock"), Some(("session-three".into(), None)));
     }
 
     #[tokio::test]

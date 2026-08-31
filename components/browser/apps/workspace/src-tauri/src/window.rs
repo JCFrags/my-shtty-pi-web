@@ -62,7 +62,8 @@ pub fn apply_launch_request<R: Runtime>(app: &AppHandle<R>, request: LaunchReque
     }
     if let Some(browser_session_id) = request.browser_session_id {
         let tab_id = request.tab_id;
-        app.state::<WorkspaceClientService>().queue_launch_selection(browser_session_id.clone(), tab_id.clone());
+        let service = app.state::<WorkspaceClientService>();
+        if service.stage_launch_selection_if_offline(browser_session_id.clone(), tab_id.clone()) { return; }
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             let service = app.state::<WorkspaceClientService>();
