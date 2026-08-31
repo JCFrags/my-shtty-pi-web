@@ -4,7 +4,7 @@ use tauri::{Runtime, WebviewWindow};
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum EvidenceCapture { AgentA, AgentB, Empty, Reconnecting }
+pub enum EvidenceCapture { AgentA, AgentB, Empty, Reconnecting, HumanA, HumanB, Returned }
 
 impl EvidenceCapture {
     pub fn parse(value: &str) -> Option<Self> {
@@ -13,6 +13,9 @@ impl EvidenceCapture {
             "agent-b" => Some(Self::AgentB),
             "empty" => Some(Self::Empty),
             "reconnecting" => Some(Self::Reconnecting),
+            "human-a" => Some(Self::HumanA),
+            "human-b" => Some(Self::HumanB),
+            "returned" => Some(Self::Returned),
             _ => None,
         }
     }
@@ -24,6 +27,9 @@ impl EvidenceCapture {
             Self::AgentB => "phase3a-workspace-agent-b.png",
             Self::Empty => "phase3a-workspace-empty.png",
             Self::Reconnecting => "phase3a-workspace-reconnecting.png",
+            Self::HumanA => "phase3b-workspace-human-a.png",
+            Self::HumanB => "phase3b-workspace-human-b.png",
+            Self::Returned => "phase3b-workspace-returned.png",
         }
     }
 }
@@ -82,6 +88,8 @@ mod tests {
     fn accepts_only_fixed_evidence_names() {
         assert_eq!(EvidenceCapture::parse("agent-a"), Some(EvidenceCapture::AgentA));
         assert_eq!(EvidenceCapture::parse("reconnecting"), Some(EvidenceCapture::Reconnecting));
+        assert_eq!(EvidenceCapture::parse("human-a"), Some(EvidenceCapture::HumanA));
+        assert_eq!(EvidenceCapture::parse("returned"), Some(EvidenceCapture::Returned));
         assert_eq!(EvidenceCapture::parse("../secret"), None);
         assert_eq!(EvidenceCapture::parse("anything"), None);
     }

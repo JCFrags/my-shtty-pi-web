@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { WorkspaceAtspi, type WorkspaceAtspiResult } from "./workspace-atspi.js";
 
 export interface WorkspaceDiagnostic extends Record<string, unknown> {
   readonly kind: string;
@@ -12,7 +13,8 @@ export class WorkspaceRoute {
   readonly binary: string;
   readonly root: string;
   readonly diagnosticsPath: string;
-  readonly screenshots: Record<"agent-a" | "agent-b" | "empty" | "reconnecting", string>;
+  readonly screenshots: Record<"agent-a" | "agent-b" | "empty" | "reconnecting" | "human-a" | "human-b" | "returned", string>;
+  readonly atspi = new WorkspaceAtspi();
   process?: ChildProcess;
   startupStarted = 0;
   startupReadyMs = 0;
@@ -27,6 +29,9 @@ export class WorkspaceRoute {
       "agent-b": join(root, "phase3a-workspace-agent-b.png"),
       empty: join(root, "phase3a-workspace-empty.png"),
       reconnecting: join(root, "phase3a-workspace-reconnecting.png"),
+      "human-a": join(root, "phase3b-workspace-human-a.png"),
+      "human-b": join(root, "phase3b-workspace-human-b.png"),
+      returned: join(root, "phase3b-workspace-returned.png"),
     };
   }
 
@@ -122,6 +127,56 @@ export class WorkspaceRoute {
     return await this.waitForRecord((record) => record.kind === "frameSettled" && record.outcome === "painted" && record.browserSessionId === browserSessionId && record.tabId === tabId && record.selectionId === selectionId, from, timeoutMs);
   }
 
+  async waitForControlState(browserSessionId: string, state: "agent" | "takeover-pending" | "human" | "human-disconnected" | "return-pending", from = 0, timeoutMs = 20_000): Promise<WorkspaceDiagnostic> {
+    return await this.waitForRecord((record) => {
+      if (record.kind !== "snapshot" || !Array.isArray(record.sessions)) return false;
+      const session = record.sessions.filter(isRecord).find((item) => item.browserSessionId === browserSessionId);
+      return session?.controlState === state;
+    }, from, timeoutMs);
+  }
+
+  async waitForTakeoverOutcome(browserSessionId: string, from = 0, timeoutMs = 8_000): Promise<{ kind: "human"; record: WorkspaceDiagnostic } | { kind: "error"; record: WorkspaceDiagnostic; code: string }> {
+    const record = await this.waitForRecord((candidate) => {
+      if (candidate.kind === "launcherError" && typeof candidate.code === "string") return true;
+      if (candidate.kind !== "snapshot" || !Array.isArray(candidate.sessions)) return false;
+      return candidate.sessions.filter(isRecord).some((session) => session.browserSessionId === browserSessionId && session.controlState === "human");
+    }, from, timeoutMs);
+    if (record.kind === "launcherError") return { kind: "error", record, code: String(record.code) };
+    return { kind: "human", record };
+  }
+
+  async assertNoControlState(browserSessionId: string, state: "human", from: number, dwellMs = 1_000): Promise<void> {
+    await sleep(dwellMs);
+    const records = (await this.records()).slice(from);
+    assert.ok(!records.some((record) => record.kind === "snapshot" && Array.isArray(record.sessions) && record.sessions.filter(isRecord).some((session) => session.browserSessionId === browserSessionId && session.controlState === state)), "failed takeover acquired control later");
+  }
+
+  async takeControlViaUi(browserSessionId: string, tabId: string): Promise<{ record: WorkspaceDiagnostic; atspi: WorkspaceAtspiResult; attempts: number }> {
+    const firstFrom = await this.index();
+    const firstAtspi = await this.atspi.takeControl();
+    try { return { record: await this.waitForControlState(browserSessionId, "human", firstFrom, 5_000), atspi: firstAtspi, attempts: 1 }; }
+    catch {
+      await this.assertNoControlState(browserSessionId, "human", firstFrom, 1_000);
+      await this.waitForControlState(browserSessionId, "agent", firstFrom, 5_000);
+      await this.select(browserSessionId, tabId);
+      const retryFrom = await this.index();
+      const retryAtspi = await this.atspi.takeControl();
+      return { record: await this.waitForControlState(browserSessionId, "human", retryFrom), atspi: retryAtspi, attempts: 2 };
+    }
+  }
+
+  async returnControlViaUi(browserSessionId: string): Promise<{ record: WorkspaceDiagnostic; atspi: WorkspaceAtspiResult }> {
+    const from = await this.index();
+    const atspi = await this.atspi.returnControl();
+    return { record: await this.waitForControlState(browserSessionId, "agent", from), atspi };
+  }
+
+  async exerciseHumanInput(full = true): Promise<WorkspaceAtspiResult> {
+    return full ? await this.atspi.exerciseInput() : await this.atspi.exercisePointer();
+  }
+
+  async holdHumanInput(): Promise<WorkspaceAtspiResult> { return await this.atspi.holdInput(); }
+
   async select(browserSessionId: string, tabId: string, paintTimeoutMs = 45_000): Promise<{ selection: WorkspaceDiagnostic; paint: WorkspaceDiagnostic; latencyMs: number; brokerLatencyMs: number; frameLatencyMs: number; launcherLatencyMs: number }> {
     const records = await this.records();
     const from = records.length;
@@ -165,6 +220,19 @@ export class WorkspaceRoute {
 
   async waitForWindowAction(action: "raise" | "hide", from = 0, timeoutMs = 10_000): Promise<WorkspaceDiagnostic> {
     return await this.waitForRecord((record) => record.kind === "windowAction" && record.action === action, from, timeoutMs);
+  }
+
+  async closeViaAcceptance(): Promise<void> {
+    const child = this.process;
+    if (child === undefined) throw new Error("Tauri workspace is not running");
+    await this.launch(["--acceptance-close"]);
+    await new Promise<void>((resolveClose, rejectClose) => {
+      if (child.exitCode !== null || child.signalCode !== null) { resolveClose(); return; }
+      const timer = setTimeout(() => { child.off("exit", exited); rejectClose(new Error("Tauri CloseRequested lifecycle timed out")); }, 15_000);
+      const exited = () => { clearTimeout(timer); resolveClose(); };
+      child.once("exit", exited);
+    });
+    this.process = undefined;
   }
 
   async stop(): Promise<void> {

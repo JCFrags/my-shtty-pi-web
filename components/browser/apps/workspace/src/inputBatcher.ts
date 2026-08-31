@@ -84,7 +84,28 @@ export class FreshFrameInputPump {
   get awaitingFrame(): boolean { return this.#awaitingFreshFrame; }
 
   requireFreshFrame(afterDeliveryId = this.#paintToken): void {
-    this.#barrierToken = afterDeliveryId;
+    const barrier = this.#barrierToken === undefined
+      ? afterDeliveryId
+      : afterDeliveryId === undefined
+        ? this.#barrierToken
+        : Math.max(this.#barrierToken, afterDeliveryId);
+    this.#barrierToken = barrier;
+    // A qualifying delivery can finish painting while the input IPC response is
+    // still in flight. Do not close admission after that newer paint has already
+    // satisfied the exact delivery fence returned by Rust.
+    if (barrier !== undefined && this.#paintToken !== undefined && this.#paintToken > barrier) {
+      if (this.#awaitingFreshFrame) {
+        this.#awaitingFreshFrame = false;
+        this.#barrierToken = undefined;
+        this.#barrierChanged(false);
+        for (const settle of this.#frameWaiters) settle(true);
+        this.#frameWaiters.clear();
+        void this.pump();
+      } else {
+        this.#barrierToken = undefined;
+      }
+      return;
+    }
     if (!this.#awaitingFreshFrame) { this.#awaitingFreshFrame = true; this.#barrierChanged(true); }
   }
 

@@ -23,6 +23,7 @@ export interface HumanCanvasInput {
   };
   releaseHeld: () => Promise<void>;
   quiesceAndReturn: () => Promise<void>;
+  dispatchAcceptanceText: (text: string) => void;
 }
 
 type Button = "left" | "middle" | "right";
@@ -193,8 +194,8 @@ export function useHumanCanvasInput(bridge: WorkspaceApi, canvasRef: RefObject<H
   const onPointerDown: PointerEventHandler<HTMLCanvasElement> = (event) => {
     if (!admissionOpen.current) return;
     const mapped = point(event); const button = pointerButton(event.button); if (!mapped || !button) return;
-    event.preventDefault(); event.currentTarget.focus(); event.currentTarget.setPointerCapture(event.pointerId);
-    capturedPointers.current.add(event.pointerId);
+    event.preventDefault(); event.currentTarget.focus();
+    if (event.isTrusted) { event.currentTarget.setPointerCapture(event.pointerId); capturedPointers.current.add(event.pointerId); }
     heldButtons.current.add(button); enqueue({ kind: "pointerDown", point: mapped, button, clickCount: event.detail >= 2 ? 2 : 1 });
   };
   const onPointerUp: PointerEventHandler<HTMLCanvasElement> = (event) => {
@@ -221,13 +222,17 @@ export function useHumanCanvasInput(bridge: WorkspaceApi, canvasRef: RefObject<H
     event.preventDefault(); heldKeys.current.delete(code);
     enqueueRelease({ kind: "keyUp", key: heldKey, code }, () => heldKeys.current.set(code, heldKey));
   };
+  const dispatchAcceptanceText = useCallback((text: string): void => {
+    if (!admissionOpen.current || text.length < 1 || text.length > 4_096) throw new Error("acceptance text input is not ready");
+    enqueue({ kind: "text", text });
+  }, [enqueue]);
   const onBeforeInput: FormEventHandler<HTMLCanvasElement> = (event) => {
     if (!admissionOpen.current) return;
     const value = (event.nativeEvent as InputEvent).data;
     if (value) { event.preventDefault(); enqueue({ kind: "text", text: value }); }
   };
 
-  return { error, inputReady, releaseHeld, quiesceAndReturn, handlers: { tabIndex: active ? 0 : -1, contentEditable: active && inputReady, suppressContentEditableWarning: true, onPointerMove, onPointerDown, onPointerUp, onPointerCancel, onLostPointerCapture, onContextMenu: (event) => { if (active) event.preventDefault(); }, onWheel, onKeyDown, onKeyUp, onBeforeInput, onBlur: () => { if (heldButtons.current.size > 0 || heldKeys.current.size > 0) void releaseHeld(); } } };
+  return { error, inputReady, releaseHeld, quiesceAndReturn, dispatchAcceptanceText, handlers: { tabIndex: active ? 0 : -1, contentEditable: active && inputReady, suppressContentEditableWarning: true, onPointerMove, onPointerDown, onPointerUp, onPointerCancel, onLostPointerCapture, onContextMenu: (event) => { if (active) event.preventDefault(); }, onWheel, onKeyDown, onKeyUp, onBeforeInput, onBlur: () => { if (heldButtons.current.size > 0 || heldKeys.current.size > 0) void releaseHeld(); } } };
 }
 
 export function shouldReleasePointerCapture(heldButtonCount: number): boolean { return heldButtonCount === 0; }

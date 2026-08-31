@@ -61,6 +61,7 @@ pub fn run() {
             commands::workspace_return_control,
             commands::workspace_input_batch,
             commands::workspace_current_state,
+            commands::workspace_acceptance_enabled,
             commands::workspace_window_action,
             commands::workspace_binary_probe_open,
             commands::workspace_binary_probe_ack,

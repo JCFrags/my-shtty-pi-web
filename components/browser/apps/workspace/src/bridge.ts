@@ -57,6 +57,7 @@ export interface WorkspaceApi {
   returnControl(): Promise<{ controlState: string }>;
   input(events: HumanInputEvent[]): Promise<InputAck>;
   windowAction(action: "raise" | "hide"): Promise<void>;
+  acceptanceEnabled?(): Promise<boolean>;
 }
 
 export class WorkspaceBridge implements WorkspaceApi {
@@ -92,6 +93,7 @@ export class WorkspaceBridge implements WorkspaceApi {
   returnControl(): Promise<{ controlState: string }> { return invoke("workspace_return_control"); }
   input(events: HumanInputEvent[]): Promise<InputAck> { return invoke("workspace_input_batch", { batch: { events } }); }
   windowAction(action: "raise" | "hide"): Promise<void> { return invoke("workspace_window_action", { action }); }
+  acceptanceEnabled(): Promise<boolean> { return invoke("workspace_acceptance_enabled"); }
 }
 
 export function decodeFrameEnvelope(value: ArrayBuffer): FrameEnvelope {

@@ -92,6 +92,26 @@ describe("bounded typed frontend-to-Rust input batching spike", () => {
     expect(batches).toEqual([[{ kind: "text", text: "first" }], [{ kind: "text", text: "second" }]]);
   });
 
+  it("keeps admission open when a qualifying paint completes before the input acknowledgement", async () => {
+    const batches: HumanInputEvent[][] = [];
+    let settleFirst: ((ack: InputAck) => void) | undefined;
+    const first = new Promise<InputAck>((resolve) => { settleFirst = resolve; });
+    const pump = new FreshFrameInputPump(async (events) => {
+      batches.push(events);
+      if (batches.length === 1) return await first;
+      return { acceptedEventCount: events.length, coalescedPointerMoveCount: 0, awaitingNewFrame: false };
+    }, () => { throw new Error("input pump failed"); });
+    pump.painted(10);
+    pump.push({ kind: "text", text: "first" });
+    pump.painted(11);
+    settleFirst?.({ acceptedEventCount: 1, coalescedPointerMoveCount: 0, awaitingNewFrame: true, resumeAfterDeliveryId: 10 });
+    await pump.settle();
+    expect(pump.awaitingFrame).toBe(false);
+    pump.push({ kind: "text", text: "second" });
+    await pump.settle();
+    expect(batches).toEqual([[{ kind: "text", text: "first" }], [{ kind: "text", text: "second" }]]);
+  });
+
   it("dispatches release transitions while ordinary input waits for a newer painted frame", async () => {
     const batches: HumanInputEvent[][] = [];
     const pump = new FreshFrameInputPump(async (events) => {

@@ -17,6 +17,7 @@ pub struct LaunchRequest {
     pub tab_id: Option<String>,
     pub acceptance_output: Option<PathBuf>,
     pub evidence_capture: Option<EvidenceCapture>,
+    pub acceptance_close: bool,
 }
 
 pub fn parse_launch_args<I>(args: I) -> Result<LaunchRequest, String>
@@ -43,8 +44,13 @@ where I: IntoIterator<Item = String> {
             request.evidence_capture = EvidenceCapture::parse(value);
             if request.evidence_capture.is_none() { return Err("invalid --capture-evidence".into()); }
         }
+        else if cfg!(debug_assertions) && arg == "--acceptance-close" {
+            if request.acceptance_close { return Err("duplicate --acceptance-close".into()); }
+            request.acceptance_close = true;
+        }
         else { return Err("unknown workspace launch argument".into()); }
     }
+    if request.acceptance_close && (request.raise || request.hide || request.take_control || request.return_control || request.browser_session_id.is_some() || request.tab_id.is_some() || request.acceptance_output.is_some() || request.evidence_capture.is_some()) { return Err("--acceptance-close must be used alone".into()); }
     if request.raise && request.hide { return Err("--raise and --hide conflict".into()); }
     if request.take_control && request.return_control { return Err("control transfer arguments conflict".into()); }
     if request.hide && (request.browser_session_id.is_some() || request.evidence_capture.is_some() || request.take_control || request.return_control) { return Err("--hide cannot select, capture, or transfer control".into()); }
@@ -73,6 +79,11 @@ pub fn apply_launch_request<R: Runtime>(app: &AppHandle<R>, request: LaunchReque
 
 async fn apply_launch_request_async<R: Runtime>(app: &AppHandle<R>, request: LaunchRequest, default_raise: bool) -> Result<(), PublicError> {
     let service = app.state::<WorkspaceClientService>();
+    if request.acceptance_close {
+        let window = app.get_webview_window("main").ok_or_else(|| WorkspaceError::Unavailable.public())?;
+        window.close().map_err(|_| WorkspaceError::Unavailable.public())?;
+        return Ok(());
+    }
     if request.return_control { service.release_for_hide().await?; }
     if let Some(window) = app.get_webview_window("main") {
         if request.hide {
@@ -100,7 +111,7 @@ mod tests {
     use super::*;
     #[test]
     fn accepts_only_bounded_fixed_launch_arguments() {
-        assert_eq!(parse_launch_args(["--raise".into(), "--select-session=session:one".into(), "--select-tab=tab:one".into()]).unwrap(), LaunchRequest { raise: true, hide: false, take_control: false, return_control: false, browser_session_id: Some("session:one".into()), tab_id: Some("tab:one".into()), acceptance_output: None, evidence_capture: None });
+        assert_eq!(parse_launch_args(["--raise".into(), "--select-session=session:one".into(), "--select-tab=tab:one".into()]).unwrap(), LaunchRequest { raise: true, hide: false, take_control: false, return_control: false, browser_session_id: Some("session:one".into()), tab_id: Some("tab:one".into()), acceptance_output: None, evidence_capture: None, acceptance_close: false });
         assert_eq!(parse_launch_args(["--raise".into(), "--select-session=session:one".into(), "--select-tab=tab:one".into(), "--take-control".into()]).unwrap(), LaunchRequest { raise: true, take_control: true, browser_session_id: Some("session:one".into()), tab_id: Some("tab:one".into()), ..LaunchRequest::default() });
         assert_eq!(parse_launch_args(["--return-control".into()]).unwrap(), LaunchRequest { return_control: true, ..LaunchRequest::default() });
         assert!(parse_launch_args(["--shell=rm".into()]).is_err());
@@ -118,8 +129,11 @@ mod tests {
         assert!(parse_launch_args(["--select-session=session:one".into(), "--select-session=session:two".into()]).is_err());
         assert!(parse_launch_args(["--raise".into(), "--select-session=session:one".into(), "--select-tab=tab:one".into(), "--unknown".into(), "--extra".into()]).is_err());
         assert!(parse_launch_args([format!("--select-session={}", "a".repeat(257))]).is_err());
-        #[cfg(debug_assertions)]
-        assert_eq!(parse_launch_args(["--capture-evidence=agent-a".into()]).unwrap().evidence_capture, Some(EvidenceCapture::AgentA));
+        #[cfg(debug_assertions)] {
+            assert_eq!(parse_launch_args(["--capture-evidence=agent-a".into()]).unwrap().evidence_capture, Some(EvidenceCapture::AgentA));
+            assert!(parse_launch_args(["--acceptance-close".into()]).unwrap().acceptance_close);
+            assert!(parse_launch_args(["--acceptance-close".into(), "--raise".into()]).is_err());
+        }
         #[cfg(not(debug_assertions))]
         assert!(parse_launch_args(["--capture-evidence=agent-a".into()]).is_err());
         assert!(parse_launch_args(["--capture-evidence=../secret".into()]).is_err());

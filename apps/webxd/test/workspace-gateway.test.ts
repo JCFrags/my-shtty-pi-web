@@ -78,9 +78,14 @@ describe("private workspace gateway", () => {
     client.send({ protocolVersion: "workspace.v2", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret });
     await client.next(); await client.next();
     client.send({ protocolVersion: "workspace.v2", kind: "snapshot.get", requestId: "request:snapshot" });
-    const snapshotResponse = (await client.next()).header as { result: { snapshot: { sessions: Array<{ cursor: Record<string, unknown> }> } } };
+    const snapshotResponse = (await client.next()).header as { result: { snapshot: { sessions: Array<{ agentLabel: string; personaDisplayId: string; cursor: Record<string, unknown> }> } } };
     expect(snapshotResponse.result.snapshot.sessions).toHaveLength(1);
-    expect(snapshotResponse.result.snapshot.sessions[0]?.cursor).not.toHaveProperty("personaId");
+    const displaySession = snapshotResponse.result.snapshot.sessions[0];
+    expect(displaySession?.cursor).not.toHaveProperty("personaId");
+    expect(displaySession?.agentLabel).toMatch(/^Pi agent [0-9a-f]{12}$/u);
+    expect(displaySession?.personaDisplayId).toMatch(/^persona-[0-9a-f]{12}$/u);
+    expect(JSON.stringify(displaySession)).not.toContain("agent:one");
+    expect(JSON.stringify(displaySession)).not.toContain("persona_1234567890123456");
     client.send({ protocolVersion: "workspace.v2", kind: "frame.select", requestId: "request:select", selectionId: "selection_1234567890", browserSessionId: "session:one", tabId: "tab:one" });
     const selected = (await client.next()).header as { result: { subscriptionId?: string } };
     expect(selected).toMatchObject({ kind: "response", ok: true, result: { kind: "selection", selectionId: "selection_1234567890", browserSessionId: "session:one", tabId: "tab:one" } });

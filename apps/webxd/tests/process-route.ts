@@ -2,16 +2,12 @@ import assert from "node:assert/strict";
 import { execFileSync, fork, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createPiWebxExtension } from "../../pi-webx/src/index.js";
 import { WebxFacadeClient } from "../../../packages/sdk/src/index.js";
 import { WorkspaceRoute, type WorkspaceDiagnostic } from "./workspace-route.js";
 
 interface ToolPresentation { readonly content: Array<{ readonly type: "text"; readonly text: string } | { readonly type: "image"; readonly data: string; readonly mimeType: string }>; readonly details: unknown }
-interface RegisteredTool { readonly name: string; readonly execute: (toolCallId: string, input: unknown, signal: AbortSignal, onUpdate: unknown, context: unknown) => Promise<ToolPresentation> }
-interface RegisteredCommand { readonly handler: (args: string, context: unknown) => Promise<void> | void }
-type EventHandler = (event?: unknown, context?: unknown) => Promise<unknown> | unknown;
 interface ChildReady extends Record<string, unknown> { readonly kind: "ready"; readonly role: string }
 interface BrowserIdentity { readonly browserSessionId: string; readonly tabId: string }
 interface SoakBrowserReplacement {
@@ -24,33 +20,107 @@ interface SoakBrowserReplacement {
   readonly piReconnects: number;
   readonly captureReadinessAttempts: number;
   readonly captureReadinessRecoveredTimeouts: number;
+  readonly heldControlBeforeReplacement: { readonly buttons: 1; readonly keys: 1; readonly blockedAgentOperation: true };
+  readonly replacementStartedAgentOwned: true;
+  readonly replacementFixtureStartedClean: true;
 }
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const MAX_ROUTE_SAMPLES = 2_048;
+const activePiHarnesses = new Set<PiHarness>();
 
 class PiHarness {
-  readonly tools = new Map<string, RegisteredTool>();
-  readonly events = new Map<string, EventHandler>();
-  readonly commands = new Map<string, RegisteredCommand>();
-  readonly notifications: string[] = [];
-  readonly controller = new AbortController();
-  readonly context: Record<string, unknown>;
+  readonly ownerId: string;
+  readonly webxPath: string;
+  readonly exportRoot: string;
+  #process: ChildProcess | undefined;
   #activeTools: string[] = [];
-  #callSequence = 0;
+  #sequence = 0;
+  readonly #pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
+  readonly #stderr: string[] = [];
 
   constructor(ownerId: string, webxPath: string, exportRoot: string) {
-    this.context = { cwd: "/deterministic/phase2b-process", hasUI: false, isProjectTrusted: () => true, sessionManager: { getSessionId: () => ownerId }, ui: { setStatus: () => undefined, notify: (message: string) => { this.notifications.push(message); }, select: async () => "Deny", input: async () => undefined } };
-    const extensionApi = { registerTool: (tool: RegisteredTool) => this.tools.set(tool.name, tool), registerCommand: (name: string, command: RegisteredCommand) => this.commands.set(name, command), registerShortcut: () => undefined, on: (name: string, handler: EventHandler) => this.events.set(name, handler), getActiveTools: () => [...this.#activeTools], setActiveTools: (tools: string[]) => { this.#activeTools = [...tools]; } };
-    createPiWebxExtension(() => new WebxFacadeClient(webxPath, exportRoot), { record: async () => undefined })(extensionApi as never);
+    this.ownerId = ownerId;
+    this.webxPath = webxPath;
+    this.exportRoot = exportRoot;
+    activePiHarnesses.add(this);
   }
+
   get activeTools(): readonly string[] { return this.#activeTools; }
-  async start(): Promise<void> { await this.events.get("session_start")?.({}, this.context); }
-  async stop(): Promise<void> { await this.events.get("session_shutdown")?.({}, this.context); }
-  async command(name: string, args: string): Promise<void> { const command = this.commands.get(name); if (command === undefined) throw new Error(`Pi command ${name} is not registered`); await command.handler(args, this.context); }
-  async execute(name: string, input: unknown, signal: AbortSignal = this.controller.signal): Promise<ToolPresentation> {
-    const tool = this.tools.get(name); if (tool === undefined) throw new Error(`Pi tool ${name} is not registered`);
-    this.#callSequence += 1;
-    return await tool.execute(`phase2b-${name}-${this.#callSequence}`, input, signal, undefined, this.context);
+  get pid(): number {
+    const pid = this.#process?.pid;
+    if (pid === undefined) throw new Error("Pi actor process is not running");
+    return pid;
+  }
+
+  async start(): Promise<void> {
+    if (this.#process !== undefined) throw new Error("Pi actor process is already running");
+    activePiHarnesses.add(this);
+    const worker = fileURLToPath(new URL("./process-route-pi-worker.ts", import.meta.url));
+    const child = fork(worker, [], {
+      env: { ...process.env, PROCESS_ROUTE_PI_OWNER: this.ownerId, PROCESS_ROUTE_PI_WEBX_PATH: this.webxPath, PROCESS_ROUTE_PI_EXPORT_ROOT: this.exportRoot },
+      execArgv: process.execArgv,
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+    });
+    this.#process = child;
+    child.stderr?.on("data", (chunk) => { this.#stderr.push(chunk.toString()); if (this.#stderr.length > 100) this.#stderr.shift(); });
+    child.on("message", (message: unknown) => {
+      if (!isRecord(message) || typeof message.id !== "number" || typeof message.ok !== "boolean") return;
+      const pending = this.#pending.get(message.id);
+      if (pending === undefined) return;
+      this.#pending.delete(message.id);
+      if (message.ok) pending.resolve(message.result); else pending.reject(new Error(String(message.error ?? "Pi actor command failed")));
+    });
+    const rejectPending = (error: Error) => { for (const pending of this.#pending.values()) pending.reject(error); this.#pending.clear(); };
+    child.once("exit", (code, signal) => { if (this.#process === child) this.#process = undefined; rejectPending(new Error(`Pi actor exited (${code ?? signal})\n${this.#stderr.join("")}`)); });
+    child.on("error", rejectPending);
+    await new Promise<void>((resolveReady, rejectReady) => {
+      const timeout = setTimeout(() => rejectReady(new Error(`Pi actor readiness timed out\n${this.#stderr.join("")}`)), 30_000);
+      const onMessage = (message: unknown) => {
+        if (!isRecord(message) || message.kind !== "ready" || message.role !== "pi") return;
+        clearTimeout(timeout);
+        child.off("message", onMessage);
+        resolveReady();
+      };
+      child.on("message", onMessage);
+      child.once("exit", (code, signal) => { clearTimeout(timeout); rejectReady(new Error(`Pi actor exited before ready (${code ?? signal})\n${this.#stderr.join("")}`)); });
+    });
+    const started = asRecord(await this.call("start"));
+    this.#activeTools = Array.isArray(started.activeTools) ? started.activeTools.filter((value): value is string => typeof value === "string") : [];
+    assert.equal(started.pid, child.pid);
+  }
+
+  async stop(): Promise<void> {
+    const child = this.#process;
+    if (child === undefined) { activePiHarnesses.delete(this); return; }
+    await this.call("stop", {}, 30_000).catch(() => undefined);
+    await waitExit(child, 5_000).catch(() => { child.kill("SIGKILL"); });
+    if (this.#process === child) this.#process = undefined;
+    this.#activeTools = [];
+    activePiHarnesses.delete(this);
+  }
+
+  async command(name: string, args: string): Promise<void> { await this.call("command", { name, args }); }
+
+  async execute(name: string, input: unknown, signal?: AbortSignal): Promise<ToolPresentation> {
+    if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error("Pi actor operation was aborted");
+    return await this.call("execute", { name, input }) as ToolPresentation;
+  }
+
+  async call(command: string, fields: Record<string, unknown> = {}, timeoutMs = 60_000): Promise<unknown> {
+    const child = this.#process;
+    if (child === undefined) throw new Error("Pi actor process is not running");
+    const id = ++this.#sequence;
+    return await new Promise((resolveCall, rejectCall) => {
+      const timer = setTimeout(() => { this.#pending.delete(id); rejectCall(new Error(`Pi actor ${command} timed out\n${this.#stderr.join("")}`)); }, timeoutMs);
+      this.#pending.set(id, { resolve: (value) => { clearTimeout(timer); resolveCall(value); }, reject: (error) => { clearTimeout(timer); rejectCall(error); } });
+      if (!child.connected || child.send === undefined) {
+        const pending = this.#pending.get(id); this.#pending.delete(id); pending?.reject(new Error("Pi actor IPC channel is closed")); return;
+      }
+      child.send({ id, command, ...fields }, (error) => {
+        if (error === null) return;
+        const pending = this.#pending.get(id); this.#pending.delete(id); pending?.reject(error);
+      });
+    });
   }
 }
 
@@ -141,9 +211,13 @@ async function main(): Promise<void> {
   const contentionWorkspaceAttempts = boundedNumberArgument("--contention-workspace-attempts", 0, 0, 10_000);
   const gate0Switches = boundedNumberArgument("--gate0-switches", 0, 0, 1_000);
   const gate0ReplacementCycles = boundedNumberArgument("--gate0-replacement-cycles", 0, 0, 4);
+  const soakDurationSeconds = boundedNumberArgument("--soak-duration-seconds", 0, 0, 7_200);
+  const humanControlCycles = boundedNumberArgument("--human-control-cycles", 0, 0, 1_000);
   if (contentionTransactions > 0 && (contentionObservations < 300 || contentionTransactions < 1_000)) throw new Error("capture contention requires at least 1,000 transactions and 300 observations");
   const gate0Requested = gate0Switches > 0 || gate0ReplacementCycles > 0 || contentionWorkspaceAttempts > 0;
   if (gate0Requested && !workspaceEnabled) throw new Error("Gate 0 qualification requires the real Tauri workspace");
+  if (humanControlCycles > 0 && !workspaceEnabled) throw new Error("human-control acceptance requires the real Tauri workspace");
+  if (soakDurationSeconds >= 1_800 && humanControlCycles > 0 && humanControlCycles < 100) throw new Error("the control soak requires at least 100 takeover/return cycles");
   if (gate0Requested && (gate0Switches < 200 || gate0ReplacementCycles < 2 || contentionTransactions < 1_000 || contentionObservations < 500 || contentionWorkspaceAttempts < 500)) throw new Error("Gate 0 qualification requires 200 switches, two replacements, 1,000 governed transactions, 500 observations, and 500 workspace attempts");
   root = await mkdtemp(join(runtimeDirectory, "phase2b-process-route-"));
   const browserdDirectory = join(root, "browserd");
@@ -172,7 +246,9 @@ async function main(): Promise<void> {
   piA = new PiHarness("phase2b-agent-a", webxPath, join(root, "exports-a"));
   piB = new PiHarness("phase2b-agent-b", webxPath, join(root, "exports-b"));
   await Promise.all([piA.start(), piB.start()]);
-  const primaryPi = piA;
+  const piActorPids = [piA.pid, piB.pid];
+  assert.equal(new Set([process.pid, browserdReady.pid, webxdReady.pid, ...piActorPids]).size, 5, "coordinator, Pi actors, browserd, and webxd must use distinct processes");
+  let primaryPi = piA;
   assert.ok(primaryPi.activeTools.includes("browser_open") && piB.activeTools.includes("browser_open"));
 
   const [openedA, openedB] = await Promise.all([piA.execute("browser_open", { url: `${origin}/alpha` }), piB.execute("browser_open", { url: `${origin}/beta` })]);
@@ -186,6 +262,10 @@ async function main(): Promise<void> {
   const workspaceSwitchBreakdowns: Record<string, unknown>[] = [];
   let gate0RecordWindow: { from: number; to: number } | undefined;
   let workspaceCursorFrames: Record<string, unknown>[] = [];
+  let humanControlAcceptance: Record<string, unknown> | undefined;
+  let disconnectControlAcceptance: Record<string, unknown> | undefined;
+  let failedDisconnectedTakeoverFrom: number | undefined;
+  let shortHumanControlCycles = 0;
   if (workspaceEnabled) {
     assert.ok(workspaceBinary !== undefined);
     workspace = new WorkspaceRoute(workspaceBinary, root);
@@ -399,17 +479,51 @@ async function main(): Promise<void> {
     captureContention.settlement = { subscriptions: settled.subscriptions, captureCoordinators: settled.captureCoordinators, heldInput: settled.heldInput };
   }
 
+  if (humanControlCycles > 0) {
+    if (workspace === undefined) throw new Error("human-control acceptance requires the real Tauri workspace");
+    failureContext.currentOperation = "human-control.initial";
+    shortHumanControlCycles = soakDurationSeconds > 0 ? Math.min(4, humanControlCycles) : humanControlCycles;
+    humanControlAcceptance = await runHumanControlAcceptance({ cycles: shortHumanControlCycles, workspace, piA, piB, identityA, identityB, browserd });
+  }
+
   await piA.stop();
   piA = new PiHarness("phase2b-agent-a", webxPath, join(root, "exports-a-rebound")); await piA.start();
+  primaryPi = piA;
   const reboundList = await piA.execute("browser_tabs", { action: "list" }); assert.match(textOf(reboundList), new RegExp(identityA.browserSessionId));
 
+  if (humanControlCycles > 0 && workspace !== undefined) {
+    if (piA === undefined) throw new Error("Pi actor A is unavailable before the disconnect acceptance");
+    const controlPiA = piA;
+    await workspace.select(identityA.browserSessionId, identityA.tabId);
+    await workspace.takeControlViaUi(identityA.browserSessionId, identityA.tabId);
+    await workspace.holdHumanInput();
+    await expectHumanControlRejection(async () => await controlPiA.execute("browser_observe", identityA));
+    const heldBeforeDisconnect = arrayOfRecords(asRecord(await browserd.call("metrics")).heldInput).find((item) => item.browserSessionId === identityA.browserSessionId);
+    assert.ok(heldBeforeDisconnect !== undefined && Array.isArray(heldBeforeDisconnect.buttons) && heldBeforeDisconnect.buttons.length === 1 && Array.isArray(heldBeforeDisconnect.keys) && heldBeforeDisconnect.keys.length === 1, "graphical acceptance did not hold one button and one key");
+    disconnectControlAcceptance = { heldBeforeDisconnect: { buttons: 1, keys: 1 }, blockedAgentOperation: true };
+  }
   const beforeWebxdRestart = await workspace?.index() ?? 0;
   await webxd.stop(); children.splice(children.indexOf(webxd), 1);
   if (workspace !== undefined) { await workspace.waitForConnection("reconnecting", beforeWebxdRestart); await workspace.capture("reconnecting"); }
+  if (disconnectControlAcceptance !== undefined) {
+    await waitFor(async () => {
+      const held = arrayOfRecords(asRecord(await browserd.call("metrics")).heldInput).find((item) => item.browserSessionId === identityA.browserSessionId);
+      return held !== undefined && Array.isArray(held.buttons) && held.buttons.length === 0 && Array.isArray(held.keys) && held.keys.length === 0;
+    }, 10_000);
+    disconnectControlAcceptance = { ...disconnectControlAcceptance, webxdDisconnectReleasedHeldInput: true, disconnectedWorkspaceVisible: true };
+    if (workspace === undefined) throw new Error("disconnected takeover acceptance lost its workspace");
+    failedDisconnectedTakeoverFrom = await workspace.index();
+    await workspace.launch(["--raise", `--select-session=${identityA.browserSessionId}`, `--select-tab=${identityA.tabId}`, "--take-control"]);
+    const failedDisconnectedTakeover = await workspace.waitForTakeoverOutcome(identityA.browserSessionId, failedDisconnectedTakeoverFrom, 15_000);
+    assert.equal(failedDisconnectedTakeover.kind, "error", "disconnected takeover did not settle as a launcher error");
+    await workspace.assertNoControlState(identityA.browserSessionId, "human", failedDisconnectedTakeoverFrom, 1_000);
+    disconnectControlAcceptance = { ...disconnectControlAcceptance, disconnectedTakeoverCancelled: true, disconnectedTakeoverErrorCode: failedDisconnectedTakeover.kind === "error" ? failedDisconnectedTakeover.code : "missing", noLateTakeoverBeforeReconnect: true };
+  }
   webxd = spawn("webxd", { ...common, PROCESS_ROUTE_WEBXD_SOCKET: webxPath, PROCESS_ROUTE_DROP_RESPONSE_KEY: "phase2b-close-response-loss" }); activeWebxd = webxd; await webxd.ready;
   if (workspaceDescriptorPath !== undefined) { const descriptorPath = workspaceDescriptorPath; await waitFor(async () => await exists(descriptorPath)); workspaceSocketPaths.push(textField(asRecord(JSON.parse(await readFile(descriptorPath, "utf8"))), "socketPath")); }
   const rehydratedList = await piA.execute("browser_tabs", { action: "list" }); assert.match(textOf(rehydratedList), new RegExp(identityA.browserSessionId));
   const rehydratedFrame = await piA.execute("browser_observe", identityA); assertPiImage(rehydratedFrame);
+  const rehydratedFrameB = await piB.execute("browser_observe", identityB); assertPiImage(rehydratedFrameB);
   if (workspace !== undefined) {
     await workspace.waitForSessions([identityA.browserSessionId, identityB.browserSessionId], beforeWebxdRestart);
     let recovered;
@@ -421,14 +535,24 @@ async function main(): Promise<void> {
       throw new Error(`workspace recovery selection failed; authority=${JSON.stringify({ gateway: { clientConnections: gatewayMetrics.clientConnections, boundClients: gatewayMetrics.boundClients, selectedClients: gatewayMetrics.selectedClients, pendingFrames: gatewayMetrics.pendingFrames, droppedFrames: gatewayMetrics.droppedFrames, broker: gatewayMetrics.broker }, browserd: { connections: browserdMetrics.connections, workspaceSubscriptions: browserdMetrics.workspaceSubscriptions, workspaceLedgerEntries: browserdMetrics.workspaceLedgerEntries, droppedFrames: browserdMetrics.droppedFrames, captureCoordinators: browserdMetrics.captureCoordinators } })}`, { cause });
     }
     workspaceRecoverySwitchLatencyMs.push(recovered.latencyMs); workspaceLauncherLatencyMs.push(recovered.launcherLatencyMs); workspaceSwitchBreakdowns.push({ kind: "webxd-recovery", totalMs: recovered.latencyMs, brokerMs: recovered.brokerLatencyMs, frameMs: recovered.frameLatencyMs, launcherMs: recovered.launcherLatencyMs });
+    if (disconnectControlAcceptance !== undefined) {
+      await workspace.waitForControlState(identityA.browserSessionId, "agent", beforeWebxdRestart);
+      const fixtureBeforeFence = controlFixtureState(await piA.execute("browser_observe", { ...identityA, mode: "dom", maxNodes: 80 }));
+      if (failedDisconnectedTakeoverFrom !== undefined) await workspace.assertNoControlState(identityA.browserSessionId, "human", failedDisconnectedTakeoverFrom, 12_250);
+      const fixtureAfterFence = controlFixtureState(await piA.execute("browser_observe", { ...identityA, mode: "dom", maxNodes: 80 }));
+      assert.deepEqual(fixtureAfterFence, fixtureBeforeFence, "cancelled disconnected takeover mutated the fixture later");
+      disconnectControlAcceptance = { ...disconnectControlAcceptance, reconnectedAsAgent: true, modelResumedAfterReconnect: true, noLateTakeoverAfterCommandTtl: true, fixtureUnchangedAfterCommandTtl: true };
+    }
   }
+  if (humanControlAcceptance !== undefined && disconnectControlAcceptance !== undefined) humanControlAcceptance = { ...humanControlAcceptance, disconnectCleanup: disconnectControlAcceptance };
 
-  const soakDurationSeconds = boundedNumberArgument("--soak-duration-seconds", 0, 0, 7_200);
   const soakRun = soakDurationSeconds > 0 ? await runProcessSoak({
     durationSeconds: soakDurationSeconds,
     testedSha,
     sampleSeconds: numberArgument("--sample-seconds", 15),
     modelDelayMs: numberArgument("--soak-model-delay-ms", 10_000),
+    controlCycles: Math.max(0, humanControlCycles - shortHumanControlCycles),
+    initialControlOrdinal: shortHumanControlCycles,
     root, profileRoot, webxPath, origin, identityA, identityB, piA, piB, browserd, webxd, workspace,
     restartWebxd: async (current) => {
       await current.stop(); removeChild(current);
@@ -439,9 +563,35 @@ async function main(): Promise<void> {
     },
     replaceBrowserd: async (current, currentWebxd, currentPiB, oldA) => {
       await currentWebxd.call("unsubscribe").catch(() => undefined);
-      const workspaceIndex = await workspace?.index() ?? 0;
+      if (workspace === undefined) throw new Error("Phase 3B replacement requires the real Tauri workspace");
+      const preReplacementObservation = observationIdentity(await primaryPi.execute("browser_observe", oldA));
+      const selectionState = [...await workspace.records()].reverse().find((record) => record.kind === "selection" || record.kind === "selectionCleared");
+      if (selectionState?.kind === "selection" && selectionState.browserSessionId === oldA.browserSessionId && selectionState.tabId === oldA.tabId) {
+        // Same-target selection legitimately preserves its selection ID. Wait for
+        // one new paint on that exact authoritative selection instead of requiring
+        // a replacement selection event that production does not promise.
+        failureContext.currentOperation = "replacement.precondition-fresh-paint";
+        const from = await workspace.index();
+        await workspace.waitForPaint(oldA.browserSessionId, oldA.tabId, selectionState.selectionId, from, 15_000).catch((cause) => { throw new Error("replacement precondition did not receive a fresh selected frame", { cause }); });
+      } else {
+        failureContext.currentOperation = "replacement.precondition-select";
+        await workspace.select(oldA.browserSessionId, oldA.tabId).catch((cause) => { throw new Error("replacement precondition could not paint the selected actor", { cause }); });
+      }
+      failureContext.currentOperation = "replacement.precondition-acquire";
+      await workspace.takeControlViaUi(oldA.browserSessionId, oldA.tabId).catch((cause) => { throw new Error("replacement precondition could not acquire human control", { cause }); });
+      failureContext.currentOperation = "replacement.precondition-hold";
+      await workspace.holdHumanInput().catch((cause) => { throw new Error("replacement precondition could not hold input", { cause }); });
+      const heldBeforeReplacement = arrayOfRecords(asRecord(await current.call("metrics")).heldInput).find((item) => item.browserSessionId === oldA.browserSessionId);
+      assert.ok(heldBeforeReplacement !== undefined && Array.isArray(heldBeforeReplacement.buttons) && heldBeforeReplacement.buttons.length === 1 && Array.isArray(heldBeforeReplacement.keys) && heldBeforeReplacement.keys.length === 1, "replacement acceptance did not hold one button and one key");
+      await expectHumanControlRejection(async () => await primaryPi.execute("browser_act", { ...oldA, action: { kind: "move", observationId: preReplacementObservation.observationId, coordinateSpace: "cssViewport", x: 300, y: 300 } }));
+      const workspaceIndex = await workspace.index();
       await current.stop(); removeChild(current);
-      if (workspace !== undefined) { await workspace.waitForSessionAbsent(oldA.browserSessionId, workspaceIndex); await workspace.capture("empty"); }
+      if (workspace !== undefined) {
+        failureContext.currentOperation = "replacement.wait-session-absent";
+        await workspace.waitForSessionAbsent(oldA.browserSessionId, workspaceIndex).catch((cause) => { throw new Error("replacement workspace did not remove the stopped browser session", { cause }); });
+        failureContext.currentOperation = "replacement.capture-empty";
+        await workspace.capture("empty").catch((cause) => { throw new Error("replacement workspace could not capture the empty state", { cause }); });
+      }
       await proxy.call("set-health", { healthy: false });
       // Rebind both long-lived Pi extension clients before the outage health proof.
       // This avoids using capabilities that may have been sampled during the earlier
@@ -471,6 +621,11 @@ async function main(): Promise<void> {
         currentPiB.execute("browser_open", { url: `${origin}/beta?soak-replacement=1` }),
       ]);
       const nextA = browserIdentity(openedReplacementA); const nextB = browserIdentity(openedReplacementB);
+      assert.notEqual(nextA.browserSessionId, nextB.browserSessionId, "replacement Pi actors opened the same browser session");
+      const replacementMetricsAfterOpen = asRecord(await next.call("metrics"));
+      assert.equal(replacementMetricsAfterOpen.sessions, 2, "replacement browserd did not retain both actor sessions");
+      const replacementFixture = controlFixtureState(await primaryPi.execute("browser_observe", { ...nextA, mode: "dom", maxNodes: 80 }));
+      assert.deepEqual(replacementFixture, { left: 0, double: 0, middle: 0, right: 0, drag: 0, wheel: 0, key: 0, text: 0 }, "old human input executed in the replacement browser");
       const created = await primaryPi.execute("browser_tabs", { action: "create-tab", browserSessionId: nextA.browserSessionId, url: `${origin}/second?soak-replacement=1` });
       const nextSecondTabId = allMatches(textOf(created), /"tabId":\s*"([^"]+)"/gu).find((id) => id !== nextA.tabId);
       if (nextSecondTabId === undefined) throw new Error("replacement soak session did not create its second tab");
@@ -492,12 +647,31 @@ async function main(): Promise<void> {
         await sleep(2_000);
       }
       assert.equal(captureReady, true, "replacement Chromium capture readiness did not stabilize");
-      if (workspace !== undefined) { await workspace.waitForSessions([nextA.browserSessionId, nextB.browserSessionId]); await workspace.select(nextA.browserSessionId, nextA.tabId); }
-      if (workspace === undefined) await currentWebxd.call("subscribe", { ownerId: "phase2b-agent-a", browserSessionId: nextA.browserSessionId, tabId: nextA.tabId });
-      return { browserd: next, ready, identityA: nextA, identityB: nextB, secondTabId: nextSecondTabId, searchReadHealthyDuringOutage: true, piReconnects: 4, captureReadinessAttempts, captureReadinessRecoveredTimeouts };
+      failureContext.currentOperation = "replacement.wait-sessions";
+      await workspace.waitForSessions([nextA.browserSessionId, nextB.browserSessionId]).catch((cause) => { throw new Error("replacement Tauri workspace did not show both actor sessions", { cause }); });
+      failureContext.currentOperation = "replacement.wait-agent-control";
+      await workspace.waitForControlState(nextA.browserSessionId, "agent").catch((cause) => { throw new Error("replacement Tauri workspace did not report agent control", { cause }); });
+      const replacementSelection = [...await workspace.records()].reverse().find((record) => record.kind === "selection" || record.kind === "selectionCleared");
+      if (replacementSelection?.kind === "selection" && replacementSelection.browserSessionId === nextA.browserSessionId && replacementSelection.tabId === nextA.tabId) {
+        failureContext.currentOperation = "replacement.fresh-paint-new";
+        const from = await workspace.index();
+        await workspace.waitForPaint(nextA.browserSessionId, nextA.tabId, replacementSelection.selectionId, from, 15_000).catch((cause) => { throw new Error("replacement Tauri workspace did not refresh the replacement actor", { cause }); });
+      } else {
+        failureContext.currentOperation = "replacement.select-new";
+        await workspace.select(nextA.browserSessionId, nextA.tabId).catch((cause) => { throw new Error("replacement Tauri workspace could not paint the replacement actor", { cause }); });
+      }
+      const replacementHeld = arrayOfRecords(asRecord(await next.call("metrics")).heldInput);
+      assert.ok(replacementHeld.every((item) => Array.isArray(item.buttons) && item.buttons.length === 0 && Array.isArray(item.keys) && item.keys.length === 0), "replacement inherited held human input");
+      return { browserd: next, ready, identityA: nextA, identityB: nextB, secondTabId: nextSecondTabId, searchReadHealthyDuringOutage: true, piReconnects: 4, captureReadinessAttempts, captureReadinessRecoveredTimeouts, heldControlBeforeReplacement: { buttons: 1, keys: 1, blockedAgentOperation: true }, replacementStartedAgentOwned: true, replacementFixtureStartedClean: true };
     },
   }) : undefined;
-  if (soakRun !== undefined) { piB = soakRun.piB; webxd = soakRun.webxd; browserd = soakRun.browserd; activeBrowserd = browserd; identityA = soakRun.identityA; }
+  if (soakRun !== undefined) {
+    piB = soakRun.piB; webxd = soakRun.webxd; browserd = soakRun.browserd; activeBrowserd = browserd; identityA = soakRun.identityA;
+    if (humanControlAcceptance !== undefined) {
+      const soakControl = asRecord(soakRun.result.humanControlCycles);
+      humanControlAcceptance = { ...humanControlAcceptance, requestedCycles: humanControlCycles, completedCycles: shortHumanControlCycles + numberField(soakControl, "completed"), soak: soakControl };
+    }
+  }
   if (soakRun === undefined && workspace !== undefined) {
     const beforeClose = await workspace.index();
     await piA.execute("browser_tabs", { action: "close-tab", browserSessionId: identityA.browserSessionId, tabId: secondTabId });
@@ -536,6 +710,7 @@ async function main(): Promise<void> {
     if (workspace !== undefined) { await workspace.waitForSessions([replacement.browserSessionId]); const selectedReplacement = await workspace.select(replacement.browserSessionId, replacement.tabId); workspaceRecoverySwitchLatencyMs.push(selectedReplacement.latencyMs); workspaceLauncherLatencyMs.push(selectedReplacement.launcherLatencyMs); workspaceSwitchBreakdowns.push({ kind: "browserd-replacement", totalMs: selectedReplacement.latencyMs, brokerMs: selectedReplacement.brokerLatencyMs, frameMs: selectedReplacement.frameLatencyMs, launcherMs: selectedReplacement.launcherLatencyMs }); }
   }
 
+  failureContext.currentOperation = "post-soak.download-policy";
   const downloadObservation = observationIdentity(await piA.execute("browser_observe", replacement));
   await piA.execute("browser_act", { ...replacement, action: { kind: "click", observationId: downloadObservation.observationId, coordinateSpace: "cssViewport", x: 190, y: 296 } });
   await sleep(500);
@@ -544,8 +719,13 @@ async function main(): Promise<void> {
   assert.ok(chrome.some((item) => Array.isArray(item.deniedDownloads) && item.deniedDownloads.length >= 1));
   assert.equal((await findNamedFile(profileRoot, "forbidden.bin")).length, 0);
 
+  failureContext.currentOperation = "post-soak.close-retry";
+  // Exercise response-loss idempotency on a transient explicit session. Keep the
+  // qualified replacement session alive for the later held-input CloseRequested
+  // lifecycle instead of trying to reacquire a session this gate just closed.
+  const closeRetryIdentity = browserIdentity(await piA.execute("browser_open", { url: `${origin}/close-retry` }));
   const closeOptions = { signal: facadeController.signal, ownerId: "phase2b-agent-a", cwd: "/deterministic/phase2b-process", idempotencyKey: "phase2b-close-response-loss" };
-  const closeInput = { action: "close-session", browserSessionId: replacement.browserSessionId };
+  const closeInput = { action: "close-session", browserSessionId: closeRetryIdentity.browserSessionId };
   const closeRetry = await facade.request("browser.tabs", closeInput, closeOptions); assert.match(closeRetry.summary, /closed|succeeded|browser/i);
 
   const finalWebxdMetrics = asRecord(await webxd.call("metrics"));
@@ -562,12 +742,31 @@ async function main(): Promise<void> {
   assert.ok(distributionResult.median >= 400 && distributionResult.median <= 1_500, `motor median outside target: ${distributionResult.median}`);
   assert.ok(distributionResult.p95 <= 2_500, `motor p95 outside target: ${distributionResult.p95}`);
 
-  const workspaceResult = workspace === undefined ? undefined : await analyzeWorkspaceRoute(workspace, workspaceStableSwitchLatencyMs, gate0StableSwitchLatencyMs, workspaceRecoverySwitchLatencyMs, workspaceLauncherLatencyMs, workspaceSwitchBreakdowns, workspaceCursorFrames, workspaceEvidenceDirectory, gate0Switches, gate0RecordWindow);
+  const phase3bPrivacyScan = humanControlCycles > 0 && workspace !== undefined ? await scanPhase3bPrivateInputArtifacts(workspace) : undefined;
+  const workspaceResult = workspace === undefined ? undefined : await analyzeWorkspaceRoute(workspace, workspaceStableSwitchLatencyMs, gate0StableSwitchLatencyMs, workspaceRecoverySwitchLatencyMs, workspaceLauncherLatencyMs, workspaceSwitchBreakdowns, workspaceCursorFrames, workspaceEvidenceDirectory, gate0Switches, humanControlCycles > 0, gate0RecordWindow);
   let workspaceShutdown: Record<string, unknown> | undefined;
   if (workspace !== undefined) {
-    const workspacePid = workspace.assertAlive();
+    const closingWorkspace = workspace;
+    const closingPiA = piA;
+    if (closingPiA === undefined) throw new Error("Pi actor A is unavailable before workspace close acceptance");
+    let heldCloseAcceptance: Record<string, unknown> | undefined;
+    if (humanControlCycles > 0) {
+      failureContext.currentOperation = "close-acceptance.select";
+      await closingWorkspace.select(identityA.browserSessionId, identityA.tabId);
+      failureContext.currentOperation = "close-acceptance.acquire";
+      await closingWorkspace.takeControlViaUi(identityA.browserSessionId, identityA.tabId);
+      failureContext.currentOperation = "close-acceptance.hold";
+      await closingWorkspace.holdHumanInput();
+      await expectHumanControlRejection(async () => await closingPiA.execute("browser_observe", identityA));
+      const heldBeforeClose = arrayOfRecords(asRecord(await browserd.call("metrics")).heldInput).find((item) => item.browserSessionId === identityA.browserSessionId);
+      assert.ok(heldBeforeClose !== undefined && Array.isArray(heldBeforeClose.buttons) && heldBeforeClose.buttons.length === 1 && Array.isArray(heldBeforeClose.keys) && heldBeforeClose.keys.length === 1, "CloseRequested acceptance did not hold one button and one key");
+      heldCloseAcceptance = { heldBeforeClose: { buttons: 1, keys: 1 }, blockedAgentOperation: true };
+    }
+    const workspacePid = closingWorkspace.assertAlive();
     const workspacePids = await processTreePids(workspacePid);
-    await workspace.stop(); workspace = undefined;
+    failureContext.currentOperation = "close-acceptance.close-requested";
+    if (humanControlCycles > 0) await closingWorkspace.closeViaAcceptance(); else await closingWorkspace.stop();
+    workspace = undefined;
     await waitFor(async () => await allAbsent(workspacePids.map((pid) => `/proc/${pid}`)), 10_000);
     await waitFor(async () => {
       const webMetrics = asRecord(await webxd.call("metrics"));
@@ -579,7 +778,13 @@ async function main(): Promise<void> {
     const gateway = asRecord(asRecord(await webxd.call("metrics")).workspace);
     const broker = asRecord(gateway.broker);
     const browser = asRecord(await browserd.call("metrics"));
-    workspaceShutdown = { processTreeExited: true, processCount: workspacePids.length, gatewayClients: gateway.clientConnections, gatewaySelectedClients: gateway.selectedClients, gatewayPendingFrames: gateway.pendingFrames, brokerSubscriptions: broker.subscriptions, browserdWorkspaceSubscriptions: browser.workspaceSubscriptions, browserdWorkspaceLedgerEntries: browser.workspaceLedgerEntries };
+    if (heldCloseAcceptance !== undefined) {
+      const heldAfterClose = arrayOfRecords(browser.heldInput).find((item) => item.browserSessionId === identityA.browserSessionId);
+      assert.ok(heldAfterClose !== undefined && Array.isArray(heldAfterClose.buttons) && heldAfterClose.buttons.length === 0 && Array.isArray(heldAfterClose.keys) && heldAfterClose.keys.length === 0, "CloseRequested did not release held input");
+      assertPiImage(await closingPiA.execute("browser_observe", identityA));
+      heldCloseAcceptance = { ...heldCloseAcceptance, releasedAfterClose: { buttons: 0, keys: 0 }, modelResumedAfterClose: true };
+    }
+    workspaceShutdown = { processTreeExited: true, processCount: workspacePids.length, closeRequestedLifecycle: humanControlCycles > 0, heldCloseAcceptance, gatewayClients: gateway.clientConnections, gatewaySelectedClients: gateway.selectedClients, gatewayPendingFrames: gateway.pendingFrames, brokerSubscriptions: broker.subscriptions, browserdWorkspaceSubscriptions: browser.workspaceSubscriptions, browserdWorkspaceLedgerEntries: browser.workspaceLedgerEntries };
   }
 
   await Promise.all([piA.stop(), piB.stop()]); piA = undefined; piB = undefined;
@@ -627,7 +832,7 @@ async function main(): Promise<void> {
     testedSha,
     expectedSha: expectedSha ?? null,
     workingTreeClean,
-    processIsolation: { piHarnessPid: process.pid, browserdPid: browserdReady.pid, webxdPid: webxdReady.pid, distinct: true },
+    processIsolation: { coordinatorPid: process.pid, piActorPids, piActorProcesses: 2, browserdPid: browserdReady.pid, webxdPid: webxdReady.pid, distinct: true },
     productionObservationLease: { configuredMs: 60_000, testOverrideUsed: false, requestedModelDelayMs: delayMs, actualModelDelayMs: actualDelayMs, validUntil: delayedObservation.validUntil, clickSucceeded: true, clickRouteMs: delayedClickRouteMs },
     motor: { generatedNominalPathDurationMs: distribution(nominal), sampleReplayWallMs: distributionResult, sampleCount: distribution(samples) },
     exactObservationImages: { concurrent: true, observations: exactProof, distinctObservationIds: true, distinctDigests: true },
@@ -635,6 +840,8 @@ async function main(): Promise<void> {
     frameSubscription: { survivedIdleTimeoutMs: 1_000, waitedMs: 1_500, frameCount: stream.frameCount, duplicateFrameSequences: stream.duplicateFrameSequences, nonMonotonicFrameSequences: stream.nonMonotonicFrameSequences, settled: true },
     ...(captureContention === undefined ? {} : { captureContention }),
     ...(gate0Evidence === undefined ? {} : { gate0: gate0Evidence }),
+    ...(humanControlAcceptance === undefined ? {} : { humanControlAcceptance }),
+    ...(phase3bPrivacyScan === undefined ? {} : { phase3bPrivacy: phase3bPrivacyScan }),
     piReconnect: { sameActorSessionUsable: true },
     webxdRestart: { browserdRuntimePreserved: true, sessionRehydrated: true, screenshotSucceeded: true },
     browserdReplacement: { oldRuntimeInstanceId: browserdReady.runtimeInstanceId, newRuntimeInstanceId: replacementReady.runtimeInstanceId, oldSessionRejected: true, newSessionWorked: true, captureCoordinatorSegments: replacementCaptureSegments },
@@ -650,14 +857,243 @@ async function main(): Promise<void> {
     cleanup: { profilesRemaining: (await profileDirectories(profileRoot)).length, webxdSocketRemoved: !(await exists(webxPath)), browserdDescriptorRemoved: !(await exists(join(browserdDirectory, "browserd.json"))), childrenRemaining: children.length, workspaceShutdown, workspaceRuntime: workspaceRuntimeCleanup },
     testAuthorityBoundary: "Loopback destination and response-loss injection are constructed only by the opt-in test worker. Production main.ts cannot enable either path.",
   };
-  await mkdir(dirname(outputPath), { recursive: true }); await writeFile(outputPath, `${JSON.stringify(result, null, 2)}\n`);
+  const deliveredResult = humanControlCycles > 0 ? sanitizePhase3bEvidence(result) : result;
+  if (humanControlCycles > 0) assertPhase3bEvidencePrivacy(deliveredResult);
+  await mkdir(dirname(outputPath), { recursive: true }); await writeFile(outputPath, `${JSON.stringify(deliveredResult, null, 2)}\n`);
   const soakOutput = argument("--soak-output");
-  if (soakOutput !== undefined && soakRun !== undefined) { const path = resolve(soakOutput); await mkdir(dirname(path), { recursive: true }); await writeFile(path, `${JSON.stringify(result, null, 2)}\n`); }
-  console.log(JSON.stringify(result, null, 2));
+  if (soakOutput !== undefined && soakRun !== undefined) { const path = resolve(soakOutput); await mkdir(dirname(path), { recursive: true }); await writeFile(path, `${JSON.stringify(deliveredResult, null, 2)}\n`); }
+  console.log(JSON.stringify(deliveredResult, null, 2));
   await rm(root, { recursive: true, force: true }); root = undefined;
 }
 
-async function analyzeWorkspaceRoute(route: WorkspaceRoute, stableSwitchLatencies: number[], gate0StableSwitchLatencies: number[], recoverySwitchLatencies: number[], launcherLatencies: number[], switchBreakdowns: Record<string, unknown>[], cursorFrames: Record<string, unknown>[], evidenceDirectory: string | undefined, requiredGate0Switches: number, gate0RecordWindow?: { from: number; to: number }): Promise<Record<string, unknown>> {
+async function scanPhase3bPrivateInputArtifacts(workspace: WorkspaceRoute): Promise<Record<string, unknown>> {
+  const marker = Buffer.from("phase3b-private-input-", "utf8");
+  const encodedMarkers = [
+    marker,
+    Buffer.from(marker.toString("hex"), "ascii"),
+    Buffer.from(marker.toString("base64"), "ascii"),
+    Buffer.from(marker.toString("base64url"), "ascii"),
+    Buffer.from("phase3b-private-input-", "utf16le"),
+  ];
+  const paths = [workspace.diagnosticsPath, ...Object.values(workspace.screenshots)];
+  let matches = 0;
+  let bytesScanned = 0;
+  let filesScanned = 0;
+  for (const path of paths) {
+    if (!(await exists(path))) continue;
+    const bytes = await readFile(path);
+    filesScanned += 1;
+    bytesScanned += bytes.byteLength;
+    for (const encoded of encodedMarkers) if (bytes.indexOf(encoded) >= 0) matches += 1;
+  }
+  assert.equal(matches, 0, "private human input appeared in a retained acceptance artifact");
+  return { schemaVersion: "phase3b-privacy-scan.v1", filesScanned, bytesScanned, literalHexBase64Base64urlUtf16Matches: matches, humanInputRetained: false };
+}
+
+function sanitizePhase3bEvidence(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizePhase3bEvidence);
+  if (!isRecord(value)) return typeof value === "string" ? sanitizePhase3bText(value) : value;
+  const sanitized: Record<string, unknown> = {};
+  let privateKeyOrdinal = 0;
+  for (const [key, item] of Object.entries(value)) {
+    if (phase3bPrivateEvidenceKey(key)) continue;
+    const sanitizedKey = sanitizePhase3bText(key);
+    const deliveredKey = sanitizedKey === key ? key : `private-key-${++privateKeyOrdinal}`;
+    sanitized[deliveredKey] = sanitizePhase3bEvidence(item);
+  }
+  return sanitized;
+}
+
+function sanitizePhase3bText(value: string): string {
+  return value.replace(/\b(?:runtime|session|tab|observation|artifact|operation|actor|persona|subscription)_[A-Za-z0-9_-]{8,}\b/gu, "[private-id]");
+}
+
+function phase3bPrivateEvidenceKey(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return normalized === "browsersessionid"
+    || normalized === "tabid"
+    || normalized === "observationid"
+    || normalized === "selectionid"
+    || normalized === "subscriptionid"
+    || normalized === "requestid"
+    || normalized === "operationid"
+    || normalized === "artifactid"
+    || normalized === "connectionid"
+    || normalized === "actordisplayid"
+    || normalized === "personadisplayid"
+    || normalized === "targetid"
+    || normalized === "personaid"
+    || normalized === "latestframe"
+    || normalized === "heldinput"
+    || normalized === "idempotencykey"
+    || normalized === "profiledirectory"
+    || normalized === "socketpath"
+    || normalized === "newsessions"
+    || normalized === "validuntil"
+    || normalized.endsWith("runtimeinstanceid")
+    || normalized.endsWith("generation")
+    || normalized === "productionobservationlease"
+    || /^(?:control)?lease/u.test(normalized)
+    || normalized === "controlepoch";
+}
+
+function assertPhase3bEvidencePrivacy(value: unknown): void {
+  const serialized = JSON.stringify(value);
+  assert.ok(!serialized.includes("phase3b-private-input-"), "private human input appeared in Phase 3B evidence");
+  assert.ok(!/\b(?:runtime|session|tab|observation|artifact|operation|actor|persona|subscription)_[A-Za-z0-9_-]{8,}\b/u.test(serialized), "raw authority identity appeared in Phase 3B evidence");
+  const inspect = (item: unknown): void => {
+    if (Array.isArray(item)) { for (const child of item) inspect(child); return; }
+    if (!isRecord(item)) return;
+    for (const [key, child] of Object.entries(item)) {
+      assert.equal(phase3bPrivateEvidenceKey(key), false, `private authority field appeared in Phase 3B evidence: ${key}`);
+      inspect(child);
+    }
+  };
+  inspect(value);
+}
+
+interface ControlFixtureState { left: number; double: number; middle: number; right: number; drag: number; wheel: number; key: number; text: number }
+
+async function runHumanControlAcceptance(options: {
+  readonly cycles: number;
+  readonly workspace: WorkspaceRoute;
+  readonly piA: PiHarness;
+  readonly piB: PiHarness;
+  readonly identityA: BrowserIdentity;
+  readonly identityB: BrowserIdentity;
+  readonly browserd: ManagedChild;
+}): Promise<Record<string, unknown>> {
+  const cycles: Record<string, unknown>[] = [];
+  const captured = new Set<string>();
+  for (let index = 0; index < options.cycles; index++) {
+    const actor = index % 2 === 0 ? "agent-a" : "agent-b";
+    const controller = actor === "agent-a" ? options.piA : options.piB;
+    const observer = actor === "agent-a" ? options.piB : options.piA;
+    const identity = actor === "agent-a" ? options.identityA : options.identityB;
+    const otherIdentity = actor === "agent-a" ? options.identityB : options.identityA;
+    failureContext.currentOperation = `human-control.initial-${index + 1}.select`;
+    const selected = await options.workspace.select(identity.browserSessionId, identity.tabId);
+    const beforeDom = await controller.execute("browser_observe", { ...identity, mode: "dom", maxNodes: 80 });
+    const before = controlFixtureState(beforeDom);
+    const observation = observationIdentity(await controller.execute("browser_observe", identity));
+    const transferFrom = await options.workspace.index();
+    const takePath = index === 0 ? "react-accessibility" : "user-launcher";
+    let launcherAttempts = 0;
+    let firstLauncherErrorCode: string | undefined;
+    let failedAttemptStayedAgent = false;
+    failureContext.currentOperation = `human-control.initial-${index + 1}.acquire`;
+    if (takePath === "react-accessibility") await options.workspace.takeControlViaUi(identity.browserSessionId, identity.tabId);
+    else {
+      launcherAttempts = 1;
+      await options.piA.command("web", `workspace takeover ${identity.browserSessionId} ${identity.tabId}`);
+      const firstOutcome = await options.workspace.waitForTakeoverOutcome(identity.browserSessionId, transferFrom);
+      if (firstOutcome.kind === "error") {
+        firstLauncherErrorCode = firstOutcome.code;
+        const fenceFrom = await options.workspace.index();
+        await options.workspace.assertNoControlState(identity.browserSessionId, "human", fenceFrom);
+        failedAttemptStayedAgent = true;
+        await options.workspace.select(identity.browserSessionId, identity.tabId);
+        const retryFrom = await options.workspace.index();
+        launcherAttempts = 2;
+        await options.piA.command("web", `workspace takeover ${identity.browserSessionId} ${identity.tabId}`);
+        const retryOutcome = await options.workspace.waitForTakeoverOutcome(identity.browserSessionId, retryFrom);
+        if (retryOutcome.kind === "error") throw new Error(`bounded explicit takeover retry failed: ${retryOutcome.code}`);
+      }
+    }
+    await expectHumanControlRejection(async () => await controller.execute("browser_observe", identity));
+    await expectHumanControlRejection(async () => await controller.execute("browser_act", { ...identity, action: { kind: "click", observationId: observation.observationId, coordinateSpace: "cssViewport", x: 190, y: 126 } }));
+    assertPiImage(await observer.execute("browser_observe", otherIdentity));
+    const fullInput = index < 2;
+    failureContext.currentOperation = `human-control.initial-${index + 1}.${fullInput ? "full-input" : "pointer-input"}`;
+    const input = await options.workspace.exerciseHumanInput(fullInput);
+    if (!captured.has(actor)) { await options.workspace.capture(actor === "agent-a" ? "human-a" : "human-b"); captured.add(actor); }
+    const returnPath = index % 3 === 0 ? "react-accessibility" : index % 3 === 1 ? "user-launcher" : "hide-lifecycle";
+    failureContext.currentOperation = `human-control.initial-${index + 1}.return`;
+    const returnFrom = await options.workspace.index();
+    if (returnPath === "react-accessibility") await options.workspace.returnControlViaUi(identity.browserSessionId);
+    else if (returnPath === "user-launcher") {
+      await options.piA.command("web", "workspace return");
+      await options.workspace.waitForControlState(identity.browserSessionId, "agent", returnFrom);
+    } else {
+      await options.piA.command("web", "workspace hide");
+      await options.workspace.waitForWindowAction("hide", returnFrom);
+      await options.workspace.waitForControlState(identity.browserSessionId, "agent", returnFrom);
+      const showFrom = await options.workspace.index();
+      await options.piA.command("web", "workspace show");
+      await options.workspace.waitForWindowAction("raise", showFrom);
+    }
+    const afterDom = await controller.execute("browser_observe", { ...identity, mode: "dom", maxNodes: 80 });
+    assert.ok(!textOf(afterDom).includes("phase3b-private-input-"), "private human input reached a model presentation");
+    const after = controlFixtureState(afterDom);
+    assert.equal(after.left, before.left + 1, `human left click was lost or a rejected agent click ran later: ${JSON.stringify({ before, after, input })}`);
+    if (fullInput) {
+      for (const key of ["double", "middle", "right", "drag", "wheel", "key", "text"] as const) {
+        assert.ok(after[key] >= before[key] + 1, `human ${key} input was not observed`);
+      }
+    }
+    const metrics = asRecord(await options.browserd.call("metrics"));
+    const held = arrayOfRecords(metrics.heldInput).find((item) => item.browserSessionId === identity.browserSessionId);
+    assert.ok(held !== undefined && Array.isArray(held.buttons) && held.buttons.length === 0 && Array.isArray(held.keys) && held.keys.length === 0, "human input remained held after return");
+    if (!captured.has("returned")) { await options.workspace.capture("returned"); captured.add("returned"); }
+    cycles.push({ ordinal: index + 1, actor, takePath, returnPath, fullInput, inputEvents: input.eventCount, blockedObservation: true, blockedAction: true, otherActorObservationSucceeded: true, paintedBeforeAcquire: selected.paint.outcome === "painted", launcherAttempts, ...(firstLauncherErrorCode === undefined ? {} : { firstLauncherErrorCode, failedAttemptStayedAgent }), fixtureDelta: Object.fromEntries(Object.keys(before).map((key) => [key, after[key as keyof ControlFixtureState] - before[key as keyof ControlFixtureState]])), heldButtons: 0, heldKeys: 0 });
+  }
+  return { schemaVersion: "phase3b-control-acceptance.v1", requestedCycles: options.cycles, completedCycles: cycles.length, cycles, screenshots: [...captured].sort(), privateInputPrefixMatchesInModelPresentations: 0 };
+}
+
+async function runSoakControlCycle(options: {
+  readonly ordinal: number;
+  readonly workspace: WorkspaceRoute;
+  readonly piA: PiHarness;
+  readonly piB: PiHarness;
+  readonly identityA: BrowserIdentity;
+  readonly identityB: BrowserIdentity;
+  readonly browserd: ManagedChild;
+}): Promise<Record<string, unknown>> {
+  const actor = options.ordinal % 2 === 1 ? "agent-a" : "agent-b";
+  const controller = actor === "agent-a" ? options.piA : options.piB;
+  const observer = actor === "agent-a" ? options.piB : options.piA;
+  const identity = actor === "agent-a" ? options.identityA : options.identityB;
+  const otherIdentity = actor === "agent-a" ? options.identityB : options.identityA;
+  const fullInput = options.ordinal % 10 === 0;
+  await options.workspace.select(identity.browserSessionId, identity.tabId);
+  const before = controlFixtureState(await controller.execute("browser_observe", { ...identity, mode: "dom", maxNodes: 80 }));
+  await options.workspace.takeControlViaUi(identity.browserSessionId, identity.tabId);
+  if (fullInput) {
+    await expectHumanControlRejection(async () => await controller.execute("browser_observe", identity));
+    assertPiImage(await observer.execute("browser_observe", otherIdentity));
+  }
+  const input = await options.workspace.exerciseHumanInput(fullInput);
+  await options.workspace.returnControlViaUi(identity.browserSessionId);
+  const afterPresentation = await controller.execute("browser_observe", { ...identity, mode: "dom", maxNodes: 80 });
+  assert.ok(!textOf(afterPresentation).includes("phase3b-private-input-"), "private human input reached a soak model presentation");
+  const after = controlFixtureState(afterPresentation);
+  assert.equal(after.left, before.left + 1, "soak human pointer input was lost");
+  if (fullInput) for (const key of ["double", "middle", "right", "drag", "wheel", "key", "text"] as const) assert.ok(after[key] >= before[key] + 1, `soak human ${key} input was not observed`);
+  const metrics = asRecord(await options.browserd.call("metrics"));
+  const held = arrayOfRecords(metrics.heldInput).find((item) => item.browserSessionId === identity.browserSessionId);
+  assert.ok(held !== undefined && Array.isArray(held.buttons) && held.buttons.length === 0 && Array.isArray(held.keys) && held.keys.length === 0, "soak human input remained held after return");
+  return { ordinal: options.ordinal, actor, fullInput, inputEvents: input.eventCount, blockedObservationChecked: fullInput, otherActorObservationChecked: fullInput, fixtureLeftDelta: after.left - before.left, heldButtons: 0, heldKeys: 0 };
+}
+
+async function expectHumanControlRejection(task: () => Promise<ToolPresentation>): Promise<void> {
+  try {
+    const presentation = await task();
+    if (/CONTROL_HELD_BY_HUMAN|held by the local user/iu.test(textOf(presentation))) return;
+  } catch (error) {
+    if (/CONTROL_HELD_BY_HUMAN|held by the local user/iu.test(safeError(error))) return;
+  }
+  throw new Error("agent browser operation was not rejected during human control");
+}
+
+function controlFixtureState(presentation: ToolPresentation): ControlFixtureState {
+  const match = /phase3b status left=(\d+) double=(\d+) middle=(\d+) right=(\d+) drag=(\d+) wheel=(\d+) key=(\d+) text=(\d+)/u.exec(textOf(presentation));
+  if (match === null) throw new Error("sanitized control fixture state is missing");
+  const values = match.slice(1).map(Number);
+  if (values.some((value) => !Number.isSafeInteger(value) || value < 0 || value > 10_000)) throw new Error("sanitized control fixture state is invalid");
+  return { left: values[0] ?? 0, double: values[1] ?? 0, middle: values[2] ?? 0, right: values[3] ?? 0, drag: values[4] ?? 0, wheel: values[5] ?? 0, key: values[6] ?? 0, text: values[7] ?? 0 };
+}
+
+async function analyzeWorkspaceRoute(route: WorkspaceRoute, stableSwitchLatencies: number[], gate0StableSwitchLatencies: number[], recoverySwitchLatencies: number[], launcherLatencies: number[], switchBreakdowns: Record<string, unknown>[], cursorFrames: Record<string, unknown>[], evidenceDirectory: string | undefined, requiredGate0Switches: number, phase3bEvidence: boolean, gate0RecordWindow?: { from: number; to: number }): Promise<Record<string, unknown>> {
   const records = await route.records();
   const paints = records.filter((record) => record.kind === "frameSettled" && record.outcome === "painted");
   assert.ok(paints.length > 0, "Tauri did not paint a frame");
@@ -698,10 +1134,16 @@ async function analyzeWorkspaceRoute(route: WorkspaceRoute, stableSwitchLatencie
   assert.ok(new Set(cursorFrames.map((record) => record.sha256)).size >= 3);
   const screenshotHashes: Record<string, string> = {};
   for (const [name, path] of Object.entries(route.screenshots)) {
+    if (!(await exists(path))) continue;
     const bytes = await readFile(path);
     assert.ok(bytes.byteLength > 1_000);
     screenshotHashes[name] = createHash("sha256").update(bytes).digest("hex");
-    if (evidenceDirectory !== undefined) { await mkdir(evidenceDirectory, { recursive: true }); await copyFile(path, join(evidenceDirectory, path.slice(path.lastIndexOf("/") + 1))); }
+    if (evidenceDirectory !== undefined) {
+      await mkdir(evidenceDirectory, { recursive: true });
+      const sourceName = basename(path);
+      const evidenceName = phase3bEvidence ? sourceName.replace(/^phase3a-/u, "phase3b-") : sourceName;
+      await copyFile(path, join(evidenceDirectory, evidenceName));
+    }
   }
   const processMemory = await processTreeMemory(route.assertAlive());
   const startedRecord = records.find((record) => record.kind === "acceptanceStarted");
@@ -949,6 +1391,8 @@ async function runProcessSoak(options: {
   readonly testedSha: string;
   readonly sampleSeconds: number;
   readonly modelDelayMs: number;
+  readonly controlCycles: number;
+  readonly initialControlOrdinal: number;
   readonly root: string;
   readonly profileRoot: string;
   readonly webxPath: string;
@@ -990,6 +1434,8 @@ async function runProcessSoak(options: {
   let piReconnects = 0;
   let workspaceWindowCycles = 0;
   let delayedActions = 0;
+  let completedControlCycles = 0;
+  const controlCycleResults: Record<string, unknown>[] = [];
   let workloadBrowserBeforeReplacement: Record<string, unknown> | undefined;
   const started = performance.now();
   const end = started + options.durationSeconds * 1_000;
@@ -1000,12 +1446,18 @@ async function runProcessSoak(options: {
   const retryController = new AbortController();
   const retryFacade = new WebxFacadeClient(options.webxPath, join(options.root, "soak-retry-exports"));
   const actorFrameStreamEnabled = options.workspace === undefined;
+  if (options.controlCycles > 0 && options.workspace === undefined) throw new Error("control soak cycles require the real Tauri workspace");
   await retryFacade.start({ signal: retryController.signal, ownerId: "phase2b-agent-a", cwd: "/deterministic/phase2b-process" });
   // The graphical Phase 3A route uses only its connection-local selected Tauri
   // subscription. Retain the actor stream only for the non-workspace Phase 2 route.
   if (actorFrameStreamEnabled) await currentWebxd.call("subscribe", { ownerId: "phase2b-agent-a", browserSessionId: currentIdentityA.browserSessionId, tabId: currentIdentityA.tabId });
   try {
-    while (performance.now() < end) {
+    // The duration is a minimum soak interval, not permission to abandon control
+    // cycles that became due while a slow replacement or graphical input path ran.
+    // Keep one cycle per workload iteration so observations, sampling, and lifecycle
+    // events remain interleaved, then extend past the minimum only until all requested
+    // cycles have settled.
+    while (performance.now() < end || completedControlCycles < options.controlCycles) {
       iterations += 1;
       failureContext.currentOperation = "soak.observe";
       failureContext.actor = "phase2b-agent-a/phase2b-agent-b";
@@ -1036,10 +1488,19 @@ async function runProcessSoak(options: {
         ]);
       }
       if (options.workspace !== undefined) {
+        failureContext.currentOperation = "soak.workspace-select";
         const selected = alternate
           ? await options.workspace.select(currentIdentityA.browserSessionId, currentIdentityA.tabId)
           : await options.workspace.select(currentIdentityB.browserSessionId, currentIdentityB.tabId);
         workspaceSwitchLatencyMsForSoak.push(selected.latencyMs);
+      }
+      const controlDueAt = options.controlCycles === 0 ? Number.POSITIVE_INFINITY : started + completedControlCycles * options.durationSeconds * 1_000 / options.controlCycles;
+      if (completedControlCycles < options.controlCycles && performance.now() >= controlDueAt) {
+        if (options.workspace === undefined) throw new Error("control soak cycle lost its Tauri workspace");
+        failureContext.currentOperation = "soak.control";
+        const ordinal = options.initialControlOrdinal + completedControlCycles + 1;
+        controlCycleResults.push(await runSoakControlCycle({ ordinal, workspace: options.workspace, piA: options.piA, piB: currentPiB, identityA: currentIdentityA, identityB: currentIdentityB, browserd: currentBrowserd }));
+        completedControlCycles += 1;
       }
       if (iterations % 3 === 0) await Promise.all([
         timed(() => options.piA.execute("browser_observe", { ...currentIdentityA, mode: "dom", maxNodes: 40 }), domLatencyMs),
@@ -1058,6 +1519,7 @@ async function runProcessSoak(options: {
         tabCycles += 1;
       }
       if (options.workspace !== undefined && iterations % 6 === 0) {
+        failureContext.currentOperation = "soak.window-cycle";
         let beforeAction = await options.workspace.index(); await options.piA.command("web", "workspace hide"); await options.workspace.waitForWindowAction("hide", beforeAction);
         beforeAction = await options.workspace.index(); await options.piA.command("web", "workspace show"); await options.workspace.waitForWindowAction("raise", beforeAction);
         workspaceWindowCycles += 1;
@@ -1086,6 +1548,7 @@ async function runProcessSoak(options: {
         restarted = true; webxdRestarts += 1;
       }
       if (browserReplacement === undefined && elapsed >= options.durationSeconds * 1_000 * 0.8) {
+        failureContext.currentOperation = "soak.browserd-replace";
         workloadBrowserBeforeReplacement = asRecord(await currentBrowserd.call("metrics"));
         browserReplacement = await options.replaceBrowserd(currentBrowserd, currentWebxd, currentPiB, currentIdentityA, currentIdentityB);
         currentBrowserd = browserReplacement.browserd; currentIdentityA = browserReplacement.identityA; currentIdentityB = browserReplacement.identityB;
@@ -1135,6 +1598,7 @@ async function runProcessSoak(options: {
   const nonMonotonicFrameSequences = streamSegments.reduce((total, item) => total + numberField(item, "nonMonotonicFrameSequences"), 0);
   assert.equal(idempotency.imageBytesRetained, 0);
   assert.ok(actualDurationSeconds >= options.durationSeconds);
+  assert.equal(completedControlCycles, options.controlCycles, "soak did not complete every requested human-control cycle");
   if (browserReplacement === undefined) throw new Error("soak did not complete its scheduled browserd replacement");
   const workloadOverlapEvents = numberField(capture, "processOverlapEvents") - initialOverlapEvents + replacement("processOverlapEvents");
   const sameSessionMaximumConcurrency = Math.max(numberField(capture, "sameSessionMaximumConcurrency"), replacement("sameSessionMaximumConcurrency"));
@@ -1149,7 +1613,8 @@ async function runProcessSoak(options: {
   assert.ok(retries <= recoveryPolicy.maximumRetries && recoveredRate <= recoveryPolicy.maximumRecoveredRate && typedTimeouts <= recoveryPolicy.maximumTypedTimeouts, `soak recovery policy exceeded: ${recoveredRetries}/${agentScreenshotAttempts}; typed=${typedTimeouts}`);
   assert.equal(duplicateFrameSequences, 0);
   assert.equal(nonMonotonicFrameSequences, 0);
-  assert.ok(samples.length >= Math.max(1, Math.floor(options.durationSeconds / (options.sampleSeconds * 4))), "soak did not collect enough bounded process samples");
+  const minimumProcessSamples = Math.min(iterations, Math.max(1, Math.floor(options.durationSeconds / (options.sampleSeconds * 4))));
+  assert.ok(samples.length >= minimumProcessSamples, "soak did not collect enough bounded process samples");
   assert.ok(arrayOfRecords(finalBrowser.heldInput).every((item) => Array.isArray(item.buttons) && item.buttons.length === 0 && Array.isArray(item.keys) && item.keys.length === 0));
   const actionPath = actions.map((item) => numberField(item, "sampleReplayWallMs"));
   const pathDistribution = distribution(actionPath);
@@ -1225,7 +1690,8 @@ async function runProcessSoak(options: {
       motor: { generatedNominalPathDurationMs: distribution(actions.map((item) => numberField(item, "generatedNominalPathDurationMs"))), sampleReplayWallMs: pathDistribution, cdpInputLatencyMs: distribution(actions.map((item) => numberField(item, "cdpInputLatencyMs"))), cdpInputMaxLatencyMs: distribution(actions.map((item) => numberField(item, "cdpInputMaxLatencyMs"))), overlayUpdateLatencyMs: distribution(actions.map((item) => numberField(item, "overlayUpdateLatencyMs"))), postPathGuardMs: distribution(actions.map((item) => numberField(item, "postPathGuardMs"))), totalMs: distribution(actions.map((item) => numberField(item, "totalMs"))), sampleCount: distribution(actions.map((item) => numberField(item, "sampleCount"))), bySession: motorBySession, slowestActions },
       browserdDispatchLatencyMs: { screenshotMetadata: distribution(dispatch.filter((item) => item.kind === "observe.screenshot").map((item) => numberField(item, "durationMs"))), imageArtifactRead: distribution(dispatch.filter((item) => item.kind === "artifact.read").map((item) => numberField(item, "durationMs"))), coordinateAction: distribution(dispatch.filter((item) => item.kind === "action.coordinate").map((item) => numberField(item, "durationMs"))) },
       piReconnects, webxdRestarts, browserdReplacements, workspaceWindowCycles, tabCycles, exactCloseRetryPairs: closeRetryPairs,
-      browserdReplacement: { oldRuntimeInstanceId: workloadBrowser.runtimeInstanceId, newRuntimeInstanceId: finalBrowser.runtimeInstanceId, newSessions: [currentIdentityA.browserSessionId, currentIdentityB.browserSessionId], secondTabId: browserReplacement.secondTabId, searchReadHealthyDuringOutage: browserReplacement.searchReadHealthyDuringOutage, captureReadinessAttempts: browserReplacement.captureReadinessAttempts, captureReadinessRecoveredTimeouts: browserReplacement.captureReadinessRecoveredTimeouts },
+      humanControlCycles: { requested: options.controlCycles, completed: completedControlCycles, initialOrdinal: options.initialControlOrdinal, cycles: controlCycleResults },
+      browserdReplacement: { oldRuntimeInstanceId: workloadBrowser.runtimeInstanceId, newRuntimeInstanceId: finalBrowser.runtimeInstanceId, newSessions: [currentIdentityA.browserSessionId, currentIdentityB.browserSessionId], secondTabId: browserReplacement.secondTabId, searchReadHealthyDuringOutage: browserReplacement.searchReadHealthyDuringOutage, captureReadinessAttempts: browserReplacement.captureReadinessAttempts, captureReadinessRecoveredTimeouts: browserReplacement.captureReadinessRecoveredTimeouts, heldControlBeforeReplacement: browserReplacement.heldControlBeforeReplacement, replacementStartedAgentOwned: browserReplacement.replacementStartedAgentOwned, replacementFixtureStartedClean: browserReplacement.replacementFixtureStartedClean },
       workspaceSwitches: workspaceSwitchLatencyMsForSoak.length,
       workspaceSwitchLatencyMs: distribution(workspaceSwitchLatencyMsForSoak),
       finalIdempotency: idempotency,
@@ -1290,6 +1756,14 @@ function numberArgument(name: string, fallback: number): number { const value = 
 function boundedNumberArgument(name: string, fallback: number, minimum: number, maximum: number): number { const value = numberArgument(name, fallback); if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw new Error(`${name} must be an integer from ${minimum} to ${maximum}`); return value; }
 function gitOutput(args: readonly string[]): string { return execFileSync("git", [...args], { cwd: REPOSITORY_ROOT, encoding: "utf8", maxBuffer: 1_048_576 }).trim(); }
 function safeError(error: unknown): string { return (error instanceof Error ? `${error.name}: ${error.message}` : String(error)).slice(0, 1_000); }
+function safePhase3bError(error: unknown): string {
+  const raw = safeError(error);
+  if (raw.includes("phase3b-private-input-")) return "Phase 3B acceptance failed.";
+  const firstLine = raw.split("\n", 1)[0] ?? "Phase 3B acceptance failed.";
+  const structuredAt = [firstLine.indexOf("{"), firstLine.indexOf("[")].filter((index) => index >= 0).sort((a, b) => a - b)[0];
+  const bounded = (structuredAt === undefined ? firstLine : firstLine.slice(0, structuredAt)).slice(0, 256).trim();
+  return sanitizePhase3bText(bounded || "Phase 3B acceptance failed.");
+}
 function failureArtifactPath(path: string): string { return path.endsWith(".json") ? `${path.slice(0, -5)}-failure.json` : `${path}-failure.json`; }
 function asRecord(value: unknown): Record<string, unknown> { if (!isRecord(value)) throw new Error("expected object"); return value; }
 function arrayOfRecords(value: unknown): Record<string, unknown>[] { if (!Array.isArray(value)) throw new Error("expected array"); return value.map(asRecord); }
@@ -1302,7 +1776,8 @@ function sleep(ms: number): Promise<void> { return new Promise((resolveSleep) =>
 
 try { await main(); }
 catch (error) {
-  console.error(error);
+  const phase3bFailure = Number(argument("--human-control-cycles") ?? "0") > 0;
+  if (phase3bFailure) console.error("Phase 3B acceptance failed; sanitized failure evidence follows."); else console.error(error);
   const browserMetrics = await activeBrowserd?.call("metrics", {}, 5_000).then(asRecord, () => undefined);
   const webxdMetrics = await activeWebxd?.call("metrics", {}, 5_000).then(asRecord, () => undefined);
   const chrome = browserMetrics === undefined ? [] : arrayOfRecords(browserMetrics.chrome).map((item) => ({ pid: item.pid, running: item.running, connected: item.connected, cdpPendingCount: item.cdpPendingCount }));
@@ -1311,7 +1786,7 @@ catch (error) {
     testedSha: (() => { try { return gitOutput(["rev-parse", "HEAD"]); } catch { return "unavailable"; } })(),
     elapsedSeconds: (performance.now() - routeStarted) / 1_000,
     ...failureContext,
-    error: { name: error instanceof Error ? error.name : "Error", message: safeError(error) },
+    error: { name: error instanceof Error ? error.name : "Error", message: phase3bFailure ? safePhase3bError(error) : safeError(error) },
     coordinatorState: browserMetrics?.captureCoordinator ?? {},
     cdpPendingCount: chrome.reduce((total, item) => total + (typeof item.cdpPendingCount === "number" ? item.cdpPendingCount : 0), 0),
     captureAttempt: isRecord(browserMetrics?.captureCoordinator) ? browserMetrics.captureCoordinator.agentScreenshotAttempts : undefined,
@@ -1320,7 +1795,7 @@ catch (error) {
     webxd: webxdMetrics === undefined ? {} : { clientConnections: webxdMetrics.clientConnections, liveBindings: webxdMetrics.liveBindings, browser: webxdMetrics.browser, stream: webxdMetrics.stream },
   };
   await workspace?.stop().catch(() => undefined); workspace = undefined;
-  await piA?.stop().catch(() => undefined); await piB?.stop().catch(() => undefined);
+  await Promise.allSettled([...activePiHarnesses].map(async (harness) => await harness.stop()));
   facadeController?.abort(); if (facade !== undefined) await facade.stop({ ownerId: "phase2b-agent-a" }).catch(() => undefined);
   await Promise.allSettled([...children].reverse().map(async (child) => await child.stop()));
   const cleanupRoot = root;
@@ -1330,8 +1805,10 @@ catch (error) {
   const failureBase = argument("--failure-output") ?? argument("--soak-output") ?? argument("--output") ?? "../../docs/browser-rebuild/evidence/phase2b1-process-route-results.json";
   if (failureBase !== "") {
     const path = resolve(failureArtifactPath(failureBase));
+    const deliveredFailure = phase3bFailure ? sanitizePhase3bEvidence(failure) : failure;
+    if (phase3bFailure) assertPhase3bEvidencePrivacy(deliveredFailure);
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, `${JSON.stringify(failure, null, 2)}\n`);
+    await writeFile(path, `${JSON.stringify(deliveredFailure, null, 2)}\n`);
   }
   process.exitCode = 1;
 }

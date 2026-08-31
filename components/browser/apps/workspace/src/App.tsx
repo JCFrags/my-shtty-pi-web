@@ -7,6 +7,7 @@ import {
   type WorkspaceTab,
 } from "./bridge";
 import { FrameViewport, useFrameRenderer, type FrameMetrics } from "./FrameViewport";
+import { runFixedAcceptanceHold, runFixedAcceptanceInput } from "./acceptanceInput";
 import { useHumanCanvasInput } from "./humanInput";
 import {
   displayText,
@@ -28,6 +29,13 @@ export function App({ bridge: suppliedBridge, initialState }: AppProps) {
   const [selectionError, setSelectionError] = useState<string>();
   const [controlPending, setControlPending] = useState<"take" | "return">();
   const [controlError, setControlError] = useState<string>();
+  const [acceptanceEnabled, setAcceptanceEnabled] = useState(false);
+  const [acceptanceFullStatus, setAcceptanceFullStatus] = useState<"idle" | "running" | "complete" | "failed">("idle");
+  const [acceptancePointerStatus, setAcceptancePointerStatus] = useState<"idle" | "running" | "complete" | "failed">("idle");
+  const [acceptanceHoldStatus, setAcceptanceHoldStatus] = useState<"idle" | "running" | "complete" | "failed">("idle");
+  const acceptanceFullRun = useRef(0);
+  const acceptancePointerRun = useRef(0);
+  const acceptanceHoldRun = useRef(0);
   const [now, setNow] = useState(Date.now());
   const connected = view.status.connection === "ready";
   const rendererState = connected ? view.publicState : { ...view.publicState, snapshot: undefined, selected: undefined };
@@ -43,6 +51,12 @@ export function App({ bridge: suppliedBridge, initialState }: AppProps) {
     ).catch(() => {
       if (active) dispatch({ kind: "status", status: { connection: "unavailable", browserd: "unavailable", message: "The local workspace service is unavailable." } });
     });
+    return () => { active = false; };
+  }, [bridge]);
+
+  useEffect(() => {
+    let active = true;
+    void bridge.acceptanceEnabled?.().then((enabled) => { if (active) setAcceptanceEnabled(enabled); }, () => undefined);
     return () => { active = false; };
   }, [bridge]);
 
@@ -97,6 +111,22 @@ export function App({ bridge: suppliedBridge, initialState }: AppProps) {
     catch { setControlError("Browser control is not ready. Wait for a current frame and try again."); setControlPending(undefined); }
   }, [bridge, canTakeControl]);
   const returnControl = humanInput.quiesceAndReturn;
+  const runAcceptanceInput = useCallback(async (full: boolean) => {
+    const canvas = renderer.canvasRef.current;
+    const setStatus = full ? setAcceptanceFullStatus : setAcceptancePointerStatus;
+    const run = full ? acceptanceFullRun : acceptancePointerRun;
+    if (!acceptanceEnabled || !humanInput.inputReady || !canvas) return;
+    run.current += 1; setStatus("running");
+    try { await runFixedAcceptanceInput(canvas, full, humanInput.dispatchAcceptanceText); setStatus("complete"); }
+    catch { setStatus("failed"); }
+  }, [acceptanceEnabled, humanInput.dispatchAcceptanceText, humanInput.inputReady, renderer.canvasRef]);
+  const runAcceptanceHold = useCallback(async () => {
+    const canvas = renderer.canvasRef.current;
+    if (!acceptanceEnabled || !humanInput.inputReady || !canvas) return;
+    acceptanceHoldRun.current += 1; setAcceptanceHoldStatus("running");
+    try { await runFixedAcceptanceHold(canvas); setAcceptanceHoldStatus("complete"); }
+    catch { setAcceptanceHoldStatus("failed"); }
+  }, [acceptanceEnabled, humanInput.inputReady, renderer.canvasRef]);
   const agents = groupAgents(sessions);
 
   return (
@@ -175,6 +205,14 @@ export function App({ bridge: suppliedBridge, initialState }: AppProps) {
           <StatusPanel status={view.status} selected={selected} metrics={renderer.metrics} now={now} droppedBeforeFrontend={view.publicState.droppedBeforeFrontend} humanControl={humanActive} />
         </div>
         {(selectionError || controlError || humanInput.error || view.error) && <div className="error-banner" role="alert">{selectionError ?? controlError ?? humanInput.error ?? view.error}</div>}
+        {acceptanceEnabled && <aside className="acceptance-controls" aria-label="Fixed graphical acceptance controls">
+          <button aria-label={`Run control input ${acceptanceFullStatus} ${acceptanceFullRun.current}`} onClick={() => void runAcceptanceInput(true)} disabled={!humanInput.inputReady || acceptanceFullStatus === "running"}>Run control input</button>
+          <span role="status">Control input {acceptanceFullStatus} {acceptanceFullRun.current}</span>
+          <button aria-label={`Run pointer input ${acceptancePointerStatus} ${acceptancePointerRun.current}`} onClick={() => void runAcceptanceInput(false)} disabled={!humanInput.inputReady || acceptancePointerStatus === "running"}>Run pointer input</button>
+          <span role="status">Pointer input {acceptancePointerStatus} {acceptancePointerRun.current}</span>
+          <button aria-label={`Run held input ${acceptanceHoldStatus} ${acceptanceHoldRun.current}`} onClick={() => void runAcceptanceHold()} disabled={!humanInput.inputReady || acceptanceHoldStatus === "running"}>Run held input</button>
+          <span role="status">Held input {acceptanceHoldStatus} {acceptanceHoldRun.current}</span>
+        </aside>}
       </section>
     </main>
   );

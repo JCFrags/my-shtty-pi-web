@@ -91,6 +91,7 @@ impl AcceptanceDiagnostics {
     #[cfg(not(debug_assertions))]
     pub fn configure(&self, _path: &Path) -> Result<(), String> { Err("acceptance diagnostics require a development build".into()) }
 
+    pub fn enabled(&self) -> bool { self.0.lock().is_ok_and(|guard| guard.is_some()) }
     pub fn frontend_ready(&self) { self.record(json!({ "kind": "frontendReady" })); }
     pub fn milestone(&self, name: &'static str) { self.record(json!({ "kind": "milestone", "name": name })); }
 
@@ -104,6 +105,7 @@ impl AcceptanceDiagnostics {
             "actorDisplayId": bounded_text(&session.actor_display_id, 128),
             "agentLabel": bounded_text(&session.agent_label, 256),
             "state": bounded_text(&session.state, 32),
+            "controlState": bounded_text(&session.control_state, 32),
             "controlEpoch": session.control_epoch,
             "captureReadiness": bounded_text(&session.capture_readiness, 32),
             "cursor": {
@@ -151,6 +153,10 @@ impl AcceptanceDiagnostics {
     pub fn selection_cleared(&self) { self.record(json!({ "kind": "selectionCleared" })); }
 
     pub fn window_action(&self, action: &str) { self.record(json!({ "kind": "windowAction", "action": bounded_text(action, 16) })); }
+
+    pub fn launcher_error(&self, code: &str, retryable: bool) {
+        self.record(json!({ "kind": "launcherError", "code": bounded_text(code, 32), "retryable": retryable }));
+    }
 
     pub fn frame_received(&self, delivery_id: u64, header: &FrameHeader) {
         self.record(frame_record("frameReceived", delivery_id, header, None));

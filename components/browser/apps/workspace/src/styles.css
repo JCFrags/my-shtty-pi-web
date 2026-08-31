@@ -85,6 +85,8 @@ button:focus-visible { outline: 2px solid #8fbcff; outline-offset: -2px; }
 .frame-age { position: absolute; right: 10px; bottom: 10px; padding: 4px 7px; border: 1px solid #344153; border-radius: 6px; color: #aeb9c8; background: rgb(8 11 16 / 82%); font: 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .status-panel { min-height: 0; overflow: auto; padding: 14px 14px 20px; background: #0f141d; scrollbar-color: #343d4d transparent; }
 .status-panel > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; color: #dce5f1; font-size: 11px; font-weight: 600; }
+.acceptance-controls { position: fixed; z-index: 20; right: 12px; bottom: 12px; display: grid; grid-template-columns: auto auto; gap: 6px 10px; align-items: center; padding: 8px; border: 1px solid #6d7786; border-radius: 6px; background: #101722; color: #dce5f1; font-size: 10px; }
+.acceptance-controls button { min-height: 28px; border: 1px solid #64748b; border-radius: 4px; color: #f8fafc; background: #334155; }
 .readonly-pill { padding: 3px 6px; border: 1px solid #334c6d; border-radius: 999px; color: #8fbcff; font-size: 8px; font-weight: 500; text-transform: uppercase; }
 .readonly-pill.interactive { border-color: #8f592f; color: #ffc58f; background: #2a1c12; }
 .status-group { margin: 0 0 16px; }

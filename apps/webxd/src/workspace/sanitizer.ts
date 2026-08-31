@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import type { WorkspaceSnapshot as BrowserWorkspaceSnapshot, WorkspaceFrameEvent } from "../../../../packages/browser-protocol/src/index.js";
 import type { WorkspaceFrameHeader, WorkspaceSnapshot } from "../../../../packages/workspace-protocol/src/index.js";
 
@@ -14,7 +15,7 @@ export function sanitizeWorkspaceSnapshot(snapshot: BrowserWorkspaceSnapshot, br
     browserdState,
     sessions: snapshot.sessions.slice(0, 256).map((session) => ({
       browserSessionId: session.browserSessionId,
-      agentLabel: agentLabel(session.agentSessionId),
+      agentLabel: agentLabel(session.agentSessionId, browserdRuntimeInstanceId),
       actorDisplayId: session.actorDisplayId,
       pathId: "agentcursor/chrome",
       state: session.state,
@@ -24,7 +25,7 @@ export function sanitizeWorkspaceSnapshot(snapshot: BrowserWorkspaceSnapshot, br
       ...(session.selectedHumanControlTabId === undefined ? {} : { selectedHumanControlTabId: session.selectedHumanControlTabId }),
       leaseExpiry: session.leaseExpiry,
       captureReadiness: session.captureReadiness,
-      personaDisplayId: sanitizePersona(session.personaId),
+      personaDisplayId: personaDisplayId(session.personaId, browserdRuntimeInstanceId),
       cursor: session.controlState === "agent" ? {
         x: session.cursor.x,
         y: session.cursor.y,
@@ -70,13 +71,14 @@ export function workspaceFrameHeader(event: WorkspaceFrameEvent, selectionId: st
   };
 }
 
-function agentLabel(agentSessionId: string): string {
-  const safe = safeText(agentSessionId, 72);
-  return `Pi agent ${safe.length <= 20 ? safe : `${safe.slice(0, 8)}…${safe.slice(-8)}`}`.slice(0, 96);
+function agentLabel(agentSessionId: string, runtimeSalt: string): string {
+  return `Pi agent ${displayHandle("agent", agentSessionId, runtimeSalt)}`;
 }
-function sanitizePersona(value: string): string {
-  const safe = value.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 32);
-  return safe.length === 0 ? "unknown" : safe;
+function personaDisplayId(personaId: string, runtimeSalt: string): string {
+  return `persona-${displayHandle("persona", personaId, runtimeSalt)}`;
+}
+function displayHandle(kind: "agent" | "persona", value: string, runtimeSalt: string): string {
+  return createHmac("sha256", runtimeSalt).update(kind).update("\0").update(value).digest("hex").slice(0, 12);
 }
 function safeText(value: string, max: number): string {
   return [...value].map((character) => {

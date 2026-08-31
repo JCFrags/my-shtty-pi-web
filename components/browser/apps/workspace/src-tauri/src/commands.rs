@@ -37,6 +37,9 @@ pub async fn workspace_input_batch(service: State<'_, WorkspaceClientService>, b
 pub async fn workspace_current_state(service: State<'_, WorkspaceClientService>) -> Result<PublicWorkspaceState, PublicError> { Ok(service.current().await) }
 
 #[tauri::command]
+pub fn workspace_acceptance_enabled(service: State<'_, WorkspaceClientService>) -> bool { service.acceptance_enabled() }
+
+#[tauri::command]
 pub async fn workspace_window_action(service: State<'_, WorkspaceClientService>, window: WebviewWindow, action: WindowAction) -> Result<(), PublicError> {
     if matches!(action, WindowAction::Hide) { service.release_for_hide().await?; }
     apply_window_action(&window, action).map_err(|_| crate::error::WorkspaceError::Unavailable.public())?;
