@@ -1,0 +1,3482 @@
+{
+  "passed": true,
+  "testedSha": "25e767f2ca3b5f219306827fd38f236bf53eee46",
+  "expectedSha": "25e767f2ca3b5f219306827fd38f236bf53eee46",
+  "workingTreeClean": true,
+  "processIsolation": {
+    "piHarnessPid": 959353,
+    "browserdPid": 959511,
+    "webxdPid": 959562,
+    "distinct": true
+  },
+  "productionObservationLease": {
+    "configuredMs": 60000,
+    "testOverrideUsed": false,
+    "requestedModelDelayMs": 0,
+    "actualModelDelayMs": 1.1226940000001377,
+    "validUntil": "2026-08-31T03:54:16.103Z",
+    "clickSucceeded": true,
+    "clickRouteMs": 550.1759740000002
+  },
+  "motor": {
+    "generatedNominalPathDurationMs": {
+      "count": 1,
+      "min": 511.95143340596087,
+      "median": 511.95143340596087,
+      "p95": 511.95143340596087,
+      "max": 511.95143340596087,
+      "mean": 511.95143340596087
+    },
+    "sampleReplayWallMs": {
+      "count": 1,
+      "min": 528.2446299999999,
+      "median": 528.2446299999999,
+      "p95": 528.2446299999999,
+      "max": 528.2446299999999,
+      "mean": 528.2446299999999
+    },
+    "sampleCount": {
+      "count": 1,
+      "min": 16,
+      "median": 16,
+      "p95": 16,
+      "max": 16,
+      "mean": 16
+    }
+  },
+  "exactObservationImages": {
+    "concurrent": true,
+    "observations": [
+      {
+        "observationId": "observation_lgkzN5BhMNJxB7N12GGj0QPd",
+        "digest": "3fadd587212c5cadd19c1b7b732fbb162b3c21394049a8030e46a7ac2f045fba",
+        "bytes": 13188
+      },
+      {
+        "observationId": "observation_3fjVT0O4HWtLRozF-2HzmQbE",
+        "digest": "5fca3fa16226bb299e5b5a5648810ec7892de01f4eb8212b742eeda960e59077",
+        "bytes": 14819
+      },
+      {
+        "observationId": "observation_sfHLl_yfod5eKIZbNO-Ly48k",
+        "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+        "bytes": 10883
+      }
+    ],
+    "distinctObservationIds": true,
+    "distinctDigests": true
+  },
+  "domFallback": {
+    "succeeded": true,
+    "value": "phase2b process"
+  },
+  "frameSubscription": {
+    "survivedIdleTimeoutMs": 1000,
+    "waitedMs": 1500,
+    "frameCount": 3,
+    "duplicateFrameSequences": 0,
+    "nonMonotonicFrameSequences": 0,
+    "settled": true
+  },
+  "captureContention": {
+    "passed": true,
+    "requestedTransactions": 1000,
+    "governedScreenshotTransactions": 1000,
+    "explicitAgentObservations": 500,
+    "agentScreenshotAttempts": 500,
+    "workspaceScreenshotAttempts": 500,
+    "motorActions": 20,
+    "durationSeconds": 257.509355411,
+    "sameSessionMaximumConcurrency": 1,
+    "crossSessionConcurrencyObserved": true,
+    "workloadOverlapEvents": 257,
+    "processMaximumConcurrency": 2,
+    "maximumAgentQueueDepth": 1,
+    "maximumWorkspaceQueueDepth": 1,
+    "agentQueueWaitMs": {
+      "count": 500,
+      "retainedCount": 500,
+      "min": 0.0027269999991403893,
+      "medianUpperBound": 0.00670699999682256,
+      "p95UpperBound": 3.6912179999999353,
+      "max": 533.4273599999979,
+      "meanUpperBound": 3.326184939999934
+    },
+    "workspaceQueueWaitMs": {
+      "count": 536,
+      "retainedCount": 536,
+      "min": 0.004631000003428198,
+      "medianUpperBound": 0.01989400000002206,
+      "p95UpperBound": 0.02290299999981471,
+      "max": 22.27592999999979,
+      "meanUpperBound": 0.3206050634613313
+    },
+    "agentTransactionMs": {
+      "count": 500,
+      "retainedCount": 500,
+      "min": 8.931689999997616,
+      "medianUpperBound": 27.129485000001296,
+      "p95UpperBound": 33.028214999998454,
+      "max": 37.56015499999921,
+      "meanUpperBound": 27.24125437600007
+    },
+    "workspaceTransactionMs": {
+      "count": 536,
+      "retainedCount": 536,
+      "min": 8.236367999998038,
+      "medianUpperBound": 13.573465000000397,
+      "p95UpperBound": 26.035109999997076,
+      "max": 1023.9253020000033,
+      "meanUpperBound": 30.966765978846404
+    },
+    "typedTimeouts": 0,
+    "agentTypedTimeouts": 0,
+    "workspaceTypedTimeouts": 0,
+    "retries": 0,
+    "recoveredRetries": 0,
+    "unrecoveredTimeouts": 0,
+    "unrecoveredAgentFailures": 0,
+    "droppedWorkspaceRequests": 0,
+    "coalescedWorkspaceRequests": 0,
+    "observationRouteLatencyMs": {
+      "count": 500,
+      "min": 12.869416000001365,
+      "median": 31.46893799999816,
+      "p95": 39.527883000002475,
+      "max": 578.4375199999995,
+      "mean": 31.589524298000075
+    },
+    "actionRouteLatencyMs": {
+      "count": 20,
+      "min": 398.7274929999985,
+      "median": 513.709179000005,
+      "p95": 1237.302515000003,
+      "max": 1243.1852639999997,
+      "mean": 757.4564709500006
+    },
+    "motorSessionIds": [
+      "session_M0lvV82jYpslMWUtRIjr9Q_M",
+      "session_V2DpF7Dbisuqv3e8NFOTHsBF"
+    ],
+    "minimumMotorSamples": 16,
+    "heldInputAfterSettlement": [
+      {
+        "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+        "buttons": [],
+        "keys": []
+      },
+      {
+        "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+        "buttons": [],
+        "keys": []
+      }
+    ],
+    "exactImageReads": 500,
+    "distinctObservationIds": 500,
+    "imageBytesInGeneralCache": 0,
+    "frameCount": 0,
+    "duplicateFrameSequences": 0,
+    "nonMonotonicFrameSequences": 0,
+    "ledger": {
+      "algorithm": "sha256-ndjson",
+      "digest": "1341eb7921a48f34c8543c09a5e874e4d3d3f53bf0f80ae4c5f55547adafaa00",
+      "recordCount": 500,
+      "head": [
+        {
+          "ordinal": 1,
+          "actor": "a-second",
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "tabId": "tab_luN6zru-BBSmKaVijuJpXoXx",
+          "observationId": "observation_eb8QLrxdVXSBP56iOtnsFW0s",
+          "digest": "caac6ff8a5f7b38309f859f0fef5960dc177e8cedd20343bb0de936790d0f5f3",
+          "bytes": 14835
+        },
+        {
+          "ordinal": 2,
+          "actor": "b-primary",
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+          "observationId": "observation_wYwEtH2Zh9firuVVpcK8uUlS",
+          "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+          "bytes": 10883
+        },
+        {
+          "ordinal": 3,
+          "actor": "a-primary",
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "tabId": "tab_lJ0ba8eWKI1OfsNYqESDlbTZ",
+          "observationId": "observation_9re0Yvx6mll9tYvgDuyDA8q2",
+          "digest": "f3edda24d5309ba8db07bb3b42e7cb9f8b6e5e318c4d2dfeb27e4c71ef40db1f",
+          "bytes": 11108
+        },
+        {
+          "ordinal": 4,
+          "actor": "b-primary",
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+          "observationId": "observation_KVOrM0vcoXVUfRzUOpIDX4Hp",
+          "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+          "bytes": 10883
+        },
+        {
+          "ordinal": 5,
+          "actor": "a-second",
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "tabId": "tab_luN6zru-BBSmKaVijuJpXoXx",
+          "observationId": "observation_S_Y_bKezaeEICIzQts-JiljN",
+          "digest": "caac6ff8a5f7b38309f859f0fef5960dc177e8cedd20343bb0de936790d0f5f3",
+          "bytes": 14835
+        },
+        {
+          "ordinal": 6,
+          "actor": "b-primary",
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+          "observationId": "observation_ifLrnMza451kMpGH7xZ-NA4N",
+          "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+          "bytes": 10883
+        },
+        {
+          "ordinal": 7,
+          "actor": "a-primary",
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "tabId": "tab_lJ0ba8eWKI1OfsNYqESDlbTZ",
+          "observationId": "observation_nj1EmFDPPCKTbc8HkuBQq5s8",
+          "digest": "f3edda24d5309ba8db07bb3b42e7cb9f8b6e5e318c4d2dfeb27e4c71ef40db1f",
+          "bytes": 11108
+        },
+        {
+          "ordinal": 8,
+          "actor": "b-primary",
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+          "observationId": "observation_pv2M9Yd75j_D-eTQ72BTkcnN",
+          "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+          "bytes": 10883
+        },
+        {
+          "ordinal": 9,
+          "actor": "a-second",
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "tabId": "tab_luN6zru-BBSmKaVijuJpXoXx",
+          "observationId": "observation_wF0LggqBQNUYD6Q74aNNdp8r",
+          "digest": "caac6ff8a5f7b38309f859f0fef5960dc177e8cedd20343bb0de936790d0f5f3",
+          "bytes": 14835
+        },
+        {
+          "ordinal": 10,
+          "actor": "b-primary",
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+          "observationId": "observation_nBTlJoEW4vDsih123K-PVTaw",
+          "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+          "bytes": 10883
+        },
+        {
+          "ordinal": 11,
+          "actor": "a-primary",
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "tabId": "tab_lJ0ba8eWKI1OfsNYqESDlbTZ",
+          "observationId": "observation_nRrihSEiHCfmlcNej77J0Rv6",
+          "digest": "f3edda24d5309ba8db07bb3b42e7cb9f8b6e5e318c4d2dfeb27e4c71ef40db1f",
+          "bytes": 11108
+        },
+        {
+          "ordinal": 12,
+          "actor": "b-primary",
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+          "observationId": "observation_BTuPv3QWYWsXm50ZswRIGNEu",
+          "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+          "bytes": 10883
+        },
+        {
+          "ordinal": 13,
+          "actor": "a-second",
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "tabId": "tab_luN6zru-BBSmKaVijuJpXoXx",
+          "observationId": "observation_uNCnPkyu2-Rrqf1Y20TbLl96",
+          "digest": "caac6ff8a5f7b38309f859f0fef5960dc177e8cedd20343bb0de936790d0f5f3",
+          "bytes": 14835
+        },
+        {
+          "ordinal": 14,
+          "actor": "b-primary",
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+          "observationId": "observation_UGkQk4j7YxxRbD8O1sIfBnYD",
+          "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+          "bytes": 10883
+        },
+        {
+          "ordinal": 15,
+          "actor": "a-primary",
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "tabId": "tab_lJ0ba8eWKI1OfsNYqESDlbTZ",
+          "observationId": "observation_12dHxfS5K0FEo-LECl0rbpHH",
+          "digest": "f3edda24d5309ba8db07bb3b42e7cb9f8b6e5e318c4d2dfeb27e4c71ef40db1f",
+          "bytes": 11108
+        },
+        {
+          "ordinal": 16,
+          "actor": "b-primary",
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+          "observationId": "observation_Bsc50RAavg_Wu3_Me-n_Gqte",
+          "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+          "bytes": 10883
+        }
+      ],
+      "tail": [
+        {
+          "ordinal": 485,
+          "actor": "a-second",
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "tabId": "tab_luN6zru-BBSmKaVijuJpXoXx",
+          "observationId": "observation_Ioa2zAeQoT_Nf7mcxZSMpoMI",
+          "digest": "caac6ff8a5f7b38309f859f0fef5960dc177e8cedd20343bb0de936790d0f5f3",
+          "bytes": 14835
+        },
+        {
+          "ordinal": 486,
+          "actor": "b-primary",
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+          "observationId": "observation_OiK3sduXMoY2m7CpeD4pCVCJ",
+          "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+          "bytes": 10916
+        },
+        {
+          "ordinal": 487,
+          "actor": "a-primary",
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "tabId": "tab_lJ0ba8eWKI1OfsNYqESDlbTZ",
+          "observationId": "observation_-SShLXvhYG-yB4VYbiVtSTBS",
+          "digest": "1af801144349b2c9299b5ba2d8faacec341a41f456171a2a6c65a015248ce43b",
+          "bytes": 11141
+        },
+        {
+          "ordinal": 488,
+          "actor": "b-primary",
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+          "observationId": "observation_YKZ0HHwznf2nU71z71QmIF0o",
+          "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+          "bytes": 10916
+        },
+        {
+          "ordinal": 489,
+          "actor": "a-second",
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "tabId": "tab_luN6zru-BBSmKaVijuJpXoXx",
+          "observationId": "observation_kei5_Wib9aioXgk0s7I4zxg5",
+          "digest": "caac6ff8a5f7b38309f859f0fef5960dc177e8cedd20343bb0de936790d0f5f3",
+          "bytes": 14835
+        },
+        {
+          "ordinal": 490,
+          "actor": "b-primary",
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+          "observationId": "observation_BeozX-W_HXvF7Xrcto8J5VyO",
+          "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+          "bytes": 10916
+        },
+        {
+          "ordinal": 491,
+          "actor": "a-primary",
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "tabId": "tab_lJ0ba8eWKI1OfsNYqESDlbTZ",
+          "observationId": "observation_S-_BaKNJTKzbQsKTXQMbqBga",
+          "digest": "1af801144349b2c9299b5ba2d8faacec341a41f456171a2a6c65a015248ce43b",
+          "bytes": 11141
+        },
+        {
+          "ordinal": 492,
+          "actor": "b-primary",
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+          "observationId": "observation_bfSEvLW9Mkm0omPDnwXESZDY",
+          "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+          "bytes": 10916
+        },
+        {
+          "ordinal": 493,
+          "actor": "a-second",
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "tabId": "tab_luN6zru-BBSmKaVijuJpXoXx",
+          "observationId": "observation_5dEbqKcbTpGVq5w_6R6D6v2p",
+          "digest": "caac6ff8a5f7b38309f859f0fef5960dc177e8cedd20343bb0de936790d0f5f3",
+          "bytes": 14835
+        },
+        {
+          "ordinal": 494,
+          "actor": "b-primary",
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+          "observationId": "observation_TsbrgmDF8f2rH91fIqz38BO3",
+          "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+          "bytes": 10916
+        },
+        {
+          "ordinal": 495,
+          "actor": "a-primary",
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "tabId": "tab_lJ0ba8eWKI1OfsNYqESDlbTZ",
+          "observationId": "observation_2f0BwOC5w9gMmZHaXXoegZv9",
+          "digest": "1af801144349b2c9299b5ba2d8faacec341a41f456171a2a6c65a015248ce43b",
+          "bytes": 11141
+        },
+        {
+          "ordinal": 496,
+          "actor": "b-primary",
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+          "observationId": "observation_2NWiyAA3aSP2PQ-SJi04O1OE",
+          "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+          "bytes": 10916
+        },
+        {
+          "ordinal": 497,
+          "actor": "a-second",
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "tabId": "tab_luN6zru-BBSmKaVijuJpXoXx",
+          "observationId": "observation_Sw2E0mR443dWei3wTqIrSoQS",
+          "digest": "caac6ff8a5f7b38309f859f0fef5960dc177e8cedd20343bb0de936790d0f5f3",
+          "bytes": 14835
+        },
+        {
+          "ordinal": 498,
+          "actor": "b-primary",
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+          "observationId": "observation_OjMy2Bn4XNeJDWGHvH28T5Uj",
+          "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+          "bytes": 10916
+        },
+        {
+          "ordinal": 499,
+          "actor": "a-primary",
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "tabId": "tab_lJ0ba8eWKI1OfsNYqESDlbTZ",
+          "observationId": "observation_QJGBe7ETBdX-H3PsxxeFjOxF",
+          "digest": "1af801144349b2c9299b5ba2d8faacec341a41f456171a2a6c65a015248ce43b",
+          "bytes": 11141
+        },
+        {
+          "ordinal": 500,
+          "actor": "b-primary",
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+          "observationId": "observation_3DB96S1AzJSu9bXckLeeGSc8",
+          "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+          "bytes": 10916
+        }
+      ]
+    },
+    "settlement": {
+      "subscriptions": 1,
+      "captureCoordinators": [
+        {
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "active": 0,
+          "agentQueued": 0,
+          "frameQueued": 0,
+          "maxObservedConcurrent": 1,
+          "maxObservedAgentQueue": 1,
+          "maxObservedFrameQueue": 1,
+          "agentRequests": 250,
+          "frameRequests": 523,
+          "agentScreenshotAttempts": 250,
+          "frameScreenshotAttempts": 523,
+          "agentScreenshotRetries": 0,
+          "completedAgent": 250,
+          "completedFrame": 523,
+          "failedAgent": 0,
+          "rejectedAgent": 0,
+          "droppedFrame": 0,
+          "coalescedFrame": 0,
+          "cancelled": 0,
+          "agentWaitMaxMs": 533.4273599999979,
+          "frameWaitMaxMs": 22.27592999999979,
+          "agentScreenshotTimeouts": 0,
+          "recoveredAgentScreenshotTimeouts": 0,
+          "unrecoveredAgentScreenshotTimeouts": 0,
+          "frameScreenshotTimeouts": 0,
+          "agentQueueWaitMs": {
+            "count": 250,
+            "retainedCount": 250,
+            "min": 0.002846999999746913,
+            "median": 0.00670699999682256,
+            "p95": 3.6912179999999353,
+            "max": 533.4273599999979,
+            "mean": 3.326184939999934
+          },
+          "frameQueueWaitMs": {
+            "count": 523,
+            "retainedCount": 523,
+            "min": 0.004631000003428198,
+            "median": 0.012705000001005828,
+            "p95": 0.020961000001989305,
+            "max": 22.27592999999979,
+            "mean": 0.3188688527723598
+          },
+          "agentTransactionMs": {
+            "count": 250,
+            "retainedCount": 250,
+            "min": 13.116860000001907,
+            "median": 27.129485000001296,
+            "p95": 33.028214999998454,
+            "max": 37.56015499999921,
+            "mean": 27.24125437600007
+          },
+          "frameTransactionMs": {
+            "count": 523,
+            "retainedCount": 523,
+            "min": 8.898474000001443,
+            "median": 11.606458999999631,
+            "p95": 25.82622099999935,
+            "max": 1023.9253020000033,
+            "mean": 30.850807789675294
+          },
+          "processActiveTransactions": 0,
+          "processMaxObservedConcurrent": 2,
+          "processOverlapEvents": 259,
+          "closed": false
+        },
+        {
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "active": 0,
+          "agentQueued": 0,
+          "frameQueued": 0,
+          "maxObservedConcurrent": 1,
+          "maxObservedAgentQueue": 1,
+          "maxObservedFrameQueue": 1,
+          "agentRequests": 250,
+          "frameRequests": 16,
+          "agentScreenshotAttempts": 250,
+          "frameScreenshotAttempts": 16,
+          "agentScreenshotRetries": 0,
+          "completedAgent": 250,
+          "completedFrame": 16,
+          "failedAgent": 0,
+          "rejectedAgent": 0,
+          "droppedFrame": 0,
+          "coalescedFrame": 0,
+          "cancelled": 0,
+          "agentWaitMaxMs": 0.03307399999903282,
+          "frameWaitMaxMs": 0.032344999999622814,
+          "agentScreenshotTimeouts": 0,
+          "recoveredAgentScreenshotTimeouts": 0,
+          "unrecoveredAgentScreenshotTimeouts": 0,
+          "frameScreenshotTimeouts": 0,
+          "agentQueueWaitMs": {
+            "count": 250,
+            "retainedCount": 250,
+            "min": 0.0027269999991403893,
+            "median": 0.004236999997374369,
+            "p95": 0.009017000000312692,
+            "max": 0.03307399999903282,
+            "mean": 0.005226444000087213
+          },
+          "frameQueueWaitMs": {
+            "count": 16,
+            "retainedCount": 16,
+            "min": 0.01238999999986845,
+            "median": 0.01989400000002206,
+            "p95": 0.02290299999981471,
+            "max": 0.032344999999622814,
+            "mean": 0.019332374999564195
+          },
+          "agentTransactionMs": {
+            "count": 250,
+            "retainedCount": 250,
+            "min": 8.931689999997616,
+            "median": 16.59071700000277,
+            "p95": 27.972703999999794,
+            "max": 32.15686799999821,
+            "mean": 17.711976819999936
+          },
+          "frameTransactionMs": {
+            "count": 16,
+            "retainedCount": 16,
+            "min": 8.236367999998038,
+            "median": 13.573465000000397,
+            "p95": 16.418021999999837,
+            "max": 236.11514699999998,
+            "mean": 26.999101249999967
+          },
+          "processActiveTransactions": 0,
+          "processMaxObservedConcurrent": 2,
+          "processOverlapEvents": 259,
+          "closed": false
+        }
+      ],
+      "heldInput": [
+        {
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "buttons": [],
+          "keys": []
+        }
+      ]
+    }
+  },
+  "gate0": {
+    "schemaVersion": "gate0.v1",
+    "passed": true,
+    "stableSwitches": {
+      "requested": 200,
+      "completed": 200,
+      "latencyMs": {
+        "count": 200,
+        "min": 16,
+        "median": 21,
+        "p95": 28,
+        "max": 38,
+        "mean": 21.775
+      },
+      "boundsMs": {
+        "median": 500,
+        "p95": 1500
+      },
+      "formerSelectionPaints": 0,
+      "crossTargetPaints": 0,
+      "nonMonotonicPaints": 0,
+      "droppedFormerSelectionFrames": 0,
+      "retentionViolations": 0,
+      "liveAuthority": {
+        "samples": 200,
+        "expectedWorkspaceSubscriptions": 1,
+        "maximumWorkspaceSubscriptions": 1,
+        "maximumWorkspaceLedgerEntries": 1,
+        "maximumBrokerSubscriptions": 1
+      },
+      "backgroundTabCapture": {
+        "cacheExpiryWaitMs": 4000,
+        "latencyMs": 25,
+        "timeoutDelta": 0,
+        "frameSequence": 3,
+        "runtimeInstanceId": "runtime_FsZzSSNr13NupqCe2eze3jw8",
+        "controlEpoch": 1,
+        "targetActivationUsed": false
+      }
+    },
+    "replacementCycles": [
+      {
+        "cycle": 1,
+        "oldRuntimeInstanceId": "runtime_iU0PvzaI8MMze_vULel_kGic",
+        "newRuntimeInstanceId": "runtime_BP_0kjr8BcKfK0eN3VIh0m88",
+        "brokerReconnectMs": 1113.6823139999997,
+        "brokerReconnectBoundMs": 20000,
+        "oldSessionsRejected": true,
+        "newSessions": [
+          "session_oqhZM2OoZKkp6ewyj8SJVvel",
+          "session_LLrWrzCJPKS8-d_bJguF69yG"
+        ],
+        "chrome": [
+          {
+            "browserSessionId": "session_LLrWrzCJPKS8-d_bJguF69yG",
+            "pid": 960523,
+            "running": true,
+            "connected": true
+          },
+          {
+            "browserSessionId": "session_oqhZM2OoZKkp6ewyj8SJVvel",
+            "pid": 960521,
+            "running": true,
+            "connected": true
+          }
+        ],
+        "readinessTransitions": {
+          "sessionA": 523,
+          "sessionASecondTab": 1091,
+          "sessionB": 532,
+          "boundMs": 60000
+        },
+        "captureCoordinator": {
+          "sessionCount": 2,
+          "sameSessionMaximumConcurrency": 1,
+          "processActiveTransactions": 0,
+          "processMaximumConcurrency": 2,
+          "processOverlapEvents": 2,
+          "agentRequests": 0,
+          "workspaceRequests": 6,
+          "agentScreenshotAttempts": 0,
+          "workspaceScreenshotAttempts": 6,
+          "agentScreenshotRetries": 0,
+          "typedTimeouts": 0,
+          "agentTypedTimeouts": 0,
+          "workspaceTypedTimeouts": 0,
+          "recoveredAgentTimeouts": 0,
+          "unrecoveredAgentTimeouts": 0,
+          "unrecoveredAgentFailures": 0,
+          "droppedWorkspaceRequests": 0,
+          "coalescedWorkspaceRequests": 0,
+          "maximumAgentQueueDepth": 0,
+          "maximumWorkspaceQueueDepth": 1,
+          "agentQueueWaitMs": {
+            "count": 0,
+            "retainedCount": 0,
+            "min": 0,
+            "medianUpperBound": 0,
+            "p95UpperBound": 0,
+            "max": 0,
+            "meanUpperBound": 0
+          },
+          "workspaceQueueWaitMs": {
+            "count": 6,
+            "retainedCount": 6,
+            "min": 0.012508000000025277,
+            "medianUpperBound": 0.026098000000274624,
+            "p95UpperBound": 0.02784499999961554,
+            "max": 0.07788600000003498,
+            "meanUpperBound": 0.0519920000001548
+          },
+          "agentTransactionMs": {
+            "count": 0,
+            "retainedCount": 0,
+            "min": 0,
+            "medianUpperBound": 0,
+            "p95UpperBound": 0,
+            "max": 0,
+            "meanUpperBound": 0
+          },
+          "workspaceTransactionMs": {
+            "count": 6,
+            "retainedCount": 6,
+            "min": 10.444698000000244,
+            "medianUpperBound": 31.070913999999902,
+            "p95UpperBound": 31.070913999999902,
+            "max": 313.49904100000003,
+            "meanUpperBound": 172.28497749999997
+          }
+        },
+        "searchReadHealthyDuringOutage": true
+      },
+      {
+        "cycle": 2,
+        "oldRuntimeInstanceId": "runtime_BP_0kjr8BcKfK0eN3VIh0m88",
+        "newRuntimeInstanceId": "runtime_FsZzSSNr13NupqCe2eze3jw8",
+        "brokerReconnectMs": 1246.735095,
+        "brokerReconnectBoundMs": 20000,
+        "oldSessionsRejected": true,
+        "newSessions": [
+          "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "session_V2DpF7Dbisuqv3e8NFOTHsBF"
+        ],
+        "chrome": [
+          {
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "pid": 961087,
+            "running": true,
+            "connected": true
+          },
+          {
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "pid": 961089,
+            "running": true,
+            "connected": true
+          }
+        ],
+        "readinessTransitions": {
+          "sessionA": 528,
+          "sessionASecondTab": 1086,
+          "sessionB": 518,
+          "boundMs": 60000
+        },
+        "captureCoordinator": {
+          "sessionCount": 2,
+          "sameSessionMaximumConcurrency": 1,
+          "processActiveTransactions": 0,
+          "processMaximumConcurrency": 2,
+          "processOverlapEvents": 2,
+          "agentRequests": 0,
+          "workspaceRequests": 6,
+          "agentScreenshotAttempts": 0,
+          "workspaceScreenshotAttempts": 6,
+          "agentScreenshotRetries": 0,
+          "typedTimeouts": 0,
+          "agentTypedTimeouts": 0,
+          "workspaceTypedTimeouts": 0,
+          "recoveredAgentTimeouts": 0,
+          "unrecoveredAgentTimeouts": 0,
+          "unrecoveredAgentFailures": 0,
+          "droppedWorkspaceRequests": 0,
+          "coalescedWorkspaceRequests": 0,
+          "maximumAgentQueueDepth": 0,
+          "maximumWorkspaceQueueDepth": 1,
+          "agentQueueWaitMs": {
+            "count": 0,
+            "retainedCount": 0,
+            "min": 0,
+            "medianUpperBound": 0,
+            "p95UpperBound": 0,
+            "max": 0,
+            "meanUpperBound": 0
+          },
+          "workspaceQueueWaitMs": {
+            "count": 6,
+            "retainedCount": 6,
+            "min": 0.022848999999951047,
+            "medianUpperBound": 0.031028999999762163,
+            "p95UpperBound": 0.0361430000002656,
+            "max": 0.10517100000015489,
+            "meanUpperBound": 0.05034675000001698
+          },
+          "agentTransactionMs": {
+            "count": 0,
+            "retainedCount": 0,
+            "min": 0,
+            "medianUpperBound": 0,
+            "p95UpperBound": 0,
+            "max": 0,
+            "meanUpperBound": 0
+          },
+          "workspaceTransactionMs": {
+            "count": 6,
+            "retainedCount": 6,
+            "min": 9.927212999999938,
+            "medianUpperBound": 20.0486649999998,
+            "p95UpperBound": 27.593728000000283,
+            "max": 272.50830399999995,
+            "meanUpperBound": 126.26658449999991
+          }
+        },
+        "searchReadHealthyDuringOutage": true
+      }
+    ],
+    "postReplacementStress": {
+      "passed": true,
+      "requestedTransactions": 1000,
+      "governedScreenshotTransactions": 1000,
+      "explicitAgentObservations": 500,
+      "agentScreenshotAttempts": 500,
+      "workspaceScreenshotAttempts": 500,
+      "motorActions": 20,
+      "durationSeconds": 257.509355411,
+      "sameSessionMaximumConcurrency": 1,
+      "crossSessionConcurrencyObserved": true,
+      "workloadOverlapEvents": 257,
+      "processMaximumConcurrency": 2,
+      "maximumAgentQueueDepth": 1,
+      "maximumWorkspaceQueueDepth": 1,
+      "agentQueueWaitMs": {
+        "count": 500,
+        "retainedCount": 500,
+        "min": 0.0027269999991403893,
+        "medianUpperBound": 0.00670699999682256,
+        "p95UpperBound": 3.6912179999999353,
+        "max": 533.4273599999979,
+        "meanUpperBound": 3.326184939999934
+      },
+      "workspaceQueueWaitMs": {
+        "count": 536,
+        "retainedCount": 536,
+        "min": 0.004631000003428198,
+        "medianUpperBound": 0.01989400000002206,
+        "p95UpperBound": 0.02290299999981471,
+        "max": 22.27592999999979,
+        "meanUpperBound": 0.3206050634613313
+      },
+      "agentTransactionMs": {
+        "count": 500,
+        "retainedCount": 500,
+        "min": 8.931689999997616,
+        "medianUpperBound": 27.129485000001296,
+        "p95UpperBound": 33.028214999998454,
+        "max": 37.56015499999921,
+        "meanUpperBound": 27.24125437600007
+      },
+      "workspaceTransactionMs": {
+        "count": 536,
+        "retainedCount": 536,
+        "min": 8.236367999998038,
+        "medianUpperBound": 13.573465000000397,
+        "p95UpperBound": 26.035109999997076,
+        "max": 1023.9253020000033,
+        "meanUpperBound": 30.966765978846404
+      },
+      "typedTimeouts": 0,
+      "agentTypedTimeouts": 0,
+      "workspaceTypedTimeouts": 0,
+      "retries": 0,
+      "recoveredRetries": 0,
+      "unrecoveredTimeouts": 0,
+      "unrecoveredAgentFailures": 0,
+      "droppedWorkspaceRequests": 0,
+      "coalescedWorkspaceRequests": 0,
+      "observationRouteLatencyMs": {
+        "count": 500,
+        "min": 12.869416000001365,
+        "median": 31.46893799999816,
+        "p95": 39.527883000002475,
+        "max": 578.4375199999995,
+        "mean": 31.589524298000075
+      },
+      "actionRouteLatencyMs": {
+        "count": 20,
+        "min": 398.7274929999985,
+        "median": 513.709179000005,
+        "p95": 1237.302515000003,
+        "max": 1243.1852639999997,
+        "mean": 757.4564709500006
+      },
+      "motorSessionIds": [
+        "session_M0lvV82jYpslMWUtRIjr9Q_M",
+        "session_V2DpF7Dbisuqv3e8NFOTHsBF"
+      ],
+      "minimumMotorSamples": 16,
+      "heldInputAfterSettlement": [
+        {
+          "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+          "buttons": [],
+          "keys": []
+        },
+        {
+          "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+          "buttons": [],
+          "keys": []
+        }
+      ],
+      "exactImageReads": 500,
+      "distinctObservationIds": 500,
+      "imageBytesInGeneralCache": 0,
+      "frameCount": 0,
+      "duplicateFrameSequences": 0,
+      "nonMonotonicFrameSequences": 0,
+      "ledger": {
+        "algorithm": "sha256-ndjson",
+        "digest": "1341eb7921a48f34c8543c09a5e874e4d3d3f53bf0f80ae4c5f55547adafaa00",
+        "recordCount": 500,
+        "head": [
+          {
+            "ordinal": 1,
+            "actor": "a-second",
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "tabId": "tab_luN6zru-BBSmKaVijuJpXoXx",
+            "observationId": "observation_eb8QLrxdVXSBP56iOtnsFW0s",
+            "digest": "caac6ff8a5f7b38309f859f0fef5960dc177e8cedd20343bb0de936790d0f5f3",
+            "bytes": 14835
+          },
+          {
+            "ordinal": 2,
+            "actor": "b-primary",
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+            "observationId": "observation_wYwEtH2Zh9firuVVpcK8uUlS",
+            "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+            "bytes": 10883
+          },
+          {
+            "ordinal": 3,
+            "actor": "a-primary",
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "tabId": "tab_lJ0ba8eWKI1OfsNYqESDlbTZ",
+            "observationId": "observation_9re0Yvx6mll9tYvgDuyDA8q2",
+            "digest": "f3edda24d5309ba8db07bb3b42e7cb9f8b6e5e318c4d2dfeb27e4c71ef40db1f",
+            "bytes": 11108
+          },
+          {
+            "ordinal": 4,
+            "actor": "b-primary",
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+            "observationId": "observation_KVOrM0vcoXVUfRzUOpIDX4Hp",
+            "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+            "bytes": 10883
+          },
+          {
+            "ordinal": 5,
+            "actor": "a-second",
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "tabId": "tab_luN6zru-BBSmKaVijuJpXoXx",
+            "observationId": "observation_S_Y_bKezaeEICIzQts-JiljN",
+            "digest": "caac6ff8a5f7b38309f859f0fef5960dc177e8cedd20343bb0de936790d0f5f3",
+            "bytes": 14835
+          },
+          {
+            "ordinal": 6,
+            "actor": "b-primary",
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+            "observationId": "observation_ifLrnMza451kMpGH7xZ-NA4N",
+            "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+            "bytes": 10883
+          },
+          {
+            "ordinal": 7,
+            "actor": "a-primary",
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "tabId": "tab_lJ0ba8eWKI1OfsNYqESDlbTZ",
+            "observationId": "observation_nj1EmFDPPCKTbc8HkuBQq5s8",
+            "digest": "f3edda24d5309ba8db07bb3b42e7cb9f8b6e5e318c4d2dfeb27e4c71ef40db1f",
+            "bytes": 11108
+          },
+          {
+            "ordinal": 8,
+            "actor": "b-primary",
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+            "observationId": "observation_pv2M9Yd75j_D-eTQ72BTkcnN",
+            "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+            "bytes": 10883
+          },
+          {
+            "ordinal": 9,
+            "actor": "a-second",
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "tabId": "tab_luN6zru-BBSmKaVijuJpXoXx",
+            "observationId": "observation_wF0LggqBQNUYD6Q74aNNdp8r",
+            "digest": "caac6ff8a5f7b38309f859f0fef5960dc177e8cedd20343bb0de936790d0f5f3",
+            "bytes": 14835
+          },
+          {
+            "ordinal": 10,
+            "actor": "b-primary",
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+            "observationId": "observation_nBTlJoEW4vDsih123K-PVTaw",
+            "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+            "bytes": 10883
+          },
+          {
+            "ordinal": 11,
+            "actor": "a-primary",
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "tabId": "tab_lJ0ba8eWKI1OfsNYqESDlbTZ",
+            "observationId": "observation_nRrihSEiHCfmlcNej77J0Rv6",
+            "digest": "f3edda24d5309ba8db07bb3b42e7cb9f8b6e5e318c4d2dfeb27e4c71ef40db1f",
+            "bytes": 11108
+          },
+          {
+            "ordinal": 12,
+            "actor": "b-primary",
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+            "observationId": "observation_BTuPv3QWYWsXm50ZswRIGNEu",
+            "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+            "bytes": 10883
+          },
+          {
+            "ordinal": 13,
+            "actor": "a-second",
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "tabId": "tab_luN6zru-BBSmKaVijuJpXoXx",
+            "observationId": "observation_uNCnPkyu2-Rrqf1Y20TbLl96",
+            "digest": "caac6ff8a5f7b38309f859f0fef5960dc177e8cedd20343bb0de936790d0f5f3",
+            "bytes": 14835
+          },
+          {
+            "ordinal": 14,
+            "actor": "b-primary",
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+            "observationId": "observation_UGkQk4j7YxxRbD8O1sIfBnYD",
+            "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+            "bytes": 10883
+          },
+          {
+            "ordinal": 15,
+            "actor": "a-primary",
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "tabId": "tab_lJ0ba8eWKI1OfsNYqESDlbTZ",
+            "observationId": "observation_12dHxfS5K0FEo-LECl0rbpHH",
+            "digest": "f3edda24d5309ba8db07bb3b42e7cb9f8b6e5e318c4d2dfeb27e4c71ef40db1f",
+            "bytes": 11108
+          },
+          {
+            "ordinal": 16,
+            "actor": "b-primary",
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+            "observationId": "observation_Bsc50RAavg_Wu3_Me-n_Gqte",
+            "digest": "8c27410e2078b7de1d81201177b7ba0491e983f645ce7a8b21d4108b283e3e2d",
+            "bytes": 10883
+          }
+        ],
+        "tail": [
+          {
+            "ordinal": 485,
+            "actor": "a-second",
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "tabId": "tab_luN6zru-BBSmKaVijuJpXoXx",
+            "observationId": "observation_Ioa2zAeQoT_Nf7mcxZSMpoMI",
+            "digest": "caac6ff8a5f7b38309f859f0fef5960dc177e8cedd20343bb0de936790d0f5f3",
+            "bytes": 14835
+          },
+          {
+            "ordinal": 486,
+            "actor": "b-primary",
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+            "observationId": "observation_OiK3sduXMoY2m7CpeD4pCVCJ",
+            "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+            "bytes": 10916
+          },
+          {
+            "ordinal": 487,
+            "actor": "a-primary",
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "tabId": "tab_lJ0ba8eWKI1OfsNYqESDlbTZ",
+            "observationId": "observation_-SShLXvhYG-yB4VYbiVtSTBS",
+            "digest": "1af801144349b2c9299b5ba2d8faacec341a41f456171a2a6c65a015248ce43b",
+            "bytes": 11141
+          },
+          {
+            "ordinal": 488,
+            "actor": "b-primary",
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+            "observationId": "observation_YKZ0HHwznf2nU71z71QmIF0o",
+            "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+            "bytes": 10916
+          },
+          {
+            "ordinal": 489,
+            "actor": "a-second",
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "tabId": "tab_luN6zru-BBSmKaVijuJpXoXx",
+            "observationId": "observation_kei5_Wib9aioXgk0s7I4zxg5",
+            "digest": "caac6ff8a5f7b38309f859f0fef5960dc177e8cedd20343bb0de936790d0f5f3",
+            "bytes": 14835
+          },
+          {
+            "ordinal": 490,
+            "actor": "b-primary",
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+            "observationId": "observation_BeozX-W_HXvF7Xrcto8J5VyO",
+            "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+            "bytes": 10916
+          },
+          {
+            "ordinal": 491,
+            "actor": "a-primary",
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "tabId": "tab_lJ0ba8eWKI1OfsNYqESDlbTZ",
+            "observationId": "observation_S-_BaKNJTKzbQsKTXQMbqBga",
+            "digest": "1af801144349b2c9299b5ba2d8faacec341a41f456171a2a6c65a015248ce43b",
+            "bytes": 11141
+          },
+          {
+            "ordinal": 492,
+            "actor": "b-primary",
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+            "observationId": "observation_bfSEvLW9Mkm0omPDnwXESZDY",
+            "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+            "bytes": 10916
+          },
+          {
+            "ordinal": 493,
+            "actor": "a-second",
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "tabId": "tab_luN6zru-BBSmKaVijuJpXoXx",
+            "observationId": "observation_5dEbqKcbTpGVq5w_6R6D6v2p",
+            "digest": "caac6ff8a5f7b38309f859f0fef5960dc177e8cedd20343bb0de936790d0f5f3",
+            "bytes": 14835
+          },
+          {
+            "ordinal": 494,
+            "actor": "b-primary",
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+            "observationId": "observation_TsbrgmDF8f2rH91fIqz38BO3",
+            "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+            "bytes": 10916
+          },
+          {
+            "ordinal": 495,
+            "actor": "a-primary",
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "tabId": "tab_lJ0ba8eWKI1OfsNYqESDlbTZ",
+            "observationId": "observation_2f0BwOC5w9gMmZHaXXoegZv9",
+            "digest": "1af801144349b2c9299b5ba2d8faacec341a41f456171a2a6c65a015248ce43b",
+            "bytes": 11141
+          },
+          {
+            "ordinal": 496,
+            "actor": "b-primary",
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+            "observationId": "observation_2NWiyAA3aSP2PQ-SJi04O1OE",
+            "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+            "bytes": 10916
+          },
+          {
+            "ordinal": 497,
+            "actor": "a-second",
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "tabId": "tab_luN6zru-BBSmKaVijuJpXoXx",
+            "observationId": "observation_Sw2E0mR443dWei3wTqIrSoQS",
+            "digest": "caac6ff8a5f7b38309f859f0fef5960dc177e8cedd20343bb0de936790d0f5f3",
+            "bytes": 14835
+          },
+          {
+            "ordinal": 498,
+            "actor": "b-primary",
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+            "observationId": "observation_OjMy2Bn4XNeJDWGHvH28T5Uj",
+            "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+            "bytes": 10916
+          },
+          {
+            "ordinal": 499,
+            "actor": "a-primary",
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "tabId": "tab_lJ0ba8eWKI1OfsNYqESDlbTZ",
+            "observationId": "observation_QJGBe7ETBdX-H3PsxxeFjOxF",
+            "digest": "1af801144349b2c9299b5ba2d8faacec341a41f456171a2a6c65a015248ce43b",
+            "bytes": 11141
+          },
+          {
+            "ordinal": 500,
+            "actor": "b-primary",
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "tabId": "tab_4AxXRXP5HGcQc2FMqgqDOE-d",
+            "observationId": "observation_3DB96S1AzJSu9bXckLeeGSc8",
+            "digest": "927b233ef4f8d8126b9a62998586f843d182fdedd40304810a29434f23c88236",
+            "bytes": 10916
+          }
+        ]
+      },
+      "settlement": {
+        "subscriptions": 1,
+        "captureCoordinators": [
+          {
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "active": 0,
+            "agentQueued": 0,
+            "frameQueued": 0,
+            "maxObservedConcurrent": 1,
+            "maxObservedAgentQueue": 1,
+            "maxObservedFrameQueue": 1,
+            "agentRequests": 250,
+            "frameRequests": 523,
+            "agentScreenshotAttempts": 250,
+            "frameScreenshotAttempts": 523,
+            "agentScreenshotRetries": 0,
+            "completedAgent": 250,
+            "completedFrame": 523,
+            "failedAgent": 0,
+            "rejectedAgent": 0,
+            "droppedFrame": 0,
+            "coalescedFrame": 0,
+            "cancelled": 0,
+            "agentWaitMaxMs": 533.4273599999979,
+            "frameWaitMaxMs": 22.27592999999979,
+            "agentScreenshotTimeouts": 0,
+            "recoveredAgentScreenshotTimeouts": 0,
+            "unrecoveredAgentScreenshotTimeouts": 0,
+            "frameScreenshotTimeouts": 0,
+            "agentQueueWaitMs": {
+              "count": 250,
+              "retainedCount": 250,
+              "min": 0.002846999999746913,
+              "median": 0.00670699999682256,
+              "p95": 3.6912179999999353,
+              "max": 533.4273599999979,
+              "mean": 3.326184939999934
+            },
+            "frameQueueWaitMs": {
+              "count": 523,
+              "retainedCount": 523,
+              "min": 0.004631000003428198,
+              "median": 0.012705000001005828,
+              "p95": 0.020961000001989305,
+              "max": 22.27592999999979,
+              "mean": 0.3188688527723598
+            },
+            "agentTransactionMs": {
+              "count": 250,
+              "retainedCount": 250,
+              "min": 13.116860000001907,
+              "median": 27.129485000001296,
+              "p95": 33.028214999998454,
+              "max": 37.56015499999921,
+              "mean": 27.24125437600007
+            },
+            "frameTransactionMs": {
+              "count": 523,
+              "retainedCount": 523,
+              "min": 8.898474000001443,
+              "median": 11.606458999999631,
+              "p95": 25.82622099999935,
+              "max": 1023.9253020000033,
+              "mean": 30.850807789675294
+            },
+            "processActiveTransactions": 0,
+            "processMaxObservedConcurrent": 2,
+            "processOverlapEvents": 259,
+            "closed": false
+          },
+          {
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "active": 0,
+            "agentQueued": 0,
+            "frameQueued": 0,
+            "maxObservedConcurrent": 1,
+            "maxObservedAgentQueue": 1,
+            "maxObservedFrameQueue": 1,
+            "agentRequests": 250,
+            "frameRequests": 16,
+            "agentScreenshotAttempts": 250,
+            "frameScreenshotAttempts": 16,
+            "agentScreenshotRetries": 0,
+            "completedAgent": 250,
+            "completedFrame": 16,
+            "failedAgent": 0,
+            "rejectedAgent": 0,
+            "droppedFrame": 0,
+            "coalescedFrame": 0,
+            "cancelled": 0,
+            "agentWaitMaxMs": 0.03307399999903282,
+            "frameWaitMaxMs": 0.032344999999622814,
+            "agentScreenshotTimeouts": 0,
+            "recoveredAgentScreenshotTimeouts": 0,
+            "unrecoveredAgentScreenshotTimeouts": 0,
+            "frameScreenshotTimeouts": 0,
+            "agentQueueWaitMs": {
+              "count": 250,
+              "retainedCount": 250,
+              "min": 0.0027269999991403893,
+              "median": 0.004236999997374369,
+              "p95": 0.009017000000312692,
+              "max": 0.03307399999903282,
+              "mean": 0.005226444000087213
+            },
+            "frameQueueWaitMs": {
+              "count": 16,
+              "retainedCount": 16,
+              "min": 0.01238999999986845,
+              "median": 0.01989400000002206,
+              "p95": 0.02290299999981471,
+              "max": 0.032344999999622814,
+              "mean": 0.019332374999564195
+            },
+            "agentTransactionMs": {
+              "count": 250,
+              "retainedCount": 250,
+              "min": 8.931689999997616,
+              "median": 16.59071700000277,
+              "p95": 27.972703999999794,
+              "max": 32.15686799999821,
+              "mean": 17.711976819999936
+            },
+            "frameTransactionMs": {
+              "count": 16,
+              "retainedCount": 16,
+              "min": 8.236367999998038,
+              "median": 13.573465000000397,
+              "p95": 16.418021999999837,
+              "max": 236.11514699999998,
+              "mean": 26.999101249999967
+            },
+            "processActiveTransactions": 0,
+            "processMaxObservedConcurrent": 2,
+            "processOverlapEvents": 259,
+            "closed": false
+          }
+        ],
+        "heldInput": [
+          {
+            "browserSessionId": "session_M0lvV82jYpslMWUtRIjr9Q_M",
+            "buttons": [],
+            "keys": []
+          },
+          {
+            "browserSessionId": "session_V2DpF7Dbisuqv3e8NFOTHsBF",
+            "buttons": [],
+            "keys": []
+          }
+        ]
+      }
+    },
+    "cleanup": {
+      "processTreeExited": true,
+      "processCount": 3,
+      "gatewayClients": 0,
+      "gatewaySelectedClients": 0,
+      "gatewayPendingFrames": 0,
+      "brokerSubscriptions": 0,
+      "browserdWorkspaceSubscriptions": 0,
+      "browserdWorkspaceLedgerEntries": 0
+    }
+  },
+  "piReconnect": {
+    "sameActorSessionUsable": true
+  },
+  "webxdRestart": {
+    "browserdRuntimePreserved": true,
+    "sessionRehydrated": true,
+    "screenshotSucceeded": true
+  },
+  "browserdReplacement": {
+    "oldRuntimeInstanceId": "runtime_iU0PvzaI8MMze_vULel_kGic",
+    "newRuntimeInstanceId": "runtime_xQeGhFMVAwhg8hwhWHnh6k1i",
+    "oldSessionRejected": true,
+    "newSessionWorked": true,
+    "captureCoordinatorSegments": {
+      "beforeReplacement": {
+        "sessionCount": 2,
+        "sameSessionMaximumConcurrency": 1,
+        "processActiveTransactions": 0,
+        "processMaximumConcurrency": 2,
+        "processOverlapEvents": 259,
+        "agentRequests": 501,
+        "workspaceRequests": 540,
+        "agentScreenshotAttempts": 501,
+        "workspaceScreenshotAttempts": 540,
+        "agentScreenshotRetries": 0,
+        "typedTimeouts": 0,
+        "agentTypedTimeouts": 0,
+        "workspaceTypedTimeouts": 0,
+        "recoveredAgentTimeouts": 0,
+        "unrecoveredAgentTimeouts": 0,
+        "unrecoveredAgentFailures": 0,
+        "droppedWorkspaceRequests": 0,
+        "coalescedWorkspaceRequests": 0,
+        "maximumAgentQueueDepth": 1,
+        "maximumWorkspaceQueueDepth": 1,
+        "agentQueueWaitMs": {
+          "count": 501,
+          "retainedCount": 501,
+          "min": 0.0027269999991403893,
+          "medianUpperBound": 0.0067319999980099965,
+          "p95UpperBound": 3.6912179999999353,
+          "max": 533.4273599999979,
+          "meanUpperBound": 3.3129681434262577
+        },
+        "workspaceQueueWaitMs": {
+          "count": 540,
+          "retainedCount": 540,
+          "min": 0.004631000003428198,
+          "medianUpperBound": 0.01989400000002206,
+          "p95UpperBound": 0.02290299999981471,
+          "max": 22.27592999999979,
+          "meanUpperBound": 0.3188688527723598
+        },
+        "agentTransactionMs": {
+          "count": 501,
+          "retainedCount": 501,
+          "min": 8.931689999997616,
+          "medianUpperBound": 27.129485000001296,
+          "p95UpperBound": 33.028214999998454,
+          "max": 37.56015499999921,
+          "meanUpperBound": 27.201281553784852
+        },
+        "workspaceTransactionMs": {
+          "count": 540,
+          "retainedCount": 540,
+          "min": 8.236367999998038,
+          "medianUpperBound": 13.573465000000397,
+          "p95UpperBound": 25.82622099999935,
+          "max": 1023.9253020000033,
+          "meanUpperBound": 30.850807789675294
+        }
+      },
+      "afterReplacement": {
+        "sessionCount": 0,
+        "sameSessionMaximumConcurrency": 0,
+        "processActiveTransactions": 0,
+        "processMaximumConcurrency": 0,
+        "processOverlapEvents": 0,
+        "agentRequests": 0,
+        "workspaceRequests": 0,
+        "agentScreenshotAttempts": 0,
+        "workspaceScreenshotAttempts": 0,
+        "agentScreenshotRetries": 0,
+        "typedTimeouts": 0,
+        "agentTypedTimeouts": 0,
+        "workspaceTypedTimeouts": 0,
+        "recoveredAgentTimeouts": 0,
+        "unrecoveredAgentTimeouts": 0,
+        "unrecoveredAgentFailures": 0,
+        "droppedWorkspaceRequests": 0,
+        "coalescedWorkspaceRequests": 0,
+        "maximumAgentQueueDepth": 0,
+        "maximumWorkspaceQueueDepth": 0,
+        "agentQueueWaitMs": {
+          "count": 0,
+          "retainedCount": 0,
+          "min": 0,
+          "medianUpperBound": 0,
+          "p95UpperBound": 0,
+          "max": 0,
+          "meanUpperBound": 0
+        },
+        "workspaceQueueWaitMs": {
+          "count": 0,
+          "retainedCount": 0,
+          "min": 0,
+          "medianUpperBound": 0,
+          "p95UpperBound": 0,
+          "max": 0,
+          "meanUpperBound": 0
+        },
+        "agentTransactionMs": {
+          "count": 0,
+          "retainedCount": 0,
+          "min": 0,
+          "medianUpperBound": 0,
+          "p95UpperBound": 0,
+          "max": 0,
+          "meanUpperBound": 0
+        },
+        "workspaceTransactionMs": {
+          "count": 0,
+          "retainedCount": 0,
+          "min": 0,
+          "medianUpperBound": 0,
+          "p95UpperBound": 0,
+          "max": 0,
+          "meanUpperBound": 0
+        }
+      }
+    }
+  },
+  "proxyHealth": {
+    "healthyCapability": true,
+    "unhealthyCapability": false,
+    "recovered": true
+  },
+  "searchReadIndependence": {
+    "succeededDuringBrowserdAndProxyOutage": true
+  },
+  "downloadDenial": {
+    "eventCount": 1,
+    "forbiddenFilesRemaining": 0
+  },
+  "stableCloseRetry": {
+    "firstResponseLost": true,
+    "transparentExactRetrySucceeded": true,
+    "idempotencyKey": "phase2b-close-response-loss",
+    "injectedDropObserved": true
+  },
+  "idempotency": {
+    "byPolicy": {
+      "durable-mutation": {
+        "entries": 6,
+        "bytes": 4114
+      },
+      "ephemeral-observation": {
+        "entries": 0,
+        "bytes": 0
+      },
+      "image-read": {
+        "entries": 0,
+        "bytes": 0
+      }
+    },
+    "imageBytesRetained": 0
+  },
+  "webxd": {
+    "pid": 968154,
+    "heapUsedBytes": 21714648,
+    "clientConnections": 3,
+    "liveBindings": 3,
+    "idempotency": {
+      "byPolicy": {
+        "durable-mutation": {
+          "entries": 6,
+          "bytes": 4114
+        },
+        "ephemeral-observation": {
+          "entries": 0,
+          "bytes": 0
+        },
+        "image-read": {
+          "entries": 0,
+          "bytes": 0
+        }
+      },
+      "imageBytesRetained": 0
+    },
+    "browser": {
+      "runtimeInstanceId": "runtime_xQeGhFMVAwhg8hwhWHnh6k1i",
+      "sessions": 0,
+      "observationMetadata": {
+        "count": 0,
+        "bytes": 0
+      },
+      "imageBytesRetained": 0,
+      "actorConnections": 1
+    },
+    "workspace": {
+      "clientConnections": 1,
+      "boundClients": 1,
+      "selectedClients": 1,
+      "outboundBytes": 0,
+      "pendingFrames": 0,
+      "droppedFrames": 0,
+      "workspaceRevision": 13,
+      "broker": {
+        "runtimeInstanceId": "runtime_xQeGhFMVAwhg8hwhWHnh6k1i",
+        "connected": true,
+        "pendingRequests": 0,
+        "subscriptions": 1
+      }
+    },
+    "testResponseDropped": true,
+    "stream": {
+      "connectionCount": 1,
+      "active": false,
+      "frameCount": 0,
+      "duplicateFrameSequences": 0,
+      "nonMonotonicFrameSequences": 0,
+      "uniqueFrameSequences": 0,
+      "lastFrameSequence": 0
+    }
+  },
+  "browserd": {
+    "pid": 968254,
+    "heapUsedBytes": 24661992,
+    "runtimeInstanceId": "runtime_xQeGhFMVAwhg8hwhWHnh6k1i",
+    "connections": 3,
+    "sessions": 0,
+    "tabs": 0,
+    "subscriptions": 0,
+    "workspaceSubscriptions": 0,
+    "workspaceLedgerEntries": 0,
+    "operations": 4,
+    "artifacts": 0,
+    "artifactBytes": 0,
+    "heldInput": [],
+    "chrome": [],
+    "droppedFrames": 0,
+    "captureCoordinators": [],
+    "captureCoordinator": {
+      "sessionCount": 0,
+      "sameSessionMaximumConcurrency": 0,
+      "processActiveTransactions": 0,
+      "processMaximumConcurrency": 0,
+      "processOverlapEvents": 0,
+      "agentRequests": 0,
+      "workspaceRequests": 0,
+      "agentScreenshotAttempts": 0,
+      "workspaceScreenshotAttempts": 0,
+      "agentScreenshotRetries": 0,
+      "typedTimeouts": 0,
+      "agentTypedTimeouts": 0,
+      "workspaceTypedTimeouts": 0,
+      "recoveredAgentTimeouts": 0,
+      "unrecoveredAgentTimeouts": 0,
+      "unrecoveredAgentFailures": 0,
+      "droppedWorkspaceRequests": 0,
+      "coalescedWorkspaceRequests": 0,
+      "maximumAgentQueueDepth": 0,
+      "maximumWorkspaceQueueDepth": 0,
+      "agentQueueWaitMs": {
+        "count": 0,
+        "retainedCount": 0,
+        "min": 0,
+        "medianUpperBound": 0,
+        "p95UpperBound": 0,
+        "max": 0,
+        "meanUpperBound": 0
+      },
+      "workspaceQueueWaitMs": {
+        "count": 0,
+        "retainedCount": 0,
+        "min": 0,
+        "medianUpperBound": 0,
+        "p95UpperBound": 0,
+        "max": 0,
+        "meanUpperBound": 0
+      },
+      "agentTransactionMs": {
+        "count": 0,
+        "retainedCount": 0,
+        "min": 0,
+        "medianUpperBound": 0,
+        "p95UpperBound": 0,
+        "max": 0,
+        "meanUpperBound": 0
+      },
+      "workspaceTransactionMs": {
+        "count": 0,
+        "retainedCount": 0,
+        "min": 0,
+        "medianUpperBound": 0,
+        "p95UpperBound": 0,
+        "max": 0,
+        "meanUpperBound": 0
+      }
+    },
+    "actionTimings": [
+      {
+        "browserSessionId": "session_i-rU36qGrFmlC6coZnTu8GSG",
+        "tabId": "tab_vIRqs-dWPWjdWcOxEUQbfbUr",
+        "recordedMonotonicMs": 1754.377116,
+        "pathDurationMs": 511.95143340596087,
+        "pathWallMs": 528.2446299999999,
+        "generatedNominalPathDurationMs": 511.95143340596087,
+        "sampleReplayWallMs": 528.2446299999999,
+        "cdpInputLatencyMs": 116.56168800000046,
+        "cdpInputMaxLatencyMs": 17.179188000000067,
+        "overlayUpdateLatencyMs": 9.903774999999769,
+        "postPathGuardMs": 0.6512479999998959,
+        "sampleCount": 16,
+        "completionAfterPathMs": 134.95968400000015,
+        "totalMs": 665.16824
+      }
+    ],
+    "dispatchTimings": [
+      {
+        "kind": "session.list",
+        "durationMs": 0.21997899999996662
+      },
+      {
+        "kind": "session.create",
+        "durationMs": 455.20568499999996
+      },
+      {
+        "kind": "session.list",
+        "durationMs": 0.0843929999998636
+      },
+      {
+        "kind": "observe.screenshot",
+        "durationMs": 36.05192899999997
+      },
+      {
+        "kind": "session.list",
+        "durationMs": 0.025239000000055967
+      },
+      {
+        "kind": "artifact.read",
+        "durationMs": 0.11286999999992986
+      },
+      {
+        "kind": "session.list",
+        "durationMs": 0.028620000000046275
+      },
+      {
+        "kind": "action.coordinate",
+        "durationMs": 672.3713789999999
+      },
+      {
+        "kind": "tab.list",
+        "durationMs": 0.0555859999999484
+      },
+      {
+        "kind": "session.list",
+        "durationMs": 0.021836000000348577
+      },
+      {
+        "kind": "session.close",
+        "durationMs": 63.36276299999963
+      },
+      {
+        "kind": "capabilities.get",
+        "durationMs": 0.19892199999958393
+      }
+    ]
+  },
+  "workspace": {
+    "realTauriProcess": true,
+    "pid": 960033,
+    "startupToFrontendReadyMs": 307.3982109999997,
+    "startupTimingsMs": {
+      "descriptorDiscovery": 0,
+      "gatewayBind": 1,
+      "firstSnapshot": 141,
+      "firstSelectedFrame": 323
+    },
+    "visibleSnapshots": 1419,
+    "selections": 214,
+    "framesReceived": 750,
+    "framesPainted": 748,
+    "framesDropped": 2,
+    "stableSwitchLatencyMs": {
+      "count": 203,
+      "min": 16,
+      "median": 21,
+      "p95": 28,
+      "max": 59,
+      "mean": 21.995073891625616
+    },
+    "gate0StableSwitchLatencyMs": {
+      "count": 200,
+      "min": 16,
+      "median": 21,
+      "p95": 28,
+      "max": 38,
+      "mean": 21.775
+    },
+    "stableTabSwitchLatencyMs": {
+      "count": 2,
+      "min": 23,
+      "median": 23,
+      "p95": 23,
+      "max": 59,
+      "mean": 41
+    },
+    "stableSessionSwitchLatencyMs": {
+      "count": 1,
+      "min": 28,
+      "median": 28,
+      "p95": 28,
+      "max": 28,
+      "mean": 28
+    },
+    "switchP95DevelopmentTargetMs": 1500,
+    "switchP95DevelopmentTargetMet": true,
+    "recoverySwitchLatencyMs": {
+      "count": 8,
+      "min": 19,
+      "median": 41,
+      "p95": 179,
+      "max": 230,
+      "mean": 86.75
+    },
+    "secondaryLauncherToPaintMs": {
+      "count": 211,
+      "min": 73.47520500000064,
+      "median": 78.85247700000036,
+      "p95": 104.95692499999859,
+      "max": 283.7238430000016,
+      "mean": 83.43613823222746
+    },
+    "switchBreakdowns": [
+      {
+        "kind": "stable-tab",
+        "totalMs": 59,
+        "brokerMs": 3,
+        "frameMs": 56,
+        "launcherMs": 127.91690300000027
+      },
+      {
+        "kind": "stable-tab",
+        "totalMs": 23,
+        "brokerMs": 2,
+        "frameMs": 21,
+        "launcherMs": 80.06926400000066
+      },
+      {
+        "kind": "stable-session",
+        "totalMs": 28,
+        "brokerMs": 2,
+        "frameMs": 26,
+        "launcherMs": 98.97586300000057
+      },
+      {
+        "kind": "gate0-browserd-replacement",
+        "cycle": 1,
+        "totalMs": 230,
+        "brokerMs": 1,
+        "frameMs": 229,
+        "launcherMs": 283.7238430000016
+      },
+      {
+        "kind": "gate0-browserd-replacement",
+        "cycle": 1,
+        "totalMs": 44,
+        "brokerMs": 2,
+        "frameMs": 42,
+        "launcherMs": 101.50514400000066
+      },
+      {
+        "kind": "gate0-browserd-replacement",
+        "cycle": 1,
+        "totalMs": 19,
+        "brokerMs": 2,
+        "frameMs": 17,
+        "launcherMs": 73.47520500000064
+      },
+      {
+        "kind": "gate0-browserd-replacement",
+        "cycle": 2,
+        "totalMs": 179,
+        "brokerMs": 2,
+        "frameMs": 177,
+        "launcherMs": 229.91624800000136
+      },
+      {
+        "kind": "gate0-browserd-replacement",
+        "cycle": 2,
+        "totalMs": 41,
+        "brokerMs": 2,
+        "frameMs": 39,
+        "launcherMs": 107.040732999998
+      },
+      {
+        "kind": "gate0-browserd-replacement",
+        "cycle": 2,
+        "totalMs": 19,
+        "brokerMs": 2,
+        "frameMs": 17,
+        "launcherMs": 81.7900890000019
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 23,
+        "brokerMs": 1,
+        "frameMs": 22,
+        "launcherMs": 75.97147100000075
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 20,
+        "brokerMs": 1,
+        "frameMs": 19,
+        "launcherMs": 81.26576299999942
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 17,
+        "brokerMs": 1,
+        "frameMs": 16,
+        "launcherMs": 84.92476600000009
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 20,
+        "brokerMs": 1,
+        "frameMs": 19,
+        "launcherMs": 76.42077699999936
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 76.63238600000113
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 78.056274999999
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 19,
+        "brokerMs": 1,
+        "frameMs": 18,
+        "launcherMs": 75.70770099999936
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 23,
+        "brokerMs": 1,
+        "frameMs": 22,
+        "launcherMs": 77.45652999999947
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 24,
+        "brokerMs": 2,
+        "frameMs": 22,
+        "launcherMs": 75.33173199999874
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 20,
+        "brokerMs": 2,
+        "frameMs": 18,
+        "launcherMs": 81.19961200000034
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 17,
+        "brokerMs": 2,
+        "frameMs": 15,
+        "launcherMs": 77.47810500000196
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 77.60102000000188
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 19,
+        "brokerMs": 1,
+        "frameMs": 18,
+        "launcherMs": 83.4291830000002
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 28,
+        "brokerMs": 1,
+        "frameMs": 27,
+        "launcherMs": 107.98319300000003
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 24,
+        "brokerMs": 2,
+        "frameMs": 22,
+        "launcherMs": 73.96438499999931
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 26,
+        "brokerMs": 2,
+        "frameMs": 24,
+        "launcherMs": 75.471035999999
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 27,
+        "brokerMs": 1,
+        "frameMs": 26,
+        "launcherMs": 76.74587199999951
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 17,
+        "brokerMs": 1,
+        "frameMs": 16,
+        "launcherMs": 74.75091800000155
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 77.24437300000136
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 17,
+        "brokerMs": 1,
+        "frameMs": 16,
+        "launcherMs": 75.9983289999982
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 27,
+        "brokerMs": 2,
+        "frameMs": 25,
+        "launcherMs": 86.29498799999783
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 27,
+        "brokerMs": 2,
+        "frameMs": 25,
+        "launcherMs": 75.18479799999841
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 26,
+        "brokerMs": 1,
+        "frameMs": 25,
+        "launcherMs": 78.67349100000138
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 22,
+        "brokerMs": 2,
+        "frameMs": 20,
+        "launcherMs": 83.10152900000321
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 20,
+        "brokerMs": 1,
+        "frameMs": 19,
+        "launcherMs": 79.27818600000319
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 28,
+        "brokerMs": 2,
+        "frameMs": 26,
+        "launcherMs": 76.64199899999949
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 81.55314500000168
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 35,
+        "brokerMs": 1,
+        "frameMs": 34,
+        "launcherMs": 103.81587599999693
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 24,
+        "brokerMs": 2,
+        "frameMs": 22,
+        "launcherMs": 80.5042289999983
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 21,
+        "brokerMs": 1,
+        "frameMs": 20,
+        "launcherMs": 78.3890449999999
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 23,
+        "brokerMs": 1,
+        "frameMs": 22,
+        "launcherMs": 79.16433200000029
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 23,
+        "brokerMs": 1,
+        "frameMs": 22,
+        "launcherMs": 77.3283479999991
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 24,
+        "brokerMs": 1,
+        "frameMs": 23,
+        "launcherMs": 80.1384799999978
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 20,
+        "brokerMs": 1,
+        "frameMs": 19,
+        "launcherMs": 78.74500899999839
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 22,
+        "brokerMs": 1,
+        "frameMs": 21,
+        "launcherMs": 75.79693899999984
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 17,
+        "brokerMs": 1,
+        "frameMs": 16,
+        "launcherMs": 75.31024900000193
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 2,
+        "frameMs": 16,
+        "launcherMs": 91.10997100000168
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 27,
+        "brokerMs": 2,
+        "frameMs": 25,
+        "launcherMs": 78.97695899999962
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 20,
+        "brokerMs": 2,
+        "frameMs": 18,
+        "launcherMs": 84.58131800000046
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 21,
+        "brokerMs": 2,
+        "frameMs": 19,
+        "launcherMs": 77.78613499999847
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 23,
+        "brokerMs": 1,
+        "frameMs": 22,
+        "launcherMs": 76.81587800000125
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 20,
+        "brokerMs": 1,
+        "frameMs": 19,
+        "launcherMs": 78.9275979999984
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 22,
+        "brokerMs": 2,
+        "frameMs": 20,
+        "launcherMs": 77.88180099999954
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 17,
+        "brokerMs": 2,
+        "frameMs": 15,
+        "launcherMs": 77.82892400000128
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 23,
+        "brokerMs": 1,
+        "frameMs": 22,
+        "launcherMs": 77.00090400000045
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 24,
+        "brokerMs": 2,
+        "frameMs": 22,
+        "launcherMs": 77.72903799999767
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 20,
+        "brokerMs": 1,
+        "frameMs": 19,
+        "launcherMs": 78.70287299999836
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 27,
+        "brokerMs": 1,
+        "frameMs": 26,
+        "launcherMs": 90.58822800000053
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 19,
+        "brokerMs": 1,
+        "frameMs": 18,
+        "launcherMs": 78.85247700000036
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 21,
+        "brokerMs": 2,
+        "frameMs": 19,
+        "launcherMs": 75.62090800000078
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 26,
+        "brokerMs": 2,
+        "frameMs": 24,
+        "launcherMs": 79.63844999999856
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 78.9482820000012
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 25,
+        "brokerMs": 1,
+        "frameMs": 24,
+        "launcherMs": 78.3599979999999
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 24,
+        "brokerMs": 2,
+        "frameMs": 22,
+        "launcherMs": 81.26175199999852
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 34,
+        "brokerMs": 2,
+        "frameMs": 32,
+        "launcherMs": 108.78630699999849
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 26,
+        "brokerMs": 2,
+        "frameMs": 24,
+        "launcherMs": 77.06303200000184
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 24,
+        "brokerMs": 1,
+        "frameMs": 23,
+        "launcherMs": 80.02752200000032
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 19,
+        "brokerMs": 1,
+        "frameMs": 18,
+        "launcherMs": 84.42882600000303
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 23,
+        "brokerMs": 1,
+        "frameMs": 22,
+        "launcherMs": 80.53600000000006
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 21,
+        "brokerMs": 1,
+        "frameMs": 20,
+        "launcherMs": 75.60422599999947
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 19,
+        "brokerMs": 2,
+        "frameMs": 17,
+        "launcherMs": 76.35262599999987
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 2,
+        "frameMs": 16,
+        "launcherMs": 78.21669099999781
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 21,
+        "brokerMs": 1,
+        "frameMs": 20,
+        "launcherMs": 74.69999499999903
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 20,
+        "brokerMs": 2,
+        "frameMs": 18,
+        "launcherMs": 80.17007100000046
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 21,
+        "brokerMs": 2,
+        "frameMs": 19,
+        "launcherMs": 75.1123520000001
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 19,
+        "brokerMs": 1,
+        "frameMs": 18,
+        "launcherMs": 79.80688400000145
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 24,
+        "brokerMs": 2,
+        "frameMs": 22,
+        "launcherMs": 75.35486999999921
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 16,
+        "brokerMs": 1,
+        "frameMs": 15,
+        "launcherMs": 75.34442999999737
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 27,
+        "brokerMs": 2,
+        "frameMs": 25,
+        "launcherMs": 75.94228300000032
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 23,
+        "brokerMs": 2,
+        "frameMs": 21,
+        "launcherMs": 83.87313700000232
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 21,
+        "brokerMs": 2,
+        "frameMs": 19,
+        "launcherMs": 78.13459499999954
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 21,
+        "brokerMs": 1,
+        "frameMs": 20,
+        "launcherMs": 78.28225299999758
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 22,
+        "brokerMs": 1,
+        "frameMs": 21,
+        "launcherMs": 75.32501299999785
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 24,
+        "brokerMs": 2,
+        "frameMs": 22,
+        "launcherMs": 76.19886400000178
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 28,
+        "brokerMs": 2,
+        "frameMs": 26,
+        "launcherMs": 76.47427699999753
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 28,
+        "brokerMs": 1,
+        "frameMs": 27,
+        "launcherMs": 76.83784799999921
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 17,
+        "brokerMs": 1,
+        "frameMs": 16,
+        "launcherMs": 78.45380999999907
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 78.45889499999976
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 2,
+        "frameMs": 16,
+        "launcherMs": 75.06899599999815
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 31,
+        "brokerMs": 1,
+        "frameMs": 30,
+        "launcherMs": 101.64346300000034
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 24,
+        "brokerMs": 2,
+        "frameMs": 22,
+        "launcherMs": 76.75209000000177
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 25,
+        "brokerMs": 2,
+        "frameMs": 23,
+        "launcherMs": 75.54283099999884
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 26,
+        "brokerMs": 1,
+        "frameMs": 25,
+        "launcherMs": 76.97867100000076
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 20,
+        "brokerMs": 2,
+        "frameMs": 18,
+        "launcherMs": 76.34040099999766
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 25,
+        "brokerMs": 2,
+        "frameMs": 23,
+        "launcherMs": 80.63179899999886
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 23,
+        "brokerMs": 2,
+        "frameMs": 21,
+        "launcherMs": 79.68861200000174
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 26,
+        "brokerMs": 1,
+        "frameMs": 25,
+        "launcherMs": 74.8428989999993
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 19,
+        "brokerMs": 2,
+        "frameMs": 17,
+        "launcherMs": 76.15504299999884
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 25,
+        "brokerMs": 1,
+        "frameMs": 24,
+        "launcherMs": 80.30434199999945
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 24,
+        "brokerMs": 1,
+        "frameMs": 23,
+        "launcherMs": 79.65790500000003
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 78.19375700000091
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 26,
+        "brokerMs": 1,
+        "frameMs": 25,
+        "launcherMs": 77.33821399999943
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 19,
+        "brokerMs": 1,
+        "frameMs": 18,
+        "launcherMs": 76.21104500000001
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 25,
+        "brokerMs": 1,
+        "frameMs": 24,
+        "launcherMs": 82.98440800000026
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 23,
+        "brokerMs": 1,
+        "frameMs": 22,
+        "launcherMs": 77.32902800000011
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 18,
+        "brokerMs": 2,
+        "frameMs": 16,
+        "launcherMs": 77.84832200000164
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 27,
+        "brokerMs": 1,
+        "frameMs": 26,
+        "launcherMs": 74.77178099999946
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 25,
+        "brokerMs": 2,
+        "frameMs": 23,
+        "launcherMs": 81.24009500000102
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 19,
+        "brokerMs": 1,
+        "frameMs": 18,
+        "launcherMs": 77.07300100000066
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 2,
+        "frameMs": 16,
+        "launcherMs": 81.78758299999754
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 83.3043319999997
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 23,
+        "brokerMs": 2,
+        "frameMs": 21,
+        "launcherMs": 77.6226170000009
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 26,
+        "brokerMs": 1,
+        "frameMs": 25,
+        "launcherMs": 85.79720500000258
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 26,
+        "brokerMs": 1,
+        "frameMs": 25,
+        "launcherMs": 76.34963500000231
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 24,
+        "brokerMs": 1,
+        "frameMs": 23,
+        "launcherMs": 83.60113700000147
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 21,
+        "brokerMs": 1,
+        "frameMs": 20,
+        "launcherMs": 77.93034500000067
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 23,
+        "brokerMs": 1,
+        "frameMs": 22,
+        "launcherMs": 77.51000900000145
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 20,
+        "brokerMs": 2,
+        "frameMs": 18,
+        "launcherMs": 80.91038800000024
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 34,
+        "brokerMs": 1,
+        "frameMs": 33,
+        "launcherMs": 108.77416199999789
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 17,
+        "brokerMs": 1,
+        "frameMs": 16,
+        "launcherMs": 76.94818799999848
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 22,
+        "brokerMs": 2,
+        "frameMs": 20,
+        "launcherMs": 78.26585400000113
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 22,
+        "brokerMs": 1,
+        "frameMs": 21,
+        "launcherMs": 77.87218500000017
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 19,
+        "brokerMs": 1,
+        "frameMs": 18,
+        "launcherMs": 79.6112269999976
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 21,
+        "brokerMs": 1,
+        "frameMs": 20,
+        "launcherMs": 76.80210200000147
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 21,
+        "brokerMs": 2,
+        "frameMs": 19,
+        "launcherMs": 78.70424400000047
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 21,
+        "brokerMs": 2,
+        "frameMs": 19,
+        "launcherMs": 76.0040399999998
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 76.56026099999872
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 20,
+        "brokerMs": 2,
+        "frameMs": 18,
+        "launcherMs": 80.19099799999822
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 22,
+        "brokerMs": 2,
+        "frameMs": 20,
+        "launcherMs": 77.29192399999738
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 19,
+        "brokerMs": 2,
+        "frameMs": 17,
+        "launcherMs": 83.46097600000212
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 79.44316199999957
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 19,
+        "brokerMs": 1,
+        "frameMs": 18,
+        "launcherMs": 76.07688000000053
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 18,
+        "brokerMs": 2,
+        "frameMs": 16,
+        "launcherMs": 75.34467500000392
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 21,
+        "brokerMs": 1,
+        "frameMs": 20,
+        "launcherMs": 76.51018900000054
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 16,
+        "brokerMs": 1,
+        "frameMs": 15,
+        "launcherMs": 78.61819800000376
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 28,
+        "brokerMs": 2,
+        "frameMs": 26,
+        "launcherMs": 81.21744499999477
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 78.40176200000133
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 76.47019999999611
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 27,
+        "brokerMs": 1,
+        "frameMs": 26,
+        "launcherMs": 79.965787000001
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 19,
+        "brokerMs": 1,
+        "frameMs": 18,
+        "launcherMs": 93.1533169999966
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 17,
+        "brokerMs": 2,
+        "frameMs": 15,
+        "launcherMs": 80.03806500000064
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 20,
+        "brokerMs": 2,
+        "frameMs": 18,
+        "launcherMs": 79.54222599999775
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 80.5751339999988
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 36,
+        "brokerMs": 1,
+        "frameMs": 35,
+        "launcherMs": 105.69576000000234
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 19,
+        "brokerMs": 1,
+        "frameMs": 18,
+        "launcherMs": 76.99166599999444
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 27,
+        "brokerMs": 1,
+        "frameMs": 26,
+        "launcherMs": 77.87190199999895
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 16,
+        "brokerMs": 1,
+        "frameMs": 15,
+        "launcherMs": 82.32731600000261
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 23,
+        "brokerMs": 2,
+        "frameMs": 21,
+        "launcherMs": 77.0829950000043
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 77.20933500000683
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 17,
+        "brokerMs": 1,
+        "frameMs": 16,
+        "launcherMs": 76.49848900000507
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 18,
+        "brokerMs": 2,
+        "frameMs": 16,
+        "launcherMs": 79.84434200000396
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 19,
+        "brokerMs": 2,
+        "frameMs": 17,
+        "launcherMs": 82.97295399999712
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 20,
+        "brokerMs": 1,
+        "frameMs": 19,
+        "launcherMs": 75.91016500000114
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 78.92317000000185
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 19,
+        "brokerMs": 2,
+        "frameMs": 17,
+        "launcherMs": 83.96163199999864
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 17,
+        "brokerMs": 1,
+        "frameMs": 16,
+        "launcherMs": 79.42129299999942
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 19,
+        "brokerMs": 1,
+        "frameMs": 18,
+        "launcherMs": 84.43258399999468
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 20,
+        "brokerMs": 1,
+        "frameMs": 19,
+        "launcherMs": 78.29884399999719
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 85.1755639999974
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 24,
+        "brokerMs": 1,
+        "frameMs": 23,
+        "launcherMs": 80.68018499999744
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 21,
+        "brokerMs": 1,
+        "frameMs": 20,
+        "launcherMs": 80.75595800000156
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 2,
+        "frameMs": 16,
+        "launcherMs": 87.26425400000153
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 38,
+        "brokerMs": 2,
+        "frameMs": 36,
+        "launcherMs": 111.27478400000109
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 26,
+        "brokerMs": 1,
+        "frameMs": 25,
+        "launcherMs": 78.34385499999917
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 27,
+        "brokerMs": 2,
+        "frameMs": 25,
+        "launcherMs": 76.8699970000016
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 26,
+        "brokerMs": 2,
+        "frameMs": 24,
+        "launcherMs": 78.66125499999907
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 79.27394699999422
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 29,
+        "brokerMs": 2,
+        "frameMs": 27,
+        "launcherMs": 76.44776300000376
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 27,
+        "brokerMs": 1,
+        "frameMs": 26,
+        "launcherMs": 78.04443899999751
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 76.32063099999505
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 22,
+        "brokerMs": 1,
+        "frameMs": 21,
+        "launcherMs": 81.12001900000178
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 20,
+        "brokerMs": 1,
+        "frameMs": 19,
+        "launcherMs": 81.04845899999782
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 25,
+        "brokerMs": 2,
+        "frameMs": 23,
+        "launcherMs": 76.30688399999781
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 2,
+        "frameMs": 16,
+        "launcherMs": 82.07587200000125
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 78.94165400000202
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 19,
+        "brokerMs": 2,
+        "frameMs": 17,
+        "launcherMs": 78.79185699999653
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 24,
+        "brokerMs": 1,
+        "frameMs": 23,
+        "launcherMs": 82.04807900000014
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 20,
+        "brokerMs": 1,
+        "frameMs": 19,
+        "launcherMs": 80.06115900000441
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 21,
+        "brokerMs": 2,
+        "frameMs": 19,
+        "launcherMs": 82.1709239999982
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 17,
+        "brokerMs": 1,
+        "frameMs": 16,
+        "launcherMs": 76.86948800000391
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 17,
+        "brokerMs": 1,
+        "frameMs": 16,
+        "launcherMs": 78.90371600000071
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 17,
+        "brokerMs": 1,
+        "frameMs": 16,
+        "launcherMs": 76.59705499999836
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 2,
+        "frameMs": 16,
+        "launcherMs": 76.89747999999963
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 20,
+        "brokerMs": 2,
+        "frameMs": 18,
+        "launcherMs": 78.63006899999891
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 29,
+        "brokerMs": 1,
+        "frameMs": 28,
+        "launcherMs": 77.92706700000417
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 28,
+        "brokerMs": 2,
+        "frameMs": 26,
+        "launcherMs": 83.63573699999688
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 22,
+        "brokerMs": 2,
+        "frameMs": 20,
+        "launcherMs": 104.03315999999904
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 20,
+        "brokerMs": 2,
+        "frameMs": 18,
+        "launcherMs": 90.42410100000416
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 17,
+        "brokerMs": 2,
+        "frameMs": 15,
+        "launcherMs": 75.88633899999695
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 33,
+        "brokerMs": 1,
+        "frameMs": 32,
+        "launcherMs": 104.95692499999859
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 21,
+        "brokerMs": 2,
+        "frameMs": 19,
+        "launcherMs": 80.91812600000412
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 22,
+        "brokerMs": 1,
+        "frameMs": 21,
+        "launcherMs": 76.42180299999745
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 19,
+        "brokerMs": 1,
+        "frameMs": 18,
+        "launcherMs": 81.60499100000015
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 28,
+        "brokerMs": 2,
+        "frameMs": 26,
+        "launcherMs": 80.12688799999887
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 22,
+        "brokerMs": 1,
+        "frameMs": 21,
+        "launcherMs": 83.87221300000238
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 20,
+        "brokerMs": 1,
+        "frameMs": 19,
+        "launcherMs": 81.93525700000464
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 31,
+        "brokerMs": 1,
+        "frameMs": 30,
+        "launcherMs": 106.43044299999747
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 16,
+        "brokerMs": 1,
+        "frameMs": 15,
+        "launcherMs": 82.5996460000024
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 19,
+        "brokerMs": 2,
+        "frameMs": 17,
+        "launcherMs": 77.36925000000338
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 17,
+        "brokerMs": 1,
+        "frameMs": 16,
+        "launcherMs": 78.94230300000345
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 23,
+        "brokerMs": 1,
+        "frameMs": 22,
+        "launcherMs": 87.98559499999828
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 20,
+        "brokerMs": 2,
+        "frameMs": 18,
+        "launcherMs": 83.62687700000242
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 83.39438099999825
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 19,
+        "brokerMs": 2,
+        "frameMs": 17,
+        "launcherMs": 86.83302899999399
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 24,
+        "brokerMs": 2,
+        "frameMs": 22,
+        "launcherMs": 85.49100299999554
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 18,
+        "brokerMs": 1,
+        "frameMs": 17,
+        "launcherMs": 82.09755399999995
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 17,
+        "brokerMs": 1,
+        "frameMs": 16,
+        "launcherMs": 80.87937100000272
+      },
+      {
+        "kind": "gate0-stable-session",
+        "totalMs": 28,
+        "brokerMs": 1,
+        "frameMs": 27,
+        "launcherMs": 80.07641799999692
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 19,
+        "brokerMs": 2,
+        "frameMs": 17,
+        "launcherMs": 78.90113099999871
+      },
+      {
+        "kind": "gate0-stable-tab",
+        "totalMs": 16,
+        "brokerMs": 2,
+        "frameMs": 14,
+        "launcherMs": 94.45352099999582
+      },
+      {
+        "kind": "webxd-recovery",
+        "totalMs": 26,
+        "brokerMs": 2,
+        "frameMs": 24,
+        "launcherMs": 79.90592799999285
+      },
+      {
+        "kind": "browserd-replacement",
+        "totalMs": 136,
+        "brokerMs": 3,
+        "frameMs": 133,
+        "launcherMs": 211.96149800001876
+      }
+    ],
+    "decodeLatencyMs": {
+      "count": 748,
+      "min": 4.999999999970896,
+      "median": 6,
+      "p95": 9,
+      "max": 11.000000000014552,
+      "mean": 6.4251336898398375
+    },
+    "paintLatencyMs": {
+      "count": 748,
+      "min": 0,
+      "median": 0,
+      "p95": 1,
+      "max": 1.0000000000291038,
+      "mean": 0.33021390374319937
+    },
+    "publicationToPaintMs": {
+      "count": 748,
+      "min": 7,
+      "median": 24,
+      "p95": 27,
+      "max": 71,
+      "mean": 21.800802139037433
+    },
+    "cursorMotion": {
+      "distinctPaintedDigests": 7,
+      "frames": [
+        {
+          "frameSequence": 2,
+          "sha256": "f3edda24d5309ba8db07bb3b42e7cb9f8b6e5e318c4d2dfeb27e4c71ef40db1f",
+          "capturedAt": "2026-08-31T03:53:16.076Z",
+          "paintedAt": "2026-08-31T03:53:16.115Z"
+        },
+        {
+          "frameSequence": 4,
+          "sha256": "1df903fe62405ff11617a035c849a5ceb268d5cf47a0c3f938e1c7a089015c59",
+          "capturedAt": "2026-08-31T03:53:16.192Z",
+          "paintedAt": "2026-08-31T03:53:16.204Z"
+        },
+        {
+          "frameSequence": 5,
+          "sha256": "8d1c7457c3c8a7edcb8cd617c731ba722c5eecae08a8e1539d6cf95d301b265c",
+          "capturedAt": "2026-08-31T03:53:16.292Z",
+          "paintedAt": "2026-08-31T03:53:16.317Z"
+        },
+        {
+          "frameSequence": 6,
+          "sha256": "a42616b6ca0fbf24745f8b3bac7a4aae4bdd502f53b5c013b89410b87c267397",
+          "capturedAt": "2026-08-31T03:53:16.408Z",
+          "paintedAt": "2026-08-31T03:53:16.429Z"
+        },
+        {
+          "frameSequence": 7,
+          "sha256": "4e566138bf7157359f9358aadcd59360e07194f3800977e4312a3806ca06c890",
+          "capturedAt": "2026-08-31T03:53:16.507Z",
+          "paintedAt": "2026-08-31T03:53:16.525Z"
+        },
+        {
+          "frameSequence": 8,
+          "sha256": "a5bae1f9bd5ad761f56a34f4c0c43f8bb2120bb2c546125585095448b81daf3e",
+          "capturedAt": "2026-08-31T03:53:16.624Z",
+          "paintedAt": "2026-08-31T03:53:16.638Z"
+        },
+        {
+          "frameSequence": 9,
+          "sha256": "5ac2dc6acf89ac8f1395738ae81d32f945f4c0db363fc5f9473347a13389a464",
+          "capturedAt": "2026-08-31T03:53:17.123Z",
+          "paintedAt": "2026-08-31T03:53:17.149Z"
+        }
+      ]
+    },
+    "exactSelectionPaints": true,
+    "nonMonotonicPaints": 0,
+    "staleFormerSelectionPaints": 0,
+    "crossAgentPaints": 0,
+    "droppedFormerSelectionFrames": 0,
+    "gate0DiagnosticWindow": {
+      "from": 197,
+      "to": 1214,
+      "records": 1017,
+      "settledFrames": 200
+    },
+    "gate0RetentionViolations": 0,
+    "frontendFrameByteType": "ArrayBuffer",
+    "base64FrameBytes": 0,
+    "retention": {
+      "maximumFrontendRetainedFrames": 1,
+      "frontendImageBitmapsAfterSettlement": 0,
+      "maximumConcurrentFrontendImageBitmaps": 1,
+      "maximumRustRetainedFrames": 2
+    },
+    "screenshots": {
+      "agent-a": "b9ad55b5e603a587a979443b4c5f4da2d9700e56d17a821926f733c69131e4e2",
+      "agent-b": "0e9b6446e1178078001ba6f2d61b2a6f793beae7d02b049897872103da298060",
+      "empty": "8323a4ad56760ad5dddb7a5c6caeed62b8fb03b6cad9936349e8603860e41c3a",
+      "reconnecting": "2be6bf668947537d82dd1bfd1a2be1411f25f52ae66161274358dd5db8fe5789"
+    },
+    "processMemory": {
+      "pid": 960033,
+      "pssKiB": 269529,
+      "privateDirtyKiB": 110604,
+      "cpuTicks": 3457,
+      "processCount": 3,
+      "processes": [
+        {
+          "pid": 960033,
+          "name": "pi-browser-work",
+          "pssKiB": 102225,
+          "privateDirtyKiB": 36740,
+          "cpuTicks": 625
+        },
+        {
+          "pid": 960058,
+          "name": "WebKitNetworkPr",
+          "pssKiB": 24252,
+          "privateDirtyKiB": 11820,
+          "cpuTicks": 59
+        },
+        {
+          "pid": 960067,
+          "name": "WebKitWebProces",
+          "pssKiB": 143052,
+          "privateDirtyKiB": 62044,
+          "cpuTicks": 2773
+        }
+      ]
+    },
+    "diagnosticsRecords": 3590
+  },
+  "cleanup": {
+    "profilesRemaining": 0,
+    "webxdSocketRemoved": true,
+    "browserdDescriptorRemoved": true,
+    "childrenRemaining": 0,
+    "workspaceShutdown": {
+      "processTreeExited": true,
+      "processCount": 3,
+      "gatewayClients": 0,
+      "gatewaySelectedClients": 0,
+      "gatewayPendingFrames": 0,
+      "brokerSubscriptions": 0,
+      "browserdWorkspaceSubscriptions": 0,
+      "browserdWorkspaceLedgerEntries": 0
+    },
+    "workspaceRuntime": {
+      "descriptorRemoved": true,
+      "socketsObserved": 2,
+      "allObservedSocketsRemoved": true
+    }
+  },
+  "testAuthorityBoundary": "Loopback destination and response-loss injection are constructed only by the opt-in test worker. Production main.ts cannot enable either path."
+}
