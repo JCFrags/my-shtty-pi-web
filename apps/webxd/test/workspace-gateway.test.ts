@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { BrowserdServer } from "../../browserd/src/server.js";
 import type { BrowserRuntime } from "../../../packages/browser-runtime/src/index.js";
-import type { FrameEvent, WorkspaceBrokerRequest, WorkspaceSnapshot as BrowserWorkspaceSnapshot } from "../../../packages/browser-protocol/src/index.js";
+import { BrowserProtocolError, type FrameEvent, type WorkspaceBrokerRequest, type WorkspaceSnapshot as BrowserWorkspaceSnapshot } from "../../../packages/browser-protocol/src/index.js";
 import { encodeWorkspaceRecord, parseWorkspaceServerHeader, WorkspaceRecordDecoder, type WorkspaceWireRecord } from "../../../packages/workspace-protocol/src/index.js";
 import { WorkspaceGateway } from "../src/workspace/gateway.js";
 import { readWorkspaceDescriptor } from "../src/workspace/descriptor.js";
@@ -98,6 +98,68 @@ describe("private workspace gateway", () => {
     expect(gateway.diagnostics.selectedClients).toBe(0);
   });
 
+  it("preserves an acknowledged selection across a transient snapshot failure on a live broker connection", async () => {
+    const root = await mkdtemp(join(tmpdir(), "webxd-workspace-transient-snapshot-"));
+    const runtime = new FakeWorkspaceRuntime();
+    const browserDirectory = join(root, "browserd");
+    const browserd = new BrowserdServer({ runtimeDirectory: browserDirectory, runtime: runtime as unknown as BrowserRuntime, allowTemporaryRuntimeDirectoryForTest: true });
+    await browserd.start(); cleanups.push(async () => await browserd.stop());
+    const gateway = new WorkspaceGateway({ runtimeDirectory: join(root, "workspace"), browserBackend: "agentcursor", browserDescriptorPath: join(browserDirectory, "browserd.json"), browserRuntimeDirectory: browserDirectory, heartbeatMs: 100 });
+    const descriptor = await gateway.start(); cleanups.push(async () => await gateway.stop());
+    const client = await FramedClient.open(descriptor.socketPath); cleanups.push(async () => client.close());
+    client.send({ protocolVersion: "workspace.v1", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret }); await client.next(); await client.next();
+    client.send({ protocolVersion: "workspace.v1", kind: "frame.select", requestId: "request:select", selectionId: "selection_transient_01", browserSessionId: "session:one", tabId: "tab:one" });
+    expect((await client.next()).header).toMatchObject({ kind: "response", requestId: "request:select", ok: true });
+    runtime.failNextSnapshot = true;
+    await waitUntil(() => runtime.snapshotFailures === 1, 4_000);
+    expect(gateway.diagnostics.selectedClients).toBe(1);
+    expect(gateway.diagnostics.broker).toMatchObject({ connected: true, subscriptions: 1 });
+    runtime.publishFrame();
+    expect((await nextMatching(client, (header) => header.kind === "frame")).header).toMatchObject({ kind: "frame", selectionId: "selection_transient_01", browserSessionId: "session:one", tabId: "tab:one" });
+  });
+
+  it("preserves the former selection when an atomic replacement is rejected", async () => {
+    const root = await mkdtemp(join(tmpdir(), "webxd-workspace-replace-failure-"));
+    const runtime = new FakeWorkspaceRuntime();
+    const browserDirectory = join(root, "browserd");
+    const browserd = new BrowserdServer({ runtimeDirectory: browserDirectory, runtime: runtime as unknown as BrowserRuntime, allowTemporaryRuntimeDirectoryForTest: true });
+    await browserd.start(); cleanups.push(async () => await browserd.stop());
+    const gateway = new WorkspaceGateway({ runtimeDirectory: join(root, "workspace"), browserBackend: "agentcursor", browserDescriptorPath: join(browserDirectory, "browserd.json"), browserRuntimeDirectory: browserDirectory, heartbeatMs: 100 });
+    const descriptor = await gateway.start(); cleanups.push(async () => await gateway.stop());
+    const client = await FramedClient.open(descriptor.socketPath); cleanups.push(async () => client.close());
+    client.send({ protocolVersion: "workspace.v1", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret }); await client.next(); await client.next();
+    client.send({ protocolVersion: "workspace.v1", kind: "frame.select", requestId: "request:first", selectionId: "selection_first_0001", browserSessionId: "session:one", tabId: "tab:one" });
+    expect((await client.next()).header).toMatchObject({ kind: "response", ok: true });
+    runtime.failReplace = true;
+    client.send({ protocolVersion: "workspace.v1", kind: "frame.select", requestId: "request:failed", selectionId: "selection_failed_001", browserSessionId: "session:missing", tabId: "tab:missing" });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:failed")).header).toMatchObject({ kind: "response", requestId: "request:failed", ok: false });
+    runtime.failReplace = false;
+    expect(gateway.diagnostics.selectedClients).toBe(1);
+    expect(gateway.diagnostics.broker.subscriptions).toBe(1);
+    runtime.publishFrame();
+    expect((await nextMatching(client, (header) => header.kind === "frame")).header).toMatchObject({ kind: "frame", selectionId: "selection_first_0001", browserSessionId: "session:one", tabId: "tab:one" });
+    expect(gateway.diagnostics.selectedClients).toBe(1);
+    expect(gateway.diagnostics.broker.subscriptions).toBe(1);
+  });
+
+  it("orders an authoritative selection response before a rebound cached frame", async () => {
+    const root = await mkdtemp(join(tmpdir(), "webxd-workspace-cached-frame-"));
+    const runtime = new FakeWorkspaceRuntime(); runtime.cachedOnReplace = true;
+    const browserDirectory = join(root, "browserd");
+    const browserd = new BrowserdServer({ runtimeDirectory: browserDirectory, runtime: runtime as unknown as BrowserRuntime, allowTemporaryRuntimeDirectoryForTest: true });
+    await browserd.start(); cleanups.push(async () => await browserd.stop());
+    const gateway = new WorkspaceGateway({ runtimeDirectory: join(root, "workspace"), browserBackend: "agentcursor", browserDescriptorPath: join(browserDirectory, "browserd.json"), browserRuntimeDirectory: browserDirectory, heartbeatMs: 100 });
+    const descriptor = await gateway.start(); cleanups.push(async () => await gateway.stop());
+    const client = await FramedClient.open(descriptor.socketPath); cleanups.push(async () => client.close());
+    client.send({ protocolVersion: "workspace.v1", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret }); await client.next(); await client.next();
+    client.send({ protocolVersion: "workspace.v1", kind: "frame.select", requestId: "request:cached", selectionId: "selection_cached_001", browserSessionId: "session:one", tabId: "tab:one" });
+    expect((await client.next()).header).toMatchObject({ kind: "response", requestId: "request:cached", ok: true });
+    const cached = await client.next();
+    expect(cached.header).toMatchObject({ kind: "frame", selectionId: "selection_cached_001", frameSequence: 1, sha256: runtime.sha256 });
+    expect(cached.payload).toEqual(runtime.frameBytes);
+    expect(gateway.diagnostics.pendingFrames).toBe(0);
+  });
+
   it("rejects insecure descriptor permissions and connection rebinding", async () => {
     const root = await mkdtemp(join(tmpdir(), "webxd-workspace-security-"));
     const runtimeDirectory = join(root, "workspace");
@@ -145,15 +207,27 @@ class FakeWorkspaceRuntime extends EventEmitter {
   readonly sha256 = createHash("sha256").update(this.frameBytes).digest("hex");
   subscriptionId?: string;
   connectionId?: string;
+  failReplace = false;
+  cachedOnReplace = false;
+  failNextSnapshot = false;
+  snapshotFailures = 0;
   readonly snapshot: BrowserWorkspaceSnapshot = {
-    kind: "workspaceSnapshot", workspaceRevision: 1, generatedAt: new Date().toISOString(), sessions: [{ browserSessionId: "session:one", agentSessionId: "agent:one", actorDisplayId: "actor_1234567890123456", pathId: "agentcursor/chrome", state: "ready", controlState: "agent", personaId: "persona_1234567890123456", cursor: { x: 10, y: 20, visible: true, pathSequence: 1, sampleSequence: 2, personaId: "persona_1234567890123456" }, tabs: [{ tabId: "tab:one", url: "http://fixture.local/", title: "Fixture <script>", state: "ready", documentGeneration: 1, viewportGeneration: 1, frameSequence: 0 }] }],
+    kind: "workspaceSnapshot", workspaceRevision: 1, generatedAt: new Date().toISOString(), sessions: [{ browserSessionId: "session:one", agentSessionId: "agent:one", actorDisplayId: "actor_1234567890123456", pathId: "agentcursor/chrome", state: "ready", controlState: "agent", controlEpoch: 1, captureReadiness: "ready", personaId: "persona_1234567890123456", cursor: { x: 10, y: 20, visible: true, pathSequence: 1, sampleSequence: 2, personaId: "persona_1234567890123456" }, tabs: [{ tabId: "tab:one", url: "http://fixture.local/", title: "Fixture <script>", state: "ready", captureReadiness: "ready", documentGeneration: 1, viewportGeneration: 1, frameSequence: 0 }] }],
   };
-  workspaceSnapshot(): BrowserWorkspaceSnapshot { return this.snapshot; }
+  workspaceSnapshot(): BrowserWorkspaceSnapshot {
+    if (this.failNextSnapshot) { this.failNextSnapshot = false; this.snapshotFailures++; throw new BrowserProtocolError("CAPABILITY_UNAVAILABLE", "injected transient snapshot failure", true); }
+    return this.snapshot;
+  }
   workspaceSubscribeEvents(): void {}
   workspaceUnsubscribeEvents(): void {}
   shouldDeliverWorkspaceEvent(): boolean { return true; }
   workspaceSubscribeFrames(connectionId: string, subscriptionId: string): void { this.connectionId = connectionId; this.subscriptionId = subscriptionId; }
   async workspaceUnsubscribeFrames(_connectionId: string, subscriptionId: string): Promise<void> { if (this.subscriptionId === subscriptionId) { this.subscriptionId = undefined; this.connectionId = undefined; } }
+  workspaceReplaceFrames(connectionId: string, _prior: unknown, next: { subscriptionId: string }): FrameEvent | undefined {
+    if (this.failReplace) throw new BrowserProtocolError("TAB_NOT_FOUND", "injected replacement failure");
+    this.connectionId = connectionId; this.subscriptionId = next.subscriptionId;
+    return this.cachedOnReplace ? this.frame() : undefined;
+  }
   workspaceFrameDeliveries(connectionId: string, frame: FrameEvent): Array<{ subscriptionId: string; frame: FrameEvent }> { return connectionId === this.connectionId && this.subscriptionId !== undefined ? [{ subscriptionId: this.subscriptionId, frame }] : []; }
   recordWorkspaceFrameDelivered(): void {}
   async workspaceReadFrame(_connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.frame.read" }>): Promise<unknown> {
@@ -162,10 +236,8 @@ class FakeWorkspaceRuntime extends EventEmitter {
   }
   releaseConnection(): void { this.subscriptionId = undefined; this.connectionId = undefined; }
   async close(): Promise<void> {}
-  publishFrame(): void {
-    const frame: FrameEvent = { protocolVersion: "browser.v2", kind: "frame.available", address: { browserSessionId: "session:one", tabId: "tab:one", targetId: "target_1234567890123456", controlEpoch: 1 }, documentGeneration: 1, viewportGeneration: 1, frameSequence: 1, capturedMonotonicMs: 100, publishedMonotonicMs: 110, mediaType: "image/png", byteLength: this.frameBytes.byteLength, artifactId: "artifact_1234567890123456", sha256: this.sha256, viewport: { width: 800, height: 600, devicePixelRatio: 1 }, url: "http://fixture.local/", title: "Fixture", cursor: { x: 10, y: 20, visible: true, pathSequence: 1, sampleSequence: 2, personaId: "persona_1234567890123456" } };
-    this.emit("frame", frame);
-  }
+  frame(): FrameEvent { return { protocolVersion: "browser.v2", kind: "frame.available", address: { browserSessionId: "session:one", tabId: "tab:one", targetId: "target_1234567890123456", controlEpoch: 1 }, documentGeneration: 1, viewportGeneration: 1, frameSequence: 1, capturedMonotonicMs: 100, publishedMonotonicMs: 110, mediaType: "image/png", byteLength: this.frameBytes.byteLength, artifactId: "artifact_1234567890123456", sha256: this.sha256, viewport: { width: 800, height: 600, devicePixelRatio: 1 }, url: "http://fixture.local/", title: "Fixture", cursor: { x: 10, y: 20, visible: true, pathSequence: 1, sampleSequence: 2, personaId: "persona_1234567890123456" } }; }
+  publishFrame(): void { this.emit("frame", this.frame()); }
 }
 
 async function bindAndSnapshot(descriptor: { socketPath: string; bindingSecret: string }): Promise<Record<string, unknown>> {
@@ -177,3 +249,11 @@ async function bindAndSnapshot(descriptor: { socketPath: string; bindingSecret: 
   } finally { await client.close(); }
 }
 async function waitUntil(check: () => boolean, timeoutMs = 2_000): Promise<void> { const deadline = Date.now() + timeoutMs; while (!check()) { if (Date.now() >= deadline) throw new Error("timed out waiting for condition"); await new Promise((resolve) => setTimeout(resolve, 10)); } }
+async function nextMatching(client: FramedClient, predicate: (header: Record<string, unknown>) => boolean, timeoutMs = 4_000): Promise<WorkspaceWireRecord> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const record = await client.next(Math.max(1, deadline - Date.now()));
+    if (predicate(record.header as Record<string, unknown>)) return record;
+  }
+  throw new Error("timed out waiting for matching workspace record");
+}

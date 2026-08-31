@@ -129,16 +129,22 @@ async function main(): Promise<void> {
   const workspaceEvidenceDirectory = workspaceEnabled && workspaceEvidenceArgument !== undefined ? resolve(workspaceEvidenceArgument) : undefined;
   if (workspaceBinary !== undefined) process.env.PI_WEB_WORKSPACE_BIN = workspaceBinary;
   const testedSha = gitOutput(["rev-parse", "HEAD"]);
-  const expectedSha = argument("--expected-sha") ?? process.env.PHASE3A_EXPECTED_SHA ?? process.env.PHASE2B1_EXPECTED_SHA;
+  const expectedSha = argument("--expected-sha") ?? process.env.GATE0_EXPECTED_SHA ?? process.env.PHASE3A_EXPECTED_SHA ?? process.env.PHASE2B1_EXPECTED_SHA;
   const workingTreeClean = gitOutput(["status", "--porcelain"]) === "";
   if (argument("--require-clean") === "true") {
     if (!workingTreeClean) throw new Error("qualification requires a clean tested SHA");
-    if (expectedSha === undefined || !/^[0-9a-f]{40}$/u.test(expectedSha)) throw new Error("qualification requires PHASE3A_EXPECTED_SHA, PHASE2B1_EXPECTED_SHA, or --expected-sha");
+    if (expectedSha === undefined || !/^[0-9a-f]{40}$/u.test(expectedSha)) throw new Error("qualification requires GATE0_EXPECTED_SHA, PHASE3A_EXPECTED_SHA, PHASE2B1_EXPECTED_SHA, or --expected-sha");
     if (testedSha !== expectedSha) throw new Error(`qualification SHA mismatch: expected ${expectedSha}, found ${testedSha}`);
   }
   const contentionTransactions = boundedNumberArgument("--contention-transactions", 0, 0, 10_000);
   const contentionObservations = boundedNumberArgument("--contention-observations", 0, 0, 10_000);
+  const contentionWorkspaceAttempts = boundedNumberArgument("--contention-workspace-attempts", 0, 0, 10_000);
+  const gate0Switches = boundedNumberArgument("--gate0-switches", 0, 0, 1_000);
+  const gate0ReplacementCycles = boundedNumberArgument("--gate0-replacement-cycles", 0, 0, 4);
   if (contentionTransactions > 0 && (contentionObservations < 300 || contentionTransactions < 1_000)) throw new Error("capture contention requires at least 1,000 transactions and 300 observations");
+  const gate0Requested = gate0Switches > 0 || gate0ReplacementCycles > 0 || contentionWorkspaceAttempts > 0;
+  if (gate0Requested && !workspaceEnabled) throw new Error("Gate 0 qualification requires the real Tauri workspace");
+  if (gate0Requested && (gate0Switches < 200 || gate0ReplacementCycles < 2 || contentionTransactions < 1_000 || contentionObservations < 500 || contentionWorkspaceAttempts < 500)) throw new Error("Gate 0 qualification requires 200 switches, two replacements, 1,000 governed transactions, 500 observations, and 500 workspace attempts");
   root = await mkdtemp(join(runtimeDirectory, "phase2b-process-route-"));
   const browserdDirectory = join(root, "browserd");
   const profileRoot = join(root, "profiles");
@@ -170,13 +176,15 @@ async function main(): Promise<void> {
   assert.ok(primaryPi.activeTools.includes("browser_open") && piB.activeTools.includes("browser_open"));
 
   const [openedA, openedB] = await Promise.all([piA.execute("browser_open", { url: `${origin}/alpha` }), piB.execute("browser_open", { url: `${origin}/beta` })]);
-  let identityA = browserIdentity(openedA); const identityB = browserIdentity(openedB);
+  let identityA = browserIdentity(openedA); let identityB = browserIdentity(openedB);
   assert.notEqual(identityA.browserSessionId, identityB.browserSessionId);
 
   const workspaceStableSwitchLatencyMs: number[] = [];
+  const gate0StableSwitchLatencyMs: number[] = [];
   const workspaceRecoverySwitchLatencyMs: number[] = [];
   const workspaceLauncherLatencyMs: number[] = [];
   const workspaceSwitchBreakdowns: Record<string, unknown>[] = [];
+  let gate0RecordWindow: { from: number; to: number } | undefined;
   let workspaceCursorFrames: Record<string, unknown>[] = [];
   if (workspaceEnabled) {
     assert.ok(workspaceBinary !== undefined);
@@ -208,7 +216,7 @@ async function main(): Promise<void> {
   assert.match(textOf(domAfterFill), /phase2b process/);
 
   const tabsCreated = await piA.execute("browser_tabs", { action: "create-tab", browserSessionId: identityA.browserSessionId, url: `${origin}/second` });
-  const secondTabId = allMatches(textOf(tabsCreated), /"tabId":\s*"([^"]+)"/gu).find((id) => id !== identityA.tabId); assert.ok(secondTabId);
+  let secondTabId = allMatches(textOf(tabsCreated), /"tabId":\s*"([^"]+)"/gu).find((id) => id !== identityA.tabId); assert.ok(secondTabId);
   const [exactFirst, exactSecond, actorBExact] = await Promise.all([
     piA.execute("browser_observe", identityA),
     piA.execute("browser_observe", { browserSessionId: identityA.browserSessionId, tabId: secondTabId }),
@@ -233,10 +241,138 @@ async function main(): Promise<void> {
     beforeCommand = await workspace.index(); await piA.command("web", `workspace attach ${identityA.browserSessionId} ${identityA.tabId}`); await workspace.waitForSelection(identityA.browserSessionId, identityA.tabId, beforeCommand);
   }
 
-  await webxd.call("subscribe", { ownerId: "phase2b-agent-a", browserSessionId: identityA.browserSessionId, tabId: identityA.tabId });
+  const gate0ReplacementResults: Record<string, unknown>[] = [];
+  for (let cycle = 1; cycle <= gate0ReplacementCycles; cycle++) {
+    if (workspace === undefined) throw new Error("Gate 0 replacement requires the real Tauri workspace");
+    const priorA = identityA;
+    const priorB = identityB;
+    const recordFrom = await workspace.index();
+    const beforeMetrics = asRecord(await browserd.call("metrics"));
+    await browserd.stop(); removeChild(browserd);
+    await workspace.waitForSessionAbsent(priorA.browserSessionId, recordFrom);
+    const [searchDuringReplacement, readDuringReplacement] = await Promise.all([
+      piA.execute("web_search", { query: "WebX" }),
+      piB.execute("web_read", { url: "https://fixture.invalid/webx", maxChars: 1_000 }),
+    ]);
+    assert.match(textOf(searchDuringReplacement), /WebX/);
+    assert.match(textOf(readDuringReplacement), /fixture/i);
+    const brokerReconnectStarted = performance.now();
+    browserd = spawn("browserd", { ...common, PROCESS_ROUTE_PERSONA_SEED: String(8192 + cycle) }); activeBrowserd = browserd;
+    const replacementReady = await browserd.ready;
+    await waitFor(async () => {
+      const metrics = asRecord(await webxd.call("metrics"));
+      const broker = asRecord(asRecord(metrics.workspace).broker);
+      return broker.connected === true && broker.runtimeInstanceId === replacementReady.runtimeInstanceId;
+    }, 20_000);
+    const brokerReconnectMs = performance.now() - brokerReconnectStarted;
+    await Promise.all([piA.stop(), piB.stop()]);
+    await Promise.all([piA.start(), piB.start()]);
+    await assert.rejects(piA.execute("browser_observe", priorA), /restarted|replaced|instance/i);
+    const readinessFrom = await workspace.index();
+    const [replacementA, replacementB] = await Promise.all([
+      piA.execute("browser_open", { url: `${origin}/alpha?gate0-replacement=${cycle}` }),
+      piB.execute("browser_open", { url: `${origin}/beta?gate0-replacement=${cycle}` }),
+    ]);
+    identityA = browserIdentity(replacementA);
+    identityB = browserIdentity(replacementB);
+    assert.notEqual(identityA.browserSessionId, identityB.browserSessionId);
+    assert.notEqual(identityA.browserSessionId, priorA.browserSessionId);
+    assert.notEqual(identityB.browserSessionId, priorB.browserSessionId);
+    const replacementTabs = await piA.execute("browser_tabs", { action: "create-tab", browserSessionId: identityA.browserSessionId, url: `${origin}/second?gate0-replacement=${cycle}` });
+    secondTabId = allMatches(textOf(replacementTabs), /"tabId":\s*"([^"]+)"/gu).find((id) => id !== identityA.tabId);
+    if (secondTabId === undefined) throw new Error("Gate 0 replacement session did not create a second tab");
+    await workspace.waitForSessions([identityA.browserSessionId, identityB.browserSessionId]);
+    const selectedA = await workspace.select(identityA.browserSessionId, identityA.tabId);
+    const readinessA = await workspace.waitForCaptureReadinessTransition(identityA.browserSessionId, identityA.tabId, readinessFrom, 60_000);
+    const selectedSecond = await workspace.select(identityA.browserSessionId, secondTabId);
+    const readinessSecond = await workspace.waitForCaptureReadinessTransition(identityA.browserSessionId, secondTabId, readinessFrom, 60_000);
+    const selectedB = await workspace.select(identityB.browserSessionId, identityB.tabId);
+    const readinessB = await workspace.waitForCaptureReadinessTransition(identityB.browserSessionId, identityB.tabId, readinessFrom, 60_000);
+    workspaceRecoverySwitchLatencyMs.push(selectedA.latencyMs, selectedSecond.latencyMs, selectedB.latencyMs);
+    workspaceLauncherLatencyMs.push(selectedA.launcherLatencyMs, selectedSecond.launcherLatencyMs, selectedB.launcherLatencyMs);
+    workspaceSwitchBreakdowns.push(
+      { kind: "gate0-browserd-replacement", cycle, totalMs: selectedA.latencyMs, brokerMs: selectedA.brokerLatencyMs, frameMs: selectedA.frameLatencyMs, launcherMs: selectedA.launcherLatencyMs },
+      { kind: "gate0-browserd-replacement", cycle, totalMs: selectedSecond.latencyMs, brokerMs: selectedSecond.brokerLatencyMs, frameMs: selectedSecond.frameLatencyMs, launcherMs: selectedSecond.launcherLatencyMs },
+      { kind: "gate0-browserd-replacement", cycle, totalMs: selectedB.latencyMs, brokerMs: selectedB.brokerLatencyMs, frameMs: selectedB.frameLatencyMs, launcherMs: selectedB.launcherLatencyMs },
+    );
+    const afterMetrics = asRecord(await browserd.call("metrics"));
+    const replacementChrome = arrayOfRecords(afterMetrics.chrome);
+    assert.equal(replacementChrome.length, 2, "Gate 0 replacement did not create exactly two Chrome hosts");
+    assert.deepEqual(new Set(replacementChrome.map((item) => textField(item, "browserSessionId"))), new Set([identityA.browserSessionId, identityB.browserSessionId]));
+    assert.equal(new Set(replacementChrome.map((item) => numberField(item, "pid"))).size, 2, "Gate 0 replacement Chrome PIDs are not distinct");
+    assert.ok(replacementChrome.every((item) => item.running === true && item.connected === true), "Gate 0 replacement Chrome host is not ready");
+    gate0ReplacementResults.push({
+      cycle,
+      oldRuntimeInstanceId: beforeMetrics.runtimeInstanceId,
+      newRuntimeInstanceId: replacementReady.runtimeInstanceId,
+      brokerReconnectMs,
+      brokerReconnectBoundMs: 20_000,
+      oldSessionsRejected: true,
+      newSessions: [identityA.browserSessionId, identityB.browserSessionId],
+      chrome: replacementChrome.map((item) => ({ browserSessionId: item.browserSessionId, pid: item.pid, running: item.running, connected: item.connected })),
+      readinessTransitions: { sessionA: readinessA.elapsedMs, sessionASecondTab: readinessSecond.elapsedMs, sessionB: readinessB.elapsedMs, boundMs: 60_000 },
+      captureCoordinator: afterMetrics.captureCoordinator,
+      searchReadHealthyDuringOutage: true,
+    });
+  }
+
+  let gate0LiveAuthority: Record<string, unknown> | undefined;
+  let gate0BackgroundTabCapture: Record<string, unknown> | undefined;
+  if (gate0Switches > 0) {
+    if (workspace === undefined) throw new Error("Gate 0 stable switches require the real Tauri workspace");
+    await sleep(4_000);
+    const backgroundBeforeMetrics = asRecord(await browserd.call("metrics"));
+    const backgroundBeforeCapture = asRecord(backgroundBeforeMetrics.captureCoordinator);
+    const backgroundTimeoutsBefore = numberField(backgroundBeforeCapture, "workspaceTypedTimeouts");
+    const backgroundSelection = await workspace.select(identityA.browserSessionId, identityA.tabId, 12_000);
+    const backgroundAfterMetrics = asRecord(await browserd.call("metrics"));
+    const backgroundAfterCapture = asRecord(backgroundAfterMetrics.captureCoordinator);
+    assert.ok(backgroundSelection.latencyMs <= 1_500, `Gate 0 background-tab capture exceeded 1,500 ms: ${backgroundSelection.latencyMs}`);
+    assert.equal(numberField(backgroundAfterCapture, "workspaceTypedTimeouts"), backgroundTimeoutsBefore, "Gate 0 background-tab capture timed out");
+    assert.equal(backgroundSelection.paint.browserdRuntimeInstanceId, backgroundAfterMetrics.runtimeInstanceId);
+    assert.equal(backgroundSelection.paint.controlEpoch, 1);
+    assert.ok(Date.parse(String(backgroundSelection.paint.recordedAt)) - Date.parse(String(backgroundSelection.paint.capturedAt)) <= 1_500, "Gate 0 background-tab frame was not current");
+    gate0BackgroundTabCapture = { cacheExpiryWaitMs: 4_000, latencyMs: backgroundSelection.latencyMs, timeoutDelta: numberField(backgroundAfterCapture, "workspaceTypedTimeouts") - backgroundTimeoutsBefore, frameSequence: backgroundSelection.paint.frameSequence, runtimeInstanceId: backgroundSelection.paint.browserdRuntimeInstanceId, controlEpoch: backgroundSelection.paint.controlEpoch, targetActivationUsed: false };
+    const stableTargets = [
+      { browserSessionId: identityA.browserSessionId, tabId: secondTabId, kind: "gate0-stable-tab" },
+      { browserSessionId: identityA.browserSessionId, tabId: identityA.tabId, kind: "gate0-stable-tab" },
+      { browserSessionId: identityB.browserSessionId, tabId: identityB.tabId, kind: "gate0-stable-session" },
+    ] as const;
+    const gate0RecordFrom = await workspace.index();
+    let maximumWorkspaceSubscriptions = 0;
+    let maximumWorkspaceLedgerEntries = 0;
+    let maximumBrokerSubscriptions = 0;
+    for (let index = 0; index < gate0Switches; index++) {
+      const target = stableTargets[index % stableTargets.length];
+      if (target === undefined) throw new Error("Gate 0 stable switch target is missing");
+      const selectedTarget = await workspace.select(target.browserSessionId, target.tabId);
+      workspaceStableSwitchLatencyMs.push(selectedTarget.latencyMs);
+      gate0StableSwitchLatencyMs.push(selectedTarget.latencyMs);
+      workspaceLauncherLatencyMs.push(selectedTarget.launcherLatencyMs);
+      workspaceSwitchBreakdowns.push({ kind: target.kind, totalMs: selectedTarget.latencyMs, brokerMs: selectedTarget.brokerLatencyMs, frameMs: selectedTarget.frameLatencyMs, launcherMs: selectedTarget.launcherLatencyMs });
+      const browserMetrics = asRecord(await browserd.call("metrics"));
+      const gatewayMetrics = asRecord(asRecord(await webxd.call("metrics")).workspace);
+      const brokerMetrics = asRecord(gatewayMetrics.broker);
+      const workspaceSubscriptions = numberField(browserMetrics, "workspaceSubscriptions");
+      const workspaceLedgerEntries = numberField(browserMetrics, "workspaceLedgerEntries");
+      const brokerSubscriptions = numberField(brokerMetrics, "subscriptions");
+      maximumWorkspaceSubscriptions = Math.max(maximumWorkspaceSubscriptions, workspaceSubscriptions);
+      maximumWorkspaceLedgerEntries = Math.max(maximumWorkspaceLedgerEntries, workspaceLedgerEntries);
+      maximumBrokerSubscriptions = Math.max(maximumBrokerSubscriptions, brokerSubscriptions);
+      assert.equal(workspaceSubscriptions, 1, "Gate 0 live workspace subscription count changed");
+      assert.ok(workspaceLedgerEntries <= 2, "Gate 0 live workspace ledger exceeded its active-subscription bound");
+      assert.equal(brokerSubscriptions, 1, "Gate 0 live broker subscription count changed");
+      assert.equal(numberField(gatewayMetrics, "selectedClients"), 1, "Gate 0 live selected-client count changed");
+    }
+    gate0RecordWindow = { from: gate0RecordFrom, to: await workspace.index() };
+    gate0LiveAuthority = { samples: gate0Switches, expectedWorkspaceSubscriptions: 1, maximumWorkspaceSubscriptions, maximumWorkspaceLedgerEntries, maximumBrokerSubscriptions };
+  }
+
+  if (!gate0Requested) await webxd.call("subscribe", { ownerId: "phase2b-agent-a", browserSessionId: identityA.browserSessionId, tabId: identityA.tabId });
   const captureContention = contentionTransactions > 0 ? await runCaptureContention({
     requestedTransactions: contentionTransactions,
     minimumObservations: contentionObservations,
+    minimumWorkspaceAttempts: contentionWorkspaceAttempts,
     piA,
     piB,
     identityA,
@@ -244,7 +380,9 @@ async function main(): Promise<void> {
     secondTabId,
     browserd,
     webxd,
+    requireActorStream: !gate0Requested,
   }) : undefined;
+  if (gate0Requested) await webxd.call("subscribe", { ownerId: "phase2b-agent-a", browserSessionId: identityA.browserSessionId, tabId: identityA.tabId });
   await sleep(1_500);
   if (workspaceEnabled) await waitFor(async () => numberField(asRecord(asRecord(await webxd.call("metrics")).stream), "frameCount") >= 1, 8_000);
   const streamMetrics = asRecord(await webxd.call("metrics"));
@@ -255,7 +393,7 @@ async function main(): Promise<void> {
     await waitFor(async () => {
       const metrics = asRecord(await browserd.call("metrics"));
       const coordinators = arrayOfRecords(metrics.captureCoordinators);
-      return numberField(metrics, "subscriptions") === 0 && coordinators.every((item) => numberField(item, "active") === 0 && numberField(item, "agentQueued") === 0 && numberField(item, "frameQueued") === 0);
+      return coordinators.every((item) => item.activeKind !== "agent" && numberField(item, "agentQueued") === 0 && numberField(item, "frameQueued") <= 1);
     });
     const settled = asRecord(await browserd.call("metrics"));
     captureContention.settlement = { subscriptions: settled.subscriptions, captureCoordinators: settled.captureCoordinators, heldInput: settled.heldInput };
@@ -274,7 +412,15 @@ async function main(): Promise<void> {
   const rehydratedFrame = await piA.execute("browser_observe", identityA); assertPiImage(rehydratedFrame);
   if (workspace !== undefined) {
     await workspace.waitForSessions([identityA.browserSessionId, identityB.browserSessionId]);
-    const recovered = await workspace.select(identityB.browserSessionId, identityB.tabId); workspaceRecoverySwitchLatencyMs.push(recovered.latencyMs); workspaceLauncherLatencyMs.push(recovered.launcherLatencyMs); workspaceSwitchBreakdowns.push({ kind: "webxd-recovery", totalMs: recovered.latencyMs, brokerMs: recovered.brokerLatencyMs, frameMs: recovered.frameLatencyMs, launcherMs: recovered.launcherLatencyMs });
+    let recovered;
+    try { recovered = await workspace.select(identityB.browserSessionId, identityB.tabId); }
+    catch (cause) {
+      const webxdMetrics = asRecord(await webxd.call("metrics"));
+      const gatewayMetrics = asRecord(webxdMetrics.workspace);
+      const browserdMetrics = asRecord(await browserd.call("metrics"));
+      throw new Error(`workspace recovery selection failed; authority=${JSON.stringify({ gateway: { clientConnections: gatewayMetrics.clientConnections, boundClients: gatewayMetrics.boundClients, selectedClients: gatewayMetrics.selectedClients, pendingFrames: gatewayMetrics.pendingFrames, droppedFrames: gatewayMetrics.droppedFrames, broker: gatewayMetrics.broker }, browserd: { connections: browserdMetrics.connections, workspaceSubscriptions: browserdMetrics.workspaceSubscriptions, workspaceLedgerEntries: browserdMetrics.workspaceLedgerEntries, droppedFrames: browserdMetrics.droppedFrames, captureCoordinators: browserdMetrics.captureCoordinators } })}`, { cause });
+    }
+    workspaceRecoverySwitchLatencyMs.push(recovered.latencyMs); workspaceLauncherLatencyMs.push(recovered.launcherLatencyMs); workspaceSwitchBreakdowns.push({ kind: "webxd-recovery", totalMs: recovered.latencyMs, brokerMs: recovered.brokerLatencyMs, frameMs: recovered.frameLatencyMs, launcherMs: recovered.launcherLatencyMs });
   }
 
   const soakDurationSeconds = boundedNumberArgument("--soak-duration-seconds", 0, 0, 7_200);
@@ -416,7 +562,7 @@ async function main(): Promise<void> {
   assert.ok(distributionResult.median >= 400 && distributionResult.median <= 1_500, `motor median outside target: ${distributionResult.median}`);
   assert.ok(distributionResult.p95 <= 2_500, `motor p95 outside target: ${distributionResult.p95}`);
 
-  const workspaceResult = workspace === undefined ? undefined : await analyzeWorkspaceRoute(workspace, workspaceStableSwitchLatencyMs, workspaceRecoverySwitchLatencyMs, workspaceLauncherLatencyMs, workspaceSwitchBreakdowns, workspaceCursorFrames, workspaceEvidenceDirectory);
+  const workspaceResult = workspace === undefined ? undefined : await analyzeWorkspaceRoute(workspace, workspaceStableSwitchLatencyMs, gate0StableSwitchLatencyMs, workspaceRecoverySwitchLatencyMs, workspaceLauncherLatencyMs, workspaceSwitchBreakdowns, workspaceCursorFrames, workspaceEvidenceDirectory, gate0Switches, gate0RecordWindow);
   let workspaceShutdown: Record<string, unknown> | undefined;
   if (workspace !== undefined) {
     const workspacePid = workspace.assertAlive();
@@ -453,6 +599,29 @@ async function main(): Promise<void> {
       }
     : asRecord(asRecord(soakRun.result.captureCoordinator).runtimeSegments);
 
+  const gate0Workspace = workspaceResult === undefined ? undefined : asRecord(workspaceResult);
+  const gate0SwitchMetrics = gate0Workspace === undefined ? undefined : asRecord(gate0Workspace.gate0StableSwitchLatencyMs);
+  const gate0Evidence = !gate0Requested ? undefined : {
+    schemaVersion: "gate0.v1",
+    passed: true,
+    stableSwitches: {
+      requested: gate0Switches,
+      completed: gate0SwitchMetrics?.count,
+      latencyMs: gate0SwitchMetrics,
+      boundsMs: { median: 500, p95: 1_500 },
+      formerSelectionPaints: gate0Workspace?.staleFormerSelectionPaints,
+      crossTargetPaints: gate0Workspace?.crossAgentPaints,
+      nonMonotonicPaints: gate0Workspace?.nonMonotonicPaints,
+      droppedFormerSelectionFrames: gate0Workspace?.droppedFormerSelectionFrames,
+      retentionViolations: gate0Workspace?.gate0RetentionViolations,
+      liveAuthority: gate0LiveAuthority,
+      backgroundTabCapture: gate0BackgroundTabCapture,
+    },
+    replacementCycles: gate0ReplacementResults,
+    postReplacementStress: captureContention,
+    cleanup: workspaceShutdown,
+  };
+
   const result = {
     passed: true,
     testedSha,
@@ -465,6 +634,7 @@ async function main(): Promise<void> {
     domFallback: { succeeded: true, value: "phase2b process" },
     frameSubscription: { survivedIdleTimeoutMs: 1_000, waitedMs: 1_500, frameCount: stream.frameCount, duplicateFrameSequences: stream.duplicateFrameSequences, nonMonotonicFrameSequences: stream.nonMonotonicFrameSequences, settled: true },
     ...(captureContention === undefined ? {} : { captureContention }),
+    ...(gate0Evidence === undefined ? {} : { gate0: gate0Evidence }),
     piReconnect: { sameActorSessionUsable: true },
     webxdRestart: { browserdRuntimePreserved: true, sessionRehydrated: true, screenshotSucceeded: true },
     browserdReplacement: { oldRuntimeInstanceId: browserdReady.runtimeInstanceId, newRuntimeInstanceId: replacementReady.runtimeInstanceId, oldSessionRejected: true, newSessionWorked: true, captureCoordinatorSegments: replacementCaptureSegments },
@@ -487,26 +657,42 @@ async function main(): Promise<void> {
   await rm(root, { recursive: true, force: true }); root = undefined;
 }
 
-async function analyzeWorkspaceRoute(route: WorkspaceRoute, stableSwitchLatencies: number[], recoverySwitchLatencies: number[], launcherLatencies: number[], switchBreakdowns: Record<string, unknown>[], cursorFrames: Record<string, unknown>[], evidenceDirectory: string | undefined): Promise<Record<string, unknown>> {
+async function analyzeWorkspaceRoute(route: WorkspaceRoute, stableSwitchLatencies: number[], gate0StableSwitchLatencies: number[], recoverySwitchLatencies: number[], launcherLatencies: number[], switchBreakdowns: Record<string, unknown>[], cursorFrames: Record<string, unknown>[], evidenceDirectory: string | undefined, requiredGate0Switches: number, gate0RecordWindow?: { from: number; to: number }): Promise<Record<string, unknown>> {
   const records = await route.records();
   const paints = records.filter((record) => record.kind === "frameSettled" && record.outcome === "painted");
   assert.ok(paints.length > 0, "Tauri did not paint a frame");
   const selections = new Map<string, { browserSessionId: string; tabId: string }>();
+  const withinGate0Window = (index: number): boolean => gate0RecordWindow !== undefined && index >= gate0RecordWindow.from && index < gate0RecordWindow.to;
   let activeSelectionId: string | undefined;
-  for (const record of records) {
+  let gate0FormerSelectionPaints = 0;
+  let gate0CrossTargetPaints = 0;
+  let gate0DroppedFormerFrames = 0;
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index];
+    if (record === undefined) continue;
     if (record.kind === "selection" && typeof record.selectionId === "string" && typeof record.browserSessionId === "string" && typeof record.tabId === "string") { selections.set(record.selectionId, { browserSessionId: record.browserSessionId, tabId: record.tabId }); activeSelectionId = record.selectionId; }
     if (record.kind === "selectionCleared") activeSelectionId = undefined;
     if (record.kind === "frameSettled" && record.outcome === "painted") {
       const selection = typeof record.selectionId === "string" ? selections.get(record.selectionId) : undefined;
-      assert.deepEqual(selection, { browserSessionId: record.browserSessionId, tabId: record.tabId }, "Tauri painted a frame outside its exact selection");
-      assert.equal(record.selectionId, activeSelectionId, "Tauri painted a frame after a newer selection barrier");
+      const crossTarget = selection?.browserSessionId !== record.browserSessionId || selection?.tabId !== record.tabId;
+      const formerSelection = record.selectionId !== activeSelectionId;
+      if (withinGate0Window(index) && crossTarget) gate0CrossTargetPaints++;
+      if (withinGate0Window(index) && formerSelection) gate0FormerSelectionPaints++;
+      assert.equal(crossTarget, false, "Tauri painted a frame outside its exact selection");
+      assert.equal(formerSelection, false, "Tauri painted a frame after a newer selection barrier");
     }
+    if (withinGate0Window(index) && record.kind === "frameSettled" && record.outcome === "dropped" && record.selectionId !== activeSelectionId) gate0DroppedFormerFrames++;
   }
   const lastSequence = new Map<string, number>();
-  for (const record of paints) {
+  let gate0NonMonotonicPaints = 0;
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index];
+    if (record === undefined || record.kind !== "frameSettled" || record.outcome !== "painted") continue;
     const key = `${String(record.browserdRuntimeInstanceId)}:${String(record.selectionId)}:${String(record.browserSessionId)}:${String(record.tabId)}`;
     const sequence = numberField(record, "frameSequence");
-    assert.ok(sequence > (lastSequence.get(key) ?? 0), "Tauri painted a non-monotonic frame sequence");
+    const nonMonotonic = sequence <= (lastSequence.get(key) ?? 0);
+    if (withinGate0Window(index) && nonMonotonic) gate0NonMonotonicPaints++;
+    assert.equal(nonMonotonic, false, "Tauri painted a non-monotonic frame sequence");
     lastSequence.set(key, sequence);
   }
   assert.ok(new Set(cursorFrames.map((record) => record.sha256)).size >= 3);
@@ -533,8 +719,21 @@ async function analyzeWorkspaceRoute(route: WorkspaceRoute, stableSwitchLatencie
   assert.ok(settled.every((record) => numberField(record, "frontendImageBitmaps") === 0), "frontend retained an ImageBitmap after frame settlement");
   assert.ok(settled.every((record) => numberField(record, "maximumFrontendImageBitmaps") <= 1), "frontend created concurrent ImageBitmap decoders");
   assert.ok(settled.every((record) => numberField(record, "rustRetainedFrames") <= 2), "Rust retained more than one inflight and one pending frame");
+  const gate0Settled = gate0RecordWindow === undefined ? [] : records.slice(gate0RecordWindow.from, gate0RecordWindow.to).filter((record) => record.kind === "frameSettled");
+  const gate0RetentionViolations = gate0Settled.filter((record) => numberField(record, "frontendRetainedFrames") > 1 || numberField(record, "frontendImageBitmaps") > 0 || numberField(record, "maximumFrontendImageBitmaps") > 1 || numberField(record, "rustRetainedFrames") > 2).length;
   const stableSwitches = distribution(stableSwitchLatencies);
-  assert.ok(stableSwitches.count >= 3, "Tauri stable switch evidence is incomplete");
+  const gate0StableSwitches = distribution(gate0StableSwitchLatencies);
+  assert.ok(stableSwitches.count >= 3 + requiredGate0Switches, "Tauri stable switch evidence is incomplete");
+  if (requiredGate0Switches > 0) {
+    assert.ok(gate0RecordWindow !== undefined, "Gate 0 diagnostic record window is missing");
+    assert.equal(gate0StableSwitches.count, requiredGate0Switches, "Gate 0 stable switch sample count is incomplete");
+    assert.ok(gate0StableSwitches.median <= 500, `Gate 0 stable switch median is ${gate0StableSwitches.median} ms`);
+    assert.ok(gate0StableSwitches.p95 <= 1_500, `Gate 0 stable switch p95 is ${gate0StableSwitches.p95} ms`);
+    assert.equal(gate0FormerSelectionPaints, 0, "Gate 0 painted a former selection");
+    assert.equal(gate0CrossTargetPaints, 0, "Gate 0 painted a cross-target frame");
+    assert.equal(gate0NonMonotonicPaints, 0, "Gate 0 painted a non-monotonic frame");
+    assert.equal(gate0RetentionViolations, 0, "Gate 0 exceeded frontend or Rust retention bounds");
+  }
   const stableTabSwitches = distribution(switchBreakdowns.filter((item) => item.kind === "stable-tab").map((item) => numberField(item, "totalMs")));
   const stableSessionSwitches = distribution(switchBreakdowns.filter((item) => item.kind === "stable-session").map((item) => numberField(item, "totalMs")));
   const decode = paints.map((record) => typeof record.decodeMs === "number" ? record.decodeMs : 0);
@@ -551,10 +750,11 @@ async function analyzeWorkspaceRoute(route: WorkspaceRoute, stableSwitchLatencie
     framesPainted: paints.length,
     framesDropped: records.filter((record) => record.kind === "frameSettled" && record.outcome === "dropped").length,
     stableSwitchLatencyMs: stableSwitches,
+    gate0StableSwitchLatencyMs: gate0StableSwitches,
     stableTabSwitchLatencyMs: stableTabSwitches,
     stableSessionSwitchLatencyMs: stableSessionSwitches,
     switchP95DevelopmentTargetMs: 1_500,
-    switchP95DevelopmentTargetMet: stableSwitches.p95 <= 1_500,
+    switchP95DevelopmentTargetMet: (requiredGate0Switches > 0 ? gate0StableSwitches : stableSwitches).p95 <= 1_500,
     recoverySwitchLatencyMs: distribution(recoverySwitchLatencies),
     secondaryLauncherToPaintMs: distribution(launcherLatencies),
     switchBreakdowns,
@@ -562,10 +762,13 @@ async function analyzeWorkspaceRoute(route: WorkspaceRoute, stableSwitchLatencie
     paintLatencyMs: distribution(paint),
     publicationToPaintMs: distribution(total),
     cursorMotion: { distinctPaintedDigests: new Set(cursorFrames.map((record) => record.sha256)).size, frames: cursorFrames.slice(0, 32).map((record) => ({ frameSequence: record.frameSequence, sha256: record.sha256, capturedAt: record.capturedAt, paintedAt: record.paintedAt })) },
-    exactSelectionPaints: true,
-    nonMonotonicPaints: 0,
-    staleFormerSelectionPaints: 0,
-    crossAgentPaints: 0,
+    exactSelectionPaints: gate0CrossTargetPaints === 0 && gate0FormerSelectionPaints === 0,
+    nonMonotonicPaints: gate0NonMonotonicPaints,
+    staleFormerSelectionPaints: gate0FormerSelectionPaints,
+    crossAgentPaints: gate0CrossTargetPaints,
+    droppedFormerSelectionFrames: gate0DroppedFormerFrames,
+    gate0DiagnosticWindow: gate0RecordWindow === undefined ? null : { ...gate0RecordWindow, records: gate0RecordWindow.to - gate0RecordWindow.from, settledFrames: gate0Settled.length },
+    gate0RetentionViolations,
     frontendFrameByteType: [...frontendTypes][0],
     base64FrameBytes: 0,
     retention: {
@@ -583,6 +786,7 @@ async function analyzeWorkspaceRoute(route: WorkspaceRoute, stableSwitchLatencie
 async function runCaptureContention(options: {
   readonly requestedTransactions: number;
   readonly minimumObservations: number;
+  readonly minimumWorkspaceAttempts: number;
   readonly piA: PiHarness;
   readonly piB: PiHarness;
   readonly identityA: { browserSessionId: string; tabId: string };
@@ -590,6 +794,7 @@ async function runCaptureContention(options: {
   readonly secondTabId: string;
   readonly browserd: ManagedChild;
   readonly webxd: ManagedChild;
+  readonly requireActorStream: boolean;
 }): Promise<Record<string, unknown>> {
   const beforeBrowser = asRecord(await options.browserd.call("metrics"));
   const beforeCoordinator = asRecord(beforeBrowser.captureCoordinator);
@@ -601,6 +806,7 @@ async function runCaptureContention(options: {
   const beforeRecovered = numberField(beforeCoordinator, "recoveredAgentTimeouts");
   const beforeUnrecoveredTimeouts = numberField(beforeCoordinator, "unrecoveredAgentTimeouts");
   const beforeOverlapEvents = numberField(beforeCoordinator, "processOverlapEvents");
+  const beforeActionTimingCount = arrayOfRecords(beforeBrowser.actionTimings).length;
   const observationIds = new Set<string>();
   const ledgerHash = createHash("sha256");
   const ledgerHead: Record<string, unknown>[] = [];
@@ -616,8 +822,14 @@ async function runCaptureContention(options: {
   for (;;) {
     const coordinator = asRecord(browserMetrics.captureCoordinator);
     const attempts = numberField(coordinator, "agentScreenshotAttempts") + numberField(coordinator, "workspaceScreenshotAttempts") - beforeAttempts;
-    if (explicitObservations >= options.minimumObservations && attempts >= options.requestedTransactions) break;
+    const workspaceAttempts = numberField(coordinator, "workspaceScreenshotAttempts") - numberField(beforeCoordinator, "workspaceScreenshotAttempts");
+    if (explicitObservations >= options.minimumObservations && workspaceAttempts >= options.minimumWorkspaceAttempts && attempts >= options.requestedTransactions) break;
     if (performance.now() >= deadline) throw new Error(`capture contention did not reach ${options.requestedTransactions} transactions before its bounded deadline`);
+    if (explicitObservations >= options.minimumObservations) {
+      await sleep(100);
+      browserMetrics = asRecord(await options.browserd.call("metrics"));
+      continue;
+    }
     batches += 1;
     const actorARequest = batches % 2 === 0
       ? { actor: "a-primary", pi: options.piA, identity: options.identityA }
@@ -660,22 +872,35 @@ async function runCaptureContention(options: {
   const totalAttempts = agentAttempts + workspaceAttempts;
   const timeoutCount = numberField(coordinator, "typedTimeouts") - beforeTimeouts;
   const agentTimeoutCount = numberField(coordinator, "agentTypedTimeouts") - beforeAgentTimeouts;
+  const workspaceTimeoutCount = timeoutCount - agentTimeoutCount;
   const retryCount = numberField(coordinator, "agentScreenshotRetries") - beforeRetries;
   const recoveredRetries = numberField(coordinator, "recoveredAgentTimeouts") - beforeRecovered;
   const unrecoveredTimeouts = numberField(coordinator, "unrecoveredAgentTimeouts") - beforeUnrecoveredTimeouts;
   const unrecoveredFailures = numberField(coordinator, "unrecoveredAgentFailures") - beforeAgentFailures;
   assert.ok(totalAttempts >= options.requestedTransactions, `governed screenshot transaction count is ${totalAttempts}`);
   assert.ok(explicitObservations >= options.minimumObservations);
+  assert.ok(workspaceAttempts >= options.minimumWorkspaceAttempts, `workspace screenshot attempt count is ${workspaceAttempts}`);
   const workloadOverlapEvents = numberField(coordinator, "processOverlapEvents") - beforeOverlapEvents;
   assert.equal(numberField(coordinator, "sameSessionMaximumConcurrency"), 1);
   assert.ok(workloadOverlapEvents > 0, "cross-session capture concurrency was not observed during the contention workload");
   assert.equal(unrecoveredFailures, 0);
   assert.equal(unrecoveredTimeouts, 0);
-  assert.ok(retryCount <= 3 && recoveredRetries / Math.max(1, agentAttempts) <= 0.005, `contention recovery policy exceeded: ${recoveredRetries}/${agentAttempts}`);
+  assert.equal(workspaceTimeoutCount, 0, "control-ready workspace capture timed out");
+  assert.ok(retryCount <= 3 && recoveredRetries <= 3 && recoveredRetries / Math.max(1, agentAttempts) <= 0.005, `contention recovery policy exceeded: ${recoveredRetries}/${agentAttempts}`);
+  assert.equal(observationIds.size, explicitObservations);
+  assert.ok(motorActions > 0, "capture contention did not exercise active AgentCursor motor movement");
+  const workloadActionTimings = arrayOfRecords(browserMetrics.actionTimings).slice(beforeActionTimingCount);
+  const motorSessionIds = new Set(workloadActionTimings.map((item) => item.browserSessionId));
+  assert.ok(motorSessionIds.has(options.identityA.browserSessionId) && motorSessionIds.has(options.identityB.browserSessionId), "capture contention did not move both browser sessions");
+  assert.ok(workloadActionTimings.every((item) => numberField(item, "sampleCount") >= 6), "capture contention motor path had fewer than six samples");
+  const heldInput = arrayOfRecords(browserMetrics.heldInput);
+  assert.ok(heldInput.every((item) => Array.isArray(item.buttons) && item.buttons.length === 0 && Array.isArray(item.keys) && item.keys.length === 0), "capture contention left held input");
   assert.equal(numberField(idempotency, "imageBytesRetained"), 0);
-  assert.equal(numberField(stream, "duplicateFrameSequences"), 0);
-  assert.equal(numberField(stream, "nonMonotonicFrameSequences"), 0);
-  assert.ok(numberField(stream, "frameCount") > 0);
+  if (options.requireActorStream) {
+    assert.equal(numberField(stream, "duplicateFrameSequences"), 0);
+    assert.equal(numberField(stream, "nonMonotonicFrameSequences"), 0);
+    assert.ok(numberField(stream, "frameCount") > 0);
+  }
   return {
     passed: true,
     requestedTransactions: options.requestedTransactions,
@@ -697,6 +922,7 @@ async function runCaptureContention(options: {
     workspaceTransactionMs: coordinator.workspaceTransactionMs,
     typedTimeouts: timeoutCount,
     agentTypedTimeouts: agentTimeoutCount,
+    workspaceTypedTimeouts: workspaceTimeoutCount,
     retries: retryCount,
     recoveredRetries,
     unrecoveredTimeouts,
@@ -705,6 +931,9 @@ async function runCaptureContention(options: {
     coalescedWorkspaceRequests: numberField(coordinator, "coalescedWorkspaceRequests"),
     observationRouteLatencyMs: distribution(observationRouteLatencyMs),
     actionRouteLatencyMs: distribution(actionRouteLatencyMs),
+    motorSessionIds: [...motorSessionIds].sort(),
+    minimumMotorSamples: Math.min(...workloadActionTimings.map((item) => numberField(item, "sampleCount"))),
+    heldInputAfterSettlement: heldInput,
     exactImageReads: explicitObservations,
     distinctObservationIds: observationIds.size,
     imageBytesInGeneralCache: numberField(idempotency, "imageBytesRetained"),

@@ -18,6 +18,7 @@
     "test:routed-soak": "tsx tests/live-agentcursor-route.ts --soak-duration-seconds=1800 --sample-seconds=15",
     "test:routed-soak-phase2b": "tsx tests/process-route.ts --require-clean=true --soak-duration-seconds=1800 --sample-seconds=15",
     "test:workspace-live": "pnpm --filter @pi-web/workspace tauri build --debug --no-bundle && tsx tests/process-route.ts --workspace=true --model-delay-ms=0 --output=../../docs/browser-rebuild/evidence/phase3a-live-results.json --workspace-evidence-dir=../../docs/browser-rebuild/evidence",
+    "test:gate0-live": "pnpm --filter @pi-web/workspace tauri build --debug --no-bundle && tsx tests/process-route.ts --workspace=true --require-clean=true --model-delay-ms=0 --gate0-switches=200 --gate0-replacement-cycles=2 --contention-transactions=1000 --contention-observations=500 --contention-workspace-attempts=500 --output=../../docs/browser-rebuild/evidence/phase3b-gate0-results.json",
     "test:workspace-soak": "pnpm --filter @pi-web/workspace tauri build --debug --no-bundle && tsx tests/process-route.ts --workspace=true --require-clean=true --soak-duration-seconds=1800 --sample-seconds=15 --output=/tmp/phase3a-workspace-soak-route-results.json --soak-output=../../docs/browser-rebuild/evidence/phase3a-workspace-soak-results.json"
   },
   "devDependencies": {

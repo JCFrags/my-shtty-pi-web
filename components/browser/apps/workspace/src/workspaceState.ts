@@ -63,6 +63,26 @@ export function findSelected(
 
 export const MAX_FRAME_PIXELS = 33_554_432;
 
+export function framePaintBindingKey(publicState: PublicWorkspaceState): string {
+  const selected = publicState.selected;
+  const target = findSelected(publicState.snapshot?.sessions, selected);
+  if (!selected || !target) return "none";
+  return JSON.stringify([
+    publicState.snapshot?.browserdRuntimeInstanceId ?? "",
+    selected.selectionId,
+    selected.browserSessionId,
+    selected.tabId,
+    target.session.controlEpoch,
+    target.tab.documentGeneration,
+    target.tab.viewportGeneration,
+  ]);
+}
+
+export function framePaintReadinessEligible(publicState: PublicWorkspaceState): boolean {
+  const target = findSelected(publicState.snapshot?.sessions, publicState.selected);
+  return target?.session.captureReadiness === "ready" && target.tab.captureReadiness === "ready";
+}
+
 export class FrameSequenceWatermark {
   #value = 0;
   current(): number { return this.#value; }
@@ -78,6 +98,7 @@ export class FrameSequenceWatermark {
 export type FrameRejection =
   | "selection"
   | "runtime"
+  | "control-epoch"
   | "document-generation"
   | "viewport-generation"
   | "sequence"
@@ -96,6 +117,7 @@ export function frameRejectionReason(
   if (!selected || !target || metadata.selectionId !== selected.selectionId
     || metadata.browserSessionId !== selected.browserSessionId || metadata.tabId !== selected.tabId) return "selection";
   if (!snapshot?.browserdRuntimeInstanceId || metadata.browserdRuntimeInstanceId !== snapshot.browserdRuntimeInstanceId) return "runtime";
+  if (metadata.controlEpoch !== target.session.controlEpoch) return "control-epoch";
   if (metadata.documentGeneration !== target.tab.documentGeneration) return "document-generation";
   if (metadata.viewportGeneration !== target.tab.viewportGeneration) return "viewport-generation";
   if (metadata.frameSequence <= lastSequence) return "sequence";

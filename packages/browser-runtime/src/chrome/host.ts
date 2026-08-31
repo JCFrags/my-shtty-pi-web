@@ -58,7 +58,7 @@ export class ChromeHost extends EventEmitter {
     const executable = options.executable ?? await findChromeExecutable();
     signal?.throwIfAborted();
     await access(executable, constants.X_OK);
-    const extraFlags = validateExtraFlags(options.extraFlags ?? []);
+    const extraFlags = prepareChromeExtraFlags(options.extraFlags ?? []);
     const egressFlags = proxyFlags(options.egressProxy);
     const manager = options.profileManager ?? new ProfileManager(options.profileRoot);
     const lease = await manager.allocate();
@@ -168,6 +168,14 @@ export async function findChromeExecutable(configured = process.env.BROWSERD_CHR
     try { await access(candidate, constants.X_OK); return candidate; } catch { /* Continue fixed candidates. */ }
   }
   throw new BrowserProtocolError("BROWSER_START_FAILED", "No reviewed Chrome or Chromium executable is available.");
+}
+
+export function prepareChromeExtraFlags(flags: readonly string[]): string[] {
+  const validated = validateExtraFlags(flags);
+  const useOzonePlatform = validated.includes("--enable-features=UseOzonePlatform");
+  const remaining = validated.filter((flag) => flag !== "--enable-features=UseOzonePlatform");
+  const features = useOzonePlatform ? "CDPScreenshotNewSurface,UseOzonePlatform" : "CDPScreenshotNewSurface";
+  return [`--enable-features=${features}`, ...remaining];
 }
 
 export function validateExtraFlags(flags: readonly string[]): string[] {

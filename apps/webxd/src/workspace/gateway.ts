@@ -7,6 +7,7 @@ import {
   type WorkspaceClientCommand, type WorkspaceFrameHeader, type WorkspaceServerHeader, type WorkspaceSnapshot, type WorkspaceStatus,
 } from "../../../../packages/workspace-protocol/src/index.js";
 import type { BrowserBackendSelection } from "../browser-backend-selection.js";
+import { BrowserdClientError } from "../browserd-client.js";
 import { BrowserdWorkspaceBrokerClient, type BrowserdBrokerDiagnostics } from "./browserd-broker-client.js";
 import { cleanupWorkspaceDescriptor, prepareWorkspaceDescriptor, publishWorkspaceDescriptor, type PreparedWorkspaceDescriptor, type WorkspaceDescriptor } from "./descriptor.js";
 import { sanitizeWorkspaceSnapshot, unavailableWorkspaceSnapshot, workspaceFrameHeader } from "./sanitizer.js";
@@ -33,6 +34,7 @@ interface GatewayClient {
   blocked: boolean;
   pendingFrame?: Uint8Array;
   selection?: Selection;
+  selectionReady: boolean;
   pendingBrokerFrame?: WorkspaceFrameEvent;
   frameReadRunning: boolean;
   droppedFrames: number;
@@ -155,7 +157,7 @@ export class WorkspaceGateway {
 
   private accept(socket: Socket): void {
     if (this.#clients.size >= this.#maxClients) { socket.destroy(); return; }
-    const client: GatewayClient = { socket, decoder: new WorkspaceRecordDecoder(), chain: Promise.resolve(), queued: 0, bound: false, closed: false, snapshotSubscribed: false, outboundBytes: 0, blocked: false, frameReadRunning: false, droppedFrames: 0 };
+    const client: GatewayClient = { socket, decoder: new WorkspaceRecordDecoder(), chain: Promise.resolve(), queued: 0, bound: false, closed: false, snapshotSubscribed: false, outboundBytes: 0, blocked: false, selectionReady: false, frameReadRunning: false, droppedFrames: 0 };
     this.#clients.add(client);
     client.bindTimer = setTimeout(() => { if (!client.bound) void this.closeClient(client); }, this.#bindTimeoutMs); client.bindTimer.unref?.();
     socket.on("data", (chunk) => {
@@ -197,17 +199,26 @@ export class WorkspaceGateway {
     if (command.kind === "frame.clear") { await this.clearSelection(client); this.sendSuccess(client, command.requestId, { kind: "ack" }); return; }
     if (command.kind === "close") { this.sendSuccess(client, command.requestId, { kind: "ack" }); await this.closeClient(client, true); return; }
     if (this.#broker === undefined) throw new WorkspaceProtocolError("UNAVAILABLE", "AgentCursor browser workspace is not active.", true);
-    await this.clearSelection(client);
+    const prior = client.selection;
     const selection: Selection = { selectionId: command.selectionId, subscriptionId: randomBytes(18).toString("base64url"), browserSessionId: command.browserSessionId, tabId: command.tabId };
-    client.pendingFrame = undefined; client.pendingBrokerFrame = undefined;
-    await this.#broker.subscribeFrames(selection.subscriptionId, selection.browserSessionId, selection.tabId, "selected");
-    client.selection = selection;
+    client.selection = selection; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined;
+    try {
+      await this.#broker.replaceFrames(prior, { subscriptionId: selection.subscriptionId, browserSessionId: selection.browserSessionId, tabId: selection.tabId, interest: "selected" });
+    } catch (error) {
+      client.pendingBrokerFrame = undefined;
+      const definiteRejection = error instanceof BrowserdClientError && error.code !== "DEADLINE_EXCEEDED" && error.code !== "CAPABILITY_UNAVAILABLE";
+      if (prior !== undefined && definiteRejection) { client.selection = prior; client.selectionReady = true; }
+      else { client.selection = undefined; client.selectionReady = false; }
+      throw error;
+    }
+    client.selectionReady = true;
     this.sendSuccess(client, command.requestId, { kind: "selection", selectionId: selection.selectionId, browserSessionId: selection.browserSessionId, tabId: selection.tabId });
+    if (client.pendingBrokerFrame !== undefined && !client.frameReadRunning) void this.readFrames(client);
   }
 
   private async clearSelection(client: GatewayClient): Promise<void> {
     const prior = client.selection;
-    client.selection = undefined; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined;
+    client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined;
     if (prior !== undefined && this.#broker !== undefined) await this.#broker.unsubscribeFrames(prior.subscriptionId, prior.browserSessionId, prior.tabId);
   }
 
@@ -223,12 +234,12 @@ export class WorkspaceGateway {
       if (client.closed || selection === undefined || selection.subscriptionId !== event.subscriptionId || selection.browserSessionId !== event.browserSessionId || selection.tabId !== event.tabId || event.runtimeInstanceId !== this.#broker?.diagnostics.runtimeInstanceId) continue;
       if (client.pendingBrokerFrame !== undefined) client.droppedFrames++;
       client.pendingBrokerFrame = event;
-      if (!client.frameReadRunning) void this.readFrames(client);
+      if (client.selectionReady && !client.frameReadRunning) void this.readFrames(client);
     }
   }
 
   private async readFrames(client: GatewayClient): Promise<void> {
-    if (this.#broker === undefined || client.frameReadRunning) return;
+    if (this.#broker === undefined || client.frameReadRunning || !client.selectionReady) return;
     client.frameReadRunning = true;
     try {
       while (!client.closed && client.pendingBrokerFrame !== undefined) {
@@ -236,7 +247,7 @@ export class WorkspaceGateway {
         let bytes: Uint8Array;
         try { bytes = await this.#broker.readFrame(event); } catch { continue; }
         const selection = client.selection;
-        if (selection === undefined || selection.subscriptionId !== event.subscriptionId || selection.browserSessionId !== event.browserSessionId || selection.tabId !== event.tabId || this.#broker.diagnostics.runtimeInstanceId !== event.runtimeInstanceId) { client.droppedFrames++; continue; }
+        if (!client.selectionReady || selection === undefined || selection.subscriptionId !== event.subscriptionId || selection.browserSessionId !== event.browserSessionId || selection.tabId !== event.tabId || this.#broker.diagnostics.runtimeInstanceId !== event.runtimeInstanceId) { client.droppedFrames++; continue; }
         if (client.pendingBrokerFrame !== undefined) { client.droppedFrames++; continue; }
         const header = workspaceFrameHeader(event, selection.selectionId);
         if (bytes.byteLength !== header.byteLength) { client.droppedFrames++; continue; }
@@ -249,7 +260,7 @@ export class WorkspaceGateway {
     if (this.#broker === undefined || this.#refreshRunning) return;
     this.#refreshRunning = true;
     try { await this.#broker.refresh(); await this.#broker.ping(); await this.refreshSnapshot(); }
-    catch { this.onBrowserConnectionChanged(false); }
+    catch { if (!this.#broker.diagnostics.connected) this.onBrowserConnectionChanged(false); }
     finally { this.#refreshRunning = false; }
   }
 
@@ -262,13 +273,13 @@ export class WorkspaceGateway {
       this.#lastBrowserRevision = snapshot.workspaceRevision;
       this.#snapshot = sanitizeWorkspaceSnapshot(snapshot, runtime);
       this.broadcastSnapshot(); this.broadcastStatus(this.currentStatus());
-    } catch { this.onBrowserConnectionChanged(false); }
+    } catch { if (!this.#broker.diagnostics.connected) this.onBrowserConnectionChanged(false); }
   }
 
   private onBrowserRuntimeChanged(prior: string | undefined, current: string | undefined): void {
     if (prior !== undefined && prior !== current) {
       this.#snapshot = unavailableWorkspaceSnapshot("replaced", this.#lastBrowserRevision + 1); this.#lastBrowserRevision = 0;
-      for (const client of this.#clients) { client.selection = undefined; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; }
+      for (const client of this.#clients) { client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; }
       this.broadcastSnapshot(); this.broadcastStatus({ connection: "reconnecting", browserd: "replaced", message: "Browser service was replaced." });
     }
   }
@@ -276,7 +287,7 @@ export class WorkspaceGateway {
   private onBrowserConnectionChanged(ready: boolean): void {
     if (ready) { this.broadcastStatus(this.currentStatus()); return; }
     if (this.#snapshot.browserdState !== "replaced") this.#snapshot = unavailableWorkspaceSnapshot("unavailable", this.#lastBrowserRevision);
-    for (const client of this.#clients) { client.selection = undefined; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; }
+    for (const client of this.#clients) { client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; }
     this.broadcastSnapshot(); this.broadcastStatus(this.currentStatus());
   }
 
@@ -292,7 +303,7 @@ export class WorkspaceGateway {
   private sendStatus(client: GatewayClient, status: WorkspaceStatus): void { this.sendHeader(client, { protocolVersion: WORKSPACE_PROTOCOL_VERSION, kind: "status", status }); }
   private sendSuccess(client: GatewayClient, requestIdValue: string, result: Extract<WorkspaceServerHeader, { kind: "response"; ok: true }>["result"]): void { this.sendHeader(client, { protocolVersion: WORKSPACE_PROTOCOL_VERSION, kind: "response", requestId: requestIdValue, ok: true, result }); }
   private sendFailure(client: GatewayClient, requestIdValue: string, error: unknown): void {
-    const protocol = error instanceof WorkspaceProtocolError ? error : new WorkspaceProtocolError("INTERNAL_ERROR", "Workspace request failed.");
+    const protocol = error instanceof WorkspaceProtocolError ? error : error instanceof BrowserdClientError ? new WorkspaceProtocolError(workspaceErrorCode(error.code), error.message, error.retryable) : new WorkspaceProtocolError("INTERNAL_ERROR", "Workspace request failed.");
     this.sendHeader(client, { protocolVersion: WORKSPACE_PROTOCOL_VERSION, kind: "response", requestId: requestIdValue, ok: false, error: { code: workspaceErrorCode(protocol.code), message: protocol.message.slice(0, 256), retryable: protocol.retryable } });
   }
   private sendHeader(client: GatewayClient, header: WorkspaceServerHeader): void { this.write(client, encodeWorkspaceRecord(header), false); }
@@ -320,7 +331,7 @@ export class WorkspaceGateway {
     client.closed = true;
     if (client.bindTimer !== undefined) clearTimeout(client.bindTimer); client.bindTimer = undefined;
     this.#clients.delete(client);
-    const selection = client.selection; client.selection = undefined; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined;
+    const selection = client.selection; client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined;
     if (selection !== undefined && this.#broker !== undefined) await this.#broker.unsubscribeFrames(selection.subscriptionId, selection.browserSessionId, selection.tabId).catch(() => undefined);
     if (graceful) client.socket.end(); else client.socket.destroy();
   }

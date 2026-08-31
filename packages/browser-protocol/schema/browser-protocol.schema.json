@@ -2150,6 +2150,117 @@
             "operationId",
             "deadline",
             "kind",
+            "next"
+          ],
+          "properties": {
+            "protocolVersion": {
+              "type": "string",
+              "const": "browser.v2"
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+            },
+            "operationId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+            },
+            "deadline": {
+              "type": "string",
+              "minLength": 20,
+              "maxLength": 24,
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?Z$"
+            },
+            "kind": {
+              "type": "string",
+              "const": "workspace.frames.replace"
+            },
+            "prior": {
+              "type": "object",
+              "required": [
+                "browserSessionId",
+                "tabId",
+                "subscriptionId"
+              ],
+              "properties": {
+                "browserSessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                },
+                "tabId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                },
+                "subscriptionId": {
+                  "type": "string",
+                  "minLength": 16,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]{16,128}$"
+                }
+              },
+              "additionalProperties": false
+            },
+            "next": {
+              "type": "object",
+              "required": [
+                "browserSessionId",
+                "tabId",
+                "subscriptionId",
+                "interest"
+              ],
+              "properties": {
+                "browserSessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                },
+                "tabId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                },
+                "subscriptionId": {
+                  "type": "string",
+                  "minLength": 16,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]{16,128}$"
+                },
+                "interest": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "idle"
+                    },
+                    {
+                      "type": "string",
+                      "const": "selected"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "protocolVersion",
+            "requestId",
+            "operationId",
+            "deadline",
+            "kind",
             "browserSessionId",
             "tabId",
             "subscriptionId",
@@ -4038,6 +4149,8 @@
                           "pathId",
                           "state",
                           "controlState",
+                          "controlEpoch",
+                          "captureReadiness",
                           "personaId",
                           "cursor",
                           "tabs"
@@ -4088,6 +4201,35 @@
                           "controlState": {
                             "type": "string",
                             "const": "agent"
+                          },
+                          "controlEpoch": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "captureReadiness": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "starting"
+                              },
+                              {
+                                "type": "string",
+                                "const": "warming"
+                              },
+                              {
+                                "type": "string",
+                                "const": "ready"
+                              },
+                              {
+                                "type": "string",
+                                "const": "degraded"
+                              },
+                              {
+                                "type": "string",
+                                "const": "unavailable"
+                              }
+                            ]
                           },
                           "personaId": {
                             "type": "string",
@@ -4147,6 +4289,7 @@
                                 "url",
                                 "title",
                                 "state",
+                                "captureReadiness",
                                 "documentGeneration",
                                 "viewportGeneration",
                                 "frameSequence"
@@ -4185,6 +4328,30 @@
                                     {
                                       "type": "string",
                                       "const": "closed"
+                                    }
+                                  ]
+                                },
+                                "captureReadiness": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "starting"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "warming"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "ready"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "degraded"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "unavailable"
                                     }
                                   ]
                                 },
@@ -4740,7 +4907,7 @@
             "byteLength": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 16777216
+              "maximum": 4194304
             },
             "artifactId": {
               "type": "string",
@@ -4906,6 +5073,7 @@
             "subscriptionId",
             "browserSessionId",
             "tabId",
+            "controlEpoch",
             "documentGeneration",
             "viewportGeneration",
             "frameSequence",
@@ -4950,6 +5118,11 @@
               "minLength": 1,
               "maxLength": 128,
               "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+            },
+            "controlEpoch": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
             },
             "documentGeneration": {
               "type": "integer",

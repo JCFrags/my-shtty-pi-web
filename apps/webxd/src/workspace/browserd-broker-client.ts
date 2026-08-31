@@ -81,6 +81,16 @@ export class BrowserdWorkspaceBrokerClient {
     this.#subscriptions.delete(subscriptionId);
   }
 
+  async replaceFrames(prior: { readonly subscriptionId: string; readonly browserSessionId: string; readonly tabId: string } | undefined, next: { readonly subscriptionId: string; readonly browserSessionId: string; readonly tabId: string; readonly interest: "idle" | "selected" }): Promise<void> {
+    const knownPrior = prior === undefined ? undefined : this.#subscriptions.get(prior.subscriptionId);
+    if (prior !== undefined && (knownPrior === undefined || knownPrior.browserSessionId !== prior.browserSessionId || knownPrior.tabId !== prior.tabId)) throw new BrowserdClientError("OPERATION_CONFLICT", "prior workspace selection is no longer current", false, this.#runtimeInstanceId);
+    const existing = this.#subscriptions.get(next.subscriptionId);
+    if (existing !== undefined && (prior !== undefined || existing.browserSessionId !== next.browserSessionId || existing.tabId !== next.tabId)) throw new BrowserdClientError("OPERATION_CONFLICT", "workspace subscription identity conflicts", false, this.#runtimeInstanceId);
+    await this.call("workspace.frames.replace", { ...(prior === undefined ? {} : { prior: { subscriptionId: prior.subscriptionId, browserSessionId: prior.browserSessionId, tabId: prior.tabId } }), next });
+    if (prior !== undefined) this.#subscriptions.delete(prior.subscriptionId);
+    this.#subscriptions.set(next.subscriptionId, { browserSessionId: next.browserSessionId, tabId: next.tabId });
+  }
+
   async readFrame(event: WorkspaceFrameEvent): Promise<Uint8Array> {
     const chunks: Uint8Array[] = [];
     let offset = 0;
@@ -220,6 +230,7 @@ class WorkspaceBrokerConnection {
       const timer = setTimeout(() => {
         if (!this.#pending.delete(requestId)) return;
         reject(new BrowserdClientError("DEADLINE_EXCEEDED", "browser workspace request timed out", true, this.runtimeInstanceId));
+        void this.close();
       }, this.requestTimeoutMs);
       timer.unref?.();
       this.#pending.set(requestId, { operationId, resolve, reject, timer });

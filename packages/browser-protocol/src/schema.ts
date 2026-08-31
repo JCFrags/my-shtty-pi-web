@@ -125,12 +125,22 @@ export const BrowserRequestSchema = Type.Union([
   request("frames.unsubscribe", { address: TabAddressSchema, subscriptionId: OpaqueIdSchema }),
 ]);
 
+const workspaceFrameSelection = Type.Object({
+  browserSessionId: IdSchema,
+  tabId: IdSchema,
+  subscriptionId: OpaqueIdSchema,
+}, strict);
+
 export const WorkspaceBrokerRequestSchema = Type.Union([
   request("workspace.snapshot.get", {}),
   request("workspace.events.subscribe", {}),
   request("workspace.events.unsubscribe", {}),
   request("workspace.frames.subscribe", { browserSessionId: IdSchema, tabId: IdSchema, subscriptionId: OpaqueIdSchema, interest: Type.Union([Type.Literal("idle"), Type.Literal("selected")]) }),
   request("workspace.frames.unsubscribe", { browserSessionId: IdSchema, tabId: IdSchema, subscriptionId: OpaqueIdSchema }),
+  request("workspace.frames.replace", {
+    prior: Type.Optional(workspaceFrameSelection),
+    next: Type.Object({ browserSessionId: IdSchema, tabId: IdSchema, subscriptionId: OpaqueIdSchema, interest: Type.Union([Type.Literal("idle"), Type.Literal("selected")]) }, strict),
+  }),
   request("workspace.frame.read", { browserSessionId: IdSchema, tabId: IdSchema, subscriptionId: OpaqueIdSchema, frameSequence: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }), artifactId: OpaqueIdSchema, offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 4 * 1024 * 1024 })), maxBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 * 1024 })) }),
   request("workspace.ping", {}),
 ]);
@@ -206,6 +216,8 @@ export const WorkspaceOperationSummarySchema = Type.Object({
   cancellable: Type.Boolean(),
 }, strict);
 
+const CaptureReadinessSchema = Type.Union([Type.Literal("starting"), Type.Literal("warming"), Type.Literal("ready"), Type.Literal("degraded"), Type.Literal("unavailable")]);
+
 export const WorkspaceSessionSnapshotSchema = Type.Object({
   browserSessionId: IdSchema,
   agentSessionId: IdSchema,
@@ -213,6 +225,8 @@ export const WorkspaceSessionSnapshotSchema = Type.Object({
   pathId: Type.Literal("agentcursor/chrome"),
   state: Type.Union([Type.Literal("starting"), Type.Literal("ready"), Type.Literal("degraded"), Type.Literal("closed")]),
   controlState: Type.Literal("agent"),
+  controlEpoch: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  captureReadiness: CaptureReadinessSchema,
   personaId: OpaqueIdSchema,
   cursor,
   tabs: Type.Array(Type.Object({
@@ -220,6 +234,7 @@ export const WorkspaceSessionSnapshotSchema = Type.Object({
     url: PageUrlSchema,
     title: Type.String({ maxLength: 512 }),
     state: Type.Union([Type.Literal("attaching"), Type.Literal("ready"), Type.Literal("crashed"), Type.Literal("closed")]),
+    captureReadiness: CaptureReadinessSchema,
     documentGeneration: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
     viewportGeneration: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
     frameSequence: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
@@ -251,6 +266,7 @@ export const WorkspaceFrameEventSchema = Type.Object({
   subscriptionId: OpaqueIdSchema,
   browserSessionId: IdSchema,
   tabId: IdSchema,
+  controlEpoch: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
   documentGeneration: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
   viewportGeneration: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
   frameSequence: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
@@ -324,7 +340,7 @@ export const FrameEventSchema = Type.Object({
   capturedMonotonicMs: Type.Number({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
   publishedMonotonicMs: Type.Number({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
   mediaType: Type.Literal("image/png"),
-  byteLength: Type.Integer({ minimum: 1, maximum: 16 * 1024 * 1024 }),
+  byteLength: Type.Integer({ minimum: 1, maximum: 4 * 1024 * 1024 }),
   artifactId: OpaqueIdSchema,
   sha256: Sha256Schema,
   viewport,

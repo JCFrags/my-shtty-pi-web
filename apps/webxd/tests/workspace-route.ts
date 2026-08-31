@@ -39,7 +39,7 @@ export class WorkspaceRoute {
     if (browserSessionId !== undefined) args.push(`--select-session=${browserSessionId}`);
     if (tabId !== undefined) args.push(`--select-tab=${tabId}`);
     const child = spawn(this.binary, args, {
-      env: { ...process.env, GDK_BACKEND: "x11" },
+      env: workspaceEnvironment(),
       stdio: ["ignore", "ignore", "pipe"],
     });
     this.process = child;
@@ -58,7 +58,7 @@ export class WorkspaceRoute {
   async launch(args: readonly string[]): Promise<number> {
     if (args.length > 4 || args.some((arg) => arg.length > 256)) throw new Error("secondary Tauri arguments exceed their test bound");
     return await new Promise<number>((resolveLaunch, rejectLaunch) => {
-      const child = spawn(this.binary, [...args], { env: { ...process.env, GDK_BACKEND: "x11" }, stdio: ["ignore", "ignore", "pipe"] });
+      const child = spawn(this.binary, [...args], { env: workspaceEnvironment(), stdio: ["ignore", "ignore", "pipe"] });
       let error = "";
       child.stderr?.on("data", (chunk) => { error = `${error}${String(chunk)}`.slice(-4_096); });
       const timer = setTimeout(() => { child.kill("SIGKILL"); rejectLaunch(new Error(`secondary workspace launch timed out: ${error}`)); }, 10_000);
@@ -93,6 +93,27 @@ export class WorkspaceRoute {
     return await this.waitForRecord((record) => record.kind === "snapshot" && Array.isArray(record.sessions) && !record.sessions.filter(isRecord).some((session) => session.browserSessionId === sessionId), from, timeoutMs);
   }
 
+  async waitForCaptureReadiness(browserSessionId: string, tabId: string, state: "starting" | "warming" | "ready" | "degraded" | "unavailable", from = 0, timeoutMs = 20_000): Promise<WorkspaceDiagnostic> {
+    return await this.waitForRecord((record) => {
+      if (record.kind !== "snapshot" || !Array.isArray(record.sessions)) return false;
+      const session = record.sessions.filter(isRecord).find((item) => item.browserSessionId === browserSessionId);
+      if (session === undefined || !Array.isArray(session.tabs)) return false;
+      const tab = session.tabs.filter(isRecord).find((item) => item.tabId === tabId);
+      return session.captureReadiness === state && tab?.captureReadiness === state;
+    }, from, timeoutMs);
+  }
+
+  async waitForCaptureReadinessTransition(browserSessionId: string, tabId: string, from = 0, timeoutMs = 20_000): Promise<{ warming: WorkspaceDiagnostic; ready: WorkspaceDiagnostic; elapsedMs: number }> {
+    await this.waitForRecord((record) => tabCaptureReadiness(record, browserSessionId, tabId) === "ready", from, timeoutMs);
+    const records = (await this.records()).slice(from);
+    const warmingIndex = records.findIndex((record) => tabCaptureReadiness(record, browserSessionId, tabId) === "warming");
+    const readyIndex = records.findIndex((record, index) => index > warmingIndex && tabCaptureReadiness(record, browserSessionId, tabId) === "ready");
+    const warming = records[warmingIndex];
+    const ready = records[readyIndex];
+    if (warmingIndex < 0 || readyIndex <= warmingIndex || warming === undefined || ready === undefined) throw new Error("capture readiness did not transition from warming to ready in order");
+    return { warming, ready, elapsedMs: Math.max(0, Date.parse(ready.recordedAt) - Date.parse(warming.recordedAt)) };
+  }
+
   async waitForSelection(browserSessionId: string, tabId: string, from = 0, timeoutMs = 15_000): Promise<WorkspaceDiagnostic> {
     return await this.waitForRecord((record) => record.kind === "selection" && record.browserSessionId === browserSessionId && record.tabId === tabId, from, timeoutMs);
   }
@@ -101,21 +122,21 @@ export class WorkspaceRoute {
     return await this.waitForRecord((record) => record.kind === "frameSettled" && record.outcome === "painted" && record.browserSessionId === browserSessionId && record.tabId === tabId && record.selectionId === selectionId, from, timeoutMs);
   }
 
-  async select(browserSessionId: string, tabId: string): Promise<{ selection: WorkspaceDiagnostic; paint: WorkspaceDiagnostic; latencyMs: number; brokerLatencyMs: number; frameLatencyMs: number; launcherLatencyMs: number }> {
+  async select(browserSessionId: string, tabId: string, paintTimeoutMs = 45_000): Promise<{ selection: WorkspaceDiagnostic; paint: WorkspaceDiagnostic; latencyMs: number; brokerLatencyMs: number; frameLatencyMs: number; launcherLatencyMs: number }> {
     const records = await this.records();
     const from = records.length;
     const started = performance.now();
     await this.launch(["--raise", `--select-session=${browserSessionId}`, `--select-tab=${tabId}`]);
     const requested = await this.waitForRecord((record) => record.kind === "selectionRequested" && record.browserSessionId === browserSessionId && record.tabId === tabId, from, 15_000);
     const selection = await this.waitForRecord((record) => record.kind === "selection" && record.browserSessionId === browserSessionId && record.tabId === tabId, from, 15_000);
-    const paint = await this.waitForRecord((record) => record.kind === "frameSettled" && record.outcome === "painted" && record.browserSessionId === browserSessionId && record.tabId === tabId && record.selectionId === selection.selectionId, from, 15_000);
+    const paint = await this.waitForRecord((record) => record.kind === "frameSettled" && record.outcome === "painted" && record.browserSessionId === browserSessionId && record.tabId === tabId && record.selectionId === selection.selectionId, from, paintTimeoutMs);
     const requestedAt = Date.parse(requested.recordedAt);
     const selectedAt = Date.parse(selection.recordedAt);
     const paintedAt = Date.parse(paint.recordedAt);
     const latencyMs = paintedAt - requestedAt;
     const brokerLatencyMs = selectedAt - requestedAt;
     const frameLatencyMs = paintedAt - selectedAt;
-    if (![latencyMs, brokerLatencyMs, frameLatencyMs].every((value) => Number.isFinite(value) && value >= 0 && value <= 15_000)) throw new Error("Tauri selection diagnostic timing is invalid");
+    if (![latencyMs, brokerLatencyMs, frameLatencyMs].every((value) => Number.isFinite(value) && value >= 0 && value <= paintTimeoutMs)) throw new Error("Tauri selection diagnostic timing is invalid");
     return { selection, paint, latencyMs, brokerLatencyMs, frameLatencyMs, launcherLatencyMs: performance.now() - started };
   }
 
@@ -179,6 +200,13 @@ export class WorkspaceRoute {
   }
 }
 
+function workspaceEnvironment(): NodeJS.ProcessEnv { return { ...process.env, GDK_BACKEND: "x11", WEBKIT_DISABLE_DMABUF_RENDERER: "1" }; }
+function tabCaptureReadiness(record: WorkspaceDiagnostic, browserSessionId: string, tabId: string): unknown {
+  if (record.kind !== "snapshot" || !Array.isArray(record.sessions)) return undefined;
+  const session = record.sessions.filter(isRecord).find((item) => item.browserSessionId === browserSessionId);
+  if (session === undefined || !Array.isArray(session.tabs)) return undefined;
+  return session.tabs.filter(isRecord).find((item) => item.tabId === tabId)?.captureReadiness;
+}
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function sleep(ms: number): Promise<void> { return new Promise((resolveSleep) => setTimeout(resolveSleep, ms)); }
 async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs: number, label: string): Promise<void> {

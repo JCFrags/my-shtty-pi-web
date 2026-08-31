@@ -36,6 +36,7 @@ pub struct WorkspaceTab {
     pub url: String,
     pub title: String,
     pub state: String,
+    pub capture_readiness: String,
     pub document_generation: u64,
     pub viewport_generation: u64,
     pub frame_sequence: u64,
@@ -50,6 +51,8 @@ pub struct WorkspaceSession {
     pub path_id: String,
     pub state: String,
     pub control_state: String,
+    pub control_epoch: u64,
+    pub capture_readiness: String,
     pub persona_display_id: String,
     pub cursor: Cursor,
     pub tabs: Vec<WorkspaceTab>,
@@ -91,6 +94,7 @@ pub struct FrameHeader {
     pub browserd_runtime_instance_id: String,
     pub browser_session_id: String,
     pub tab_id: String,
+    pub control_epoch: u64,
     pub frame_sequence: u64,
     pub document_generation: u64,
     pub viewport_generation: u64,
@@ -233,15 +237,15 @@ fn validate_snapshot(snapshot: &WorkspaceSnapshot) -> Result<(), WorkspaceError>
     if snapshot.sessions.len() > 256 || !matches!(snapshot.browserd_state.as_str(), "ready" | "unavailable" | "replaced") { return Err(WorkspaceError::Protocol); }
     if snapshot.browserd_runtime_instance_id.as_deref().is_some_and(|value| !opaque_id(value)) { return Err(WorkspaceError::Protocol); }
     for session in &snapshot.sessions {
-        if !id(&session.browser_session_id) || !opaque_id(&session.actor_display_id) || session.path_id != "agentcursor/chrome" || session.control_state != "agent" || session.tabs.len() > 16 { return Err(WorkspaceError::Protocol); }
-        for tab in &session.tabs { if !id(&tab.tab_id) || tab.url.len() > 8192 || tab.title.len() > 512 { return Err(WorkspaceError::Protocol); } }
+        if !id(&session.browser_session_id) || !opaque_id(&session.actor_display_id) || session.path_id != "agentcursor/chrome" || session.control_state != "agent" || session.control_epoch == 0 || !capture_readiness(&session.capture_readiness) || session.tabs.len() > 16 { return Err(WorkspaceError::Protocol); }
+        for tab in &session.tabs { if !id(&tab.tab_id) || tab.url.len() > 8192 || tab.title.len() > 512 || !capture_readiness(&tab.capture_readiness) { return Err(WorkspaceError::Protocol); } }
     }
     Ok(())
 }
 
 fn validate_frame(frame: &FrameHeader, payload_len: usize) -> Result<(), WorkspaceError> {
     let pixels = u64::from(frame.width) * u64::from(frame.height);
-    if frame.byte_length != payload_len || payload_len == 0 || !opaque_id(&frame.selection_id) || !opaque_id(&frame.subscription_id) || !opaque_id(&frame.browserd_runtime_instance_id) || !id(&frame.browser_session_id) || !id(&frame.tab_id) || !matches!(frame.media_type.as_str(), "image/png" | "image/jpeg") || frame.sha256.len() != 64 || !frame.sha256.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) || frame.width == 0 || frame.height == 0 || frame.width > 32_768 || frame.height > 32_768 || pixels > MAX_FRAME_PIXELS { return Err(WorkspaceError::Protocol); }
+    if frame.byte_length != payload_len || payload_len == 0 || !opaque_id(&frame.selection_id) || !opaque_id(&frame.subscription_id) || !opaque_id(&frame.browserd_runtime_instance_id) || !id(&frame.browser_session_id) || !id(&frame.tab_id) || frame.control_epoch == 0 || !matches!(frame.media_type.as_str(), "image/png" | "image/jpeg") || frame.sha256.len() != 64 || !frame.sha256.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) || frame.width == 0 || frame.height == 0 || frame.width > 32_768 || frame.height > 32_768 || pixels > MAX_FRAME_PIXELS { return Err(WorkspaceError::Protocol); }
     Ok(())
 }
 
@@ -262,6 +266,7 @@ fn string(object: &serde_json::Map<String, Value>, key: &str) -> Result<String, 
 fn exact_keys(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Result<(), WorkspaceError> { if object.len() == keys.len() && keys.iter().all(|key| object.contains_key(*key)) { Ok(()) } else { Err(WorkspaceError::Protocol) } }
 fn id(value: &str) -> bool { let mut bytes = value.bytes(); bytes.next().is_some_and(|first| first.is_ascii_alphabetic()) && value.len() <= 128 && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-')) }
 fn opaque_id(value: &str) -> bool { (16..=128).contains(&value.len()) && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')) }
+fn capture_readiness(value: &str) -> bool { matches!(value, "starting" | "warming" | "ready" | "degraded" | "unavailable") }
 
 #[cfg(test)]
 mod tests {
@@ -270,10 +275,10 @@ mod tests {
     fn rejects_extra_fields_and_payload_mismatches() {
         let extra = br#"{\"protocolVersion\":\"workspace.v1\",\"kind\":\"status\",\"status\":{\"connection\":\"ready\",\"browserd\":\"ready\"},\"extra\":true}"#;
         assert!(parse_server_record(extra, 0).is_err());
-        let frame = serde_json::json!({"protocolVersion":"workspace.v1","kind":"frame","selectionId":"selection_123456","subscriptionId":"subscription_1234","browserdRuntimeInstanceId":"runtime_123456789","browserSessionId":"session:one","tabId":"tab:one","frameSequence":1,"documentGeneration":1,"viewportGeneration":1,"capturedAt":"2026-08-30T00:00:00.000Z","publishedAt":"2026-08-30T00:00:00.000Z","mediaType":"image/png","byteLength":3,"sha256":"a".repeat(64),"width":1,"height":1});
+        let frame = serde_json::json!({"protocolVersion":"workspace.v1","kind":"frame","selectionId":"selection_123456","subscriptionId":"subscription_1234","browserdRuntimeInstanceId":"runtime_123456789","browserSessionId":"session:one","tabId":"tab:one","controlEpoch":1,"frameSequence":1,"documentGeneration":1,"viewportGeneration":1,"capturedAt":"2026-08-30T00:00:00.000Z","publishedAt":"2026-08-30T00:00:00.000Z","mediaType":"image/png","byteLength":3,"sha256":"a".repeat(64),"width":1,"height":1});
         assert!(matches!(parse_server_record(&serde_json::to_vec(&frame).unwrap(), 3), Ok(ServerRecord::Frame(_))));
         assert!(parse_server_record(&serde_json::to_vec(&frame).unwrap(), 2).is_err());
-        let oversized = serde_json::json!({"protocolVersion":"workspace.v1","kind":"frame","selectionId":"selection_123456","subscriptionId":"subscription_1234","browserdRuntimeInstanceId":"runtime_123456789","browserSessionId":"session:one","tabId":"tab:one","frameSequence":1,"documentGeneration":1,"viewportGeneration":1,"capturedAt":"2026-08-30T00:00:00.000Z","publishedAt":"2026-08-30T00:00:00.000Z","mediaType":"image/png","byteLength":3,"sha256":"a".repeat(64),"width":32768,"height":32768});
+        let oversized = serde_json::json!({"protocolVersion":"workspace.v1","kind":"frame","selectionId":"selection_123456","subscriptionId":"subscription_1234","browserdRuntimeInstanceId":"runtime_123456789","browserSessionId":"session:one","tabId":"tab:one","controlEpoch":1,"frameSequence":1,"documentGeneration":1,"viewportGeneration":1,"capturedAt":"2026-08-30T00:00:00.000Z","publishedAt":"2026-08-30T00:00:00.000Z","mediaType":"image/png","byteLength":3,"sha256":"a".repeat(64),"width":32768,"height":32768});
         assert!(parse_server_record(&serde_json::to_vec(&oversized).unwrap(), 3).is_err());
     }
 }

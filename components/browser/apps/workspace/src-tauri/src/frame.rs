@@ -14,6 +14,7 @@ pub struct FrameDeliveryMetadata {
     pub browserd_runtime_instance_id: String,
     pub browser_session_id: String,
     pub tab_id: String,
+    pub control_epoch: u64,
     pub frame_sequence: u64,
     pub document_generation: u64,
     pub viewport_generation: u64,
@@ -42,6 +43,7 @@ pub fn encode_frame_delivery(delivery_id: u64, header: &FrameHeader, payload: &[
         browserd_runtime_instance_id: header.browserd_runtime_instance_id.clone(),
         browser_session_id: header.browser_session_id.clone(),
         tab_id: header.tab_id.clone(),
+        control_epoch: header.control_epoch,
         frame_sequence: header.frame_sequence,
         document_generation: header.document_generation,
         viewport_generation: header.viewport_generation,
@@ -81,11 +83,12 @@ mod tests {
     #[test]
     fn encodes_metadata_prefix_and_exact_raw_bytes() {
         let payload = vec![7_u8; 1024 * 1024];
-        let header = FrameHeader { protocol_version: "workspace.v1".into(), kind: "frame".into(), selection_id: "selection_123456".into(), subscription_id: "subscription_1234".into(), browserd_runtime_instance_id: "runtime_123456789".into(), browser_session_id: "session:one".into(), tab_id: "tab:one".into(), frame_sequence: 1, document_generation: 1, viewport_generation: 1, captured_at: "2026-08-30T00:00:00.000Z".into(), published_at: "2026-08-30T00:00:00.000Z".into(), media_type: "image/png".into(), byte_length: payload.len(), sha256: format!("{:x}", Sha256::digest(&payload)), width: 800, height: 600 };
+        let header = FrameHeader { protocol_version: "workspace.v1".into(), kind: "frame".into(), selection_id: "selection_123456".into(), subscription_id: "subscription_1234".into(), browserd_runtime_instance_id: "runtime_123456789".into(), browser_session_id: "session:one".into(), tab_id: "tab:one".into(), control_epoch: 1, frame_sequence: 1, document_generation: 1, viewport_generation: 1, captured_at: "2026-08-30T00:00:00.000Z".into(), published_at: "2026-08-30T00:00:00.000Z".into(), media_type: "image/png".into(), byte_length: payload.len(), sha256: format!("{:x}", Sha256::digest(&payload)), width: 800, height: 600 };
         let encoded = encode_frame_delivery(9, &header, &payload).unwrap();
         let metadata_len = u32::from_be_bytes(encoded[..4].try_into().unwrap()) as usize;
         let metadata: serde_json::Value = serde_json::from_slice(&encoded[4..4 + metadata_len]).unwrap();
         assert_eq!(metadata["deliveryId"], 9);
+        assert_eq!(metadata["controlEpoch"], 1);
         assert_eq!(&encoded[4 + metadata_len..], payload);
         assert!(!String::from_utf8_lossy(&encoded[..4 + metadata_len]).contains("base64"));
 

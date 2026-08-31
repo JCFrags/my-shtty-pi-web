@@ -19,6 +19,8 @@ export function sanitizeWorkspaceSnapshot(snapshot: BrowserWorkspaceSnapshot, br
       pathId: "agentcursor/chrome",
       state: session.state,
       controlState: "agent",
+      controlEpoch: session.controlEpoch,
+      captureReadiness: session.captureReadiness,
       personaDisplayId: sanitizePersona(session.personaId),
       cursor: {
         x: session.cursor.x,
@@ -48,6 +50,7 @@ export function workspaceFrameHeader(event: WorkspaceFrameEvent, selectionId: st
     browserdRuntimeInstanceId: event.runtimeInstanceId,
     browserSessionId: event.browserSessionId,
     tabId: event.tabId,
+    controlEpoch: event.controlEpoch,
     frameSequence: event.frameSequence,
     documentGeneration: event.documentGeneration,
     viewportGeneration: event.viewportGeneration,

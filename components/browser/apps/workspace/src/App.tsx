@@ -68,7 +68,7 @@ export function App({ bridge: suppliedBridge, initialState }: AppProps) {
   }, [bridge, renderer, selectionPending]);
 
   const frameAgeMs = renderer.metrics.metadata ? Math.max(0, now - Date.parse(renderer.metrics.metadata.capturedAt)) : undefined;
-  const viewportState = deriveViewportState(selected?.tab, Boolean(selectionPending), renderer.metrics, frameAgeMs);
+  const viewportState = deriveViewportState(selected?.session, selected?.tab, Boolean(selectionPending), renderer.metrics, frameAgeMs);
   const agents = groupAgents(sessions);
 
   return (
@@ -179,6 +179,7 @@ function StatusPanel({ status, selected, metrics, now, droppedBeforeFrontend }: 
       <StatusGroup title="Page" rows={[
         ["Session", selected?.session.state ?? "—"],
         ["Tab", selected?.tab.state ?? "—"],
+        ["Capture", selected ? `${selected.session.captureReadiness} / ${selected.tab.captureReadiness}` : "—"],
         ["Document", selected ? String(selected.tab.documentGeneration) : "—"],
         ["Viewport", selected ? String(selected.tab.viewportGeneration) : "—"],
       ]} />
@@ -219,15 +220,18 @@ function groupAgents(sessions: WorkspaceSession[]): Array<{ actorDisplayId: stri
 }
 
 function deriveViewportState(
+  session: WorkspaceSession | undefined,
   tab: WorkspaceTab | undefined,
   pending: boolean,
   metrics: FrameMetrics,
   age: number | undefined,
-): "idle" | "connecting" | "live" | "stale" | "unsupported" | "crashed" {
-  if (!tab) return "idle";
+): "idle" | "connecting" | "preparing" | "live" | "stale" | "unsupported" | "crashed" {
+  if (!session || !tab) return "idle";
   if (tab.state === "crashed" || tab.state === "closed") return "crashed";
   if (pending) return "connecting";
+  if (session.captureReadiness !== "ready" || tab.captureReadiness !== "ready") return "preparing";
   if (!metrics.metadata) return metrics.lastDropReason === "decode" || metrics.lastDropReason === "decoded-dimensions" ? "unsupported" : "connecting";
+  if (metrics.metadata.controlEpoch !== session.controlEpoch || metrics.metadata.documentGeneration !== tab.documentGeneration || metrics.metadata.viewportGeneration !== tab.viewportGeneration) return "connecting";
   return age !== undefined && age > 5_000 ? "stale" : "live";
 }
 

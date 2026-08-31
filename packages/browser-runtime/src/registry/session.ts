@@ -1,10 +1,12 @@
 import { randomBytes } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { BrowserProtocolError, type ActorIdentity, type DomObservation, type FrameEvent, type ScreenshotObservation, type SessionDescriptor, type TabAddress, type TabDescriptor } from "@webx/browser-protocol";
 import type { NavigationAuthorization, NavigationAuthorizationContext } from "../actor/identity.js";
 import type { BrowserArtifactStore } from "../artifacts/store.js";
 import { SessionCaptureCoordinator } from "../capture/coordinator.js";
+import { captureProofIdentity, SessionCaptureReadiness, type CaptureReadinessState } from "../capture/readiness.js";
 import { ChromeHost, type ChromeHostOptions } from "../chrome/host.js";
-import { bindFrameTab, FrameScheduler } from "../frames/scheduler.js";
+import { bindFrameTab, FrameScheduler, type FrameCaptureOutcome } from "../frames/scheduler.js";
 import { SessionMotor, bindMotorTab, type CoordinateAction, type MouseButton } from "../motor/session-motor.js";
 import { DomObservationStore, bindDomTab } from "../observations/dom-store.js";
 import { bindObservationTab, ObservationStore } from "../observations/store.js";
@@ -17,10 +19,13 @@ export type DomFallbackAction =
   | { kind: "type"; text: string; replace?: boolean }
   | { kind: "press"; key: string };
 
-export class BrowserSession {
+export class BrowserSession extends EventEmitter {
   private closeState: "open" | "closing" | "closed" | "cleanup-failed" = "open";
   private closePromise: Promise<void> | undefined;
+  private automaticWarmupAttempts = 0;
+  private automaticWarmupTabId: string | undefined;
   readonly captureCoordinator: SessionCaptureCoordinator;
+  readonly captureReadiness: SessionCaptureReadiness;
   readonly motor: SessionMotor;
   readonly observations: ObservationStore;
   readonly dom: DomObservationStore;
@@ -39,15 +44,19 @@ export class BrowserSession {
     screenshotObservationTtlMs: number,
     domObservationTtlMs: number,
   ) {
+    super();
     this.captureCoordinator = new SessionCaptureCoordinator();
+    this.captureReadiness = new SessionCaptureReadiness(() => this.emit("captureReadiness"));
     this.motor = new SessionMotor(browserSessionId, personaSeed, motorMinimumPathMs);
     this.observations = new ObservationStore(actor, targets, artifacts, this.motor, { freshnessMs: screenshotObservationTtlMs, currentEpoch: () => this.controlEpoch, captureCoordinator: this.captureCoordinator });
     this.dom = new DomObservationStore(targets, { retentionMs: domObservationTtlMs });
     this.frames = new FrameScheduler(actor, targets, artifacts, this.motor, () => this.controlEpoch, { captureCoordinator: this.captureCoordinator });
+    this.frames.on("captureOutcome", this.onCaptureReadinessOutcome);
     host.on("exit", this.onHostExit);
     host.on("disconnect", this.onHostDisconnect);
     targets.on("tabTerminal", this.onTabTerminal);
     targets.on("tabRegistered", this.onTabRegistered);
+    targets.on("tabGenerationChanged", this.onTabGenerationChanged);
   }
 
   static async create(actor: ActorIdentity, operations: OperationRegistry, artifacts: BrowserArtifactStore, navigationAuthorization: NavigationAuthorization, options: Omit<ChromeHostOptions, "hostId"> & { initialUrl?: string; initialNavigationContext?: NavigationAuthorizationContext; personaSeed?: number; motorMinimumPathMs?: number; screenshotObservationTtlMs?: number; domObservationTtlMs?: number; observationFreshnessMs?: number } = {}, signal?: AbortSignal, markProcessDispatched?: () => void): Promise<BrowserSession> {
@@ -59,8 +68,9 @@ export class BrowserSession {
       signal?.throwIfAborted();
       const targets = await TargetRegistry.create(browserSessionId, host);
       const session = new BrowserSession(actor, browserSessionId, host, targets, operations, artifacts, navigationAuthorization, personaSeed ?? randomBytes(4).readUInt32BE(), motorMinimumPathMs ?? 0, screenshotObservationTtlMs ?? observationFreshnessMs ?? 60_000, domObservationTtlMs ?? 60_000);
-      const tab = await session.createTab(undefined, signal);
+      const tab = await session.createTab(undefined, signal, undefined, { operationId: "session.create" }, false);
       if (initialUrl !== undefined) await session.navigate(session.address(tab), initialUrl, signal ?? new AbortController().signal, undefined, initialNavigationContext ?? { operationId: "session.create" });
+      session.startCaptureWarmup(tab, true);
       return session;
     } catch (error) {
       await host.close();
@@ -70,12 +80,14 @@ export class BrowserSession {
 
   get controlEpoch(): number { return this.operations.currentEpoch(this.actor, this.browserSessionId); }
   get personaId(): string { return this.motor.personaId; }
+  get captureReadinessState(): CaptureReadinessState { return this.captureReadiness.state; }
+  tabCaptureReadiness(tabId: string): CaptureReadinessState { return this.captureReadiness.tabState(tabId); }
 
   descriptor(): SessionDescriptor {
     return { kind: "session", browserSessionId: this.browserSessionId, controlEpoch: this.controlEpoch, state: this.closeState === "open" ? this.host.connected ? "ready" : "degraded" : "closed", personaId: this.personaId, cursor: this.motor.state, tabs: this.targets.list(this.controlEpoch) };
   }
 
-  async createTab(url?: string, signal = new AbortController().signal, markDispatched?: () => void, navigationContext: NavigationAuthorizationContext = { operationId: "tab.create" }): Promise<TabRecord> {
+  async createTab(url?: string, signal = new AbortController().signal, markDispatched?: () => void, navigationContext: NavigationAuthorizationContext = { operationId: "tab.create" }, prewarm = false): Promise<TabRecord> {
     this.assertOpen();
     const tab = await this.targets.createTab("about:blank", { signal, ...(markDispatched ? { markDispatched } : {}) });
     try {
@@ -84,6 +96,8 @@ export class BrowserSession {
       signal.throwIfAborted();
       if (url !== undefined) await this.navigate(this.address(tab), url, signal, undefined, navigationContext);
       signal.throwIfAborted();
+      this.captureReadiness.begin(tab, this.controlEpoch);
+      if (prewarm) this.startCaptureWarmup(tab, true);
       return tab;
     } catch (error) {
       await this.targets.rollbackRegisteredTab(tab);
@@ -157,13 +171,25 @@ export class BrowserSession {
     finally { signal.removeEventListener("abort", abort); }
   }
 
-  subscribeFrames(consumerKey: string, address: TabAddress, interest: "idle" | "selected" = "selected"): void { this.assertEpoch(address); this.frames.subscribe(consumerKey, address, interest); }
+  subscribeFrames(consumerKey: string, address: TabAddress, interest: "idle" | "selected" = "selected", deferInitialCapture = false): void { this.assertEpoch(address); this.frames.subscribe(consumerKey, address, interest, deferInitialCapture); }
   async unsubscribeFrames(consumerKey: string, address: TabAddress): Promise<void> { await this.frames.unsubscribe(consumerKey, address); }
+  invalidateFrameConsumer(consumerKey: string): void { this.frames.removeConsumer(consumerKey); }
+  async settleFrameConsumerRemoval(consumerKey: string): Promise<void> { await this.frames.removeConsumerAndSettle(consumerKey); }
+  latestValidWorkspaceFrame(address: TabAddress, maxAgeMs = 2_000): FrameEvent | undefined { this.assertEpoch(address); return this.frames.latestValidFrame(address, maxAgeMs); }
   disconnectFrameConsumer(prefix: string): void { this.frames.removeConsumerPrefix(prefix); }
   onFrame(listener: (frame: FrameEvent) => void): void { this.frames.on("frame", listener); }
   offFrame(listener: (frame: FrameEvent) => void): void { this.frames.off("frame", listener); }
+  onCaptureReadiness(listener: () => void): void { this.on("captureReadiness", listener); }
+  offCaptureReadiness(listener: () => void): void { this.off("captureReadiness", listener); }
 
-  incrementControlEpoch(): number { const epoch = this.operations.incrementEpoch(this.actor, this.browserSessionId); this.frames.invalidateEpoch(epoch); void this.motor.releaseAll(); return epoch; }
+  incrementControlEpoch(): number {
+    const epoch = this.operations.incrementEpoch(this.actor, this.browserSessionId);
+    this.frames.invalidateEpoch(epoch);
+    this.automaticWarmupTabId = undefined;
+    for (const descriptor of this.targets.list(epoch)) { const tab = this.targets.getById(descriptor.address.tabId); if (tab !== undefined) this.captureReadiness.begin(tab, epoch); }
+    void this.motor.releaseAll();
+    return epoch;
+  }
 
   async close(): Promise<void> {
     if (this.closeState === "closed") return;
@@ -178,6 +204,9 @@ export class BrowserSession {
 
   private async closeInternal(): Promise<void> {
     const failures: unknown[] = [];
+    this.captureReadiness.markUnavailable();
+    this.frames.off("captureOutcome", this.onCaptureReadinessOutcome);
+    this.targets.off("tabGenerationChanged", this.onTabGenerationChanged);
     try { await this.frames.close(); } catch (error) { failures.push(error); }
     try { await this.captureCoordinator.close(); } catch (error) { failures.push(error); }
     try { await this.motor.releaseAll(); } catch (error) { failures.push(error); }
@@ -185,6 +214,17 @@ export class BrowserSession {
     try { await this.host.close(); } catch (error) { failures.push(error); }
     try { this.artifacts.clearSession(this.actor, this.browserSessionId); } catch (error) { failures.push(error); }
     if (failures.length > 0) throw new AggregateError(failures, "Browser session cleanup failed.");
+  }
+
+  private startCaptureWarmup(tab: TabRecord, automatic = false): void {
+    if (this.closeState !== "open" || tab.state !== "open") return;
+    this.captureReadiness.begin(tab, this.controlEpoch);
+    if (!automatic || this.automaticWarmupAttempts >= 3 || this.automaticWarmupTabId !== undefined) return;
+    this.automaticWarmupTabId = tab.tabId;
+    const key = captureReadinessConsumerKey(tab.tabId);
+    const address = this.address(tab);
+    if (!this.frames.hasConsumer(key, address)) this.frames.subscribe(key, address, "selected");
+    this.frames.requestCapture(tab.tabId);
   }
 
   private bindTab(tab: TabRecord): void {
@@ -200,13 +240,35 @@ export class BrowserSession {
   }
   private assertOpen(): void { if (this.closeState !== "open" || !this.host.running || !this.host.connected) throw new BrowserProtocolError("CDP_DISCONNECTED", "Browser session is unavailable.", true); }
 
-  private readonly onHostExit = (): void => { if (this.closeState === "open") this.operations.failSession(this.actor, this.browserSessionId, "BROWSER_EXITED"); void this.motor.releaseAll(); };
-  private readonly onHostDisconnect = (): void => { if (this.closeState === "open") this.operations.failSession(this.actor, this.browserSessionId, "CDP_DISCONNECTED"); void this.motor.releaseAll(); };
-  private readonly onTabRegistered = (tab: TabRecord): void => { this.bindTab(tab); void this.motor.initializeTab(tab).catch(() => undefined); };
+  private readonly onCaptureReadinessOutcome = (outcome: FrameCaptureOutcome): void => {
+    if (!outcome.selectedAtStart) return;
+    const state = outcome.result === "succeeded"
+      ? this.captureReadiness.succeeded(outcome.identity)
+      : (this.captureReadiness.failed(outcome.identity), this.captureReadiness.tabState(outcome.identity.tabId));
+    if (this.automaticWarmupTabId !== outcome.identity.tabId) return;
+    this.automaticWarmupAttempts++;
+    const exhausted = this.automaticWarmupAttempts >= 3;
+    if (state === "ready" || exhausted) {
+      if (state !== "ready") {
+        const current = this.targets.getById(outcome.identity.tabId);
+        if (current !== undefined && current.state === "open") this.captureReadiness.failed(captureProofIdentity(current, this.controlEpoch));
+      }
+      this.automaticWarmupTabId = undefined;
+      void this.frames.removeConsumerAndSettle(captureReadinessConsumerKey(outcome.identity.tabId));
+      return;
+    }
+    this.frames.requestCapture(outcome.identity.tabId);
+  };
+  private readonly onTabGenerationChanged = (tab: TabRecord): void => { this.captureReadiness.begin(tab, this.controlEpoch); };
+  private readonly onHostExit = (): void => { if (this.closeState === "open") this.operations.failSession(this.actor, this.browserSessionId, "BROWSER_EXITED"); this.captureReadiness.markUnavailable(); void this.motor.releaseAll(); };
+  private readonly onHostDisconnect = (): void => { if (this.closeState === "open") this.operations.failSession(this.actor, this.browserSessionId, "CDP_DISCONNECTED"); this.captureReadiness.markUnavailable(); void this.motor.releaseAll(); };
+  private readonly onTabRegistered = (tab: TabRecord): void => { this.bindTab(tab); void this.motor.initializeTab(tab).then(() => this.captureReadiness.begin(tab, this.controlEpoch), () => { this.captureReadiness.begin(tab, this.controlEpoch); this.captureReadiness.failed(captureProofIdentity(tab, this.controlEpoch)); }); };
   private readonly onTabTerminal = ({ tabId, tab }: TerminalTabEvent): void => {
+    this.captureReadiness.remove(tabId);
+    if (this.automaticWarmupTabId === tabId) { this.automaticWarmupTabId = undefined; void this.frames.removeConsumerAndSettle(captureReadinessConsumerKey(tabId)); }
     this.captureCoordinator.cancelTab(tabId);
     if (this.motor.isActiveTab(tabId)) void this.motor.releaseAll(tab);
-    this.observations.invalidateTab(tabId); this.dom.invalidateTab(tabId); void this.frames.stop(tabId);
+    this.observations.invalidateTab(tabId); this.dom.invalidateTab(tabId); void this.frames.stop(tabId, 0);
     this.artifacts.clearTab(this.actor, this.browserSessionId, tabId);
     this.operations.failTab(this.actor, this.browserSessionId, tabId);
   };
@@ -232,4 +294,5 @@ function coordinatePoint(action: CoordinateAction): { x: number; y: number } {
     case "click": case "doubleClick": case "wheel": return action.at;
   }
 }
+function captureReadinessConsumerKey(tabId: string): string { return `capture-readiness\u0000${tabId}`; }
 function opaqueId(prefix: string): string { return `${prefix}_${randomBytes(18).toString("base64url")}`; }

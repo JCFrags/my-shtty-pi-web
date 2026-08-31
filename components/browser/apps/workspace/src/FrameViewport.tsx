@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import {
   decodeFrameEnvelope,
   frontendBinaryType,
@@ -9,7 +9,7 @@ import {
   type PublicWorkspaceState,
   type WorkspaceApi,
 } from "./bridge";
-import { FrameSequenceWatermark, frameRejectionReason } from "./workspaceState";
+import { FrameSequenceWatermark, framePaintBindingKey, framePaintReadinessEligible, frameRejectionReason } from "./workspaceState";
 
 export interface FrameMetrics {
   metadata?: FrameMetadata;
@@ -56,15 +56,8 @@ export function useFrameRenderer(bridge: WorkspaceApi, publicState: PublicWorksp
   const clear = useCallback(() => {
     generationRef.current += 1;
     sequenceRef.current.reset();
-    const canvas = canvasRef.current;
-    const context = canvas?.getContext("2d");
-    if (canvas && context) context.clearRect(0, 0, canvas.width, canvas.height);
-    if (canvas) {
-      canvas.removeAttribute("data-frame-sequence");
-      canvas.style.width = "0px";
-      canvas.style.height = "0px";
-    }
-    setMetrics((current) => ({ ...emptyMetrics, droppedBeforeDecode: current.droppedBeforeDecode, droppedDuringDecode: current.droppedDuringDecode }));
+    clearRenderedFrame(canvasRef.current);
+    setMetrics(resetFrameMetrics);
   }, []);
 
   const resume = useCallback(() => {
@@ -73,13 +66,15 @@ export function useFrameRenderer(bridge: WorkspaceApi, publicState: PublicWorksp
     acceptingRef.current = Boolean(publicStateRef.current.selected);
   }, []);
 
-  const selectionKey = publicState.selected
-    ? `${publicState.snapshot?.browserdRuntimeInstanceId ?? ""}:${publicState.selected.selectionId}:${publicState.selected.browserSessionId}:${publicState.selected.tabId}`
-    : "none";
-  useEffect(() => {
+  const selectionKey = framePaintBindingKey(publicState);
+  useLayoutEffect(() => {
     clear();
     acceptingRef.current = Boolean(publicState.selected);
   }, [selectionKey, clear, publicState.selected]);
+  const readinessEligible = framePaintReadinessEligible(publicState);
+  useLayoutEffect(() => {
+    if (!readinessEligible) clear();
+  }, [readinessEligible, clear]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -205,15 +200,16 @@ export function useFrameRenderer(bridge: WorkspaceApi, publicState: PublicWorksp
 
 export function FrameViewport({ canvasRef, state, frameAgeMs }: {
   canvasRef: RefObject<HTMLCanvasElement | null>;
-  state: "idle" | "connecting" | "live" | "stale" | "unsupported" | "crashed";
+  state: "idle" | "connecting" | "preparing" | "live" | "stale" | "unsupported" | "crashed";
   frameAgeMs?: number;
 }) {
   const message = state === "idle" ? "Select a browser tab to begin viewing."
     : state === "connecting" ? "Connecting to the selected browser tab…"
-      : state === "stale" ? "The latest browser frame is stale. Waiting for an update…"
-        : state === "unsupported" ? "This browser frame format is not supported."
-          : state === "crashed" ? "The selected browser tab has crashed or closed."
-            : undefined;
+      : state === "preparing" ? "Browser view is preparing."
+        : state === "stale" ? "The latest browser frame is stale. Waiting for an update…"
+          : state === "unsupported" ? "This browser frame format is not supported."
+            : state === "crashed" ? "The selected browser tab has crashed or closed."
+              : undefined;
   return (
     <section className="viewport" aria-label="Selected browser screenshot">
       <canvas ref={canvasRef} className="frame-canvas" aria-label="Live read-only browser screenshot" />
@@ -221,6 +217,25 @@ export function FrameViewport({ canvasRef, state, frameAgeMs }: {
       {state === "live" && frameAgeMs !== undefined && <span className="frame-age">{formatFrameAge(frameAgeMs)}</span>}
     </section>
   );
+}
+
+export function clearRenderedFrame(canvas: HTMLCanvasElement | null): void {
+  if (!canvas) return;
+  const context = canvas.getContext("2d");
+  if (context) context.clearRect(0, 0, canvas.width, canvas.height);
+  canvas.width = 0;
+  canvas.height = 0;
+  canvas.removeAttribute("data-frame-sequence");
+  canvas.style.width = "0px";
+  canvas.style.height = "0px";
+}
+
+export function resetFrameMetrics(current: FrameMetrics): FrameMetrics {
+  return {
+    ...emptyMetrics,
+    droppedBeforeDecode: current.droppedBeforeDecode,
+    droppedDuringDecode: current.droppedDuringDecode,
+  };
 }
 
 function fitCanvas(canvas: HTMLCanvasElement): void {

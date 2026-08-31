@@ -87,6 +87,8 @@ export class BrowserArtifactStore {
 
   get entryCount(): number { return this.records.size; }
   get totalBytes(): number { return this.total; }
+  get frameRingCount(): number { return this.framePins.size; }
+  get framePinCount(): number { let count = 0; for (const ids of this.framePins.values()) count += ids.length; return count; }
 
   stats(): Array<{ owner: string; browserSessionId: string; purpose: ArtifactPurpose; count: number; bytes: number }> {
     const values = new Map<string, { owner: string; browserSessionId: string; purpose: ArtifactPurpose; count: number; bytes: number }>();
@@ -135,6 +137,19 @@ export class BrowserArtifactStore {
     const copy = Uint8Array.from(record.bytes);
     if (await sha256Hex(copy) !== record.sha256) { this.delete(id); throw new BrowserProtocolError("INTERNAL_ERROR", "Artifact integrity verification failed."); }
     return { descriptor: descriptor(record), bytes: copy };
+  }
+
+  hasWorkspaceFrame(actor: ActorIdentity, id: string, browserSessionId: string, tabId: string, sha256: string, byteLength: number): boolean {
+    this.prune();
+    const record = this.records.get(id);
+    return record !== undefined
+      && record.owner === actorKey(actor)
+      && record.browserSessionId === browserSessionId
+      && record.tabId === tabId
+      && record.purpose === "workspace-frame"
+      && record.sha256 === sha256
+      && record.bytes.byteLength === byteLength
+      && record.pinCount > 0;
   }
 
   revoke(actor: ActorIdentity, id: string): void {

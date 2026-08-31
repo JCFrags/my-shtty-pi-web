@@ -2,8 +2,9 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 
 export interface CursorState { x: number; y: number; visible: boolean; pathSequence: number; sampleSequence: number }
 export interface OperationState { operationId: string; kind: string; state: "queued" | "running" | "cancelling" | "terminal"; dispatchState: "not-dispatched" | "partially-dispatched" | "dispatched"; startedAt?: string; cancellable: boolean }
-export interface WorkspaceTab { tabId: string; url: string; title: string; state: "attaching" | "ready" | "crashed" | "closed"; documentGeneration: number; viewportGeneration: number; frameSequence: number }
-export interface WorkspaceSession { browserSessionId: string; agentLabel: string; actorDisplayId: string; pathId: "agentcursor/chrome"; state: "starting" | "ready" | "degraded" | "closed"; controlState: "agent"; personaDisplayId: string; cursor: CursorState; tabs: WorkspaceTab[]; activeOperation?: OperationState; lastActivityAt?: string }
+export type CaptureReadiness = "starting" | "warming" | "ready" | "degraded" | "unavailable";
+export interface WorkspaceTab { tabId: string; url: string; title: string; state: "attaching" | "ready" | "crashed" | "closed"; captureReadiness: CaptureReadiness; documentGeneration: number; viewportGeneration: number; frameSequence: number }
+export interface WorkspaceSession { browserSessionId: string; agentLabel: string; actorDisplayId: string; pathId: "agentcursor/chrome"; state: "starting" | "ready" | "degraded" | "closed"; controlState: "agent"; controlEpoch: number; captureReadiness: CaptureReadiness; personaDisplayId: string; cursor: CursorState; tabs: WorkspaceTab[]; activeOperation?: OperationState; lastActivityAt?: string }
 export interface WorkspaceSnapshot { workspaceRevision: number; browserdRuntimeInstanceId?: string; generatedAt: string; browserdState: "ready" | "unavailable" | "replaced"; sessions: WorkspaceSession[] }
 export interface WorkspaceStatus { connection: "connecting" | "ready" | "reconnecting" | "unavailable" | "closed"; browserd: "ready" | "unavailable" | "replaced"; message?: string }
 export interface SelectedTab { selectionId: string; browserSessionId: string; tabId: string }
@@ -18,7 +19,7 @@ export type FrontendStateRecord =
 
 export interface FrameMetadata {
   deliveryId: number; selectionId: string; subscriptionId: string; browserdRuntimeInstanceId: string;
-  browserSessionId: string; tabId: string; frameSequence: number; documentGeneration: number;
+  browserSessionId: string; tabId: string; controlEpoch: number; frameSequence: number; documentGeneration: number;
   viewportGeneration: number; capturedAt: string; publishedAt: string; receivedAt: string;
   mediaType: "image/png" | "image/jpeg"; byteLength: number; sha256: string; width: number; height: number;
 }
@@ -127,13 +128,14 @@ export async function runBinaryProbe(): Promise<BinaryProbeResult> {
 function isFrameMetadata(value: unknown): value is FrameMetadata {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const item = value as Record<string, unknown>;
-  const keys = ["deliveryId", "selectionId", "subscriptionId", "browserdRuntimeInstanceId", "browserSessionId", "tabId", "frameSequence", "documentGeneration", "viewportGeneration", "capturedAt", "publishedAt", "receivedAt", "mediaType", "byteLength", "sha256", "width", "height"];
+  const keys = ["deliveryId", "selectionId", "subscriptionId", "browserdRuntimeInstanceId", "browserSessionId", "tabId", "controlEpoch", "frameSequence", "documentGeneration", "viewportGeneration", "capturedAt", "publishedAt", "receivedAt", "mediaType", "byteLength", "sha256", "width", "height"];
   if (Object.keys(item).length !== keys.length || !keys.every((key) => key in item)) return false;
   return Number.isSafeInteger(item.deliveryId) && typeof item.selectionId === "string" && OPAQUE_ID.test(item.selectionId)
     && typeof item.subscriptionId === "string" && OPAQUE_ID.test(item.subscriptionId)
     && typeof item.browserdRuntimeInstanceId === "string" && OPAQUE_ID.test(item.browserdRuntimeInstanceId)
     && typeof item.browserSessionId === "string" && ID.test(item.browserSessionId)
     && typeof item.tabId === "string" && ID.test(item.tabId)
+    && Number.isSafeInteger(item.controlEpoch) && (item.controlEpoch as number) >= 1
     && Number.isSafeInteger(item.frameSequence) && Number.isSafeInteger(item.documentGeneration) && Number.isSafeInteger(item.viewportGeneration)
     && typeof item.capturedAt === "string" && typeof item.publishedAt === "string" && typeof item.receivedAt === "string"
     && (item.mediaType === "image/png" || item.mediaType === "image/jpeg") && Number.isSafeInteger(item.byteLength) && (item.byteLength as number) > 0

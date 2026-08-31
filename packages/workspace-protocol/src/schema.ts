@@ -14,6 +14,7 @@ export const WorkspaceOpaqueIdSchema = Type.String({ minLength: 16, maxLength: 1
 export const WorkspaceTimestampSchema = Type.String({ minLength: 20, maxLength: 24, pattern: timestampPattern });
 export const WorkspaceSha256Schema = Type.String({ minLength: 64, maxLength: 64, pattern: "^[0-9a-f]{64}$" });
 const boundedText = (maxLength: number) => Type.String({ maxLength });
+const captureReadiness = Type.Union([Type.Literal("starting"), Type.Literal("warming"), Type.Literal("ready"), Type.Literal("degraded"), Type.Literal("unavailable")]);
 
 const cursor = Type.Object({
   x: Type.Number({ minimum: 0, maximum: 100_000 }),
@@ -43,6 +44,7 @@ export const WorkspaceTabSchema = Type.Object({
   url: boundedText(8192),
   title: boundedText(512),
   state: Type.Union([Type.Literal("attaching"), Type.Literal("ready"), Type.Literal("crashed"), Type.Literal("closed")]),
+  captureReadiness,
   documentGeneration: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
   viewportGeneration: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
   frameSequence: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
@@ -55,6 +57,8 @@ export const WorkspaceSessionSchema = Type.Object({
   pathId: Type.Literal("agentcursor/chrome"),
   state: Type.Union([Type.Literal("starting"), Type.Literal("ready"), Type.Literal("degraded"), Type.Literal("closed")]),
   controlState: Type.Literal("agent"),
+  controlEpoch: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  captureReadiness,
   personaDisplayId: Type.String({ minLength: 1, maxLength: 32, pattern: "^[A-Za-z0-9_-]+$" }),
   cursor,
   tabs: Type.Array(WorkspaceTabSchema, { maxItems: 16 }),
@@ -107,6 +111,7 @@ export const WorkspaceFrameHeaderSchema = Type.Object({
   browserdRuntimeInstanceId: WorkspaceOpaqueIdSchema,
   browserSessionId: WorkspaceIdSchema,
   tabId: WorkspaceIdSchema,
+  controlEpoch: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
   frameSequence: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
   documentGeneration: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
   viewportGeneration: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),

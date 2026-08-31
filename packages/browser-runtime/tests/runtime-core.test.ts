@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "vitest";
 import { DenyNavigationAuthorization, LoopbackFixtureAuthorization } from "../src/actor/identity.js";
 import { BrowserArtifactStore } from "../src/artifacts/store.js";
-import { cleanupOrphanProfiles, validateExtraFlags } from "../src/chrome/host.js";
+import { cleanupOrphanProfiles, prepareChromeExtraFlags, validateExtraFlags } from "../src/chrome/host.js";
 import { OperationRegistry } from "../src/operations/registry.js";
 import { bindMotorTab, SessionMotor } from "../src/motor/session-motor.js";
 import type { TabRecord } from "../src/targets/registry.js";
@@ -241,7 +241,13 @@ describe("artifacts and Chrome configuration", () => {
     assert.equal(store.totalBytes, 8);
   });
 
-  it("permits only reviewed Chrome flags", () => {
+  it("requires the reviewed background-tab screenshot surface and merges allowed feature flags", () => {
+    assert.deepEqual(prepareChromeExtraFlags([]), ["--enable-features=CDPScreenshotNewSurface"]);
+    assert.deepEqual(
+      prepareChromeExtraFlags(["--enable-features=UseOzonePlatform", "--ozone-platform=wayland"]),
+      ["--enable-features=CDPScreenshotNewSurface,UseOzonePlatform", "--ozone-platform=wayland"],
+    );
+    assert.equal(prepareChromeExtraFlags(["--enable-features=UseOzonePlatform"]).filter((flag) => flag.startsWith("--enable-features=")).length, 1);
     assert.deepEqual(validateExtraFlags(["--ozone-platform=wayland"]), ["--ozone-platform=wayland"]);
     assert.throws(() => validateExtraFlags(["--no-sandbox"]), /not allowed/i);
     assert.throws(() => validateExtraFlags(["--ignore-certificate-errors"]), /not allowed/i);

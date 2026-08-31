@@ -130,7 +130,7 @@ export class TargetRegistry extends EventEmitter {
   }
 
   incrementFrame(tab: TabRecord): number { return ++tab.latestFrameSequence; }
-  incrementViewport(tab: TabRecord): void { tab.viewportGeneration++; }
+  incrementViewport(tab: TabRecord): void { tab.viewportGeneration++; this.emit("tabGenerationChanged", tab); }
 
   async close(): Promise<void> {
     if (this.closed) return;
@@ -222,8 +222,9 @@ export class TargetRegistry extends EventEmitter {
       tab.documentGeneration++;
       if (typeof event.params.frame.id === "string") tab.topFrameId = event.params.frame.id;
       if (typeof event.params.frame.url === "string") tab.url = event.params.frame.url;
+      this.emit("tabGenerationChanged", tab);
     } else if (event.method === "Page.navigatedWithinDocument" && typeof event.params.url === "string") tab.url = event.params.url;
-    else if (event.method === "Page.frameResized") tab.viewportGeneration++;
+    else if (event.method === "Page.frameResized") this.incrementViewport(tab);
     else if (event.method === "Inspector.targetCrashed") this.markTerminal(tab, "crashed");
   };
 

@@ -102,6 +102,8 @@ impl AcceptanceDiagnostics {
             "actorDisplayId": bounded_text(&session.actor_display_id, 128),
             "agentLabel": bounded_text(&session.agent_label, 256),
             "state": bounded_text(&session.state, 32),
+            "controlEpoch": session.control_epoch,
+            "captureReadiness": bounded_text(&session.capture_readiness, 32),
             "cursor": {
                 "x": session.cursor.x,
                 "y": session.cursor.y,
@@ -112,6 +114,7 @@ impl AcceptanceDiagnostics {
             "tabs": session.tabs.iter().take(64).map(|tab| json!({
                 "tabId": bounded_text(&tab.tab_id, 128),
                 "state": bounded_text(&tab.state, 32),
+                "captureReadiness": bounded_text(&tab.capture_readiness, 32),
                 "documentGeneration": tab.document_generation,
                 "viewportGeneration": tab.viewport_generation,
                 "frameSequence": tab.frame_sequence,
@@ -181,6 +184,7 @@ fn frame_record(kind: &str, delivery_id: u64, header: &FrameHeader, disposition:
         "browserdRuntimeInstanceId": bounded_text(&header.browserd_runtime_instance_id, 128),
         "browserSessionId": bounded_text(&header.browser_session_id, 128),
         "tabId": bounded_text(&header.tab_id, 128),
+        "controlEpoch": header.control_epoch,
         "frameSequence": header.frame_sequence,
         "documentGeneration": header.document_generation,
         "viewportGeneration": header.viewport_generation,

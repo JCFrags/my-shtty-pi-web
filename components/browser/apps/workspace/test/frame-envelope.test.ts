@@ -10,6 +10,7 @@ function makeEnvelope(payload: Uint8Array): ArrayBuffer {
     browserdRuntimeInstanceId: "runtime_AAAAAAAA",
     browserSessionId: "session:one",
     tabId: "tab:one",
+    controlEpoch: 4,
     frameSequence: 8,
     documentGeneration: 3,
     viewportGeneration: 4,

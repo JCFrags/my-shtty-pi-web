@@ -245,14 +245,21 @@ export class BrowserdServer {
     state.pending.set(request.requestId, controller);
     try {
       let result: unknown;
+      let cachedDelivery: { readonly subscriptionId: string; readonly frame: FrameEvent } | undefined;
       if (request.kind === "workspace.snapshot.get") result = this.runtime.workspaceSnapshot();
       else if (request.kind === "workspace.events.subscribe") { this.runtime.workspaceSubscribeEvents(state.connectionId); result = { kind: "workspacePong", generatedAt: new Date().toISOString() }; }
       else if (request.kind === "workspace.events.unsubscribe") { this.runtime.workspaceUnsubscribeEvents(state.connectionId); result = { kind: "workspacePong", generatedAt: new Date().toISOString() }; }
       else if (request.kind === "workspace.frames.subscribe") { this.runtime.workspaceSubscribeFrames(state.connectionId, request.subscriptionId, request.browserSessionId, request.tabId, request.interest); result = { kind: "workspaceSubscription", operationId: request.operationId, subscriptionId: request.subscriptionId, subscribed: true }; }
       else if (request.kind === "workspace.frames.unsubscribe") { await this.runtime.workspaceUnsubscribeFrames(state.connectionId, request.subscriptionId, request.browserSessionId, request.tabId); result = { kind: "workspaceSubscription", operationId: request.operationId, subscriptionId: request.subscriptionId, subscribed: false }; }
+      else if (request.kind === "workspace.frames.replace") {
+        const frame = this.runtime.workspaceReplaceFrames(state.connectionId, request.prior, request.next);
+        result = { kind: "workspaceSubscription", operationId: request.operationId, subscriptionId: request.next.subscriptionId, subscribed: true };
+        if (frame !== undefined) cachedDelivery = { subscriptionId: request.next.subscriptionId, frame };
+      }
       else if (request.kind === "workspace.frame.read") result = await this.runtime.workspaceReadFrame(state.connectionId, request);
       else result = { kind: "workspacePong", generatedAt: new Date().toISOString() };
       this.send(state, { protocolVersion: PROTOCOL_VERSION, kind: "response", requestId: request.requestId, operationId: request.operationId, ok: true, result });
+      if (cachedDelivery !== undefined) this.sendWorkspaceFrame(state, cachedDelivery.subscriptionId, cachedDelivery.frame);
     } catch (error) { this.sendCaught(state, request.requestId, error, request.operationId); }
     finally { state.pending.delete(request.requestId); }
   }
@@ -281,14 +288,15 @@ export class BrowserdServer {
     for (const state of this.connections) {
       if (state.closed) continue;
       if (state.role === "actor" && state.actor !== undefined && this.runtime.shouldDeliverFrame(state.connectionId, state.actor, frame)) this.send(state, frame, true);
-      if (state.role === "workspace") {
-        for (const delivery of this.runtime.workspaceFrameDeliveries(state.connectionId, frame)) {
-          const message = { protocolVersion: PROTOCOL_VERSION, kind: "workspace.frame.available", runtimeInstanceId: this.descriptor.runtimeInstanceId, subscriptionId: delivery.subscriptionId, browserSessionId: frame.address.browserSessionId, tabId: frame.address.tabId, documentGeneration: frame.documentGeneration, viewportGeneration: frame.viewportGeneration, frameSequence: frame.frameSequence, capturedMonotonicMs: frame.capturedMonotonicMs, publishedMonotonicMs: frame.publishedMonotonicMs, mediaType: frame.mediaType, byteLength: frame.byteLength, artifactId: frame.artifactId, sha256: frame.sha256, width: frame.viewport.width, height: frame.viewport.height };
-          if (this.send(state, message, true)) this.runtime.recordWorkspaceFrameDelivered(state.connectionId, delivery.subscriptionId, frame);
-        }
-      }
+      if (state.role === "workspace") for (const delivery of this.runtime.workspaceFrameDeliveries(state.connectionId, frame)) this.sendWorkspaceFrame(state, delivery.subscriptionId, delivery.frame);
     }
   };
+
+  private sendWorkspaceFrame(state: ConnectionState, subscriptionId: string, frame: FrameEvent): void {
+    if (state.closed || state.role !== "workspace") return;
+    const message = { protocolVersion: PROTOCOL_VERSION, kind: "workspace.frame.available", runtimeInstanceId: this.descriptor.runtimeInstanceId, subscriptionId, browserSessionId: frame.address.browserSessionId, tabId: frame.address.tabId, controlEpoch: frame.address.controlEpoch, documentGeneration: frame.documentGeneration, viewportGeneration: frame.viewportGeneration, frameSequence: frame.frameSequence, capturedMonotonicMs: frame.capturedMonotonicMs, publishedMonotonicMs: frame.publishedMonotonicMs, mediaType: frame.mediaType, byteLength: frame.byteLength, artifactId: frame.artifactId, sha256: frame.sha256, width: frame.viewport.width, height: frame.viewport.height };
+    if (this.send(state, message, true)) this.runtime.recordWorkspaceFrameDelivered(state.connectionId, subscriptionId, frame);
+  }
 
   private readonly onWorkspaceState = (event: WorkspaceStateEvent): void => {
     for (const state of this.connections) if (!state.closed && state.role === "workspace" && this.runtime.shouldDeliverWorkspaceEvent(state.connectionId)) this.send(state, event);

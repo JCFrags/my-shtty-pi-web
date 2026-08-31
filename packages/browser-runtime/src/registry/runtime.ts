@@ -11,6 +11,7 @@ import { BrowserSession, type DomFallbackAction } from "./session.js";
 
 interface RuntimeSubscription { readonly actor: string; readonly connectionId: string; readonly subscriptionId: string; readonly address: TabAddress; readonly interest: "idle" | "selected"; readonly consumerKey: string }
 interface WorkspaceSubscription { readonly connectionId: string; readonly subscriptionId: string; readonly browserSessionId: string; readonly tabId: string; readonly interest: "idle" | "selected"; readonly consumerKey: string }
+interface WorkspaceFrameSelection { readonly subscriptionId: string; readonly browserSessionId: string; readonly tabId: string }
 interface WorkspaceFrameLedgerEntry { readonly subscriptionId: string; readonly actor: ActorIdentity; readonly browserSessionId: string; readonly tabId: string; readonly frameSequence: number; readonly artifactId: string; readonly deliveredAtMs: number }
 
 export const DEFAULT_SCREENSHOT_OBSERVATION_TTL_MS = 60_000;
@@ -105,9 +106,11 @@ export class BrowserRuntime extends EventEmitter {
           pathId: "agentcursor/chrome" as const,
           state: descriptor.state,
           controlState: "agent" as const,
+          controlEpoch: descriptor.controlEpoch,
+          captureReadiness: session.captureReadinessState,
           personaId: descriptor.personaId,
           cursor: descriptor.cursor,
-          tabs: descriptor.tabs.map((tab) => ({ tabId: tab.address.tabId, url: tab.url, title: tab.title.slice(0, 512), state: tab.state, documentGeneration: tab.documentGeneration, viewportGeneration: tab.viewportGeneration, frameSequence: tab.frameSequence })),
+          tabs: descriptor.tabs.map((tab) => ({ tabId: tab.address.tabId, url: tab.url, title: tab.title.slice(0, 512), state: tab.state, captureReadiness: session.tabCaptureReadiness(tab.address.tabId), documentGeneration: tab.documentGeneration, viewportGeneration: tab.viewportGeneration, frameSequence: tab.frameSequence })),
           ...(activeOperation === undefined ? {} : { activeOperation }),
         };
       }),
@@ -137,15 +140,41 @@ export class BrowserRuntime extends EventEmitter {
 
   async workspaceUnsubscribeFrames(connectionId: string, subscriptionId: string, browserSessionId: string, tabId: string): Promise<void> {
     const values = this.workspaceSubscriptions.get(connectionId);
-    const subscription = values?.get(subscriptionId);
+    if (values === undefined) return;
+    const subscription = values.get(subscriptionId);
     if (subscription === undefined) return;
     if (subscription.browserSessionId !== browserSessionId || subscription.tabId !== tabId) throw new BrowserProtocolError("OPERATION_CONFLICT", "Workspace subscription identity does not match.");
-    const session = this.sessions.get(browserSessionId);
-    const address = session?.descriptor().tabs.find((item) => item.address.tabId === tabId)?.address;
-    if (session !== undefined && address !== undefined) await session.unsubscribeFrames(subscription.consumerKey, address);
-    values?.delete(subscriptionId);
-    if (values?.size === 0) this.workspaceSubscriptions.delete(connectionId);
-    this.pruneWorkspaceLedger(connectionId, subscriptionId);
+    values.delete(subscription.subscriptionId);
+    this.pruneWorkspaceLedger(connectionId, subscription.subscriptionId);
+    if (values.size === 0) this.workspaceSubscriptions.delete(connectionId);
+    await this.sessions.get(subscription.browserSessionId)?.settleFrameConsumerRemoval(subscription.consumerKey);
+  }
+
+  workspaceReplaceFrames(connectionId: string, prior: WorkspaceFrameSelection | undefined, next: WorkspaceFrameSelection & { readonly interest: "idle" | "selected" }): FrameEvent | undefined {
+    const values = this.workspaceSubscriptions.get(connectionId) ?? new Map<string, WorkspaceSubscription>();
+    const priorSubscription = prior === undefined ? undefined : values.get(prior.subscriptionId);
+    if (prior !== undefined && (priorSubscription === undefined || priorSubscription.browserSessionId !== prior.browserSessionId || priorSubscription.tabId !== prior.tabId)) throw new BrowserProtocolError("OPERATION_CONFLICT", "Prior workspace selection is no longer current.");
+    const existing = values.get(next.subscriptionId);
+    if (existing !== undefined) {
+      if (existing.browserSessionId !== next.browserSessionId || existing.tabId !== next.tabId || existing.interest !== next.interest || priorSubscription !== undefined) throw new BrowserProtocolError("OPERATION_CONFLICT", "Workspace subscription ID is already bound.");
+      const existingSession = this.sessions.get(existing.browserSessionId);
+      const existingAddress = existingSession?.descriptor().tabs.find((item) => item.address.tabId === existing.tabId)?.address;
+      return existingSession !== undefined && existingAddress !== undefined ? existingSession.latestValidWorkspaceFrame(existingAddress, 2_000) : undefined;
+    }
+    if (priorSubscription !== undefined && priorSubscription.subscriptionId === next.subscriptionId) throw new BrowserProtocolError("OPERATION_CONFLICT", "Replacement workspace subscription ID must be new.");
+    const session = this.sessions.get(next.browserSessionId);
+    const tab = session?.descriptor().tabs.find((item) => item.address.tabId === next.tabId);
+    if (session === undefined || tab === undefined || tab.state !== "ready") throw new BrowserProtocolError("TAB_NOT_FOUND", "Workspace tab not found.");
+    const projectedConnectionCount = values.size - Number(priorSubscription !== undefined) + 1;
+    const projectedGlobalCount = this.workspaceSubscriptionCount - Number(priorSubscription !== undefined) + 1;
+    if (projectedConnectionCount > 16 || projectedGlobalCount > 32) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Workspace subscription limit reached.", true);
+    const subscription: WorkspaceSubscription = { connectionId, subscriptionId: next.subscriptionId, browserSessionId: next.browserSessionId, tabId: next.tabId, interest: next.interest, consumerKey: `workspace\u0000${connectionId}\u0000${next.subscriptionId}` };
+    const cached = session.latestValidWorkspaceFrame(tab.address, 2_000);
+    session.subscribeFrames(subscription.consumerKey, tab.address, next.interest, cached !== undefined);
+    if (priorSubscription !== undefined) this.invalidateWorkspaceSubscription(connectionId, values, priorSubscription, false);
+    values.set(next.subscriptionId, subscription);
+    this.workspaceSubscriptions.set(connectionId, values);
+    return cached;
   }
 
   workspaceFrameDeliveries(connectionId: string, frame: FrameEvent): Array<{ subscriptionId: string; frame: FrameEvent }> {
@@ -247,6 +276,7 @@ export class BrowserRuntime extends EventEmitter {
           if (context.signal.aborted) { await session.close(); throw context.signal.reason; }
           this.sessions.set(session.browserSessionId, session);
           session.onFrame(this.onFrame);
+          session.onCaptureReadiness(() => this.workspaceChanged("control", session.browserSessionId));
           session.targets.on("tabTerminal", ({ tabId }: { tabId: string }) => { this.removeTabSubscriptions(session.browserSessionId, tabId); this.workspaceChanged("tab", session.browserSessionId, tabId); });
           this.workspaceChanged("session", session.browserSessionId);
           return session.descriptor();
@@ -396,6 +426,13 @@ export class BrowserRuntime extends EventEmitter {
   }
   private findSubscription(actor: ActorIdentity, connectionId: string, subscriptionId: string): RuntimeSubscription | undefined { const value = this.subscriptions.get(connectionId)?.get(subscriptionId); return value?.actor === actorKey(actor) ? value : undefined; }
   private removeSubscription(connectionId: string, subscriptionId: string, expected: RuntimeSubscription): void { const values = this.subscriptions.get(connectionId); if (values?.get(subscriptionId) !== expected) return; values.delete(subscriptionId); if (values.size === 0) this.subscriptions.delete(connectionId); }
+  private invalidateWorkspaceSubscription(connectionId: string, values: Map<string, WorkspaceSubscription>, subscription: WorkspaceSubscription, removeEmpty = true): void {
+    if (values.get(subscription.subscriptionId) !== subscription) return;
+    values.delete(subscription.subscriptionId);
+    this.sessions.get(subscription.browserSessionId)?.invalidateFrameConsumer(subscription.consumerKey);
+    this.pruneWorkspaceLedger(connectionId, subscription.subscriptionId);
+    if (removeEmpty && values.size === 0) this.workspaceSubscriptions.delete(connectionId);
+  }
   private pruneWorkspaceLedger(connectionId: string, subscriptionId: string): void { const values = this.workspaceFrameLedgers.get(connectionId)?.filter((item) => item.subscriptionId !== subscriptionId); if (values === undefined || values.length === 0) this.workspaceFrameLedgers.delete(connectionId); else this.workspaceFrameLedgers.set(connectionId, values); }
   private removeTabSubscriptions(sessionId: string, tabId: string): void { for (const [connectionId, values] of this.subscriptions) { for (const [id, subscription] of values) if (subscription.address.browserSessionId === sessionId && subscription.address.tabId === tabId) values.delete(id); if (values.size === 0) this.subscriptions.delete(connectionId); } for (const [connectionId, values] of this.workspaceSubscriptions) { for (const [id, subscription] of values) if (subscription.browserSessionId === sessionId && subscription.tabId === tabId) { this.sessions.get(sessionId)?.frames.removeConsumer(subscription.consumerKey); values.delete(id); this.pruneWorkspaceLedger(connectionId, id); } if (values.size === 0) this.workspaceSubscriptions.delete(connectionId); } }
   private removeSessionSubscriptions(sessionId: string): void { for (const [connectionId, values] of this.subscriptions) { for (const [id, subscription] of values) if (subscription.address.browserSessionId === sessionId) values.delete(id); if (values.size === 0) this.subscriptions.delete(connectionId); } for (const [connectionId, values] of this.workspaceSubscriptions) { for (const [id, subscription] of values) if (subscription.browserSessionId === sessionId) { this.sessions.get(sessionId)?.frames.removeConsumer(subscription.consumerKey); values.delete(id); this.pruneWorkspaceLedger(connectionId, id); } if (values.size === 0) this.workspaceSubscriptions.delete(connectionId); } }

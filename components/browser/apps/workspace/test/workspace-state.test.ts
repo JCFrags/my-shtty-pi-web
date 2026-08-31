@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { App } from "../src/App";
+import { clearRenderedFrame, resetFrameMetrics, type FrameMetrics } from "../src/FrameViewport";
 import type {
   FrameMetadata,
   FrontendStateRecord,
@@ -9,11 +10,14 @@ import type {
   WorkspaceApi,
   WorkspaceSession,
   WorkspaceSnapshot,
+  WorkspaceTab,
 } from "../src/bridge";
 import {
   displayText,
   findSelected,
   FrameSequenceWatermark,
+  framePaintBindingKey,
+  framePaintReadinessEligible,
   frameRejectionReason,
   initialWorkspaceViewState,
   reduceWorkspaceRecord,
@@ -38,6 +42,8 @@ function makeSession(browserSessionId: string, actorDisplayId: string, agentLabe
     pathId: "agentcursor/chrome",
     state: "ready",
     controlState: "agent",
+    controlEpoch: 4,
+    captureReadiness: "ready",
     personaDisplayId: "persona_AAAAAAAA",
     cursor: { x: 12, y: 34, visible: true, pathSequence: 5, sampleSequence: 8 },
     tabs: [{
@@ -45,6 +51,7 @@ function makeSession(browserSessionId: string, actorDisplayId: string, agentLabe
       title: `<img src=x onerror=alert(1)>\u202e`,
       url: "http://fixture.local/test?value=<script>",
       state: "ready",
+      captureReadiness: "ready",
       documentGeneration: 3,
       viewportGeneration: 4,
       frameSequence: 9,
@@ -61,6 +68,7 @@ function metadata(overrides: Partial<FrameMetadata> = {}): FrameMetadata {
     browserdRuntimeInstanceId: "runtime_AAAAAAAA",
     browserSessionId: selected.browserSessionId,
     tabId: selected.tabId,
+    controlEpoch: 4,
     frameSequence: 10,
     documentGeneration: 3,
     viewportGeneration: 4,
@@ -98,10 +106,62 @@ describe("workspace state", () => {
     expect(frameRejectionReason(metadata(), publicState(), 9)).toBeUndefined();
     expect(frameRejectionReason(metadata({ browserdRuntimeInstanceId: "runtime_BBBBBBBB" }), publicState(), 9)).toBe("runtime");
     expect(frameRejectionReason(metadata({ tabId: "tab:b" }), publicState(), 9)).toBe("selection");
+    expect(frameRejectionReason(metadata({ controlEpoch: 3 }), publicState(), 9)).toBe("control-epoch");
     expect(frameRejectionReason(metadata({ documentGeneration: 2 }), publicState(), 9)).toBe("document-generation");
     expect(frameRejectionReason(metadata({ viewportGeneration: 3 }), publicState(), 9)).toBe("viewport-generation");
     expect(frameRejectionReason(metadata({ frameSequence: 9 }), publicState(), 9)).toBe("sequence");
     expect(frameRejectionReason(metadata({ width: 32_768, height: 32_768 }), publicState(), 9)).toBe("dimensions");
+  });
+
+  it("invalidates retained paint authority and pixels on epoch, generation, or readiness changes", () => {
+    const initial = publicState();
+    const initialKey = framePaintBindingKey(initial);
+    const changed = (sessionChanges: Partial<WorkspaceSession>, tabChanges: Partial<WorkspaceTab> = {}) => publicState({
+      snapshot: {
+        ...snapshot,
+        sessions: [{ ...sessionA, ...sessionChanges, tabs: [{ ...sessionA.tabs[0]!, ...tabChanges }] }, sessionB],
+      },
+    });
+    expect(framePaintBindingKey(changed({ controlEpoch: sessionA.controlEpoch + 1 }))).not.toBe(initialKey);
+    expect(framePaintBindingKey(changed({}, { documentGeneration: sessionA.tabs[0]!.documentGeneration + 1 }))).not.toBe(initialKey);
+    expect(framePaintBindingKey(changed({}, { viewportGeneration: sessionA.tabs[0]!.viewportGeneration + 1 }))).not.toBe(initialKey);
+    const degraded = changed({ captureReadiness: "degraded" });
+    const warming = changed({}, { captureReadiness: "warming" });
+    expect(framePaintBindingKey(degraded)).toBe(initialKey);
+    expect(framePaintBindingKey(warming)).toBe(initialKey);
+    expect(framePaintReadinessEligible(initial)).toBe(true);
+    expect(framePaintReadinessEligible(degraded)).toBe(false);
+    expect(framePaintReadinessEligible(warming)).toBe(false);
+
+    let cleared: [number, number, number, number] | undefined;
+    let removed = false;
+    const canvas = {
+      width: 10,
+      height: 20,
+      style: { width: "10px", height: "20px" },
+      getContext: () => ({ clearRect: (x: number, y: number, width: number, height: number) => { cleared = [x, y, width, height]; } }),
+      removeAttribute: (name: string) => { if (name === "data-frame-sequence") removed = true; },
+    } as unknown as HTMLCanvasElement;
+    clearRenderedFrame(canvas);
+    expect(cleared).toEqual([0, 0, 10, 20]);
+    expect([canvas.width, canvas.height, canvas.style.width, canvas.style.height, removed]).toEqual([0, 0, "0px", "0px", true]);
+
+    const priorMetrics: FrameMetrics = {
+      metadata: metadata(),
+      paintedAt: "2026-08-30T00:00:01.000Z",
+      droppedBeforeDecode: 2,
+      droppedDuringDecode: 3,
+      malformedFrames: 4,
+      digestFailures: 5,
+      dimensionFailures: 6,
+    };
+    expect(resetFrameMetrics(priorMetrics)).toEqual({
+      droppedBeforeDecode: 2,
+      droppedDuringDecode: 3,
+      malformedFrames: 0,
+      digestFailures: 0,
+      dimensionFailures: 0,
+    });
   });
 
   it("does not poison the sequence watermark when verification fails before commit", () => {
@@ -151,6 +211,18 @@ describe("workspace state", () => {
     expect(markup).toContain("&lt;img src=x onerror=alert(1)&gt;");
     expect(markup).not.toContain("Take control");
     expect(markup).not.toContain("dangerouslySetInnerHTML");
+
+    const preparingSnapshot: WorkspaceSnapshot = {
+      ...snapshot,
+      sessions: [{ ...sessionA, captureReadiness: "warming", tabs: [{ ...sessionA.tabs[0]!, captureReadiness: "warming" }] }, sessionB],
+    };
+    const preparingState = reduceWorkspaceRecord(
+      reduceWorkspaceRecord(initialWorkspaceViewState, { kind: "status", status: { connection: "ready", browserd: "ready" } }),
+      { kind: "snapshot", snapshot: preparingSnapshot },
+    );
+    const preparingSelected = reduceWorkspaceRecord(preparingState, { kind: "selection", selected });
+    const preparingMarkup = renderToStaticMarkup(createElement(App, { bridge: inertBridge, initialState: preparingSelected }));
+    expect(preparingMarkup).toContain("Browser view is preparing.");
 
     const reconnecting = reduceWorkspaceRecord(initialState, { kind: "current", state: { ...initialState.publicState, connection: "reconnecting" } });
     const reconnectingMarkup = renderToStaticMarkup(createElement(App, { bridge: inertBridge, initialState: reconnecting }));

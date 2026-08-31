@@ -405,6 +405,8 @@
                               "pathId",
                               "state",
                               "controlState",
+                              "controlEpoch",
+                              "captureReadiness",
                               "personaDisplayId",
                               "cursor",
                               "tabs"
@@ -453,6 +455,35 @@
                               "controlState": {
                                 "type": "string",
                                 "const": "agent"
+                              },
+                              "controlEpoch": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "captureReadiness": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "starting"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "warming"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "ready"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "degraded"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "unavailable"
+                                  }
+                                ]
                               },
                               "personaDisplayId": {
                                 "type": "string",
@@ -505,6 +536,7 @@
                                     "url",
                                     "title",
                                     "state",
+                                    "captureReadiness",
                                     "documentGeneration",
                                     "viewportGeneration",
                                     "frameSequence"
@@ -541,6 +573,30 @@
                                         {
                                           "type": "string",
                                           "const": "closed"
+                                        }
+                                      ]
+                                    },
+                                    "captureReadiness": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "starting"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "warming"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "ready"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "degraded"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "unavailable"
                                         }
                                       ]
                                     },
@@ -861,6 +917,8 @@
                       "pathId",
                       "state",
                       "controlState",
+                      "controlEpoch",
+                      "captureReadiness",
                       "personaDisplayId",
                       "cursor",
                       "tabs"
@@ -909,6 +967,35 @@
                       "controlState": {
                         "type": "string",
                         "const": "agent"
+                      },
+                      "controlEpoch": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "captureReadiness": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "starting"
+                          },
+                          {
+                            "type": "string",
+                            "const": "warming"
+                          },
+                          {
+                            "type": "string",
+                            "const": "ready"
+                          },
+                          {
+                            "type": "string",
+                            "const": "degraded"
+                          },
+                          {
+                            "type": "string",
+                            "const": "unavailable"
+                          }
+                        ]
                       },
                       "personaDisplayId": {
                         "type": "string",
@@ -961,6 +1048,7 @@
                             "url",
                             "title",
                             "state",
+                            "captureReadiness",
                             "documentGeneration",
                             "viewportGeneration",
                             "frameSequence"
@@ -997,6 +1085,30 @@
                                 {
                                   "type": "string",
                                   "const": "closed"
+                                }
+                              ]
+                            },
+                            "captureReadiness": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "starting"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "warming"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "ready"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "degraded"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "unavailable"
                                 }
                               ]
                             },
@@ -1244,6 +1356,7 @@
             "browserdRuntimeInstanceId",
             "browserSessionId",
             "tabId",
+            "controlEpoch",
             "frameSequence",
             "documentGeneration",
             "viewportGeneration",
@@ -1293,6 +1406,11 @@
               "minLength": 1,
               "maxLength": 128,
               "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+            },
+            "controlEpoch": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
             },
             "frameSequence": {
               "type": "integer",

@@ -259,7 +259,11 @@ impl Worker {
                     Ok(ResponseResult::Selection { selection_id, browser_session_id, tab_id }) => {
                         let selected = SelectedTab { selection_id: selection_id.clone(), browser_session_id: browser_session_id.clone(), tab_id: tab_id.clone() };
                         *self.pending_launch_selection.lock().expect("workspace launch selection lock") = None;
-                        self.pending_frame = None; self.selected = Some(selected.clone()); self.update_selected(Some(selected.clone())).await; let _ = self.send_state(FrontendStateRecord::Selection { selected: selected.clone() }); self.record_selection_evidence(PendingSelectionEvidence::Selected(selected));
+                        // A former-selection frame can arrive while request() is waiting for
+                        // the authoritative replacement response and raise the sequence
+                        // watermark. Reset it only after that response so a newly selected
+                        // tab whose sequence is lower remains admissible.
+                        self.pending_frame = None; self.last_frame_sequence = 0; self.selected = Some(selected.clone()); self.update_selected(Some(selected.clone())).await; let _ = self.send_state(FrontendStateRecord::Selection { selected: selected.clone() }); self.record_selection_evidence(PendingSelectionEvidence::Selected(selected));
                         Ok(SelectionResult { selection_id, browser_session_id, tab_id })
                     }
                     Ok(_) => Err(WorkspaceError::Protocol.public()),

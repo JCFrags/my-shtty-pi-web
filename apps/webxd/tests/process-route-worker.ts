@@ -151,7 +151,7 @@ async function startBrowserd(): Promise<void> {
       artifacts: runtime.artifacts.entryCount,
       artifactBytes: runtime.artifacts.totalBytes,
       heldInput: sessions.map((session) => ({ browserSessionId: session.browserSessionId, ...session.motor.heldInputState })),
-      chrome: sessions.map((session) => ({ pid: session.host.pid, running: session.host.running, connected: session.host.connected, cdpPendingCount: session.host.cdp.pendingCount, deniedDownloads: session.host.deniedDownloads, profileDirectory: session.host.profileDirectory })),
+      chrome: sessions.map((session) => ({ browserSessionId: session.browserSessionId, pid: session.host.pid, running: session.host.running, connected: session.host.connected, cdpPendingCount: session.host.cdp.pendingCount, deniedDownloads: session.host.deniedDownloads, profileDirectory: session.host.profileDirectory })),
       droppedFrames: sessions.reduce((count, session) => count + session.frames.droppedFrames, 0),
       captureCoordinators,
       captureCoordinator: aggregateCaptureDiagnostics(captureCoordinators),

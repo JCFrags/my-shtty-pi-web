@@ -5,7 +5,7 @@ import { BrowserProtocolError, PROTOCOL_VERSION, type FrameEvent, type TabAddres
 import { BrowserArtifactStore } from "../src/artifacts/store.js";
 import { SessionCaptureCoordinator } from "../src/capture/coordinator.js";
 import { CdpCommandTimeoutError } from "../src/cdp/connection.js";
-import { bindFrameTab, FrameScheduler } from "../src/frames/scheduler.js";
+import { bindFrameTab, FrameScheduler, type FrameCaptureOutcome } from "../src/frames/scheduler.js";
 import { bindObservationTab, ObservationStore, type Layout } from "../src/observations/store.js";
 import { BrowserRuntime } from "../src/registry/runtime.js";
 import type { TabRecord, TargetRegistry } from "../src/targets/registry.js";
@@ -74,6 +74,70 @@ describe("connection-scoped frame schedules", () => {
     assert.equal(scheduler.subscriptionCount, 0);
     assert.equal(scheduler.timerCount, 0);
     scheduler.close();
+  });
+
+  it("reports exact post-transaction readiness outcomes and distinguishes selected from idle interest", async () => {
+    for (const interest of ["selected", "idle"] as const) {
+      const target = tab(`outcome-${interest}`);
+      const scheduler = new FrameScheduler(actor, registryFor([target]), new BrowserArtifactStore(), new FakeMotor() as never, () => 7, { selectedIntervalMs: 10_000, idleIntervalMs: 10_000, captureCoordinator: new SessionCaptureCoordinator() });
+      bindFrameTab(target, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: layout() } } as T; return { data: fakePngBase64() } as T; } });
+      const outcomes: FrameCaptureOutcome[] = [];
+      scheduler.on("captureOutcome", (outcome) => outcomes.push(outcome));
+      scheduler.subscribe(`connection\0${interest}`, address(target, 7), interest);
+      await waitFor(() => outcomes.length === 1);
+      assert.deepEqual(outcomes[0], {
+        identity: { browserSessionId: target.browserSessionId, tabId: target.tabId, targetId: target.targetId, documentGeneration: 1, viewportGeneration: 1, controlEpoch: 7 },
+        selectedAtStart: interest === "selected",
+        result: "succeeded",
+      });
+      await scheduler.close();
+    }
+  });
+
+  it("reports size failures against the generation captured at transaction start", async () => {
+    const target = tab("outcome-failure");
+    const scheduler = new FrameScheduler(actor, registryFor([target]), new BrowserArtifactStore(), new FakeMotor() as never, () => 1, { selectedIntervalMs: 10_000 });
+    bindFrameTab(target, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: layout() } } as T; target.documentGeneration = 2; return { data: oversizedPngBase64(800, 600) } as T; } });
+    const outcomes: FrameCaptureOutcome[] = [];
+    scheduler.on("captureOutcome", (outcome) => outcomes.push(outcome));
+    scheduler.subscribe("connection\0failure", address(target));
+    await waitFor(() => outcomes.length === 1);
+    assert.equal(outcomes[0]?.result, "failed");
+    assert.equal(outcomes[0]?.selectedAtStart, true);
+    assert.equal(outcomes[0]?.identity.documentGeneration, 1);
+    assert.equal(target.documentGeneration, 2);
+    await scheduler.close();
+  });
+
+  it("rebinds one exact cached frame without changing sequence and releases its retained ring on expiry", async () => {
+    const target = tab("cached");
+    const artifacts = new BrowserArtifactStore({ frameRingSize: 2 });
+    const scheduler = new FrameScheduler(actor, registryFor([target]), artifacts, new FakeMotor() as never, () => 1, { selectedIntervalMs: 10_000, latestRetentionMs: 20 });
+    bindFrameTab(target, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: layout() } } as T; return { data: Buffer.from("cached-png").toString("base64") } as T; } });
+    const events: FrameEvent[] = [];
+    scheduler.on("frame", (frame) => events.push(frame));
+    const firstKey = "connection\0cached-first";
+    scheduler.subscribe(firstKey, address(target));
+    await waitFor(() => events.length === 1);
+    const published = events[0];
+    assert.ok(published);
+    await scheduler.unsubscribe(firstKey, address(target));
+    const cached = scheduler.latestValidFrame(address(target), 2_000);
+    assert.equal(cached, published);
+    assert.equal(cached?.frameSequence, 1);
+    assert.equal(target.latestFrameSequence, 1);
+    assert.equal(scheduler.retainedLatestCount, 1);
+    assert.equal(artifacts.framePinCount, 1);
+
+    const secondKey = "connection\0cached-second";
+    scheduler.subscribe(secondKey, address(target));
+    assert.equal(scheduler.latestValidFrame(address(target), 2_000), published);
+    await scheduler.unsubscribe(secondKey, address(target));
+    await waitFor(() => scheduler.retainedLatestCount === 0);
+    assert.equal(scheduler.latestValidFrame(address(target), 2_000), undefined);
+    assert.equal(artifacts.frameRingCount, 0);
+    assert.equal(artifacts.framePinCount, 0);
+    await scheduler.close();
   });
 
   it("routes a frame only to the matching connection, actor, address, and epoch", async () => {
@@ -331,6 +395,32 @@ describe("screenshot consistency transaction", () => {
     assert.equal(captureCoordinator.diagnostics.agentScreenshotTimeouts, 2);
     assert.equal(captureCoordinator.diagnostics.recoveredAgentScreenshotTimeouts, 0);
     assert.equal(captureCoordinator.diagnostics.unrecoveredAgentScreenshotTimeouts, 1);
+  });
+
+  it("paces three post-timeout frame successes before returning to the normal selected interval", async () => {
+    const target = tab("frame-timeout-pacing");
+    const captureCoordinator = new SessionCaptureCoordinator();
+    const screenshotStartedMs: number[] = [];
+    let screenshots = 0;
+    bindFrameTab(target, { async send<T>(method: string): Promise<T> {
+      if (method !== "Page.captureScreenshot") return { result: { value: layout() } } as T;
+      screenshotStartedMs.push(performance.now());
+      screenshots++;
+      if (screenshots === 1) throw new CdpCommandTimeoutError(method, 10_000);
+      return { data: fakePngBase64() } as T;
+    } });
+    const scheduler = new FrameScheduler(actor, registryFor([target]), new BrowserArtifactStore(), new FakeMotor() as never, () => 1, { selectedIntervalMs: 1, frameTimeoutRecoveryMs: 20, captureCoordinator });
+    const outcomes: FrameCaptureOutcome[] = [];
+    scheduler.on("captureOutcome", (outcome) => outcomes.push(outcome));
+    scheduler.subscribe("connection\0frame-timeout-pacing", address(target));
+    await waitFor(() => outcomes.length >= 4);
+    assert.deepEqual(outcomes.slice(0, 4).map((outcome) => outcome.result), ["failed", "succeeded", "succeeded", "succeeded"]);
+    assert.ok((screenshotStartedMs[1] ?? 0) - (screenshotStartedMs[0] ?? 0) >= 15, "first post-timeout success was not paced");
+    assert.ok((screenshotStartedMs[2] ?? 0) - (screenshotStartedMs[1] ?? 0) >= 15, "post-timeout successes were not paced");
+    assert.ok((screenshotStartedMs[3] ?? 0) - (screenshotStartedMs[2] ?? 0) >= 15, "post-recovery schedule immediately returned to the cold-compositor interval");
+    assert.equal(captureCoordinator.diagnostics.frameScreenshotTimeouts, 1);
+    await scheduler.close();
+    await captureCoordinator.close();
   });
 
   it("does not retry a frame screenshot timeout or publish partial state", async () => {
