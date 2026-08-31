@@ -10,11 +10,17 @@ import { launchArguments, NodeWorkspaceLauncher } from "../src/workspace-launche
 test("builds only fixed bounded Tauri single-instance arguments", () => {
   assert.deepEqual(launchArguments({ action: "show" }), ["--raise"]);
   assert.deepEqual(launchArguments({ action: "hide" }), ["--hide"]);
+  assert.deepEqual(launchArguments({ action: "return" }), ["--return-control"]);
   assert.deepEqual(launchArguments({ action: "attach", browserSessionId: "session:one", tabId: "tab:one" }), [
     "--raise", "--select-session=session:one", "--select-tab=tab:one",
   ]);
+  assert.deepEqual(launchArguments({ action: "takeover", browserSessionId: "session:one", tabId: "tab:one" }), [
+    "--raise", "--select-session=session:one", "--select-tab=tab:one", "--take-control",
+  ]);
   assert.throws(() => launchArguments({ action: "attach", browserSessionId: "/tmp/socket" }), /valid browser session ID/);
+  assert.throws(() => launchArguments({ action: "takeover" }), /valid browser session ID/);
   assert.throws(() => launchArguments({ action: "attach", browserSessionId: "session:one", tabId: "--shell=rm" }), /tab ID is invalid/);
+  assert.throws(() => launchArguments({ action: "return", browserSessionId: "session:one" }), /does not accept a browser target/);
 });
 
 test("validates the executable then spawns it directly without a shell", async () => {

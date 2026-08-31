@@ -229,7 +229,7 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
     };
 
     const showHelp = (ctx: ExtensionContext) => {
-      ctx.ui.notify("Run /web with no options to open WebX settings. Direct options are /web mode off|read|browser|debug, /web status, and /web workspace show|hide|attach [sessionId] [tabId]. Human takeover and return are unavailable in Phase 3A. WebX is automatic: use web_read for a known URL or API, web_search for discovery or short source extracts, and browser tools only for dynamic pages or interaction.", "info");
+      ctx.ui.notify("Run /web with no options to open WebX settings. Direct options are /web mode off|read|browser|debug, /web status, and /web workspace show|hide|attach <sessionId> [tabId]|takeover <sessionId> [tabId]|return. Human control is explicit and user-only. WebX is automatic: use web_read for a known URL or API, web_search for discovery, and browser tools only for dynamic pages or interaction.", "info");
     };
 
     const setMode = async (requested: string, ctx: ExtensionContext) => {
@@ -246,18 +246,19 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
 
     const workspace = async (action: WorkspaceAction, sessionId: string | undefined, tabId: string | undefined, ctx: ExtensionContext) => {
       assertTrusted(ctx);
-      if (action === "takeover" || action === "return") {
-        ctx.ui.notify("Human takeover is unavailable in Phase 3A. The browser workspace is read-only.", "warning");
-        return;
-      }
       if (!capabilities?.browserPathIds.includes("agentcursor/chrome")) {
         ctx.ui.notify("AgentCursor browser workspace is not active.", "warning");
         return;
       }
+      const selectsTarget = action === "attach" || action === "takeover";
+      if (!selectsTarget && (sessionId !== undefined || tabId !== undefined)) {
+        ctx.ui.notify(`${action} does not accept a browser session or tab ID.`, "warning");
+        return;
+      }
       let selectedSessionId = sessionId;
-      if (action === "attach" && !selectedSessionId) {
+      if (selectsTarget && !selectedSessionId) {
         if (!ctx.hasUI) {
-          ctx.ui.notify("attach requires a browser session ID.", "warning");
+          ctx.ui.notify(`${action} requires a browser session ID.`, "warning");
           return;
         }
         selectedSessionId = (await ctx.ui.input("Browser session ID", "session ID from browser_tabs"))?.trim();
@@ -269,7 +270,11 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
           ...(selectedSessionId ? { browserSessionId: selectedSessionId } : {}),
           ...(tabId ? { tabId } : {}),
         });
-        ctx.ui.notify(action === "attach" ? "Browser workspace raised and selection requested." : `Browser workspace ${action} requested.`, "info");
+        const message = action === "attach" ? "Browser workspace raised and selection requested."
+          : action === "takeover" ? "Browser workspace raised and explicit takeover requested."
+          : action === "return" ? "Browser workspace return to agent requested."
+          : `Browser workspace ${action} requested.`;
+        ctx.ui.notify(message, "info");
       } catch (error) {
         ctx.ui.notify(error instanceof Error ? error.message : "The Pi Browser Workspace request failed.", "error");
       }
@@ -333,8 +338,8 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
         }
         if (words[0] === "workspace") {
           const action = words[1];
-          if (!WORKSPACE_ACTIONS.includes(action as WorkspaceAction)) {
-            ctx.ui.notify("Usage: /web workspace show|hide|attach [sessionId] [tabId]. Human takeover and return are unavailable in Phase 3A.", "warning");
+          if (!WORKSPACE_ACTIONS.includes(action as WorkspaceAction) || words.length > 4) {
+            ctx.ui.notify("Usage: /web workspace show|hide|attach <sessionId> [tabId]|takeover <sessionId> [tabId]|return", "warning");
             return;
           }
           await workspace(action as WorkspaceAction, words[2], words[3], ctx);

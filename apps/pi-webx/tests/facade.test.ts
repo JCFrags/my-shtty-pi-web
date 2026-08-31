@@ -180,10 +180,11 @@ test("one /web settings command routes modes and browser workspace actions", asy
   assert.deepEqual(fx.workspaceRequests.at(-1), { action: "attach", browserSessionId: "session-1", tabId: "tab-1" });
   assert.ok(!sdk.calls.some((call) => call.operation === "browser.workspace"));
 
+  fx.inputs.push("session-settings");
   fx.selections.push("Take over browser session");
   await fx.commands.get("web")?.handler("settings", fx.ctx);
-  assert.equal(fx.inputPrompts.length, 0);
-  assert.match(String(fx.notifications.at(-1)?.[0]), /unavailable in Phase 3A/);
+  assert.equal(fx.inputPrompts.length, 1);
+  assert.deepEqual(fx.workspaceRequests.at(-1), { action: "takeover", browserSessionId: "session-settings" });
 
   const launchCount = fx.workspaceRequests.length;
   await fx.commands.get("web")?.handler("workspace profile personal", fx.ctx);
@@ -195,7 +196,7 @@ test("one /web settings command routes modes and browser workspace actions", asy
   await fx.events.get("session_shutdown")?.();
 });
 
-test("workspace commands never fall back to legacy RPC or expose Phase 3B controls", async () => {
+test("workspace controls remain user-only fixed launcher actions and never fall back to legacy RPC", async () => {
   const sdk = new MockSdk();
   sdk.capabilitiesValue = { ...readyCapabilities, browserPathIds: ["agent-browser/chrome"] };
   const fx = harness(sdk);
@@ -208,9 +209,14 @@ test("workspace commands never fall back to legacy RPC or expose Phase 3B contro
   await fx.events.get("session_shutdown")?.();
   const agentcursor = harness(sdk);
   await agentcursor.events.get("session_start")?.({}, agentcursor.ctx);
+  await agentcursor.commands.get("web")?.handler("workspace takeover session-1 tab-1", agentcursor.ctx);
+  assert.deepEqual(agentcursor.workspaceRequests.at(-1), { action: "takeover", browserSessionId: "session-1", tabId: "tab-1" });
+  await agentcursor.commands.get("web")?.handler("workspace return", agentcursor.ctx);
+  assert.deepEqual(agentcursor.workspaceRequests.at(-1), { action: "return" });
+  const launchCount = agentcursor.workspaceRequests.length;
   await agentcursor.commands.get("web")?.handler("workspace return session-1", agentcursor.ctx);
-  assert.equal(agentcursor.workspaceRequests.length, 0);
-  assert.match(String(agentcursor.notifications.at(-1)?.[0]), /unavailable in Phase 3A/);
+  assert.equal(agentcursor.workspaceRequests.length, launchCount);
+  assert.match(String(agentcursor.notifications.at(-1)?.[0]), /does not accept/);
   assert.ok(!sdk.calls.some((call) => call.operation === "browser.workspace"));
   await agentcursor.events.get("session_shutdown")?.();
 

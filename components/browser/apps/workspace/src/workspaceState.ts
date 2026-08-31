@@ -27,11 +27,10 @@ export function reduceWorkspaceRecord(state: WorkspaceViewState, record: Fronten
         ...state,
         publicState: record.state,
         status: connection ? { ...state.status, connection } : state.status,
-        error: undefined,
       };
     }
     case "snapshot":
-      return { ...state, publicState: { ...state.publicState, snapshot: record.snapshot }, error: undefined };
+      return { ...state, publicState: { ...state.publicState, snapshot: record.snapshot } };
     case "status":
       return { ...state, status: record.status, error: record.status.message };
     case "selection":

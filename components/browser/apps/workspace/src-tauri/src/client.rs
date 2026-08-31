@@ -43,6 +43,13 @@ pub struct FrontendInputAck {
 #[derive(Clone)]
 struct PaintedFrameAuthority { binding: PaintedFrameBinding }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingLaunchSelection {
+    browser_session_id: String,
+    tab_id: Option<String>,
+    take_control_after_paint: bool,
+}
+
 struct LocalControl {
     browser_session_id: String,
     tab_id: String,
@@ -57,14 +64,19 @@ struct LifecycleRequest {
     reply: oneshot::Sender<Result<(), PublicError>>,
 }
 
+#[derive(Default)]
+struct FrontendErrorSink {
+    channel: Option<Channel<FrontendStateRecord>>,
+    pending: Option<PublicError>,
+}
+
 enum ClientCommand {
-    Select { browser_session_id: String, tab_id: String, expires: Instant, reply: oneshot::Sender<Result<SelectionResult, PublicError>> },
+    Select { browser_session_id: String, tab_id: Option<String>, raw_ids: bool, take_control_after_paint: bool, expires: Instant, reply: oneshot::Sender<Result<SelectionResult, PublicError>> },
     Clear { expires: Instant, reply: oneshot::Sender<Result<(), PublicError>> },
     FrameAck { delivery_id: u64, disposition: FrameDisposition },
     TakeControl { expires: Instant, reply: oneshot::Sender<Result<ControlActionResult, PublicError>> },
     ReturnControl { expires: Instant, reply: oneshot::Sender<Result<ControlActionResult, PublicError>> },
     Input { batch: FrontendInputBatch, reply: oneshot::Sender<Result<FrontendInputAck, PublicError>> },
-    NotifyError { error: PublicError },
     #[cfg(test)]
     Stop,
 }
@@ -76,14 +88,15 @@ pub struct WorkspaceClientService {
     shutdown: Mutex<Option<watch::Sender<bool>>>,
     lifecycle: Mutex<Option<mpsc::Sender<LifecycleRequest>>>,
     display_salt: String,
-    pending_launch_selection: Arc<Mutex<Option<(String, Option<String>)>>>,
+    pending_launch_selection: Arc<Mutex<Option<PendingLaunchSelection>>>,
+    frontend_error: Mutex<FrontendErrorSink>,
     acceptance: AcceptanceDiagnostics,
     close_in_progress: AtomicBool,
     has_opened: AtomicBool,
 }
 
 impl Default for WorkspaceClientService {
-    fn default() -> Self { Self { state: SharedPublicState::default(), sender: Mutex::new(None), task: Mutex::new(None), shutdown: Mutex::new(None), lifecycle: Mutex::new(None), display_salt: Uuid::new_v4().simple().to_string(), pending_launch_selection: Arc::new(Mutex::new(None)), acceptance: AcceptanceDiagnostics::default(), close_in_progress: AtomicBool::new(false), has_opened: AtomicBool::new(false) } }
+    fn default() -> Self { Self { state: SharedPublicState::default(), sender: Mutex::new(None), task: Mutex::new(None), shutdown: Mutex::new(None), lifecycle: Mutex::new(None), display_salt: Uuid::new_v4().simple().to_string(), pending_launch_selection: Arc::new(Mutex::new(None)), frontend_error: Mutex::new(FrontendErrorSink::default()), acceptance: AcceptanceDiagnostics::default(), close_in_progress: AtomicBool::new(false), has_opened: AtomicBool::new(false) } }
 }
 
 impl WorkspaceClientService {
@@ -95,6 +108,12 @@ impl WorkspaceClientService {
         *self.sender.lock().expect("workspace sender lock") = Some(sender);
         *self.shutdown.lock().expect("workspace shutdown lock") = Some(shutdown_sender);
         *self.lifecycle.lock().expect("workspace lifecycle lock") = Some(lifecycle_sender);
+        {
+            let mut sink = self.frontend_error.lock().expect("workspace frontend error lock");
+            sink.channel = Some(state_channel.clone());
+            let delivered = sink.pending.clone().is_some_and(|error| state_channel.send(FrontendStateRecord::Error { error }).is_ok());
+            if delivered { sink.pending = None; }
+        }
         let shared = self.state.clone();
         let pending_launch_selection = self.pending_launch_selection.clone();
         let display_salt = self.display_salt.clone();
@@ -107,9 +126,17 @@ impl WorkspaceClientService {
     }
 
     pub async fn select(&self, browser_session_id: String, tab_id: String) -> Result<SelectionResult, PublicError> {
-        if !protocol::valid_id(&browser_session_id) || !protocol::valid_id(&tab_id) { return Err(WorkspaceError::InvalidSelection.public()); }
+        self.select_request(browser_session_id, Some(tab_id), false, false).await
+    }
+
+    pub async fn select_launch(&self, browser_session_id: String, tab_id: Option<String>, take_control_after_paint: bool) -> Result<SelectionResult, PublicError> {
+        self.select_request(browser_session_id, tab_id, true, take_control_after_paint).await
+    }
+
+    async fn select_request(&self, browser_session_id: String, tab_id: Option<String>, raw_ids: bool, take_control_after_paint: bool) -> Result<SelectionResult, PublicError> {
+        if !protocol::valid_id(&browser_session_id) || tab_id.as_ref().is_some_and(|value| !protocol::valid_id(value)) { return Err(WorkspaceError::InvalidSelection.public()); }
         let (reply, received) = oneshot::channel();
-        self.send_control(ClientCommand::Select { browser_session_id, tab_id, expires: Instant::now() + COMMAND_TTL, reply }).await?;
+        self.send_control(ClientCommand::Select { browser_session_id, tab_id, raw_ids, take_control_after_paint, expires: Instant::now() + COMMAND_TTL, reply }).await?;
         tokio::time::timeout(COMMAND_TTL, received).await.map_err(|_| WorkspaceError::Unavailable.public())?.map_err(|_| WorkspaceError::Closed.public())?
     }
 
@@ -140,10 +167,10 @@ impl WorkspaceClientService {
     }
     pub fn configure_acceptance(&self, path: &Path) -> Result<(), String> { self.acceptance.configure(path) }
     pub fn record_window_action(&self, action: &str) { self.acceptance.window_action(action); }
-    pub fn stage_launch_selection_if_offline(&self, browser_session_id: String, tab_id: Option<String>) -> bool {
+    pub fn stage_launch_selection_if_offline(&self, browser_session_id: String, tab_id: Option<String>, take_control_after_paint: bool) -> bool {
         let sender = self.sender.lock().expect("workspace sender lock");
         if sender.as_ref().is_some_and(|value| !value.is_closed()) { return false; }
-        *self.pending_launch_selection.lock().expect("workspace launch selection lock") = Some((browser_session_id, tab_id));
+        *self.pending_launch_selection.lock().expect("workspace launch selection lock") = Some(PendingLaunchSelection { browser_session_id, tab_id, take_control_after_paint });
         true
     }
     pub async fn current(&self) -> PublicWorkspaceState { self.state.current().await }
@@ -151,10 +178,21 @@ impl WorkspaceClientService {
     pub fn finish_close(&self) { self.close_in_progress.store(false, Ordering::Release); }
     pub fn may_hide_without_return(&self) -> bool { !self.has_opened.load(Ordering::Acquire) }
     pub fn notify_error(&self, error: PublicError) {
-        if let Some(sender) = self.sender.lock().expect("workspace sender lock").as_ref() { let _ = sender.try_send(ClientCommand::NotifyError { error }); }
+        let mut sink = self.frontend_error.lock().expect("workspace frontend error lock");
+        sink.pending = Some(error.clone());
+        let delivered = sink.channel.as_ref().is_some_and(|channel| channel.send(FrontendStateRecord::Error { error }).is_ok());
+        if delivered { sink.pending = None; }
     }
 
-    pub async fn release_for_hide(&self) -> Result<(), PublicError> { self.lifecycle_request(false).await }
+    fn cancel_staged_launch_takeover(&self) {
+        let mut pending = self.pending_launch_selection.lock().expect("workspace launch selection lock");
+        if pending.as_ref().is_some_and(|request| request.take_control_after_paint) { *pending = None; }
+    }
+
+    pub async fn release_for_hide(&self) -> Result<(), PublicError> {
+        self.cancel_staged_launch_takeover();
+        self.lifecycle_request(false).await
+    }
 
     pub async fn close_task(&self) -> Result<(), PublicError> {
         self.lifecycle_request(true).await?;
@@ -268,13 +306,14 @@ struct Worker {
     selection_evidence_gate: SelectionEvidenceGate,
     dropped: u64,
     last_frame_sequence: u64,
-    pending_launch_selection: Arc<Mutex<Option<(String, Option<String>)>>>,
+    pending_launch_selection: Arc<Mutex<Option<PendingLaunchSelection>>>,
+    pending_takeover: bool,
     acceptance: AcceptanceDiagnostics,
 }
 
 impl Worker {
-    fn new(shared: SharedPublicState, state_channel: Channel<FrontendStateRecord>, frame_channel: Channel<Response>, commands: mpsc::Receiver<ClientCommand>, shutdown: watch::Receiver<bool>, lifecycle: mpsc::Receiver<LifecycleRequest>, display_salt: String, pending_launch_selection: Arc<Mutex<Option<(String, Option<String>)>>>, acceptance: AcceptanceDiagnostics) -> Self {
-        Self { shared, state_channel, frame_channel, commands, shutdown, lifecycle, display_salt, snapshot: None, selected: None, transport: None, webxd_runtime_instance_id: None, browserd_runtime_instance_id: None, next_delivery_id: 1, inflight_delivery_id: None, inflight_header: None, painted_frame: None, awaiting_new_frame: false, control: None, pending_frame: None, selection_evidence_gate: SelectionEvidenceGate::default(), dropped: 0, last_frame_sequence: 0, pending_launch_selection, acceptance }
+    fn new(shared: SharedPublicState, state_channel: Channel<FrontendStateRecord>, frame_channel: Channel<Response>, commands: mpsc::Receiver<ClientCommand>, shutdown: watch::Receiver<bool>, lifecycle: mpsc::Receiver<LifecycleRequest>, display_salt: String, pending_launch_selection: Arc<Mutex<Option<PendingLaunchSelection>>>, acceptance: AcceptanceDiagnostics) -> Self {
+        Self { shared, state_channel, frame_channel, commands, shutdown, lifecycle, display_salt, snapshot: None, selected: None, transport: None, webxd_runtime_instance_id: None, browserd_runtime_instance_id: None, next_delivery_id: 1, inflight_delivery_id: None, inflight_header: None, painted_frame: None, awaiting_new_frame: false, control: None, pending_frame: None, selection_evidence_gate: SelectionEvidenceGate::default(), dropped: 0, last_frame_sequence: 0, pending_launch_selection, pending_takeover: false, acceptance }
     }
 
     async fn run(mut self) {
@@ -282,14 +321,18 @@ impl Worker {
         loop {
             if *self.shutdown.borrow() { break; }
             self.set_connection("connecting").await;
-            match self.connect().await {
+            // Takeover is one attempt only. Consume it before any fallible
+            // descriptor, socket, bind, subscription, or snapshot work so an
+            // unsuccessful attempt can never acquire after reconnect.
+            let attempted_takeover = take_attempt_scoped_takeover(&self.pending_launch_selection);
+            match self.connect(attempted_takeover).await {
                 Ok(()) => {
                     backoff = Duration::from_millis(100);
                     self.set_connection("ready").await;
                     match self.connected_loop().await {
                         Ok(true) => break,
                         Ok(false) => {},
-                        Err(_) => { self.transport = None; self.pending_frame = None; self.painted_frame = None; self.control = None; }
+                        Err(_) => { self.transport = None; self.pending_frame = None; self.painted_frame = None; self.control = None; self.pending_takeover = false; }
                     }
                 }
                 Err(error) => { let _ = self.send_state(FrontendStateRecord::Error { error: error.public() }); }
@@ -308,7 +351,7 @@ impl Worker {
         self.set_connection("closed").await;
     }
 
-    async fn connect(&mut self) -> Result<(), WorkspaceError> {
+    async fn connect(&mut self, attempted_takeover: Option<PendingLaunchSelection>) -> Result<(), WorkspaceError> {
         self.acceptance.milestone("descriptor-discovery-started");
         let descriptor = tokio::task::spawn_blocking(WorkspaceDescriptor::discover).await.map_err(|_| WorkspaceError::Unavailable)??;
         self.acceptance.milestone("descriptor-discovered");
@@ -330,15 +373,13 @@ impl Worker {
             ResponseResult::Snapshot(snapshot) => self.apply_snapshot(snapshot).await?,
             _ => return Err(WorkspaceError::Protocol),
         }
-        let requested = self.pending_launch_selection.lock().expect("workspace launch selection lock").take();
-        let requested_retry = requested.clone();
+        let requested = attempted_takeover.or_else(|| self.pending_launch_selection.lock().expect("workspace launch selection lock").take());
+        let requested_target = requested.is_some();
+        let requested_takeover = requested.as_ref().is_some_and(|value| value.take_control_after_paint);
         let restoring_prior_selection = requested.is_none() && self.selected.is_some();
         if requested.is_some() || self.selected.is_none() {
             let candidate = match requested {
-                Some((browser_session_id, requested_tab)) => {
-                    let tab_id = requested_tab.or_else(|| self.snapshot.as_ref().and_then(|snapshot| snapshot.sessions.iter().find(|session| session.browser_session_id == browser_session_id)).and_then(|session| session.tabs.iter().find(|tab| tab.state == "ready").or_else(|| session.tabs.first())).map(|tab| tab.tab_id.clone()));
-                    tab_id.map(|tab_id| (browser_session_id, tab_id))
-                }
+                Some(request) => resolve_pending_launch_target(self.snapshot.as_ref(), request),
                 None => self.snapshot.as_ref().and_then(|snapshot| snapshot.sessions.iter().find_map(|session| session.tabs.iter().find(|tab| tab.state == "ready").map(|tab| (session.browser_session_id.clone(), tab.tab_id.clone())))),
             };
             if let Some((browser_session_id, tab_id)) = candidate {
@@ -347,14 +388,13 @@ impl Worker {
                 let mut fields = BTreeMap::new(); fields.insert("browserSessionId", json!(browser_session_id)); fields.insert("tabId", json!(tab_id)); fields.insert("selectionId", json!(selection_id));
                 match self.request("frame.select", fields).await {
                     Ok(ResponseResult::Selection { selection_id, browser_session_id, tab_id }) => {
-                        let selected = SelectedTab { selection_id, browser_session_id, tab_id }; self.selected = Some(selected.clone()); self.update_selected(Some(selected.clone())).await; self.send_state(FrontendStateRecord::Selection { selected: frontend_selected(&selected, &self.display_salt) })?; self.record_selection_evidence(PendingSelectionEvidence::Selected(selected));
+                        let selected = SelectedTab { selection_id, browser_session_id, tab_id }; self.selected = Some(selected.clone()); self.pending_takeover = requested_takeover; self.update_selected(Some(selected.clone())).await; self.send_state(FrontendStateRecord::Selection { selected: frontend_selected(&selected, &self.display_salt) })?; self.record_selection_evidence(PendingSelectionEvidence::Selected(selected));
                     }
                     Ok(_) => return Err(WorkspaceError::Protocol),
-                    Err(error) => {
-                        if let Some(requested) = requested_retry { *self.pending_launch_selection.lock().expect("workspace launch selection lock") = Some(requested); }
-                        return Err(error);
-                    }
+                    Err(error) => return Err(error),
                 }
+            } else if requested_target {
+                self.send_state(FrontendStateRecord::Error { error: WorkspaceError::InvalidSelection.public() })?;
             }
         }
         if restoring_prior_selection && let Some(selected) = self.selected.clone() {
@@ -410,7 +450,14 @@ impl Worker {
             None => { let _ = self.release_control_for_shutdown().await; Ok(false) }
             #[cfg(test)]
             Some(ClientCommand::Stop) => { let _ = self.release_control_for_shutdown().await; Ok(false) }
-            Some(ClientCommand::FrameAck { delivery_id, disposition }) => { self.ack_frame(delivery_id, disposition)?; Ok(true) }
+            Some(ClientCommand::FrameAck { delivery_id, disposition }) => {
+                self.ack_frame(delivery_id, disposition)?;
+                if self.pending_takeover && self.painted_frame.is_some() {
+                    self.pending_takeover = false;
+                    if let Err(error) = self.acquire_control().await { let _ = self.send_state(FrontendStateRecord::Error { error: error.public() }); }
+                }
+                Ok(true)
+            }
             Some(ClientCommand::TakeControl { expires, reply }) => {
                 let result = if Instant::now() > expires { Err(WorkspaceError::Unavailable.public()) } else { self.acquire_control().await.map_err(|error| error.public()) };
                 let _ = reply.send(result); Ok(true)
@@ -420,18 +467,40 @@ impl Worker {
                 let _ = reply.send(result); Ok(true)
             }
             Some(ClientCommand::Input { batch, reply }) => { let result = self.dispatch_input(batch).await.map_err(|error| error.public()); let _ = reply.send(result); Ok(true) }
-            Some(ClientCommand::NotifyError { error }) => { let _ = self.send_state(FrontendStateRecord::Error { error }); Ok(true) }
-            Some(ClientCommand::Select { browser_session_id, tab_id, expires, reply }) => {
+            Some(ClientCommand::Select { browser_session_id, tab_id, raw_ids, take_control_after_paint, expires, reply }) => {
                 if self.control.is_some() { let _ = reply.send(Err(WorkspaceError::Remote { code: "CONTROL_HELD_BY_HUMAN".into(), retryable: true }.public())); return Ok(true); }
                 if Instant::now() > expires { let _ = reply.send(Err(WorkspaceError::Unavailable.public())); return Ok(true); }
-                let Some((raw_browser_session_id, raw_tab_id)) = self.snapshot.as_ref().and_then(|snapshot| resolve_frontend_selection(snapshot, &self.display_salt, &browser_session_id, &tab_id)) else {
+                let resolved = self.snapshot.as_ref().and_then(|snapshot| {
+                    if raw_ids {
+                        let session = snapshot.sessions.iter().find(|session| session.browser_session_id == browser_session_id)?;
+                        let tab = match tab_id.as_ref() {
+                            Some(requested) => session.tabs.iter().find(|tab| tab.tab_id == *requested),
+                            None => session.tabs.iter().find(|tab| tab.state == "ready").or_else(|| session.tabs.first()),
+                        }?;
+                        Some((session.browser_session_id.clone(), tab.tab_id.clone()))
+                    } else {
+                        let tab_id = tab_id.as_ref()?;
+                        resolve_frontend_selection(snapshot, &self.display_salt, &browser_session_id, tab_id)
+                    }
+                });
+                let Some((raw_browser_session_id, raw_tab_id)) = resolved else {
                     let _ = reply.send(Err(WorkspaceError::InvalidSelection.public())); return Ok(true);
                 };
-                self.pending_frame = None; self.painted_frame = None; self.last_frame_sequence = 0;
+                self.pending_takeover = false; self.pending_frame = None; self.painted_frame = None; self.last_frame_sequence = 0;
                 self.acceptance.selection_requested(&raw_browser_session_id, &raw_tab_id);
                 let selection_id = Uuid::new_v4().simple().to_string();
                 let mut fields = BTreeMap::new(); fields.insert("browserSessionId", json!(raw_browser_session_id)); fields.insert("tabId", json!(raw_tab_id)); fields.insert("selectionId", json!(selection_id));
-                let result = match self.request("frame.select", fields).await {
+                let response = self.request_until("frame.select", fields, expires).await;
+                if !live_selection_attempt_active(expires, &reply) {
+                    // The caller has already observed failure or its absolute
+                    // deadline passed. Discard this transport so any late
+                    // response is orphaned with the connection, never applied.
+                    self.transport = None;
+                    self.pending_takeover = false;
+                    let _ = reply.send(Err(WorkspaceError::Unavailable.public()));
+                    return Ok(true);
+                }
+                let result = match response {
                     Ok(ResponseResult::Selection { selection_id, browser_session_id, tab_id }) => {
                         let selected = SelectedTab { selection_id: selection_id.clone(), browser_session_id: browser_session_id.clone(), tab_id: tab_id.clone() };
                         *self.pending_launch_selection.lock().expect("workspace launch selection lock") = None;
@@ -439,7 +508,7 @@ impl Worker {
                         // the authoritative replacement response and raise the sequence
                         // watermark. Reset it only after that response so a newly selected
                         // tab whose sequence is lower remains admissible.
-                        self.pending_frame = None; self.painted_frame = None; self.last_frame_sequence = 0; self.selected = Some(selected.clone()); self.update_selected(Some(selected.clone())).await; let public_selected = frontend_selected(&selected, &self.display_salt); let _ = self.send_state(FrontendStateRecord::Selection { selected: public_selected.clone() }); self.record_selection_evidence(PendingSelectionEvidence::Selected(selected));
+                        self.pending_frame = None; self.painted_frame = None; self.last_frame_sequence = 0; self.selected = Some(selected.clone()); self.pending_takeover = take_control_after_paint; self.update_selected(Some(selected.clone())).await; let public_selected = frontend_selected(&selected, &self.display_salt); let _ = self.send_state(FrontendStateRecord::Selection { selected: public_selected.clone() }); self.record_selection_evidence(PendingSelectionEvidence::Selected(selected));
                         Ok(SelectionResult { browser_session_id: public_selected.browser_session_id, tab_id: public_selected.tab_id })
                     }
                     Ok(_) => Err(WorkspaceError::Protocol.public()),
@@ -464,10 +533,21 @@ impl Worker {
             Some(ClientCommand::Stop) => false,
             Some(ClientCommand::FrameAck { delivery_id, disposition }) => { let _ = self.ack_frame(delivery_id, disposition); true }
             Some(ClientCommand::TakeControl { reply, .. }) => { let _ = reply.send(Err(WorkspaceError::Unavailable.public())); true }
-            Some(ClientCommand::ReturnControl { reply, .. }) => { self.control = None; self.painted_frame = None; let _ = reply.send(Err(WorkspaceError::Unavailable.public())); true }
+            Some(ClientCommand::ReturnControl { reply, .. }) => {
+                self.pending_takeover = false;
+                {
+                    let mut pending = self.pending_launch_selection.lock().expect("workspace launch selection lock");
+                    if pending.as_ref().is_some_and(|request| request.take_control_after_paint) { *pending = None; }
+                }
+                self.control = None; self.painted_frame = None; let _ = reply.send(Err(WorkspaceError::Unavailable.public())); true
+            }
             Some(ClientCommand::Input { reply, .. }) => { let _ = reply.send(Err(WorkspaceError::Unavailable.public())); true }
-            Some(ClientCommand::NotifyError { error }) => { let _ = self.send_state(FrontendStateRecord::Error { error }); true }
-            Some(ClientCommand::Select { browser_session_id, tab_id, reply, .. }) => { *self.pending_launch_selection.lock().expect("workspace launch selection lock") = Some((browser_session_id, Some(tab_id))); let _ = reply.send(Err(WorkspaceError::Unavailable.public())); true }
+            Some(ClientCommand::Select { reply, .. }) => {
+                // A live single-instance request that receives an unavailable result
+                // must not fire later after reconnect. Only the initial pre-worker
+                // launch path may stage a selection or takeover.
+                let _ = reply.send(Err(WorkspaceError::Unavailable.public())); true
+            }
             Some(ClientCommand::Clear { reply, .. }) => { self.clear_local_selection().await; let _ = reply.send(Ok(())); true }
         }
     }
@@ -475,6 +555,19 @@ impl Worker {
     async fn request(&mut self, kind: &str, fields: BTreeMap<&str, Value>) -> Result<ResponseResult, WorkspaceError> {
         let request_id = request_id("request");
         self.request_value(request_id.clone(), protocol::command_header(&request_id, kind, fields)).await
+    }
+
+    async fn request_until(&mut self, kind: &str, fields: BTreeMap<&str, Value>, deadline: Instant) -> Result<ResponseResult, WorkspaceError> {
+        match tokio::time::timeout_at(deadline, self.request(kind, fields)).await {
+            Ok(result) => result,
+            Err(_) => {
+                // Dropping an in-flight request leaves its eventual response
+                // unreadable on this serial transport. Close it so the response
+                // cannot be mistaken for a later operation.
+                self.transport = None;
+                Err(WorkspaceError::Unavailable)
+            }
+        }
     }
 
     async fn request_value(&mut self, request_id: String, header: Value) -> Result<ResponseResult, WorkspaceError> {
@@ -553,6 +646,11 @@ impl Worker {
     }
 
     async fn release_control_mode(&mut self, interruptible: bool) -> Result<ControlActionResult, WorkspaceError> {
+        self.pending_takeover = false;
+        {
+            let mut pending = self.pending_launch_selection.lock().expect("workspace launch selection lock");
+            if pending.as_ref().is_some_and(|request| request.take_control_after_paint) { *pending = None; }
+        }
         let Some(control) = self.control.as_ref() else { self.painted_frame = None; return Ok(ControlActionResult { control_state: "agent".into() }); };
         let browser_session_id = control.browser_session_id.clone();
         let control_epoch = control.control_epoch;
@@ -675,7 +773,7 @@ impl Worker {
     }
 
     async fn clear_local_selection(&mut self) {
-        self.selected = None; self.pending_frame = None; self.painted_frame = None; self.last_frame_sequence = 0; self.update_selected(None).await; let _ = self.send_state(FrontendStateRecord::SelectionCleared); self.record_selection_evidence(PendingSelectionEvidence::Cleared);
+        self.selected = None; self.pending_takeover = false; self.pending_frame = None; self.painted_frame = None; self.last_frame_sequence = 0; self.update_selected(None).await; let _ = self.send_state(FrontendStateRecord::SelectionCleared); self.record_selection_evidence(PendingSelectionEvidence::Cleared);
     }
     fn record_selection_evidence(&mut self, evidence: PendingSelectionEvidence) {
         if let Some(evidence) = self.selection_evidence_gate.stage(evidence, self.inflight_delivery_id.is_some()) { self.emit_selection_evidence(evidence); }
@@ -720,6 +818,24 @@ fn snapshot_precedes_control(snapshot: &WorkspaceSnapshot, browser_session_id: &
     snapshot.sessions.iter().find(|session| session.browser_session_id == browser_session_id).is_some_and(|session| session.control_epoch < control_epoch)
 }
 
+fn take_attempt_scoped_takeover(pending: &Arc<Mutex<Option<PendingLaunchSelection>>>) -> Option<PendingLaunchSelection> {
+    let mut pending = pending.lock().expect("workspace launch selection lock");
+    if pending.as_ref().is_some_and(|request| request.take_control_after_paint) { pending.take() } else { None }
+}
+
+fn live_selection_attempt_active(expires: Instant, reply: &oneshot::Sender<Result<SelectionResult, PublicError>>) -> bool {
+    Instant::now() <= expires && !reply.is_closed()
+}
+
+fn resolve_pending_launch_target(snapshot: Option<&WorkspaceSnapshot>, request: PendingLaunchSelection) -> Option<(String, String)> {
+    let browser_session_id = request.browser_session_id;
+    let tab_id = request.tab_id.or_else(|| snapshot
+        .and_then(|snapshot| snapshot.sessions.iter().find(|session| session.browser_session_id == browser_session_id))
+        .and_then(|session| session.tabs.iter().find(|tab| tab.state == "ready").or_else(|| session.tabs.first()))
+        .map(|tab| tab.tab_id.clone()));
+    tab_id.map(|tab_id| (browser_session_id, tab_id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -741,18 +857,150 @@ mod tests {
     #[test]
     fn launch_selection_uses_exactly_one_offline_or_live_route() {
         let service = WorkspaceClientService::default();
-        assert!(service.stage_launch_selection_if_offline("session-one".into(), Some("tab-one".into())));
-        assert_eq!(*service.pending_launch_selection.lock().expect("workspace launch selection lock"), Some(("session-one".into(), Some("tab-one".into()))));
+        assert!(service.stage_launch_selection_if_offline("session-one".into(), Some("tab-one".into()), true));
+        assert_eq!(*service.pending_launch_selection.lock().expect("workspace launch selection lock"), Some(PendingLaunchSelection { browser_session_id: "session-one".into(), tab_id: Some("tab-one".into()), take_control_after_paint: true }));
 
         *service.pending_launch_selection.lock().expect("workspace launch selection lock") = None;
         let (sender, receiver) = mpsc::channel(1);
         *service.sender.lock().expect("workspace sender lock") = Some(sender);
-        assert!(!service.stage_launch_selection_if_offline("session-two".into(), Some("tab-two".into())));
+        assert!(!service.stage_launch_selection_if_offline("session-two".into(), Some("tab-two".into()), false));
         assert!(service.pending_launch_selection.lock().expect("workspace launch selection lock").is_none());
 
         drop(receiver);
-        assert!(service.stage_launch_selection_if_offline("session-three".into(), None));
-        assert_eq!(*service.pending_launch_selection.lock().expect("workspace launch selection lock"), Some(("session-three".into(), None)));
+        assert!(service.stage_launch_selection_if_offline("session-three".into(), None, false));
+        assert_eq!(*service.pending_launch_selection.lock().expect("workspace launch selection lock"), Some(PendingLaunchSelection { browser_session_id: "session-three".into(), tab_id: None, take_control_after_paint: false }));
+    }
+
+    #[test]
+    fn initial_takeover_is_consumed_before_fallible_connection_setup() {
+        let takeover = Arc::new(Mutex::new(Some(PendingLaunchSelection {
+            browser_session_id: "session:one".into(),
+            tab_id: Some("tab:one".into()),
+            take_control_after_paint: true,
+        })));
+        let attempted = take_attempt_scoped_takeover(&takeover).expect("first takeover attempt");
+        assert!(attempted.take_control_after_paint);
+        assert!(takeover.lock().expect("workspace launch selection lock").is_none());
+        drop(attempted); // Simulate any descriptor/socket/bind/snapshot failure.
+        assert!(take_attempt_scoped_takeover(&takeover).is_none());
+
+        let attach = Arc::new(Mutex::new(Some(PendingLaunchSelection {
+            browser_session_id: "session:two".into(),
+            tab_id: None,
+            take_control_after_paint: false,
+        })));
+        assert!(take_attempt_scoped_takeover(&attach).is_none());
+        assert!(attach.lock().expect("workspace launch selection lock").is_some());
+    }
+
+    #[test]
+    fn expired_or_abandoned_live_selection_cannot_commit() {
+        let (open_reply, _open_receiver) = oneshot::channel();
+        assert!(live_selection_attempt_active(Instant::now() + Duration::from_secs(1), &open_reply));
+
+        let (abandoned_reply, abandoned_receiver) = oneshot::channel();
+        drop(abandoned_receiver);
+        assert!(!live_selection_attempt_active(Instant::now() + Duration::from_secs(1), &abandoned_reply));
+
+        let (expired_reply, _expired_receiver) = oneshot::channel();
+        let expired = Instant::now().checked_sub(Duration::from_millis(1)).expect("past instant");
+        assert!(!live_selection_attempt_active(expired, &expired_reply));
+    }
+
+    #[tokio::test]
+    async fn rejected_live_launch_selection_does_not_fire_after_reconnect() {
+        let (_sender, receiver) = mpsc::channel(1);
+        let (_shutdown_sender, shutdown_receiver) = watch::channel(false);
+        let (_lifecycle_sender, lifecycle_receiver) = mpsc::channel(1);
+        let pending = Arc::new(Mutex::new(None));
+        let mut worker = Worker::new(
+            SharedPublicState::default(),
+            Channel::new(|_| Ok(())),
+            Channel::new(|_| Ok(())),
+            receiver,
+            shutdown_receiver,
+            lifecycle_receiver,
+            "test-display-salt".into(),
+            pending.clone(),
+            AcceptanceDiagnostics::default(),
+        );
+        let (reply, received) = oneshot::channel();
+        assert!(worker.offline_command(Some(ClientCommand::Select {
+            browser_session_id: "session:one".into(),
+            tab_id: Some("tab:one".into()),
+            raw_ids: true,
+            take_control_after_paint: true,
+            expires: Instant::now() + COMMAND_TTL,
+            reply,
+        })).await);
+        assert!(received.await.expect("selection result").is_err());
+        assert!(pending.lock().expect("workspace launch selection lock").is_none());
+        assert!(!worker.pending_takeover);
+    }
+
+    #[test]
+    fn missing_initial_launch_target_is_not_silently_retargeted() {
+        let snapshot: WorkspaceSnapshot = serde_json::from_value(json!({
+            "workspaceRevision": 1,
+            "browserdRuntimeInstanceId": "runtime:one",
+            "generatedAt": "2026-08-31T00:00:00.000Z",
+            "browserdState": "ready",
+            "sessions": []
+        })).expect("workspace snapshot");
+        assert!(resolve_pending_launch_target(Some(&snapshot), PendingLaunchSelection {
+            browser_session_id: "session:missing".into(),
+            tab_id: None,
+            take_control_after_paint: true,
+        }).is_none());
+    }
+
+    #[tokio::test]
+    async fn explicit_return_cancels_staged_and_paint_pending_takeover() {
+        let service = WorkspaceClientService::default();
+        assert!(service.stage_launch_selection_if_offline("session:one".into(), Some("tab:one".into()), true));
+        service.release_for_hide().await.expect("pre-open return");
+        assert!(service.pending_launch_selection.lock().expect("workspace launch selection lock").is_none());
+
+        let (_sender, receiver) = mpsc::channel(1);
+        let (_shutdown_sender, shutdown_receiver) = watch::channel(false);
+        let (_lifecycle_sender, lifecycle_receiver) = mpsc::channel(1);
+        let pending = Arc::new(Mutex::new(Some(PendingLaunchSelection {
+            browser_session_id: "session:one".into(),
+            tab_id: Some("tab:one".into()),
+            take_control_after_paint: true,
+        })));
+        let mut worker = Worker::new(
+            SharedPublicState::default(),
+            Channel::new(|_| Ok(())),
+            Channel::new(|_| Ok(())),
+            receiver,
+            shutdown_receiver,
+            lifecycle_receiver,
+            "test-display-salt".into(),
+            pending.clone(),
+            AcceptanceDiagnostics::default(),
+        );
+        worker.pending_takeover = true;
+        worker.release_control().await.expect("return before paint");
+        assert!(!worker.pending_takeover);
+        assert!(pending.lock().expect("workspace launch selection lock").is_none());
+    }
+
+    #[test]
+    fn launcher_error_bypasses_a_full_ordinary_command_queue() {
+        let service = WorkspaceClientService::default();
+        let (sender, _receiver) = mpsc::channel(1);
+        sender.try_send(ClientCommand::Stop).expect("fill ordinary command queue");
+        *service.sender.lock().expect("workspace sender lock") = Some(sender);
+        let observed = Arc::new(AtomicBool::new(false));
+        let observed_for_channel = observed.clone();
+        service.frontend_error.lock().expect("workspace frontend error lock").channel = Some(Channel::new(move |_| {
+            observed_for_channel.store(true, Ordering::Release);
+            Ok(())
+        }));
+        service.notify_error(WorkspaceError::Unavailable.public());
+        assert!(observed.load(Ordering::Acquire));
+        assert!(service.frontend_error.lock().expect("workspace frontend error lock").pending.is_none());
     }
 
     #[test]

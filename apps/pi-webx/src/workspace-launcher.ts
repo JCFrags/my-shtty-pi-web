@@ -7,7 +7,7 @@ const WORKSPACE_ID = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/u;
 const MAX_PATH_BYTES = 4_096;
 
 export interface WorkspaceLaunchRequest {
-  readonly action: "show" | "hide" | "attach";
+  readonly action: "show" | "hide" | "attach" | "takeover" | "return";
   readonly browserSessionId?: string;
   readonly tabId?: string;
 }
@@ -59,13 +59,18 @@ export class NodeWorkspaceLauncher implements WorkspaceLauncher {
 }
 
 export function launchArguments(request: WorkspaceLaunchRequest): string[] {
-  if (request.action === "show") return ["--raise"];
-  if (request.action === "hide") return ["--hide"];
+  if (request.action === "show" || request.action === "hide" || request.action === "return") {
+    if (request.browserSessionId !== undefined || request.tabId !== undefined) throw new Error(`The ${request.action} workspace action does not accept a browser target.`);
+    if (request.action === "show") return ["--raise"];
+    if (request.action === "hide") return ["--hide"];
+    return ["--return-control"];
+  }
   if (!request.browserSessionId || !WORKSPACE_ID.test(request.browserSessionId)) throw new Error("A valid browser session ID is required.");
   if (request.tabId !== undefined && !WORKSPACE_ID.test(request.tabId)) throw new Error("The browser tab ID is invalid.");
   return [
     "--raise",
     `--select-session=${request.browserSessionId}`,
     ...(request.tabId ? [`--select-tab=${request.tabId}`] : []),
+    ...(request.action === "takeover" ? ["--take-control"] : []),
   ];
 }

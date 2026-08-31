@@ -87,6 +87,18 @@ describe("workspace state", () => {
     expect(state.publicState.selected).toBeUndefined();
   });
 
+  it("retains launcher errors across ordinary current and snapshot records", () => {
+    let state = reduceWorkspaceRecord(initialWorkspaceViewState, {
+      kind: "error",
+      error: { code: "INVALID_SELECTION", message: "The selected browser tab is unavailable.", retryable: false },
+    });
+    state = reduceWorkspaceRecord(state, { kind: "current", state: publicState() });
+    state = reduceWorkspaceRecord(state, { kind: "snapshot", snapshot });
+    expect(state.error).toBe("The selected browser tab is unavailable.");
+    state = reduceWorkspaceRecord(state, { kind: "selection", selected });
+    expect(state.error).toBeUndefined();
+  });
+
   it("accepts only bounded display metadata while Rust retains frame authority", () => {
     expect(frameRejectionReason(metadata(), publicState(), 0)).toBeUndefined();
     expect(frameRejectionReason(metadata(), { ...publicState(), selected: undefined }, 0)).toBe("selection");
