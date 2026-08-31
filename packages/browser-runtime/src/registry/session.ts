@@ -6,8 +6,10 @@ import type { BrowserArtifactStore } from "../artifacts/store.js";
 import { SessionCaptureCoordinator } from "../capture/coordinator.js";
 import { captureProofIdentity, SessionCaptureReadiness, type CaptureReadinessState } from "../capture/readiness.js";
 import { ChromeHost, type ChromeHostOptions } from "../chrome/host.js";
+import { HumanInputController } from "../control/human-input.js";
+import { SessionControlAuthority, SessionControlError, type SanitizedSessionControl } from "../control/session-control.js";
 import { bindFrameTab, FrameScheduler, type FrameCaptureOutcome } from "../frames/scheduler.js";
-import { SessionMotor, bindMotorTab, type CoordinateAction, type MouseButton } from "../motor/session-motor.js";
+import { SessionMotor, bindMotorTab, type CoordinateAction, type DirectHumanInputEvent, type DirectHumanInputResult, type MouseButton } from "../motor/session-motor.js";
 import { DomObservationStore, bindDomTab } from "../observations/dom-store.js";
 import { bindObservationTab, ObservationStore } from "../observations/store.js";
 import type { OperationContext, OperationRegistry } from "../operations/registry.js";
@@ -19,6 +21,14 @@ export type DomFallbackAction =
   | { kind: "type"; text: string; replace?: boolean }
   | { kind: "press"; key: string };
 
+export interface BrowserSessionControlIntegration {
+  authorityFenced(browserSessionId: string, nextEpoch: number): void;
+  establishHumanFrameStream(connectionId: string, subscriptionId: string, browserSessionId: string, tabId: string, epoch: number, signal: AbortSignal): Promise<void>;
+  establishAgentFrameStream(browserSessionId: string, epoch: number, signal: AbortSignal): Promise<void>;
+  changed(browserSessionId: string, state: SanitizedSessionControl): void;
+  terminalCleanupRequired(browserSessionId: string, reason: string): void;
+}
+
 export class BrowserSession extends EventEmitter {
   private closeState: "open" | "closing" | "closed" | "cleanup-failed" = "open";
   private closePromise: Promise<void> | undefined;
@@ -26,10 +36,12 @@ export class BrowserSession extends EventEmitter {
   private automaticWarmupTabId: string | undefined;
   readonly captureCoordinator: SessionCaptureCoordinator;
   readonly captureReadiness: SessionCaptureReadiness;
+  readonly control: SessionControlAuthority;
   readonly motor: SessionMotor;
   readonly observations: ObservationStore;
   readonly dom: DomObservationStore;
   readonly frames: FrameScheduler;
+  readonly humanInput: HumanInputController;
 
   private constructor(
     readonly actor: ActorIdentity,
@@ -43,14 +55,37 @@ export class BrowserSession extends EventEmitter {
     motorMinimumPathMs: number,
     screenshotObservationTtlMs: number,
     domObservationTtlMs: number,
+    controlIntegration: BrowserSessionControlIntegration,
   ) {
     super();
     this.captureCoordinator = new SessionCaptureCoordinator();
     this.captureReadiness = new SessionCaptureReadiness(() => this.emit("captureReadiness"));
     this.motor = new SessionMotor(browserSessionId, personaSeed, motorMinimumPathMs);
+    this.humanInput = new HumanInputController(this.motor);
     this.observations = new ObservationStore(actor, targets, artifacts, this.motor, { freshnessMs: screenshotObservationTtlMs, currentEpoch: () => this.controlEpoch, captureCoordinator: this.captureCoordinator });
     this.dom = new DomObservationStore(targets, { retentionMs: domObservationTtlMs });
     this.frames = new FrameScheduler(actor, targets, artifacts, this.motor, () => this.controlEpoch, { captureCoordinator: this.captureCoordinator });
+    this.control = new SessionControlAuthority({
+      browserSessionId,
+      currentEpoch: () => this.controlEpoch,
+      advanceEpoch: () => this.advanceAuthorityEpoch(),
+      assertAcquireReady: (tabId) => this.assertControlReady(tabId),
+      invalidateAgentAuthority: (nextEpoch) => { this.invalidateActorObservations(); controlIntegration.authorityFenced(browserSessionId, nextEpoch); },
+      awaitAgentSettlement: async (signal) => await this.operations.awaitSessionSettlement(this.actor, browserSessionId, signal),
+      stopHumanInput: () => this.humanInput.stop(),
+      awaitHumanInputSettlement: async (signal) => await this.humanInput.awaitSettlement(signal),
+      releaseHeldInput: async (signal) => { signal.throwIfAborted(); await this.motor.releaseAll(); signal.throwIfAborted(); },
+      heldInputCount: () => this.motor.heldInputState.buttons.length + this.motor.heldInputState.keys.length,
+      establishHumanFrameStream: async (connectionId, subscriptionId, tabId, epoch, signal) => {
+        await controlIntegration.establishHumanFrameStream(connectionId, subscriptionId, browserSessionId, tabId, epoch, signal);
+        await this.awaitFreshWorkspaceFrame(tabId, epoch, signal);
+        this.humanInput.start(tabId, epoch);
+      },
+      invalidateHumanAuthority: (nextEpoch) => { this.invalidateActorObservations(); controlIntegration.authorityFenced(browserSessionId, nextEpoch); },
+      establishAgentFrameStream: async (epoch, signal) => await controlIntegration.establishAgentFrameStream(browserSessionId, epoch, signal),
+      changed: (state) => controlIntegration.changed(browserSessionId, state),
+      terminalCleanupRequired: (reason) => controlIntegration.terminalCleanupRequired(browserSessionId, reason),
+    });
     this.frames.on("captureOutcome", this.onCaptureReadinessOutcome);
     host.on("exit", this.onHostExit);
     host.on("disconnect", this.onHostDisconnect);
@@ -59,15 +94,15 @@ export class BrowserSession extends EventEmitter {
     targets.on("tabGenerationChanged", this.onTabGenerationChanged);
   }
 
-  static async create(actor: ActorIdentity, operations: OperationRegistry, artifacts: BrowserArtifactStore, navigationAuthorization: NavigationAuthorization, options: Omit<ChromeHostOptions, "hostId"> & { initialUrl?: string; initialNavigationContext?: NavigationAuthorizationContext; personaSeed?: number; motorMinimumPathMs?: number; screenshotObservationTtlMs?: number; domObservationTtlMs?: number; observationFreshnessMs?: number } = {}, signal?: AbortSignal, markProcessDispatched?: () => void): Promise<BrowserSession> {
+  static async create(actor: ActorIdentity, operations: OperationRegistry, artifacts: BrowserArtifactStore, navigationAuthorization: NavigationAuthorization, options: Omit<ChromeHostOptions, "hostId"> & { initialUrl?: string; initialNavigationContext?: NavigationAuthorizationContext; personaSeed?: number; motorMinimumPathMs?: number; screenshotObservationTtlMs?: number; domObservationTtlMs?: number; observationFreshnessMs?: number; controlIntegration?: BrowserSessionControlIntegration } = {}, signal?: AbortSignal, markProcessDispatched?: () => void): Promise<BrowserSession> {
     signal?.throwIfAborted();
     const browserSessionId = opaqueId("session");
-    const { initialUrl, initialNavigationContext, personaSeed, motorMinimumPathMs, screenshotObservationTtlMs, domObservationTtlMs, observationFreshnessMs, ...hostOptions } = options;
+    const { initialUrl, initialNavigationContext, personaSeed, motorMinimumPathMs, screenshotObservationTtlMs, domObservationTtlMs, observationFreshnessMs, controlIntegration, ...hostOptions } = options;
     const host = await ChromeHost.launch({ hostId: browserSessionId, ...hostOptions }, signal, markProcessDispatched);
     try {
       signal?.throwIfAborted();
       const targets = await TargetRegistry.create(browserSessionId, host);
-      const session = new BrowserSession(actor, browserSessionId, host, targets, operations, artifacts, navigationAuthorization, personaSeed ?? randomBytes(4).readUInt32BE(), motorMinimumPathMs ?? 0, screenshotObservationTtlMs ?? observationFreshnessMs ?? 60_000, domObservationTtlMs ?? 60_000);
+      const session = new BrowserSession(actor, browserSessionId, host, targets, operations, artifacts, navigationAuthorization, personaSeed ?? randomBytes(4).readUInt32BE(), motorMinimumPathMs ?? 0, screenshotObservationTtlMs ?? observationFreshnessMs ?? 60_000, domObservationTtlMs ?? 60_000, controlIntegration ?? NOOP_CONTROL_INTEGRATION);
       const tab = await session.createTab(undefined, signal, undefined, { operationId: "session.create" }, false);
       if (initialUrl !== undefined) await session.navigate(session.address(tab), initialUrl, signal ?? new AbortController().signal, undefined, initialNavigationContext ?? { operationId: "session.create" });
       session.startCaptureWarmup(tab, true);
@@ -85,6 +120,12 @@ export class BrowserSession extends EventEmitter {
 
   descriptor(): SessionDescriptor {
     return { kind: "session", browserSessionId: this.browserSessionId, controlEpoch: this.controlEpoch, state: this.closeState === "open" ? this.host.connected ? "ready" : "degraded" : "closed", personaId: this.personaId, cursor: this.motor.state, tabs: this.targets.list(this.controlEpoch) };
+  }
+
+  actorDescriptor(): SessionDescriptor {
+    const descriptor = this.descriptor();
+    if (this.control.state === "agent") return descriptor;
+    return { ...descriptor, cursor: { ...descriptor.cursor, x: 0, y: 0, pathSequence: 0, sampleSequence: 0, visible: false } };
   }
 
   async createTab(url?: string, signal = new AbortController().signal, markDispatched?: () => void, navigationContext: NavigationAuthorizationContext = { operationId: "tab.create" }, prewarm = false): Promise<TabRecord> {
@@ -152,6 +193,12 @@ export class BrowserSession extends EventEmitter {
   async typeText(address: TabAddress, text: string, replace: boolean, context: OperationContext): Promise<void> { await this.motor.typeText(this.resolve(address), text, replace, context); }
   async pressKey(address: TabAddress, key: string, context: OperationContext): Promise<void> { await this.motor.pressKey(this.resolve(address), key, context); }
 
+  async dispatchHumanInput(tabId: string, controlEpoch: number, events: readonly DirectHumanInputEvent[], beforeDispatch: () => void, signal?: AbortSignal): Promise<{ readonly result: DirectHumanInputResult; readonly coalescedPointerMoveCount: number }> {
+    const tab = this.targets.getById(tabId);
+    if (tab === undefined || tab.state !== "open") throw new BrowserProtocolError("TAB_NOT_FOUND", "Workspace tab not found.");
+    return await this.humanInput.dispatch(tab, controlEpoch, events, beforeDispatch, signal);
+  }
+
   async navigate(address: TabAddress, rawUrl: string, signal: AbortSignal, markDispatched?: () => void, authorizationContext: NavigationAuthorizationContext = { operationId: "navigate" }): Promise<void> {
     const tab = this.resolve(address);
     const url = new URL(rawUrl);
@@ -183,8 +230,7 @@ export class BrowserSession extends EventEmitter {
   offCaptureReadiness(listener: () => void): void { this.off("captureReadiness", listener); }
 
   incrementControlEpoch(): number {
-    const epoch = this.operations.incrementEpoch(this.actor, this.browserSessionId);
-    this.frames.invalidateEpoch(epoch);
+    const epoch = this.advanceAuthorityEpoch();
     this.automaticWarmupTabId = undefined;
     for (const descriptor of this.targets.list(epoch)) { const tab = this.targets.getById(descriptor.address.tabId); if (tab !== undefined) this.captureReadiness.begin(tab, epoch); }
     void this.motor.releaseAll();
@@ -204,6 +250,7 @@ export class BrowserSession extends EventEmitter {
 
   private async closeInternal(): Promise<void> {
     const failures: unknown[] = [];
+    this.control.close();
     this.captureReadiness.markUnavailable();
     this.frames.off("captureOutcome", this.onCaptureReadinessOutcome);
     this.targets.off("tabGenerationChanged", this.onTabGenerationChanged);
@@ -214,6 +261,49 @@ export class BrowserSession extends EventEmitter {
     try { await this.host.close(); } catch (error) { failures.push(error); }
     try { this.artifacts.clearSession(this.actor, this.browserSessionId); } catch (error) { failures.push(error); }
     if (failures.length > 0) throw new AggregateError(failures, "Browser session cleanup failed.");
+  }
+
+  private advanceAuthorityEpoch(): number {
+    const epoch = this.operations.incrementEpoch(this.actor, this.browserSessionId);
+    this.frames.invalidateEpoch(epoch);
+    return epoch;
+  }
+
+  private assertControlReady(tabId: string): void {
+    this.assertOpen();
+    const tab = this.targets.getById(tabId);
+    if (tab === undefined || tab.state !== "open" || this.captureReadiness.state !== "ready" || this.captureReadiness.tabState(tabId) !== "ready") {
+      throw new SessionControlError("CONTROL_NOT_READY", "Browser view is preparing.", true);
+    }
+  }
+
+  private invalidateActorObservations(): void {
+    for (const tab of this.targets.list(this.controlEpoch)) {
+      this.observations.invalidateTab(tab.address.tabId);
+      this.dom.invalidateTab(tab.address.tabId);
+    }
+    this.artifacts.clearAgentObservations(this.actor, this.browserSessionId);
+  }
+
+  private async awaitFreshWorkspaceFrame(tabId: string, epoch: number, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    const tab = this.targets.getById(tabId);
+    if (tab === undefined || tab.state !== "open") throw new SessionControlError("CONTROL_NOT_READY", "Browser control tab is unavailable.", true);
+    const address = this.address(tab);
+    if (address.controlEpoch !== epoch) throw new SessionControlError("CONTROL_TRANSFER_PENDING", "Browser control epoch changed.", true);
+    if (this.frames.latestValidFrame(address, 1_500) !== undefined) return;
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = (): void => { signal.removeEventListener("abort", abort); this.frames.off("frame", frame); };
+      const abort = (): void => { cleanup(); reject(signal.reason ?? new SessionControlError("CONTROL_TRANSFER_PENDING", "Browser control frame wait was cancelled.", true)); };
+      const frame = (candidate: FrameEvent): void => {
+        if (candidate.address.browserSessionId !== this.browserSessionId || candidate.address.tabId !== tabId || candidate.address.controlEpoch !== epoch) return;
+        cleanup(); resolve();
+      };
+      this.frames.on("frame", frame);
+      signal.addEventListener("abort", abort, { once: true });
+      this.frames.requestCapture(tabId);
+      if (signal.aborted) abort();
+    });
   }
 
   private startCaptureWarmup(tab: TabRecord, automatic = false): void {
@@ -260,10 +350,11 @@ export class BrowserSession extends EventEmitter {
     this.frames.requestCapture(outcome.identity.tabId);
   };
   private readonly onTabGenerationChanged = (tab: TabRecord): void => { this.captureReadiness.begin(tab, this.controlEpoch); };
-  private readonly onHostExit = (): void => { if (this.closeState === "open") this.operations.failSession(this.actor, this.browserSessionId, "BROWSER_EXITED"); this.captureReadiness.markUnavailable(); void this.motor.releaseAll(); };
-  private readonly onHostDisconnect = (): void => { if (this.closeState === "open") this.operations.failSession(this.actor, this.browserSessionId, "CDP_DISCONNECTED"); this.captureReadiness.markUnavailable(); void this.motor.releaseAll(); };
+  private readonly onHostExit = (): void => { if (this.closeState === "open") this.operations.failSession(this.actor, this.browserSessionId, "BROWSER_EXITED"); this.control.close(); this.captureReadiness.markUnavailable(); void this.motor.releaseAll(); };
+  private readonly onHostDisconnect = (): void => { if (this.closeState === "open") this.operations.failSession(this.actor, this.browserSessionId, "CDP_DISCONNECTED"); this.control.close(); this.captureReadiness.markUnavailable(); void this.motor.releaseAll(); };
   private readonly onTabRegistered = (tab: TabRecord): void => { this.bindTab(tab); void this.motor.initializeTab(tab).then(() => this.captureReadiness.begin(tab, this.controlEpoch), () => { this.captureReadiness.begin(tab, this.controlEpoch); this.captureReadiness.failed(captureProofIdentity(tab, this.controlEpoch)); }); };
   private readonly onTabTerminal = ({ tabId, tab }: TerminalTabEvent): void => {
+    void this.control.controlledTabClosed(tabId).catch(() => undefined);
     this.captureReadiness.remove(tabId);
     if (this.automaticWarmupTabId === tabId) { this.automaticWarmupTabId = undefined; void this.frames.removeConsumerAndSettle(captureReadinessConsumerKey(tabId)); }
     this.captureCoordinator.cancelTab(tabId);
@@ -294,5 +385,12 @@ function coordinatePoint(action: CoordinateAction): { x: number; y: number } {
     case "click": case "doubleClick": case "wheel": return action.at;
   }
 }
+const NOOP_CONTROL_INTEGRATION: BrowserSessionControlIntegration = {
+  authorityFenced: () => undefined,
+  establishHumanFrameStream: async () => undefined,
+  establishAgentFrameStream: async () => undefined,
+  changed: () => undefined,
+  terminalCleanupRequired: () => undefined,
+};
 function captureReadinessConsumerKey(tabId: string): string { return `capture-readiness\u0000${tabId}`; }
 function opaqueId(prefix: string): string { return `${prefix}_${randomBytes(18).toString("base64url")}`; }

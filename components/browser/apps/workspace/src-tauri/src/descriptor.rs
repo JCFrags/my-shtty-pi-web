@@ -37,7 +37,7 @@ impl WorkspaceDescriptor {
     }
 
     fn validate(&self, runtime: &Path) -> Result<(), WorkspaceError> {
-        if self.protocol_version != "workspace.v1"
+        if self.protocol_version != "workspace.v2"
             || !opaque_id(&self.webxd_runtime_instance_id)
             || self.pid == 0
             || self.process_start_ticks.is_empty()
@@ -85,7 +85,7 @@ mod tests {
         fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).unwrap();
         let descriptor = runtime.join("workspace.json");
         let mut file = fs::File::create(&descriptor).unwrap();
-        write!(file, "{{\"protocolVersion\":\"workspace.v1\",\"webxdRuntimeInstanceId\":\"abcdefghijklmnop\",\"pid\":{},\"processStartTicks\":\"{}\",\"socketPath\":\"{}\",\"bindingSecret\":\"{}\",\"startedAt\":\"2026-08-30T00:00:00.000Z\"}}", std::process::id(), ticks(), socket.display(), "s".repeat(43)).unwrap();
+        write!(file, "{{\"protocolVersion\":\"workspace.v2\",\"webxdRuntimeInstanceId\":\"abcdefghijklmnop\",\"pid\":{},\"processStartTicks\":\"{}\",\"socketPath\":\"{}\",\"bindingSecret\":\"{}\",\"startedAt\":\"2026-08-30T00:00:00.000Z\"}}", std::process::id(), ticks(), socket.display(), "s".repeat(43)).unwrap();
         fs::set_permissions(&descriptor, fs::Permissions::from_mode(0o600)).unwrap();
         (root, runtime, descriptor, listener)
     }
@@ -94,7 +94,7 @@ mod tests {
     fn accepts_only_private_live_descriptor_and_socket() {
         let (_root, runtime, path, _listener) = fixture();
         let descriptor = WorkspaceDescriptor::read_from(&path, &runtime).unwrap();
-        assert_eq!(descriptor.protocol_version, "workspace.v1");
+        assert_eq!(descriptor.protocol_version, "workspace.v2");
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
         assert!(WorkspaceDescriptor::read_from(&path, &runtime).is_err());
     }

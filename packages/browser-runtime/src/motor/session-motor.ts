@@ -37,6 +37,20 @@ export interface ActionTimings {
 interface ReplayTimings { sampleReplayWallMs: number; cdpInputLatencyMs: number; cdpInputMaxLatencyMs: number; overlayUpdateLatencyMs: number; sampleCount: number }
 export type PostPathGuard = () => Promise<void>;
 
+export type DirectHumanInputEvent =
+  | { readonly kind: "pointerMove"; readonly point: Point }
+  | { readonly kind: "pointerDown"; readonly point: Point; readonly button: MouseButton; readonly clickCount: number }
+  | { readonly kind: "pointerUp"; readonly point: Point; readonly button: MouseButton; readonly clickCount: number }
+  | { readonly kind: "wheel"; readonly point: Point; readonly deltaX: number; readonly deltaY: number }
+  | { readonly kind: "keyDown"; readonly key: string; readonly code?: string; readonly repeat: boolean }
+  | { readonly kind: "keyUp"; readonly key: string; readonly code?: string }
+  | { readonly kind: "text"; readonly text: string };
+
+export interface DirectHumanInputResult {
+  readonly dispatchedEventCount: number;
+  readonly pointerMoveCount: number;
+}
+
 export class SessionMotor extends EventEmitter {
   readonly personaId = randomBytes(18).toString("base64url");
   readonly persona;
@@ -47,6 +61,7 @@ export class SessionMotor extends EventEmitter {
   private pressedButtons = new Set<MouseButton>();
   private pressedKeys = new Set<string>();
   private activeTab?: TabRecord;
+  private inputTail: Promise<void> = Promise.resolve();
 
   constructor(readonly browserSessionId: string, personaSeed: number, private readonly minimumPathDurationMs = 0) {
     super();
@@ -64,6 +79,8 @@ export class SessionMotor extends EventEmitter {
   }
 
   isActiveTab(tabId: string): boolean { return this.activeTab?.tabId === tabId; }
+  isButtonHeld(button: MouseButton): boolean { return this.pressedButtons.has(button); }
+  isHumanKeyHeld(key: string, code?: string): boolean { return this.pressedKeys.has(normalizeHumanKeyCode(key, code)); }
 
   async initializeTab(tab: TabRecord): Promise<void> {
     await this.command(tab, "Emulation.setFocusEmulationEnabled", { enabled: true });
@@ -76,6 +93,10 @@ export class SessionMotor extends EventEmitter {
   }
 
   async coordinate(tab: TabRecord, action: CoordinateAction, context: OperationContext, postPathGuard: PostPathGuard): Promise<ActionTimings> {
+    return await this.runInputExclusive(async () => await this.coordinateUnlocked(tab, action, context, postPathGuard));
+  }
+
+  private async coordinateUnlocked(tab: TabRecord, action: CoordinateAction, context: OperationContext, postPathGuard: PostPathGuard): Promise<ActionTimings> {
     const started = performance.now();
     await this.activate(tab);
     context.checkpoint();
@@ -158,6 +179,10 @@ export class SessionMotor extends EventEmitter {
   }
 
   async typeText(tab: TabRecord, text: string, replace: boolean, context: OperationContext): Promise<void> {
+    await this.runInputExclusive(async () => await this.typeTextUnlocked(tab, text, replace, context));
+  }
+
+  private async typeTextUnlocked(tab: TabRecord, text: string, replace: boolean, context: OperationContext): Promise<void> {
     await this.activate(tab);
     if (replace) {
       await this.key(tab, "a", "KeyA", 2, context);
@@ -166,17 +191,98 @@ export class SessionMotor extends EventEmitter {
     for (const item of this.persona.keySchedule(text)) {
       await sleep(item.delayMs, context.signal);
       context.checkpoint();
-      if (item.t === "back") await this.pressKey(tab, "Backspace", context);
+      if (item.t === "back") await this.pressKeyUnlocked(tab, "Backspace", context);
       else { context.checkpoint(); context.markDispatched(); await this.command(tab, "Input.insertText", { text: item.ch }, context.signal); }
     }
   }
 
   async pressKey(tab: TabRecord, key: string, context: OperationContext): Promise<void> {
+    await this.runInputExclusive(async () => await this.pressKeyUnlocked(tab, key, context));
+  }
+
+  private async pressKeyUnlocked(tab: TabRecord, key: string, context: OperationContext): Promise<void> {
     await this.activate(tab);
     await this.key(tab, key, keyCode(key), 0, context);
   }
 
+  assertHumanInputTransitions(events: readonly DirectHumanInputEvent[]): void {
+    const buttons = new Set(this.pressedButtons);
+    const keys = new Set(this.pressedKeys);
+    for (const event of events) {
+      if (event.kind === "pointerDown") {
+        if (buttons.has(event.button)) throw new BrowserProtocolError("INPUT_UNSUPPORTED", "Human pointer transition is not supported.", false);
+        buttons.add(event.button);
+      } else if (event.kind === "pointerUp") {
+        if (!buttons.delete(event.button)) throw new BrowserProtocolError("INPUT_UNSUPPORTED", "Human pointer transition is not supported.", false);
+      } else if (event.kind === "keyDown") {
+        const code = normalizeHumanKeyCode(event.key, event.code);
+        if (keys.has(code) && !event.repeat) throw new BrowserProtocolError("INPUT_UNSUPPORTED", "Human key transition is not supported.", false);
+        keys.add(code);
+      } else if (event.kind === "keyUp" && !keys.delete(normalizeHumanKeyCode(event.key, event.code))) {
+        throw new BrowserProtocolError("INPUT_UNSUPPORTED", "Human key transition is not supported.", false);
+      }
+    }
+  }
+
+  async dispatchHumanInput(tab: TabRecord, events: readonly DirectHumanInputEvent[], signal: AbortSignal): Promise<DirectHumanInputResult> {
+    return await this.runInputExclusive(async () => await this.dispatchHumanInputUnlocked(tab, events, signal));
+  }
+
+  private async dispatchHumanInputUnlocked(tab: TabRecord, events: readonly DirectHumanInputEvent[], signal: AbortSignal): Promise<DirectHumanInputResult> {
+    signal.throwIfAborted();
+    if (events.length === 0) return { dispatchedEventCount: 0, pointerMoveCount: 0 };
+    this.assertHumanInputTransitions(events);
+    if (this.activeTab !== undefined && this.activeTab.tabId !== tab.tabId && (this.pressedButtons.size > 0 || this.pressedKeys.size > 0)) {
+      throw new BrowserProtocolError("INPUT_UNSUPPORTED", "Human input cannot change targets while input is held.", false);
+    }
+    await this.activate(tab);
+    signal.throwIfAborted();
+    let dispatchedEventCount = 0;
+    let pointerMoveCount = 0;
+    for (const event of events) {
+      signal.throwIfAborted();
+      if (event.kind === "pointerMove") {
+        await this.updateHumanPointer(tab, event.point, signal);
+        await this.command(tab, "Input.dispatchMouseEvent", { type: "mouseMoved", ...event.point, button: "none", buttons: this.buttonMask() }, signal);
+        pointerMoveCount++;
+      } else if (event.kind === "pointerDown") {
+        if (this.pressedButtons.has(event.button)) throw new BrowserProtocolError("INPUT_UNSUPPORTED", "Human pointer transition is not supported.", false);
+        await this.updateHumanPointer(tab, event.point, signal);
+        this.pressedButtons.add(event.button);
+        await this.command(tab, "Input.dispatchMouseEvent", { type: "mousePressed", ...event.point, button: event.button, buttons: this.buttonMask(), clickCount: event.clickCount }, signal);
+      } else if (event.kind === "pointerUp") {
+        if (!this.pressedButtons.has(event.button)) throw new BrowserProtocolError("INPUT_UNSUPPORTED", "Human pointer transition is not supported.", false);
+        await this.updateHumanPointer(tab, event.point, signal);
+        const buttons = this.buttonMask(event.button);
+        await this.command(tab, "Input.dispatchMouseEvent", { type: "mouseReleased", ...event.point, button: event.button, buttons, clickCount: event.clickCount }, signal);
+        this.pressedButtons.delete(event.button);
+      } else if (event.kind === "wheel") {
+        await this.updateHumanPointer(tab, event.point, signal);
+        await this.command(tab, "Input.dispatchMouseEvent", { type: "mouseWheel", ...event.point, button: "none", buttons: this.buttonMask(), deltaX: event.deltaX, deltaY: event.deltaY }, signal);
+      } else if (event.kind === "keyDown") {
+        const code = normalizeHumanKeyCode(event.key, event.code);
+        const held = this.pressedKeys.has(code);
+        if (held && !event.repeat) throw new BrowserProtocolError("INPUT_UNSUPPORTED", "Human key transition is not supported.", false);
+        if (!held) this.pressedKeys.add(code);
+        await this.command(tab, "Input.dispatchKeyEvent", { type: "keyDown", key: event.key, code, autoRepeat: event.repeat }, signal);
+      } else if (event.kind === "keyUp") {
+        const code = normalizeHumanKeyCode(event.key, event.code);
+        if (!this.pressedKeys.has(code)) throw new BrowserProtocolError("INPUT_UNSUPPORTED", "Human key transition is not supported.", false);
+        await this.command(tab, "Input.dispatchKeyEvent", { type: "keyUp", key: event.key, code }, signal);
+        this.pressedKeys.delete(code);
+      } else {
+        await this.command(tab, "Input.insertText", { text: event.text }, signal);
+      }
+      dispatchedEventCount++;
+    }
+    return { dispatchedEventCount, pointerMoveCount };
+  }
+
   async releaseAll(tab = this.activeTab): Promise<void> {
+    await this.runInputExclusive(async () => await this.releaseAllUnlocked(tab));
+  }
+
+  private async releaseAllUnlocked(tab = this.activeTab): Promise<void> {
     if (tab === undefined || tab.state !== "open" || motorConnection(tab).connected === false) {
       if (this.pressedButtons.size > 0 || this.pressedKeys.size > 0) this.emit("cleanupUnavailable", { reason: tab?.state !== "open" ? "Target is terminal" : "CDP disconnected" });
       this.pressedButtons.clear();
@@ -184,14 +290,38 @@ export class SessionMotor extends EventEmitter {
       return;
     }
     for (const button of [...this.pressedButtons]) await this.releaseWithCleanup(tab, button, this.cursor, 1).catch(() => undefined);
-    for (const key of [...this.pressedKeys]) {
+    for (const code of [...this.pressedKeys]) {
       const cleanup = cleanupBudget();
       try {
-        await this.cleanupCommand(tab, "Input.dispatchKeyEvent", { type: "keyUp", key, code: keyCode(key) }, cleanup.signal);
-        this.pressedKeys.delete(key);
+        await this.cleanupCommand(tab, "Input.dispatchKeyEvent", { type: "keyUp", key: keyFromCode(code), code }, cleanup.signal);
+        this.pressedKeys.delete(code);
       } catch { /* Keep ambiguous held state while CDP remains available. */ }
       finally { cleanup.dispose(); }
     }
+  }
+
+  private async runInputExclusive<T>(task: () => Promise<T>): Promise<T> {
+    const prior = this.inputTail;
+    let release!: () => void;
+    this.inputTail = new Promise<void>((resolve) => { release = resolve; });
+    await prior;
+    try { return await task(); }
+    finally { release(); }
+  }
+
+  private async updateHumanPointer(tab: TabRecord, point: Point, signal: AbortSignal): Promise<void> {
+    this.sampleSequence++;
+    await this.evaluate(tab, overlayUpdateSource(this.overlay, point.x, point.y, this.pathSequence, this.sampleSequence), signal);
+    this.cursor = point;
+    this.emit("sample", { tabId: tab.tabId, cursor: this.state });
+  }
+
+  private buttonMask(excluding?: MouseButton): number {
+    let value = 0;
+    if (excluding !== "left" && this.pressedButtons.has("left")) value |= 1;
+    if (excluding !== "right" && this.pressedButtons.has("right")) value |= 2;
+    if (excluding !== "middle" && this.pressedButtons.has("middle")) value |= 4;
+    return value;
   }
 
   private async moveTo(tab: TabRecord, to: Point, context: OperationContext, totalStarted: number): Promise<ActionTimings> {
@@ -290,7 +420,7 @@ export class SessionMotor extends EventEmitter {
   private async releaseWithCleanup(tab: TabRecord, button: MouseButton, at: Point, clickCount: number): Promise<void> {
     const cleanup = cleanupBudget();
     try {
-      await this.cleanupCommand(tab, "Input.dispatchMouseEvent", { type: "mouseReleased", ...at, button, buttons: 0, clickCount }, cleanup.signal);
+      await this.cleanupCommand(tab, "Input.dispatchMouseEvent", { type: "mouseReleased", ...at, button, buttons: this.buttonMask(button), clickCount }, cleanup.signal);
       this.pressedButtons.delete(button);
     } finally { cleanup.dispose(); }
   }
@@ -306,7 +436,7 @@ export class SessionMotor extends EventEmitter {
 
   private async key(tab: TabRecord, key: string, code: string, modifiers: number, context: OperationContext): Promise<void> {
     context.checkpoint();
-    this.pressedKeys.add(key);
+    this.pressedKeys.add(code);
     context.markDispatched();
     try {
       await this.command(tab, "Input.dispatchKeyEvent", { type: "keyDown", key, code, modifiers }, context.signal);
@@ -314,7 +444,7 @@ export class SessionMotor extends EventEmitter {
       const cleanup = cleanupBudget();
       try {
         await this.cleanupCommand(tab, "Input.dispatchKeyEvent", { type: "keyUp", key, code, modifiers }, cleanup.signal);
-        this.pressedKeys.delete(key);
+        this.pressedKeys.delete(code);
       } finally { cleanup.dispose(); }
     }
   }
@@ -342,4 +472,21 @@ export function bindMotorTab(tab: TabRecord, connection: MotorConnection): void 
 function motorConnection(tab: TabRecord): MotorConnection { const connection = connections.get(tab); if (connection === undefined) throw new Error("Tab has no CDP connection."); return connection; }
 function cleanupBudget(timeoutMs = 750): { signal: AbortSignal; dispose(): void } { const controller = new AbortController(); const timer = setTimeout(() => controller.abort(new Error("Input cleanup timed out.")), timeoutMs); return { signal: controller.signal, dispose: () => clearTimeout(timer) }; }
 function keyCode(key: string): string { const fixed: Record<string, string> = { Backspace: "Backspace", Enter: "Enter", Escape: "Escape", Tab: "Tab", ArrowDown: "ArrowDown", ArrowLeft: "ArrowLeft", ArrowRight: "ArrowRight", ArrowUp: "ArrowUp", Home: "Home", End: "End", PageDown: "PageDown", PageUp: "PageUp", " ": "Space" }; return fixed[key] ?? (/^[a-z]$/i.test(key) ? `Key${key.toUpperCase()}` : key); }
+const HUMAN_PHYSICAL_CODES = /^(?:Key[A-Z]|Digit[0-9]|F(?:[1-9]|1[0-9]|2[0-4])|Numpad(?:[0-9]|Add|Subtract|Multiply|Divide|Decimal|Enter|Equal|Comma)|Arrow(?:Up|Down|Left|Right)|(?:Shift|Control|Alt|Meta)(?:Left|Right)|(?:Enter|Escape|Tab|Backspace|Space|Home|End|PageUp|PageDown|Insert|Delete|CapsLock|NumLock|ScrollLock|Pause|ContextMenu|PrintScreen|Semicolon|Equal|Comma|Minus|Period|Slash|Backquote|BracketLeft|Backslash|BracketRight|Quote|IntlBackslash|IntlRo|IntlYen))$/;
+function normalizeHumanKeyCode(key: string, supplied?: string): string {
+  const derived: Record<string, string> = { Backspace: "Backspace", Enter: "Enter", Escape: "Escape", Tab: "Tab", ArrowDown: "ArrowDown", ArrowLeft: "ArrowLeft", ArrowRight: "ArrowRight", ArrowUp: "ArrowUp", Home: "Home", End: "End", PageDown: "PageDown", PageUp: "PageUp", Insert: "Insert", Delete: "Delete", Shift: "ShiftLeft", Control: "ControlLeft", Alt: "AltLeft", Meta: "MetaLeft", " ": "Space" };
+  const code = supplied ?? derived[key] ?? (/^[a-z]$/i.test(key) ? `Key${key.toUpperCase()}` : /^[0-9]$/.test(key) ? `Digit${key}` : undefined);
+  if (code === undefined || !HUMAN_PHYSICAL_CODES.test(code)) throw new BrowserProtocolError("INPUT_UNSUPPORTED", "Human key transition is not supported.", false);
+  return code;
+}
+function keyFromCode(code: string): string {
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3).toLowerCase();
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  if (code === "Space") return " ";
+  if (code.startsWith("Shift")) return "Shift";
+  if (code.startsWith("Control")) return "Control";
+  if (code.startsWith("Alt")) return "Alt";
+  if (code.startsWith("Meta")) return "Meta";
+  return code;
+}
 async function sleep(ms: number, signal?: AbortSignal): Promise<void> { signal?.throwIfAborted(); if (ms <= 0) return; await new Promise<void>((resolve, reject) => { const abort = () => { cleanup(); reject(signal?.reason ?? new Error("Cancelled")); }; const timer = setTimeout(() => { cleanup(); resolve(); }, ms); const cleanup = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); }; signal?.addEventListener("abort", abort, { once: true }); if (signal?.aborted) abort(); }); }

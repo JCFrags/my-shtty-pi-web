@@ -1,14 +1,15 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 
-export interface CursorState { x: number; y: number; visible: boolean; pathSequence: number; sampleSequence: number }
-export interface OperationState { operationId: string; kind: string; state: "queued" | "running" | "cancelling" | "terminal"; dispatchState: "not-dispatched" | "partially-dispatched" | "dispatched"; startedAt?: string; cancellable: boolean }
+export interface CursorState { x: number; y: number; visible: boolean }
+export interface OperationState { kind: string; state: "queued" | "running" | "cancelling" | "terminal"; dispatchState: "not-dispatched" | "partially-dispatched" | "dispatched"; startedAt?: string; cancellable: boolean }
 export type CaptureReadiness = "starting" | "warming" | "ready" | "degraded" | "unavailable";
-export interface WorkspaceTab { tabId: string; url: string; title: string; state: "attaching" | "ready" | "crashed" | "closed"; captureReadiness: CaptureReadiness; documentGeneration: number; viewportGeneration: number; frameSequence: number }
-export interface WorkspaceSession { browserSessionId: string; agentLabel: string; actorDisplayId: string; pathId: "agentcursor/chrome"; state: "starting" | "ready" | "degraded" | "closed"; controlState: "agent"; controlEpoch: number; captureReadiness: CaptureReadiness; personaDisplayId: string; cursor: CursorState; tabs: WorkspaceTab[]; activeOperation?: OperationState; lastActivityAt?: string }
-export interface WorkspaceSnapshot { workspaceRevision: number; browserdRuntimeInstanceId?: string; generatedAt: string; browserdState: "ready" | "unavailable" | "replaced"; sessions: WorkspaceSession[] }
+export interface WorkspaceTab { tabId: string; url: string; title: string; state: "attaching" | "ready" | "crashed" | "closed"; captureReadiness: CaptureReadiness }
+export type ControlState = "agent" | "takeover-pending" | "human" | "human-disconnected" | "return-pending";
+export interface WorkspaceSession { browserSessionId: string; agentLabel: string; actorDisplayId: string; pathId: "agentcursor/chrome"; state: "starting" | "ready" | "degraded" | "closed"; controlState: ControlState; captureReadiness: CaptureReadiness; personaDisplayId: string; cursor: CursorState; tabs: WorkspaceTab[]; activeOperation?: OperationState; lastActivityAt?: string }
+export interface WorkspaceSnapshot { generatedAt: string; browserdState: "ready" | "unavailable" | "replaced"; sessions: WorkspaceSession[] }
 export interface WorkspaceStatus { connection: "connecting" | "ready" | "reconnecting" | "unavailable" | "closed"; browserd: "ready" | "unavailable" | "replaced"; message?: string }
-export interface SelectedTab { selectionId: string; browserSessionId: string; tabId: string }
-export interface PublicWorkspaceState { connection: string; webxdRuntimeInstanceId?: string; snapshot?: WorkspaceSnapshot; selected?: SelectedTab; droppedBeforeFrontend: number; inflightFrame: boolean }
+export interface SelectedTab { browserSessionId: string; tabId: string }
+export interface PublicWorkspaceState { connection: string; snapshot?: WorkspaceSnapshot; selected?: SelectedTab; droppedBeforeFrontend: number; inflightFrame: boolean }
 export type FrontendStateRecord =
   | { kind: "current"; state: PublicWorkspaceState }
   | { kind: "snapshot"; snapshot: WorkspaceSnapshot }
@@ -18,10 +19,8 @@ export type FrontendStateRecord =
   | { kind: "error"; error: { code: string; message: string; retryable: boolean } };
 
 export interface FrameMetadata {
-  deliveryId: number; selectionId: string; subscriptionId: string; browserdRuntimeInstanceId: string;
-  browserSessionId: string; tabId: string; controlEpoch: number; frameSequence: number; documentGeneration: number;
-  viewportGeneration: number; capturedAt: string; publishedAt: string; receivedAt: string;
-  mediaType: "image/png" | "image/jpeg"; byteLength: number; sha256: string; width: number; height: number;
+  deliveryId: number; capturedAt: string; publishedAt: string; receivedAt: string;
+  mediaType: "image/png" | "image/jpeg"; byteLength: number; sha256: string; imagePixelWidth: number; imagePixelHeight: number;
 }
 export interface FrameEnvelope { metadata: FrameMetadata; bytes: Uint8Array }
 export type FrameDropReason = "malformed" | "selection" | "selection-changed" | "digest" | "decode" | "decoded-dimensions" | "missing-canvas";
@@ -32,15 +31,21 @@ export interface FrameRetention {
   maximumFrontendImageBitmaps: 0 | 1;
 }
 export type FrameDispositionCore =
-  | { outcome: "painted"; frontendType: FrontendBinaryType; decodeMs: number; paintMs: number; totalMs: number; decodedAt: string; paintedAt: string }
+  | { outcome: "painted"; frontendType: FrontendBinaryType; decodeMs: number; paintMs: number; totalMs: number; decodedAt: string; paintedAt: string; decodedWidth: number; decodedHeight: number }
   | { outcome: "dropped"; frontendType: FrontendBinaryType; reason: FrameDropReason };
 export type FrameDisposition = FrameDispositionCore & FrameRetention;
 
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 const frontendBinaryTypes = new WeakMap<ArrayBuffer, FrontendBinaryType>();
 export function frontendBinaryType(value: ArrayBuffer): FrontendBinaryType { return frontendBinaryTypes.get(value) ?? "ArrayBuffer"; }
-const ID = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/;
-const OPAQUE_ID = /^[A-Za-z0-9_-]{16,128}$/;
+export type HumanInputEvent =
+  | { kind: "pointerMove"; point: { imageX: number; imageY: number } }
+  | { kind: "pointerDown" | "pointerUp"; point: { imageX: number; imageY: number }; button: "left" | "middle" | "right"; clickCount?: 1 | 2 }
+  | { kind: "wheel"; point: { imageX: number; imageY: number }; deltaX: number; deltaY: number }
+  | { kind: "keyDown"; key: string; code?: string; repeat?: boolean }
+  | { kind: "keyUp"; key: string; code?: string }
+  | { kind: "text"; text: string };
+export interface InputAck { acceptedEventCount: number; coalescedPointerMoveCount: number; awaitingNewFrame: boolean; resumeAfterDeliveryId?: number }
 
 export interface WorkspaceApi {
   open(onState: (record: FrontendStateRecord) => void, onFrame: (frame: ArrayBuffer) => void): Promise<void>;
@@ -48,6 +53,9 @@ export interface WorkspaceApi {
   clearSelection(): Promise<void>;
   currentState(): Promise<PublicWorkspaceState>;
   acknowledgeFrame(deliveryId: number, disposition: FrameDisposition): Promise<void>;
+  takeControl(): Promise<{ controlState: string }>;
+  returnControl(): Promise<{ controlState: string }>;
+  input(events: HumanInputEvent[]): Promise<InputAck>;
   windowAction(action: "raise" | "hide"): Promise<void>;
 }
 
@@ -80,6 +88,9 @@ export class WorkspaceBridge implements WorkspaceApi {
   clearSelection(): Promise<void> { return invoke("workspace_clear_selection"); }
   currentState(): Promise<PublicWorkspaceState> { return invoke("workspace_current_state"); }
   acknowledgeFrame(deliveryId: number, disposition: FrameDisposition): Promise<void> { return invoke<undefined>("workspace_frame_ack", { deliveryId, disposition }); }
+  takeControl(): Promise<{ controlState: string }> { return invoke("workspace_take_control"); }
+  returnControl(): Promise<{ controlState: string }> { return invoke("workspace_return_control"); }
+  input(events: HumanInputEvent[]): Promise<InputAck> { return invoke("workspace_input_batch", { batch: { events } }); }
   windowAction(action: "raise" | "hide"): Promise<void> { return invoke("workspace_window_action", { action }); }
 }
 
@@ -128,17 +139,12 @@ export async function runBinaryProbe(): Promise<BinaryProbeResult> {
 function isFrameMetadata(value: unknown): value is FrameMetadata {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const item = value as Record<string, unknown>;
-  const keys = ["deliveryId", "selectionId", "subscriptionId", "browserdRuntimeInstanceId", "browserSessionId", "tabId", "controlEpoch", "frameSequence", "documentGeneration", "viewportGeneration", "capturedAt", "publishedAt", "receivedAt", "mediaType", "byteLength", "sha256", "width", "height"];
+  const keys = ["deliveryId", "capturedAt", "publishedAt", "receivedAt", "mediaType", "byteLength", "sha256", "imagePixelWidth", "imagePixelHeight"];
   if (Object.keys(item).length !== keys.length || !keys.every((key) => key in item)) return false;
-  return Number.isSafeInteger(item.deliveryId) && typeof item.selectionId === "string" && OPAQUE_ID.test(item.selectionId)
-    && typeof item.subscriptionId === "string" && OPAQUE_ID.test(item.subscriptionId)
-    && typeof item.browserdRuntimeInstanceId === "string" && OPAQUE_ID.test(item.browserdRuntimeInstanceId)
-    && typeof item.browserSessionId === "string" && ID.test(item.browserSessionId)
-    && typeof item.tabId === "string" && ID.test(item.tabId)
-    && Number.isSafeInteger(item.controlEpoch) && (item.controlEpoch as number) >= 1
-    && Number.isSafeInteger(item.frameSequence) && Number.isSafeInteger(item.documentGeneration) && Number.isSafeInteger(item.viewportGeneration)
+  return Number.isSafeInteger(item.deliveryId) && (item.deliveryId as number) >= 1
     && typeof item.capturedAt === "string" && typeof item.publishedAt === "string" && typeof item.receivedAt === "string"
     && (item.mediaType === "image/png" || item.mediaType === "image/jpeg") && Number.isSafeInteger(item.byteLength) && (item.byteLength as number) > 0
     && typeof item.sha256 === "string" && /^[0-9a-f]{64}$/.test(item.sha256)
-    && Number.isSafeInteger(item.width) && Number.isSafeInteger(item.height);
+    && Number.isSafeInteger(item.imagePixelWidth) && (item.imagePixelWidth as number) > 0
+    && Number.isSafeInteger(item.imagePixelHeight) && (item.imagePixelHeight as number) > 0;
 }

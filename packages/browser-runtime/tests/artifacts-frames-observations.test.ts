@@ -61,8 +61,8 @@ describe("connection-scoped frame schedules", () => {
     const events: FrameEvent[] = [];
     scheduler.on("frame", (frame) => events.push(frame));
     const stable = layout();
-    bindFrameTab(first, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: stable } } as T; return { data: Buffer.from("png-a").toString("base64") } as T; } });
-    bindFrameTab(second, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: stable } } as T; return { data: Buffer.from("png-b").toString("base64") } as T; } });
+    bindFrameTab(first, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: stable } } as T; return { data: fakePngBase64(800, 600, 1) } as T; } });
+    bindFrameTab(second, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: stable } } as T; return { data: fakePngBase64(800, 600, 2) } as T; } });
     scheduler.subscribe("connection-a\0subscription-a", address(first));
     scheduler.subscribe("connection-a\0subscription-a", address(first));
     assert.equal(scheduler.subscriptionCount, 1);
@@ -113,7 +113,7 @@ describe("connection-scoped frame schedules", () => {
     const target = tab("cached");
     const artifacts = new BrowserArtifactStore({ frameRingSize: 2 });
     const scheduler = new FrameScheduler(actor, registryFor([target]), artifacts, new FakeMotor() as never, () => 1, { selectedIntervalMs: 10_000, latestRetentionMs: 20 });
-    bindFrameTab(target, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: layout() } } as T; return { data: Buffer.from("cached-png").toString("base64") } as T; } });
+    bindFrameTab(target, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: layout() } } as T; return { data: fakePngBase64(800, 600, 3) } as T; } });
     const events: FrameEvent[] = [];
     scheduler.on("frame", (frame) => events.push(frame));
     const firstKey = "connection\0cached-first";
@@ -159,7 +159,7 @@ describe("connection-scoped frame schedules", () => {
 
   it("fans one matching frame out to every workspace subscription on the broker connection", async () => {
     const runtime = new BrowserRuntime();
-    const workspaceSubscription = (subscriptionId: string) => ({ connectionId: "connection:workspace", subscriptionId, browserSessionId: "session:routing", tabId: "tab:routing", interest: "selected" as const, consumerKey: `workspace\0connection:workspace\0${subscriptionId}` });
+    const workspaceSubscription = (subscriptionId: string) => ({ connectionId: "connection:workspace", subscriptionId, browserSessionId: "session:routing", tabId: "tab:routing", interest: "selected" as const, consumerKey: `workspace\0connection:workspace\0${subscriptionId}`, controlEpoch: 1 });
     const first = workspaceSubscription("subscription:first");
     const second = workspaceSubscription("subscription:second");
     const internal = runtime as unknown as { workspaceSubscriptions: Map<string, Map<string, typeof first>> };
@@ -501,7 +501,7 @@ describe("screenshot consistency transaction", () => {
     const artifacts = new BrowserArtifactStore();
     const motor = new FakeMotor();
     let barrierCalls = 0;
-    bindFrameTab(target, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: layout() } } as T; return { data: Buffer.from("old-frame").toString("base64") } as T; } });
+    bindFrameTab(target, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: layout() } } as T; return { data: fakePngBase64(800, 600, 4) } as T; } });
     const scheduler = new FrameScheduler(actor, registryFor([target]), artifacts, motor as never, () => 1, {
       selectedIntervalMs: 10_000,
       commitBarrierForTest: async () => { barrierCalls++; target.viewportGeneration++; },
@@ -521,7 +521,7 @@ describe("screenshot consistency transaction", () => {
     const artifacts = new BrowserArtifactStore();
     const barrier = deferred();
     let screenshotComplete = false;
-    bindFrameTab(target, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: layout() } } as T; screenshotComplete = true; return { data: Buffer.from("late-frame").toString("base64") } as T; } });
+    bindFrameTab(target, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: layout() } } as T; screenshotComplete = true; return { data: fakePngBase64(800, 600, 5) } as T; } });
     const scheduler = new FrameScheduler(actor, registryFor([target]), artifacts, new FakeMotor() as never, () => 1, { selectedIntervalMs: 10_000, afterScreenshotForTest: async () => await barrier.promise });
     const events: FrameEvent[] = [];
     scheduler.on("frame", (event) => events.push(event));
@@ -543,7 +543,7 @@ describe("screenshot consistency transaction", () => {
     const artifacts = new BrowserArtifactStore();
     const barrier = deferred();
     let atCommit = false;
-    bindFrameTab(target, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: layout() } } as T; return { data: Buffer.from("late-frame").toString("base64") } as T; } });
+    bindFrameTab(target, { async send<T>(method: string): Promise<T> { if (method === "Runtime.evaluate") return { result: { value: layout() } } as T; return { data: fakePngBase64(800, 600, 6) } as T; } });
     const scheduler = new FrameScheduler(actor, registryFor([target]), artifacts, new FakeMotor() as never, () => 1, { selectedIntervalMs: 10_000, commitBarrierForTest: async () => { atCommit = true; await barrier.promise; } });
     const events: FrameEvent[] = [];
     scheduler.on("frame", (event) => events.push(event));

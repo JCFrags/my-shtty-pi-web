@@ -26,6 +26,8 @@ pub struct FrameDisposition {
     pub total_ms: Option<f64>,
     pub decoded_at: Option<String>,
     pub painted_at: Option<String>,
+    pub decoded_width: Option<u32>,
+    pub decoded_height: Option<u32>,
     pub frontend_retained_frames: u8,
     pub frontend_image_bitmaps: u8,
     pub maximum_frontend_image_bitmaps: u8,
@@ -57,8 +59,8 @@ impl FrameDisposition {
         if [self.decoded_at.as_deref(), self.painted_at.as_deref()].into_iter().flatten().any(|value| value.len() > 64) { return false; }
         if self.frontend_retained_frames > 1 || self.frontend_image_bitmaps != 0 || self.maximum_frontend_image_bitmaps > 1 { return false; }
         match self.outcome {
-            FrameOutcome::Painted => self.reason.is_none() && metrics.into_iter().all(|value| value.is_some()) && self.decoded_at.is_some() && self.painted_at.is_some() && self.frontend_retained_frames == 1,
-            FrameOutcome::Dropped => self.reason.is_some() && metrics.into_iter().all(|value| value.is_none()) && self.decoded_at.is_none() && self.painted_at.is_none(),
+            FrameOutcome::Painted => self.reason.is_none() && metrics.into_iter().all(|value| value.is_some()) && self.decoded_at.is_some() && self.painted_at.is_some() && self.decoded_width.is_some_and(|value| value > 0) && self.decoded_height.is_some_and(|value| value > 0) && self.frontend_retained_frames == 1,
+            FrameOutcome::Dropped => self.reason.is_some() && metrics.into_iter().all(|value| value.is_none()) && self.decoded_at.is_none() && self.painted_at.is_none() && self.decoded_width.is_none() && self.decoded_height.is_none(),
         }
     }
 }
@@ -191,8 +193,8 @@ fn frame_record(kind: &str, delivery_id: u64, header: &FrameHeader, disposition:
         "capturedAt": bounded_text(&header.captured_at, 64),
         "publishedAt": bounded_text(&header.published_at, 64),
         "sha256": bounded_text(&header.sha256, 64),
-        "width": header.width,
-        "height": header.height,
+        "width": header.image_pixel_width,
+        "height": header.image_pixel_height,
         "byteLength": header.byte_length,
         "outcome": disposition.map(|item| match item.outcome { FrameOutcome::Painted => "painted", FrameOutcome::Dropped => "dropped" }),
         "frontendType": disposition.map(|item| item.frontend_type),
@@ -202,6 +204,8 @@ fn frame_record(kind: &str, delivery_id: u64, header: &FrameHeader, disposition:
         "totalMs": disposition.and_then(|item| item.total_ms),
         "decodedAt": disposition.and_then(|item| item.decoded_at.as_deref()),
         "paintedAt": disposition.and_then(|item| item.painted_at.as_deref()),
+        "decodedWidth": disposition.and_then(|item| item.decoded_width),
+        "decodedHeight": disposition.and_then(|item| item.decoded_height),
         "frontendRetainedFrames": disposition.map(|item| item.frontend_retained_frames),
         "frontendImageBitmaps": disposition.map(|item| item.frontend_image_bitmaps),
         "maximumFrontendImageBitmaps": disposition.map(|item| item.maximum_frontend_image_bitmaps),
@@ -229,12 +233,12 @@ mod tests {
     #[test]
     fn validates_bounded_frame_dispositions() {
         let retained = (1, 0, 1);
-        assert!(FrameDisposition { outcome: FrameOutcome::Painted, frontend_type: FrontendBinaryType::ArrayBuffer, reason: None, decode_ms: Some(1.0), paint_ms: Some(0.5), total_ms: Some(4.0), decoded_at: Some("2026-08-30T00:00:00Z".into()), painted_at: Some("2026-08-30T00:00:00Z".into()), frontend_retained_frames: retained.0, frontend_image_bitmaps: retained.1, maximum_frontend_image_bitmaps: retained.2 }.validate());
-        assert!(FrameDisposition { outcome: FrameOutcome::Dropped, frontend_type: FrontendBinaryType::Uint8Array, reason: Some(FrameDropReason::Digest), decode_ms: None, paint_ms: None, total_ms: None, decoded_at: None, painted_at: None, frontend_retained_frames: 0, frontend_image_bitmaps: 0, maximum_frontend_image_bitmaps: 0 }.validate());
-        assert!(!FrameDisposition { outcome: FrameOutcome::Painted, frontend_type: FrontendBinaryType::ArrayBuffer, reason: Some(FrameDropReason::Digest), decode_ms: None, paint_ms: None, total_ms: None, decoded_at: Some("x".into()), painted_at: Some("x".into()), frontend_retained_frames: retained.0, frontend_image_bitmaps: retained.1, maximum_frontend_image_bitmaps: retained.2 }.validate());
-        assert!(!FrameDisposition { outcome: FrameOutcome::Dropped, frontend_type: FrontendBinaryType::ArrayBuffer, reason: None, decode_ms: Some(f64::NAN), paint_ms: None, total_ms: None, decoded_at: None, painted_at: None, frontend_retained_frames: 0, frontend_image_bitmaps: 0, maximum_frontend_image_bitmaps: 0 }.validate());
-        assert!(!FrameDisposition { outcome: FrameOutcome::Painted, frontend_type: FrontendBinaryType::ArrayBuffer, reason: None, decode_ms: Some(1.0), paint_ms: Some(1.0), total_ms: None, decoded_at: Some("x".into()), painted_at: Some("x".into()), frontend_retained_frames: retained.0, frontend_image_bitmaps: retained.1, maximum_frontend_image_bitmaps: retained.2 }.validate());
-        assert!(!FrameDisposition { outcome: FrameOutcome::Dropped, frontend_type: FrontendBinaryType::ArrayBuffer, reason: Some(FrameDropReason::Decode), decode_ms: Some(1.0), paint_ms: None, total_ms: None, decoded_at: None, painted_at: None, frontend_retained_frames: 0, frontend_image_bitmaps: 0, maximum_frontend_image_bitmaps: 0 }.validate());
-        assert!(!FrameDisposition { outcome: FrameOutcome::Painted, frontend_type: FrontendBinaryType::ArrayBuffer, reason: None, decode_ms: Some(1.0), paint_ms: Some(1.0), total_ms: Some(2.0), decoded_at: Some("x".into()), painted_at: Some("x".into()), frontend_retained_frames: 2, frontend_image_bitmaps: 0, maximum_frontend_image_bitmaps: 1 }.validate());
+        assert!(FrameDisposition { outcome: FrameOutcome::Painted, frontend_type: FrontendBinaryType::ArrayBuffer, reason: None, decode_ms: Some(1.0), paint_ms: Some(0.5), total_ms: Some(4.0), decoded_at: Some("2026-08-30T00:00:00Z".into()), painted_at: Some("2026-08-30T00:00:00Z".into()), decoded_width: Some(800), decoded_height: Some(600), frontend_retained_frames: retained.0, frontend_image_bitmaps: retained.1, maximum_frontend_image_bitmaps: retained.2 }.validate());
+        assert!(FrameDisposition { outcome: FrameOutcome::Dropped, frontend_type: FrontendBinaryType::Uint8Array, reason: Some(FrameDropReason::Digest), decode_ms: None, paint_ms: None, total_ms: None, decoded_at: None, painted_at: None, decoded_width: None, decoded_height: None, frontend_retained_frames: 0, frontend_image_bitmaps: 0, maximum_frontend_image_bitmaps: 0 }.validate());
+        assert!(!FrameDisposition { outcome: FrameOutcome::Painted, frontend_type: FrontendBinaryType::ArrayBuffer, reason: Some(FrameDropReason::Digest), decode_ms: None, paint_ms: None, total_ms: None, decoded_at: Some("x".into()), painted_at: Some("x".into()), decoded_width: Some(800), decoded_height: Some(600), frontend_retained_frames: retained.0, frontend_image_bitmaps: retained.1, maximum_frontend_image_bitmaps: retained.2 }.validate());
+        assert!(!FrameDisposition { outcome: FrameOutcome::Dropped, frontend_type: FrontendBinaryType::ArrayBuffer, reason: None, decode_ms: Some(f64::NAN), paint_ms: None, total_ms: None, decoded_at: None, painted_at: None, decoded_width: None, decoded_height: None, frontend_retained_frames: 0, frontend_image_bitmaps: 0, maximum_frontend_image_bitmaps: 0 }.validate());
+        assert!(!FrameDisposition { outcome: FrameOutcome::Painted, frontend_type: FrontendBinaryType::ArrayBuffer, reason: None, decode_ms: Some(1.0), paint_ms: Some(1.0), total_ms: None, decoded_at: Some("x".into()), painted_at: Some("x".into()), decoded_width: Some(800), decoded_height: Some(600), frontend_retained_frames: retained.0, frontend_image_bitmaps: retained.1, maximum_frontend_image_bitmaps: retained.2 }.validate());
+        assert!(!FrameDisposition { outcome: FrameOutcome::Dropped, frontend_type: FrontendBinaryType::ArrayBuffer, reason: Some(FrameDropReason::Decode), decode_ms: Some(1.0), paint_ms: None, total_ms: None, decoded_at: None, painted_at: None, decoded_width: None, decoded_height: None, frontend_retained_frames: 0, frontend_image_bitmaps: 0, maximum_frontend_image_bitmaps: 0 }.validate());
+        assert!(!FrameDisposition { outcome: FrameOutcome::Painted, frontend_type: FrontendBinaryType::ArrayBuffer, reason: None, decode_ms: Some(1.0), paint_ms: Some(1.0), total_ms: Some(2.0), decoded_at: Some("x".into()), painted_at: Some("x".into()), decoded_width: Some(800), decoded_height: Some(600), frontend_retained_frames: 2, frontend_image_bitmaps: 0, maximum_frontend_image_bitmaps: 1 }.validate());
     }
 }

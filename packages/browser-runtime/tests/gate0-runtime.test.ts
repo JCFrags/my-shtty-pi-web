@@ -13,7 +13,7 @@ const actor = { principalId: "owner:gate0", agentSessionId: "agent:gate0" } as c
 const deadline = (): string => new Date(Date.now() + 10_000).toISOString();
 function deferred(): { promise: Promise<void>; resolve: () => void } { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { promise, resolve }; }
 function fakeSession(close: () => Promise<void> = async () => undefined) {
-  return { actor, close, offFrame: () => undefined, frames: { removeConsumer: () => undefined }, observations: { hasUsable: () => true }, dom: { hasUsable: () => true } };
+  return { actor, close, offFrame: () => undefined, control: { assertAgentAdmission: () => undefined }, frames: { removeConsumer: () => undefined }, observations: { hasUsable: () => true }, dom: { hasUsable: () => true } };
 }
 function fakeWorkspaceSession(browserSessionId: string, tabId: string, latest?: FrameEvent) {
   const address = { browserSessionId, tabId, targetId: `target_${tabId}_123456789`, controlEpoch: 1 };
@@ -39,7 +39,7 @@ function fakeWorkspaceSession(browserSessionId: string, tabId: string, latest?: 
   };
 }
 function workspaceFrame(browserSessionId: string, tabId: string, sequence = 7): FrameEvent {
-  return { protocolVersion: "browser.v2", kind: "frame.available", address: { browserSessionId, tabId, targetId: `target_${tabId}_123456789`, controlEpoch: 1 }, documentGeneration: 1, viewportGeneration: 1, frameSequence: sequence, capturedMonotonicMs: performance.now(), publishedMonotonicMs: performance.now(), mediaType: "image/png", byteLength: 3, artifactId: "artifact_1234567890123456", sha256: "a".repeat(64), viewport: { width: 1, height: 1, devicePixelRatio: 1 }, url: "about:blank", title: "", cursor: { x: 0, y: 0, visible: true, pathSequence: 0, sampleSequence: 0, personaId: "persona_1234567890123456" } };
+  return { protocolVersion: "browser.v3", kind: "frame.available", address: { browserSessionId, tabId, targetId: `target_${tabId}_123456789`, controlEpoch: 1 }, documentGeneration: 1, viewportGeneration: 1, frameSequence: sequence, capturedMonotonicMs: performance.now(), publishedMonotonicMs: performance.now(), mediaType: "image/png", byteLength: 3, artifactId: "artifact_1234567890123456", sha256: "a".repeat(64), imagePixelWidth: 1, imagePixelHeight: 1, viewport: { width: 1, height: 1, devicePixelRatio: 1 }, url: "about:blank", title: "", cursor: { x: 0, y: 0, visible: true, pathSequence: 0, sampleSequence: 0, personaId: "persona_1234567890123456" } };
 }
 
 describe("Gate 0 runtime bounds, health, and retryable cleanup", () => {
@@ -91,7 +91,7 @@ describe("Gate 0 runtime bounds, health, and retryable cleanup", () => {
     const connectionId = "workspace:gate0";
     let current = { subscriptionId: "subscription_gate0_0000", browserSessionId: "session:a", tabId: "tab:a" };
     runtime.workspaceSubscribeFrames(connectionId, current.subscriptionId, current.browserSessionId, current.tabId, "selected");
-    runtime.recordWorkspaceFrameDelivered(connectionId, current.subscriptionId, frameA);
+    runtime.recordWorkspaceFrameDelivered(connectionId, current.subscriptionId, "runtime_gate0_0001", frameA);
     assert.equal(runtime.workspaceSubscriptionCount, 1);
     assert.equal(runtime.workspaceLedgerCount, 1);
     assert.throws(() => runtime.workspaceReplaceFrames(connectionId, { subscriptionId: "subscription_gate0_stale", browserSessionId: "session:a", tabId: "tab:a" }, { ...current, interest: "selected" }), (error) => error instanceof BrowserProtocolError && error.code === "OPERATION_CONFLICT");

@@ -7,6 +7,7 @@ import {
   type WorkspaceTab,
 } from "./bridge";
 import { FrameViewport, useFrameRenderer, type FrameMetrics } from "./FrameViewport";
+import { useHumanCanvasInput } from "./humanInput";
 import {
   displayText,
   findSelected,
@@ -25,6 +26,8 @@ export function App({ bridge: suppliedBridge, initialState }: AppProps) {
   const [view, dispatch] = useReducer(reduceWorkspaceRecord, initialState ?? initialWorkspaceViewState);
   const [selectionPending, setSelectionPending] = useState<string>();
   const [selectionError, setSelectionError] = useState<string>();
+  const [controlPending, setControlPending] = useState<"take" | "return">();
+  const [controlError, setControlError] = useState<string>();
   const [now, setNow] = useState(Date.now());
   const connected = view.status.connection === "ready";
   const rendererState = connected ? view.publicState : { ...view.publicState, snapshot: undefined, selected: undefined };
@@ -50,10 +53,26 @@ export function App({ bridge: suppliedBridge, initialState }: AppProps) {
 
   const sessions = connected ? view.publicState.snapshot?.sessions ?? [] : [];
   const selected = findSelected(sessions, connected ? view.publicState.selected : undefined);
+  const humanActive = selected?.session.controlState === "human";
+  const humanOwned = humanActive || selected?.session.controlState === "human-disconnected" || selected?.session.controlState === "return-pending";
+  useEffect(() => {
+    if (controlPending === "take" && (selected?.session.controlState === "human" || selected?.session.controlState === "human-disconnected")) setControlPending(undefined);
+    if (controlPending === "return" && selected?.session.controlState === "agent") setControlPending(undefined);
+  }, [controlPending, selected?.session.controlState]);
+  const performReturn = useCallback(async (cleanup: () => Promise<void>) => {
+    setControlPending("return"); setControlError(undefined);
+    try { await cleanup(); await bridge.returnControl(); }
+    catch {
+      setControlError("Control could not be returned safely. The workspace will remain visible.");
+      setControlPending(undefined);
+      throw new Error("control return failed");
+    }
+  }, [bridge]);
+  const humanInput = useHumanCanvasInput(bridge, renderer.canvasRef, humanActive, renderer.metrics.acknowledgedPaintDeliveryId, performReturn);
 
   const select = useCallback(async (session: WorkspaceSession, tab: WorkspaceTab) => {
     const key = `${session.browserSessionId}:${tab.tabId}`;
-    if (selectionPending === key) return;
+    if (selectionPending === key || humanOwned || controlPending !== undefined) return;
     renderer.clear();
     setSelectionPending(key);
     setSelectionError(undefined);
@@ -65,10 +84,19 @@ export function App({ bridge: suppliedBridge, initialState }: AppProps) {
     } finally {
       setSelectionPending(undefined);
     }
-  }, [bridge, renderer, selectionPending]);
+  }, [bridge, renderer, selectionPending, humanOwned, controlPending]);
 
   const frameAgeMs = renderer.metrics.metadata ? Math.max(0, now - Date.parse(renderer.metrics.metadata.capturedAt)) : undefined;
   const viewportState = deriveViewportState(selected?.session, selected?.tab, Boolean(selectionPending), renderer.metrics, frameAgeMs);
+  const framePainted = renderer.metrics.metadata !== undefined && renderer.metrics.acknowledgedPaintDeliveryId === renderer.metrics.metadata.deliveryId;
+  const canTakeControl = connected && controlPending === undefined && selected?.session.controlState === "agent" && selected.session.state === "ready" && selected.session.captureReadiness === "ready" && selected.tab.state === "ready" && selected.tab.captureReadiness === "ready" && framePainted && frameAgeMs !== undefined && frameAgeMs <= 1_500;
+  const takeControl = useCallback(async () => {
+    if (!canTakeControl) return;
+    setControlPending("take"); setControlError(undefined);
+    try { await bridge.takeControl(); }
+    catch { setControlError("Browser control is not ready. Wait for a current frame and try again."); setControlPending(undefined); }
+  }, [bridge, canTakeControl]);
+  const returnControl = humanInput.quiesceAndReturn;
   const agents = groupAgents(sessions);
 
   return (
@@ -91,7 +119,7 @@ export function App({ bridge: suppliedBridge, initialState }: AppProps) {
                     className={`session-row${isSelected ? " selected" : ""}`}
                     key={session.browserSessionId}
                     onClick={() => { const tab = readyTabs.find((candidate) => candidate.state === "ready") ?? readyTabs[0]; if (tab) void select(session, tab); }}
-                    disabled={readyTabs.length === 0}
+                    disabled={readyTabs.length === 0 || humanOwned || controlPending !== undefined}
                     aria-current={isSelected ? "true" : undefined}
                   >
                     <span className={`state-dot ${session.state}`} aria-hidden="true" />
@@ -102,7 +130,7 @@ export function App({ bridge: suppliedBridge, initialState }: AppProps) {
             </section>
           ))}
         </nav>
-        <div className="readonly-notice"><span aria-hidden="true">◉</span><div><strong>Viewing agent control</strong><span>Read-only workspace</span></div></div>
+        <div className="readonly-notice"><span aria-hidden="true">◉</span><div><strong>{controlStateLabel(selected?.session.controlState, controlPending)}</strong><span>{humanOwned ? "Ctrl+Shift+Escape returns control" : "Explicit takeover required"}</span></div></div>
       </aside>
 
       <section className="workspace-main">
@@ -112,7 +140,12 @@ export function App({ bridge: suppliedBridge, initialState }: AppProps) {
             <strong>{selected ? displayText(selected.session.agentLabel, "Pi agent") : "No browser selected"}</strong>
             <span>{selected ? shortId(selected.session.browserSessionId, 28) : "Choose a session from the sidebar"}</span>
           </div>
-          <span className={`connection-badge ${view.status.connection}`}><span aria-hidden="true" />{connectionLabel(view.status)}</span>
+          <div className="control-actions">
+            <span className={`connection-badge ${view.status.connection}`}><span aria-hidden="true" />{connectionLabel(view.status)}</span>
+            {humanOwned
+              ? <button className="return-control" onClick={() => void returnControl()} disabled={controlPending !== undefined}>Return to agent</button>
+              : <button className="take-control" onClick={() => void takeControl()} disabled={!canTakeControl}>{controlPending === "take" ? "Taking control…" : "Take control"}</button>}
+          </div>
         </header>
 
         <div className="tab-strip" role="tablist" aria-label="Open browser tabs">
@@ -123,6 +156,7 @@ export function App({ bridge: suppliedBridge, initialState }: AppProps) {
               className={selected.tab.tabId === tab.tabId ? "active" : ""}
               key={tab.tabId}
               onClick={() => void select(selected.session, tab)}
+              disabled={humanOwned || controlPending !== undefined}
             >
               <span className={`tab-state ${tab.state}`} aria-hidden="true" />
               <span>{displayText(tab.title)}</span>
@@ -137,10 +171,10 @@ export function App({ bridge: suppliedBridge, initialState }: AppProps) {
         </div>
 
         <div className="content-grid">
-          <FrameViewport canvasRef={renderer.canvasRef} state={viewportState} frameAgeMs={frameAgeMs} />
-          <StatusPanel status={view.status} selected={selected} metrics={renderer.metrics} now={now} droppedBeforeFrontend={view.publicState.droppedBeforeFrontend} />
+          <FrameViewport canvasRef={renderer.canvasRef} state={viewportState} frameAgeMs={frameAgeMs} humanControl={humanActive} inputHandlers={humanActive && controlPending !== "return" ? humanInput.handlers : undefined} />
+          <StatusPanel status={view.status} selected={selected} metrics={renderer.metrics} now={now} droppedBeforeFrontend={view.publicState.droppedBeforeFrontend} humanControl={humanActive} />
         </div>
-        {(selectionError || view.error) && <div className="error-banner" role="alert">{selectionError ?? view.error}</div>}
+        {(selectionError || controlError || humanInput.error || view.error) && <div className="error-banner" role="alert">{selectionError ?? controlError ?? humanInput.error ?? view.error}</div>}
       </section>
     </main>
   );
@@ -158,34 +192,33 @@ function EmptyAgents({ status }: { status: WorkspaceStatus }) {
   return <div className="empty-agents" role="status"><span aria-hidden="true">◇</span><p>{text}</p></div>;
 }
 
-function StatusPanel({ status, selected, metrics, now, droppedBeforeFrontend }: {
+function StatusPanel({ status, selected, metrics, now, droppedBeforeFrontend, humanControl }: {
   status: WorkspaceStatus;
   selected: ReturnType<typeof findSelected>;
   metrics: FrameMetrics;
   now: number;
   droppedBeforeFrontend: number;
+  humanControl: boolean;
 }) {
   const operation = selected?.session.activeOperation;
   const metadata = metrics.metadata;
   return (
     <aside className="status-panel" aria-label="Browser and frame status">
-      <header><span>Status</span><span className="readonly-pill">Read only</span></header>
+      <header><span>Status</span><span className={`readonly-pill${humanControl ? " interactive" : ""}`}>{humanControl ? "Human control" : "Read only"}</span></header>
       <StatusGroup title="Control" rows={[
-        ["Controller", "Agent"],
+        ["Controller", selected ? controlStateLabel(selected.session.controlState) : "—"],
         ["Persona", selected ? shortId(selected.session.personaDisplayId) : "—"],
         ["Cursor", selected ? `${Math.round(selected.session.cursor.x)}, ${Math.round(selected.session.cursor.y)} CSS px` : "—"],
-        ["Path / sample", selected ? `${selected.session.cursor.pathSequence} / ${selected.session.cursor.sampleSequence}` : "—"],
+        ["Cursor visible", selected ? (selected.session.cursor.visible ? "yes" : "no") : "—"],
       ]} />
       <StatusGroup title="Page" rows={[
         ["Session", selected?.session.state ?? "—"],
         ["Tab", selected?.tab.state ?? "—"],
         ["Capture", selected ? `${selected.session.captureReadiness} / ${selected.tab.captureReadiness}` : "—"],
-        ["Document", selected ? String(selected.tab.documentGeneration) : "—"],
-        ["Viewport", selected ? String(selected.tab.viewportGeneration) : "—"],
       ]} />
       <StatusGroup title="Frame" rows={[
-        ["Sequence", metadata ? String(metadata.frameSequence) : "—"],
-        ["Dimensions", metadata ? `${metadata.width} × ${metadata.height}` : "—"],
+        ["Delivery", metadata ? String(metadata.deliveryId) : "—"],
+        ["Dimensions", metadata ? `${metadata.imagePixelWidth} × ${metadata.imagePixelHeight}` : "—"],
         ["Media", metadata?.mediaType ?? "—"],
         ["Age", metadata ? formatAge(metadata.capturedAt, now) : "—"],
         ["Decode / paint", `${milliseconds(metrics.decodeMs)} / ${milliseconds(metrics.paintMs)}`],
@@ -231,8 +264,15 @@ function deriveViewportState(
   if (pending) return "connecting";
   if (session.captureReadiness !== "ready" || tab.captureReadiness !== "ready") return "preparing";
   if (!metrics.metadata) return metrics.lastDropReason === "decode" || metrics.lastDropReason === "decoded-dimensions" ? "unsupported" : "connecting";
-  if (metrics.metadata.controlEpoch !== session.controlEpoch || metrics.metadata.documentGeneration !== tab.documentGeneration || metrics.metadata.viewportGeneration !== tab.viewportGeneration) return "connecting";
   return age !== undefined && age > 5_000 ? "stale" : "live";
+}
+
+function controlStateLabel(state: WorkspaceSession["controlState"] | undefined, pending?: "take" | "return"): string {
+  if (pending === "take" || state === "takeover-pending") return "Taking control…";
+  if (pending === "return" || state === "return-pending") return "Returning control…";
+  if (state === "human") return "Human control";
+  if (state === "human-disconnected") return "Connection lost — agent paused";
+  return "Agent control";
 }
 
 function connectionLabel(status: WorkspaceStatus): string {

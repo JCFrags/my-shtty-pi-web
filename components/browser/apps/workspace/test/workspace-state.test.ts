@@ -26,13 +26,11 @@ import {
 const sessionA = makeSession("session:a", "actor_AAAAAAAAA", "Agent <script>alert(1)</script>", "tab:a");
 const sessionB = makeSession("session:b", "actor_BBBBBBBBB", "Agent B", "tab:b");
 const snapshot: WorkspaceSnapshot = {
-  workspaceRevision: 7,
-  browserdRuntimeInstanceId: "runtime_AAAAAAAA",
   generatedAt: "2026-08-30T00:00:00.000Z",
   browserdState: "ready",
   sessions: [sessionA, sessionB],
 };
-const selected = { selectionId: "selection_AAAAAA", browserSessionId: "session:a", tabId: "tab:a" };
+const selected = { browserSessionId: "session:a", tabId: "tab:a" };
 
 function makeSession(browserSessionId: string, actorDisplayId: string, agentLabel: string, tabId: string): WorkspaceSession {
   return {
@@ -42,19 +40,15 @@ function makeSession(browserSessionId: string, actorDisplayId: string, agentLabe
     pathId: "agentcursor/chrome",
     state: "ready",
     controlState: "agent",
-    controlEpoch: 4,
     captureReadiness: "ready",
     personaDisplayId: "persona_AAAAAAAA",
-    cursor: { x: 12, y: 34, visible: true, pathSequence: 5, sampleSequence: 8 },
+    cursor: { x: 12, y: 34, visible: true },
     tabs: [{
       tabId,
       title: `<img src=x onerror=alert(1)>\u202e`,
       url: "http://fixture.local/test?value=<script>",
       state: "ready",
       captureReadiness: "ready",
-      documentGeneration: 3,
-      viewportGeneration: 4,
-      frameSequence: 9,
     }],
     lastActivityAt: "2026-08-30T00:00:00.000Z",
   };
@@ -63,23 +57,14 @@ function makeSession(browserSessionId: string, actorDisplayId: string, agentLabe
 function metadata(overrides: Partial<FrameMetadata> = {}): FrameMetadata {
   return {
     deliveryId: 1,
-    selectionId: selected.selectionId,
-    subscriptionId: "subscription_AAA",
-    browserdRuntimeInstanceId: "runtime_AAAAAAAA",
-    browserSessionId: selected.browserSessionId,
-    tabId: selected.tabId,
-    controlEpoch: 4,
-    frameSequence: 10,
-    documentGeneration: 3,
-    viewportGeneration: 4,
     capturedAt: "2026-08-30T00:00:00.000Z",
     publishedAt: "2026-08-30T00:00:00.001Z",
     receivedAt: "2026-08-30T00:00:00.002Z",
     mediaType: "image/png",
     byteLength: 8,
     sha256: "a".repeat(64),
-    width: 10,
-    height: 10,
+    imagePixelWidth: 10,
+    imagePixelHeight: 10,
     ...overrides,
   };
 }
@@ -96,24 +81,22 @@ describe("workspace state", () => {
     expect(findSelected(state.publicState.snapshot?.sessions, state.publicState.selected)?.session.actorDisplayId).toBe(sessionA.actorDisplayId);
     state = reduceWorkspaceRecord(state, { kind: "current", state: { ...state.publicState, connection: "reconnecting" } });
     expect(state.status.connection).toBe("reconnecting");
-    state = reduceWorkspaceRecord(state, { kind: "snapshot", snapshot: { ...snapshot, workspaceRevision: 8, sessions: [sessionB] } });
+    state = reduceWorkspaceRecord(state, { kind: "snapshot", snapshot: { ...snapshot, sessions: [sessionB] } });
     expect(findSelected(state.publicState.snapshot?.sessions, state.publicState.selected)).toBeUndefined();
     state = reduceWorkspaceRecord(state, { kind: "selectionCleared" });
     expect(state.publicState.selected).toBeUndefined();
   });
 
-  it("rejects frames from another runtime, tab, generation, or former sequence", () => {
-    expect(frameRejectionReason(metadata(), publicState(), 9)).toBeUndefined();
-    expect(frameRejectionReason(metadata({ browserdRuntimeInstanceId: "runtime_BBBBBBBB" }), publicState(), 9)).toBe("runtime");
-    expect(frameRejectionReason(metadata({ tabId: "tab:b" }), publicState(), 9)).toBe("selection");
-    expect(frameRejectionReason(metadata({ controlEpoch: 3 }), publicState(), 9)).toBe("control-epoch");
-    expect(frameRejectionReason(metadata({ documentGeneration: 2 }), publicState(), 9)).toBe("document-generation");
-    expect(frameRejectionReason(metadata({ viewportGeneration: 3 }), publicState(), 9)).toBe("viewport-generation");
-    expect(frameRejectionReason(metadata({ frameSequence: 9 }), publicState(), 9)).toBe("sequence");
-    expect(frameRejectionReason(metadata({ width: 32_768, height: 32_768 }), publicState(), 9)).toBe("dimensions");
+  it("accepts only bounded display metadata while Rust retains frame authority", () => {
+    expect(frameRejectionReason(metadata(), publicState(), 0)).toBeUndefined();
+    expect(frameRejectionReason(metadata(), { ...publicState(), selected: undefined }, 0)).toBe("selection");
+    expect(frameRejectionReason(metadata({ deliveryId: 1 }), publicState(), 1)).toBe("sequence");
+    expect(frameRejectionReason(metadata({ imagePixelWidth: 32_768, imagePixelHeight: 32_768 }), publicState(), 0)).toBe("dimensions");
+    expect(metadata()).not.toHaveProperty("subscriptionId");
+    expect(metadata()).not.toHaveProperty("controlEpoch");
   });
 
-  it("invalidates retained paint authority and pixels on epoch, generation, or readiness changes", () => {
+  it("invalidates retained pixels on public control, tab, or readiness changes while Rust retains authority", () => {
     const initial = publicState();
     const initialKey = framePaintBindingKey(initial);
     const changed = (sessionChanges: Partial<WorkspaceSession>, tabChanges: Partial<WorkspaceTab> = {}) => publicState({
@@ -122,9 +105,8 @@ describe("workspace state", () => {
         sessions: [{ ...sessionA, ...sessionChanges, tabs: [{ ...sessionA.tabs[0]!, ...tabChanges }] }, sessionB],
       },
     });
-    expect(framePaintBindingKey(changed({ controlEpoch: sessionA.controlEpoch + 1 }))).not.toBe(initialKey);
-    expect(framePaintBindingKey(changed({}, { documentGeneration: sessionA.tabs[0]!.documentGeneration + 1 }))).not.toBe(initialKey);
-    expect(framePaintBindingKey(changed({}, { viewportGeneration: sessionA.tabs[0]!.viewportGeneration + 1 }))).not.toBe(initialKey);
+    expect(framePaintBindingKey(changed({ controlState: "human" }))).not.toBe(initialKey);
+    expect(framePaintBindingKey(changed({}, { state: "crashed" }))).not.toBe(initialKey);
     const degraded = changed({ captureReadiness: "degraded" });
     const warming = changed({}, { captureReadiness: "warming" });
     expect(framePaintBindingKey(degraded)).toBe(initialKey);
@@ -185,13 +167,16 @@ describe("workspace state", () => {
     expect(markup).not.toContain("<script>");
   });
 
-  it("renders native keyboard controls and labelled read-only regions without a browser input surface", () => {
+  it("renders explicit accessible takeover controls without enabling input from an unpainted frame", () => {
     const inertBridge: WorkspaceApi = {
       open: async (_onState: (record: FrontendStateRecord) => void, _onFrame: (record: ArrayBuffer) => void) => undefined,
       select: async () => selected,
       clearSelection: async () => undefined,
       currentState: async () => publicState(),
       acknowledgeFrame: async () => undefined,
+      takeControl: async () => ({ controlState: "human" }),
+      returnControl: async () => ({ controlState: "agent" }),
+      input: async (events) => ({ kind: "inputAck", inputBatchSequence: 1, acceptedEventCount: events.length, coalescedPointerMoveCount: 0, awaitingNewFrame: false }),
       windowAction: async () => undefined,
     };
     const initialState = reduceWorkspaceRecord(
@@ -207,9 +192,10 @@ describe("workspace state", () => {
     expect(markup).toContain('role="tablist"');
     expect(markup).toContain('role="tab"');
     expect(markup).toContain("Agent B");
-    expect(markup).toContain("Viewing agent control");
+    expect(markup).toContain("Agent control");
     expect(markup).toContain("&lt;img src=x onerror=alert(1)&gt;");
-    expect(markup).not.toContain("Take control");
+    expect(markup).toContain("Take control");
+    expect(markup).toContain("disabled");
     expect(markup).not.toContain("dangerouslySetInnerHTML");
 
     const preparingSnapshot: WorkspaceSnapshot = {

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PROTOCOL_VERSION, type FrameEvent, type TabAddress } from "../../../packages/browser-protocol/src/index.js";
 import { BrowserdClientPool, readSecureDescriptor, type BrowserdDescriptor } from "../src/browserd-client.js";
+import { BrowserdWorkspaceBrokerClient } from "../src/workspace/browserd-broker-client.js";
 import type { AuthorityActor } from "../src/ports.js";
 
 const actorA: AuthorityActor = { principalId: "principal-a", agentId: "agent-a", scopes: new Set(["browser.read", "browser.write"]) };
@@ -32,6 +33,7 @@ class FakeBrowserd {
   #server?: Server;
   #handler: RequestHandler = (message, socket) => this.respondAck(socket, message);
   #bindActorOverride?: { readonly principalId: string; readonly agentSessionId: string };
+  #workspaceRuntimeOverride?: string;
 
   private constructor(
     readonly directory: string,
@@ -65,6 +67,7 @@ class FakeBrowserd {
 
   set handler(value: RequestHandler) { this.#handler = value; }
   set bindActorOverride(value: { readonly principalId: string; readonly agentSessionId: string } | undefined) { this.#bindActorOverride = value; }
+  set workspaceRuntimeOverride(value: string | undefined) { this.#workspaceRuntimeOverride = value; }
 
   async replaceRuntime(runtimeInstanceId: string): Promise<void> {
     this.descriptor = { ...this.descriptor, runtimeInstanceId };
@@ -166,6 +169,8 @@ class FakeBrowserd {
             if (message.actor === undefined) throw new Error("bind actor is missing");
             this.bindActors.push(message.actor);
             this.send(socket, { protocolVersion: PROTOCOL_VERSION, kind: "bound", requestId: message.requestId, actor: this.#bindActorOverride ?? message.actor });
+          } else if (message.kind === "workspace.bind") {
+            this.send(socket, { protocolVersion: PROTOCOL_VERSION, kind: "workspace.bound", requestId: message.requestId, runtimeInstanceId: this.#workspaceRuntimeOverride ?? this.descriptor.runtimeInstanceId });
           } else this.#handler(message, socket, this);
         }
       });
@@ -196,6 +201,8 @@ function frame(sequence: number, frameAddress: TabAddress = address): FrameEvent
     byteLength: 3,
     artifactId,
     sha256: digest,
+    imagePixelWidth: 1600,
+    imagePixelHeight: 1200,
     viewport: { width: 800, height: 600, devicePixelRatio: 2 },
     url: "https://example.test/",
     title: "Fixture",
@@ -244,6 +251,29 @@ describe("readSecureDescriptor", () => {
     fixture.descriptor = { ...fixture.descriptor, socketPath: join(tmpdir(), "outside-browserd.sock") };
     await fixture.writeDescriptor();
     await expect(readSecureDescriptor(fixture.descriptorPath, fixture.directory)).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE", message: expect.not.stringContaining(fixture.descriptor.bindingSecret) });
+  });
+});
+
+describe("BrowserdWorkspaceBrokerClient replacement lifecycle", () => {
+  it("publishes disconnect and clears the old connection before a replacement bind failure", async () => {
+    const fixture = await FakeBrowserd.start();
+    const connectionChanges: boolean[] = [];
+    const client = new BrowserdWorkspaceBrokerClient({
+      descriptorPath: fixture.descriptorPath,
+      runtimeDirectory: fixture.directory,
+      requestTimeoutMs: 500,
+      onConnectionChanged: (connected) => connectionChanges.push(connected),
+    });
+    await client.refresh();
+    expect(client.diagnostics.connected).toBe(true);
+    expect(connectionChanges).toEqual([true]);
+
+    await fixture.replaceRuntime("runtime_fixture_b");
+    fixture.workspaceRuntimeOverride = "runtime_fixture_a";
+    await expect(client.refresh()).rejects.toMatchObject({ code: "AUTH_FAILED" });
+    expect(client.diagnostics.connected).toBe(false);
+    expect(connectionChanges).toEqual([true, false]);
+    await client.close();
   });
 });
 

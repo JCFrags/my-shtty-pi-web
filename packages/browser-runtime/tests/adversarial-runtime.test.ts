@@ -111,7 +111,7 @@ describe("pressed input cleanup", () => {
     const motor = new SessionMotor("session:motor-adversarial", 5);
     registry.submit(actor, { operationId: "key-up-fail", laneKey: "motor", deadline: deadline() }, async (context) => { await motor.pressKey(fixture.tab, "a", context); });
     assert.equal((await registry.wait(actor, "key-up-fail")).state, "failed");
-    assert.deepEqual(motor.heldInputState.keys, ["a"]);
+    assert.deepEqual(motor.heldInputState.keys, ["KeyA"]);
     failKeyUp = false;
     await motor.releaseAll(fixture.tab);
     assert.deepEqual(motor.heldInputState, { buttons: [], keys: [] });

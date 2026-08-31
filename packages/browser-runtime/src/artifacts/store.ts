@@ -193,6 +193,11 @@ export class BrowserArtifactStore {
     for (const [id, record] of this.records) if (record.owner === owner && record.browserSessionId === browserSessionId && record.tabId === tabId) this.delete(id);
   }
 
+  clearAgentObservations(actor: ActorIdentity, browserSessionId: string): void {
+    const owner = actorKey(actor);
+    for (const [id, record] of this.records) if (record.owner === owner && record.browserSessionId === browserSessionId && record.purpose === "agent-observation") this.delete(id);
+  }
+
   clearSession(actor: ActorIdentity, browserSessionId: string): void {
     const owner = actorKey(actor);
     for (const [id, record] of this.records) if (record.owner === owner && record.browserSessionId === browserSessionId) this.delete(id);

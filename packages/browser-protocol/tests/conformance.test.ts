@@ -5,8 +5,9 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "vitest";
 import { Check } from "typebox/value";
 import {
-  BindRequestSchema, BrowserProtocolError, BrowserRequestSchema, ProtocolSchemaDocument,
-  ServerMessageSchema, invalidRequestFixtures, parseBindRequest, parseBrowserRequest,
+  BindRequestSchema, BrowserProtocolError, BrowserRequestSchema, ErrorCodeSchema,
+  ProtocolSchemaDocument, ServerMessageSchema, WorkspaceBrokerRequestSchema,
+  invalidRequestFixtures, parseBindRequest, parseBrowserRequest, parseWorkspaceBrokerRequest,
   sanitizeMessage, validBindFixture, validRequestFixture,
 } from "../src/index.js";
 
@@ -34,12 +35,45 @@ describe("browser protocol conformance", () => {
 
   it("requires bounded opaque IDs for connection-scoped frame subscriptions", () => {
     const address = { browserSessionId: "session:frame", tabId: "tab:frame", targetId: "target_frame_0001", controlEpoch: 3 };
-    const subscribe = { protocolVersion: "browser.v2", kind: "frames.subscribe", requestId: "request:subscribe", operationId: "operation:subscribe", deadline: validDeadline, address, subscriptionId: "subscription_0001", interest: "selected" };
+    const subscribe = { protocolVersion: "browser.v3", kind: "frames.subscribe", requestId: "request:subscribe", operationId: "operation:subscribe", deadline: validDeadline, address, subscriptionId: "subscription_0001", interest: "selected" };
     const unsubscribe = { protocolVersion: subscribe.protocolVersion, kind: "frames.unsubscribe", requestId: subscribe.requestId, operationId: subscribe.operationId, deadline: subscribe.deadline, address: subscribe.address, subscriptionId: subscribe.subscriptionId };
     assert.equal(Check(BrowserRequestSchema, subscribe), true);
     assert.equal(Check(BrowserRequestSchema, unsubscribe), true);
     assert.equal(Check(BrowserRequestSchema, { ...subscribe, subscriptionId: "short" }), false);
     assert.equal(Check(BrowserRequestSchema, { ...subscribe, connectionId: "internal" }), false);
+  });
+
+  it("accepts strict workspace control input and all mandated typed errors", () => {
+    const frame = {
+      runtimeInstanceId: "runtime_control_0001", subscriptionId: "subscription_0001",
+      controlEpoch: 5, frameSequence: 7, documentGeneration: 3, viewportGeneration: 2,
+      imagePixelWidth: 1280, imagePixelHeight: 720,
+    } as const;
+    const input = {
+      protocolVersion: "browser.v3", kind: "workspace.input.batch", requestId: "request:human:1",
+      operationId: "operation:human:1", deadline: validDeadline,
+      browserSessionId: "session:human", tabId: "tab:human", controlEpoch: 5,
+      leaseId: "lease_control_0001", inputBatchSequence: 1, inputTargetGeneration: 2, frame,
+      events: [{ kind: "pointerMove", point: { imageX: 10.5, imageY: 20.25 } }, { kind: "text", text: "snowman-☃" }],
+    } as const;
+    assert.equal(Check(WorkspaceBrokerRequestSchema, input), true);
+    assert.equal(Check(BrowserRequestSchema, input), false);
+    assert.deepEqual(parseWorkspaceBrokerRequest(input, now), input);
+    assert.throws(
+      () => parseWorkspaceBrokerRequest(input, now, 64 * 1024 + 1),
+      (error: unknown) => error instanceof BrowserProtocolError && error.code === "LIMIT_EXCEEDED",
+    );
+    assert.equal(Check(WorkspaceBrokerRequestSchema, { ...input, cdpMethod: "Input.dispatchKeyEvent" }), false);
+    assert.equal(Check(WorkspaceBrokerRequestSchema, { ...input, events: Array.from({ length: 33 }, () => input.events[0]) }), false);
+    assert.throws(
+      () => parseWorkspaceBrokerRequest({ ...input, events: [{ kind: "text", text: "☃".repeat(1_366) }] }, now),
+      (error: unknown) => error instanceof BrowserProtocolError && error.code === "LIMIT_EXCEEDED",
+    );
+    for (const code of [
+      "CONTROL_NOT_READY", "CONTROL_TRANSFER_PENDING", "CONTROL_HELD_BY_HUMAN",
+      "CONTROL_LEASE_REQUIRED", "CONTROL_LEASE_EXPIRED", "CONTROL_LEASE_CONFLICT",
+      "INPUT_SEQUENCE_STALE", "INPUT_FRAME_STALE", "INPUT_RATE_LIMITED", "INPUT_UNSUPPORTED",
+    ]) assert.equal(Check(ErrorCodeSchema, code), true, code);
   });
 
   it("enforces an absolute bounded deadline", () => {
@@ -49,11 +83,11 @@ describe("browser protocol conformance", () => {
 
   it("has strict server response and event schemas", () => {
     assert.equal(Check(ServerMessageSchema, {
-      protocolVersion: "browser.v2", kind: "bound", requestId: "request:1",
+      protocolVersion: "browser.v3", kind: "bound", requestId: "request:1",
       actor: { principalId: "owner:1", agentSessionId: "agent:1" },
     }), true);
     assert.equal(Check(ServerMessageSchema, {
-      protocolVersion: "browser.v2", kind: "bound", requestId: "request:1",
+      protocolVersion: "browser.v3", kind: "bound", requestId: "request:1",
       actor: { principalId: "owner:1", agentSessionId: "agent:1" }, unexpected: true,
     }), false);
   });

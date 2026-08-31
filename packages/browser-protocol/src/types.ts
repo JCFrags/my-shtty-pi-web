@@ -2,6 +2,8 @@ import type { Static } from "typebox";
 import type {
   ActorIdentitySchema, BindRequestSchema, BindResponseSchema, BrowserRequestSchema,
   WorkspaceBrokerBindRequestSchema, WorkspaceBrokerRequestSchema, WorkspaceFrameEventSchema,
+  WorkspaceControlFrameBindingSchema, HumanInputEventSchema, WorkspaceControlStatusResultSchema,
+  WorkspaceControlHeartbeatResultSchema, WorkspaceControlLeaseResultSchema, WorkspaceInputAckResultSchema,
   WorkspaceSessionSnapshotSchema, WorkspaceSnapshotSchema, WorkspaceStateEventSchema,
   DispatchStateSchema, DomObservationSchema, ErrorCodeSchema, ErrorResponseSchema,
   FrameEventSchema, OperationStateSchema, OperationStatusSchema, ProtocolErrorSchema,
@@ -18,6 +20,12 @@ export type WorkspaceSnapshot = Static<typeof WorkspaceSnapshotSchema>;
 export type WorkspaceSessionSnapshot = Static<typeof WorkspaceSessionSnapshotSchema>;
 export type WorkspaceStateEvent = Static<typeof WorkspaceStateEventSchema>;
 export type WorkspaceFrameEvent = Static<typeof WorkspaceFrameEventSchema>;
+export type WorkspaceControlFrameBinding = Static<typeof WorkspaceControlFrameBindingSchema>;
+export type HumanInputEvent = Static<typeof HumanInputEventSchema>;
+export type WorkspaceControlStatusResult = Static<typeof WorkspaceControlStatusResultSchema>;
+export type WorkspaceControlHeartbeatResult = Static<typeof WorkspaceControlHeartbeatResultSchema>;
+export type WorkspaceControlLeaseResult = Static<typeof WorkspaceControlLeaseResultSchema>;
+export type WorkspaceInputAckResult = Static<typeof WorkspaceInputAckResultSchema>;
 export type BindResponse = Static<typeof BindResponseSchema>;
 export type SuccessResponse = Static<typeof SuccessResponseSchema>;
 export type ErrorResponse = Static<typeof ErrorResponseSchema>;

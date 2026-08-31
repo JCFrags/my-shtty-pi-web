@@ -252,6 +252,10 @@ export class FrameScheduler extends EventEmitter {
         if (before.width !== after.width || before.height !== after.height || before.dpr !== after.dpr || Math.abs(before.scrollX - after.scrollX) > 2 || Math.abs(before.scrollY - after.scrollY) > 2) throw new BrowserProtocolError("VIEWPORT_CHANGED", "Frame viewport changed during capture.");
         const bytes = Buffer.from(result.data, "base64");
         if (bytes.byteLength > 4 * 1024 * 1024) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Workspace frame exceeds the delivery limit.", true);
+        const imageDimensions = decodePngDimensions(bytes);
+        const captureScaleX = imageDimensions.width / after.width;
+        const captureScaleY = imageDimensions.height / after.height;
+        if (!Number.isFinite(captureScaleX) || !Number.isFinite(captureScaleY) || captureScaleX <= 0 || captureScaleY <= 0 || Math.abs(captureScaleX - captureScaleY) > 0.02) throw new BrowserProtocolError("CDP_ERROR", "Workspace frame dimensions do not match the captured viewport.");
         for (const [key, consumer] of schedule.consumers) if (!sameAddress(consumer.address, address)) { schedule.consumers.delete(key); this.consumerAddresses.delete(key); }
         this.assertCurrent(schedule, generation, captureSignal);
         if (schedule.consumers.size === 0 && schedule.activeActions === 0) throw new BrowserProtocolError("OPERATION_CANCELLED", "Frame capture has no current consumer.");
@@ -268,6 +272,7 @@ export class FrameScheduler extends EventEmitter {
           documentGeneration, viewportGeneration,
           frameSequence: this.registry.incrementFrame(tab), capturedMonotonicMs, publishedMonotonicMs: performance.now(),
           mediaType: "image/png", byteLength: bytes.byteLength, artifactId: artifact.artifactId, sha256: artifact.sha256,
+          imagePixelWidth: imageDimensions.width, imagePixelHeight: imageDimensions.height,
           viewport: { width: after.width, height: after.height, devicePixelRatio: after.dpr }, url: after.url, title: after.title, cursor: this.motor.state,
         };
         this.assertCurrent(schedule, generation, captureSignal);
@@ -347,6 +352,13 @@ async function layout(tab: TabRecord, signal?: AbortSignal): Promise<Layout> { c
 function isLayout(value: unknown): value is Layout { if (typeof value !== "object" || value === null) return false; const item = value as Partial<Layout>; return typeof item.url === "string" && typeof item.title === "string" && [item.width, item.height, item.dpr, item.scrollX, item.scrollY].every((number) => typeof number === "number" && Number.isFinite(number)); }
 function sameAddress(left: TabAddress, right: TabAddress): boolean { return left.browserSessionId === right.browserSessionId && left.tabId === right.tabId && left.targetId === right.targetId && left.controlEpoch === right.controlEpoch; }
 function isReadinessFailure(error: unknown): boolean { return !(error instanceof BrowserProtocolError && error.code === "OPERATION_CANCELLED"); }
+function decodePngDimensions(bytes: Buffer): { width: number; height: number } {
+  if (bytes.byteLength < 24 || bytes.subarray(0, 8).compare(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) !== 0 || bytes.toString("ascii", 12, 16) !== "IHDR") throw new BrowserProtocolError("CDP_ERROR", "Workspace frame is not a valid PNG image.");
+  const width = bytes.readUInt32BE(16);
+  const height = bytes.readUInt32BE(20);
+  if (width < 1 || height < 1 || width > 32_768 || height > 32_768) throw new BrowserProtocolError("CDP_ERROR", "Workspace frame dimensions are invalid.");
+  return { width, height };
+}
 async function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
   if (ms <= 0) return;
   signal.throwIfAborted();

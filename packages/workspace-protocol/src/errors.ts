@@ -1,6 +1,8 @@
+import type { WorkspaceErrorCode } from "./types.js";
+
 export class WorkspaceProtocolError extends Error {
   constructor(
-    readonly code: "INVALID_REQUEST" | "AUTH_FAILED" | "NOT_FOUND" | "CONFLICT" | "LIMIT_EXCEEDED" | "UNAVAILABLE" | "INTERNAL_ERROR",
+    readonly code: WorkspaceErrorCode,
     message: string,
     readonly retryable = false,
   ) { super(message); this.name = "WorkspaceProtocolError"; }

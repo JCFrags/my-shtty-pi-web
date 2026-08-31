@@ -68,13 +68,11 @@ export function framePaintBindingKey(publicState: PublicWorkspaceState): string 
   const target = findSelected(publicState.snapshot?.sessions, selected);
   if (!selected || !target) return "none";
   return JSON.stringify([
-    publicState.snapshot?.browserdRuntimeInstanceId ?? "",
-    selected.selectionId,
     selected.browserSessionId,
     selected.tabId,
-    target.session.controlEpoch,
-    target.tab.documentGeneration,
-    target.tab.viewportGeneration,
+    target.session.state,
+    target.session.controlState,
+    target.tab.state,
   ]);
 }
 
@@ -112,18 +110,12 @@ export function frameRejectionReason(
   lastSequence: number,
 ): FrameRejection | undefined {
   const selected = publicState.selected;
-  const snapshot = publicState.snapshot;
-  const target = findSelected(snapshot?.sessions, selected);
-  if (!selected || !target || metadata.selectionId !== selected.selectionId
-    || metadata.browserSessionId !== selected.browserSessionId || metadata.tabId !== selected.tabId) return "selection";
-  if (!snapshot?.browserdRuntimeInstanceId || metadata.browserdRuntimeInstanceId !== snapshot.browserdRuntimeInstanceId) return "runtime";
-  if (metadata.controlEpoch !== target.session.controlEpoch) return "control-epoch";
-  if (metadata.documentGeneration !== target.tab.documentGeneration) return "document-generation";
-  if (metadata.viewportGeneration !== target.tab.viewportGeneration) return "viewport-generation";
-  if (metadata.frameSequence <= lastSequence) return "sequence";
+  const target = findSelected(publicState.snapshot?.sessions, selected);
+  if (!selected || !target) return "selection";
+  if (metadata.deliveryId <= lastSequence) return "sequence";
   if (metadata.mediaType !== "image/png" && metadata.mediaType !== "image/jpeg") return "media-type";
-  if (metadata.width < 1 || metadata.height < 1 || metadata.width > 32_768 || metadata.height > 32_768
-    || metadata.width * metadata.height > MAX_FRAME_PIXELS) return "dimensions";
+  if (metadata.imagePixelWidth < 1 || metadata.imagePixelHeight < 1 || metadata.imagePixelWidth > 32_768 || metadata.imagePixelHeight > 32_768
+    || metadata.imagePixelWidth * metadata.imagePixelHeight > MAX_FRAME_PIXELS) return "dimensions";
   if (metadata.byteLength < 1 || metadata.byteLength > 4 * 1024 * 1024) return "length";
   return undefined;
 }

@@ -14,7 +14,7 @@
       "properties": {
         "protocolVersion": {
           "type": "string",
-          "const": "workspace.v1"
+          "const": "workspace.v2"
         },
         "requestId": {
           "type": "string",
@@ -47,7 +47,7 @@
           "properties": {
             "protocolVersion": {
               "type": "string",
-              "const": "workspace.v1"
+              "const": "workspace.v2"
             },
             "requestId": {
               "type": "string",
@@ -72,7 +72,7 @@
           "properties": {
             "protocolVersion": {
               "type": "string",
-              "const": "workspace.v1"
+              "const": "workspace.v2"
             },
             "requestId": {
               "type": "string",
@@ -100,7 +100,7 @@
           "properties": {
             "protocolVersion": {
               "type": "string",
-              "const": "workspace.v1"
+              "const": "workspace.v2"
             },
             "requestId": {
               "type": "string",
@@ -143,7 +143,7 @@
           "properties": {
             "protocolVersion": {
               "type": "string",
-              "const": "workspace.v1"
+              "const": "workspace.v2"
             },
             "requestId": {
               "type": "string",
@@ -163,12 +163,704 @@
           "required": [
             "protocolVersion",
             "requestId",
+            "kind",
+            "browserSessionId",
+            "tabId",
+            "expectedControlEpoch",
+            "frame"
+          ],
+          "properties": {
+            "protocolVersion": {
+              "type": "string",
+              "const": "workspace.v2"
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+            },
+            "kind": {
+              "type": "string",
+              "const": "control.acquire"
+            },
+            "browserSessionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+            },
+            "tabId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+            },
+            "expectedControlEpoch": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "frame": {
+              "type": "object",
+              "required": [
+                "selectionId",
+                "browserdRuntimeInstanceId",
+                "browserSessionId",
+                "tabId",
+                "subscriptionId",
+                "controlEpoch",
+                "frameSequence",
+                "documentGeneration",
+                "viewportGeneration",
+                "imagePixelWidth",
+                "imagePixelHeight",
+                "cssViewportWidth",
+                "cssViewportHeight",
+                "devicePixelRatio",
+                "paintedAt"
+              ],
+              "properties": {
+                "selectionId": {
+                  "type": "string",
+                  "minLength": 16,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]{16,128}$"
+                },
+                "browserdRuntimeInstanceId": {
+                  "type": "string",
+                  "minLength": 16,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]{16,128}$"
+                },
+                "browserSessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                },
+                "tabId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                },
+                "subscriptionId": {
+                  "type": "string",
+                  "minLength": 16,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]{16,128}$"
+                },
+                "controlEpoch": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "frameSequence": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "documentGeneration": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "viewportGeneration": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "imagePixelWidth": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 32768
+                },
+                "imagePixelHeight": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 32768
+                },
+                "cssViewportWidth": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 32768
+                },
+                "cssViewportHeight": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 32768
+                },
+                "devicePixelRatio": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 16
+                },
+                "paintedAt": {
+                  "type": "string",
+                  "minLength": 20,
+                  "maxLength": 24,
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?Z$"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "protocolVersion",
+            "requestId",
+            "kind",
+            "browserSessionId",
+            "controlEpoch"
+          ],
+          "properties": {
+            "protocolVersion": {
+              "type": "string",
+              "const": "workspace.v2"
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+            },
+            "kind": {
+              "type": "string",
+              "const": "control.heartbeat"
+            },
+            "browserSessionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+            },
+            "controlEpoch": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "protocolVersion",
+            "requestId",
+            "kind",
+            "browserSessionId",
+            "controlEpoch"
+          ],
+          "properties": {
+            "protocolVersion": {
+              "type": "string",
+              "const": "workspace.v2"
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+            },
+            "kind": {
+              "type": "string",
+              "const": "control.release"
+            },
+            "browserSessionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+            },
+            "controlEpoch": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "protocolVersion",
+            "requestId",
+            "kind",
+            "browserSessionId"
+          ],
+          "properties": {
+            "protocolVersion": {
+              "type": "string",
+              "const": "workspace.v2"
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+            },
+            "kind": {
+              "type": "string",
+              "const": "control.status"
+            },
+            "browserSessionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "protocolVersion",
+            "requestId",
+            "kind",
+            "browserSessionId",
+            "tabId",
+            "controlEpoch",
+            "inputBatchSequence",
+            "inputTargetGeneration",
+            "frame",
+            "events"
+          ],
+          "properties": {
+            "protocolVersion": {
+              "type": "string",
+              "const": "workspace.v2"
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+            },
+            "kind": {
+              "type": "string",
+              "const": "input.batch"
+            },
+            "browserSessionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+            },
+            "tabId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+            },
+            "controlEpoch": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "inputBatchSequence": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "inputTargetGeneration": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "frame": {
+              "type": "object",
+              "required": [
+                "selectionId",
+                "browserdRuntimeInstanceId",
+                "browserSessionId",
+                "tabId",
+                "subscriptionId",
+                "controlEpoch",
+                "frameSequence",
+                "documentGeneration",
+                "viewportGeneration",
+                "imagePixelWidth",
+                "imagePixelHeight",
+                "cssViewportWidth",
+                "cssViewportHeight",
+                "devicePixelRatio",
+                "paintedAt"
+              ],
+              "properties": {
+                "selectionId": {
+                  "type": "string",
+                  "minLength": 16,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]{16,128}$"
+                },
+                "browserdRuntimeInstanceId": {
+                  "type": "string",
+                  "minLength": 16,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]{16,128}$"
+                },
+                "browserSessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                },
+                "tabId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                },
+                "subscriptionId": {
+                  "type": "string",
+                  "minLength": 16,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]{16,128}$"
+                },
+                "controlEpoch": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "frameSequence": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "documentGeneration": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "viewportGeneration": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "imagePixelWidth": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 32768
+                },
+                "imagePixelHeight": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 32768
+                },
+                "cssViewportWidth": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 32768
+                },
+                "cssViewportHeight": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 32768
+                },
+                "devicePixelRatio": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 16
+                },
+                "paintedAt": {
+                  "type": "string",
+                  "minLength": 20,
+                  "maxLength": 24,
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?Z$"
+                }
+              },
+              "additionalProperties": false
+            },
+            "events": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind",
+                      "point"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "pointerMove"
+                      },
+                      "point": {
+                        "type": "object",
+                        "required": [
+                          "imageX",
+                          "imageY"
+                        ],
+                        "properties": {
+                          "imageX": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 32768
+                          },
+                          "imageY": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 32768
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind",
+                      "point",
+                      "button"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "pointerDown"
+                      },
+                      "point": {
+                        "type": "object",
+                        "required": [
+                          "imageX",
+                          "imageY"
+                        ],
+                        "properties": {
+                          "imageX": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 32768
+                          },
+                          "imageY": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 32768
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "button": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "left"
+                          },
+                          {
+                            "type": "string",
+                            "const": "middle"
+                          },
+                          {
+                            "type": "string",
+                            "const": "right"
+                          }
+                        ]
+                      },
+                      "clickCount": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind",
+                      "point",
+                      "button"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "pointerUp"
+                      },
+                      "point": {
+                        "type": "object",
+                        "required": [
+                          "imageX",
+                          "imageY"
+                        ],
+                        "properties": {
+                          "imageX": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 32768
+                          },
+                          "imageY": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 32768
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "button": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "left"
+                          },
+                          {
+                            "type": "string",
+                            "const": "middle"
+                          },
+                          {
+                            "type": "string",
+                            "const": "right"
+                          }
+                        ]
+                      },
+                      "clickCount": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind",
+                      "point",
+                      "deltaX",
+                      "deltaY"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "wheel"
+                      },
+                      "point": {
+                        "type": "object",
+                        "required": [
+                          "imageX",
+                          "imageY"
+                        ],
+                        "properties": {
+                          "imageX": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 32768
+                          },
+                          "imageY": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 32768
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "deltaX": {
+                        "type": "number",
+                        "minimum": -100000,
+                        "maximum": 100000
+                      },
+                      "deltaY": {
+                        "type": "number",
+                        "minimum": -100000,
+                        "maximum": 100000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind",
+                      "key"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "keyDown"
+                      },
+                      "key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "code": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "repeat": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind",
+                      "key"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "keyUp"
+                      },
+                      "key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "code": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind",
+                      "text"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "text"
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 32
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "protocolVersion",
+            "requestId",
             "kind"
           ],
           "properties": {
             "protocolVersion": {
               "type": "string",
-              "const": "workspace.v1"
+              "const": "workspace.v2"
             },
             "requestId": {
               "type": "string",
@@ -193,7 +885,7 @@
           "properties": {
             "protocolVersion": {
               "type": "string",
-              "const": "workspace.v1"
+              "const": "workspace.v2"
             },
             "requestId": {
               "type": "string",
@@ -223,7 +915,7 @@
           "properties": {
             "protocolVersion": {
               "type": "string",
-              "const": "workspace.v1"
+              "const": "workspace.v2"
             },
             "kind": {
               "type": "string",
@@ -256,7 +948,7 @@
           "properties": {
             "protocolVersion": {
               "type": "string",
-              "const": "workspace.v1"
+              "const": "workspace.v2"
             },
             "kind": {
               "type": "string",
@@ -406,6 +1098,8 @@
                               "state",
                               "controlState",
                               "controlEpoch",
+                              "controlTransfer",
+                              "leaseExpiry",
                               "captureReadiness",
                               "personaDisplayId",
                               "cursor",
@@ -453,13 +1147,75 @@
                                 ]
                               },
                               "controlState": {
-                                "type": "string",
-                                "const": "agent"
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "agent"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "takeover-pending"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "human"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "human-disconnected"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "return-pending"
+                                  }
+                                ]
                               },
                               "controlEpoch": {
                                 "type": "integer",
                                 "minimum": 1,
                                 "maximum": 9007199254740991
+                              },
+                              "controlTransfer": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "none"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "taking-control"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "returning-control"
+                                  }
+                                ]
+                              },
+                              "selectedHumanControlTabId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                              },
+                              "leaseExpiry": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "none"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "healthy"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "expiring"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "grace"
+                                  }
+                                ]
                               },
                               "captureReadiness": {
                                 "anyOf": [
@@ -760,6 +1516,324 @@
                     }
                   },
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "browserSessionId",
+                    "controlState",
+                    "controlEpoch",
+                    "controlTransfer",
+                    "captureReadiness",
+                    "leaseExpiry"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "controlStatus"
+                    },
+                    "browserSessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "controlState": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "agent"
+                        },
+                        {
+                          "type": "string",
+                          "const": "takeover-pending"
+                        },
+                        {
+                          "type": "string",
+                          "const": "human"
+                        },
+                        {
+                          "type": "string",
+                          "const": "human-disconnected"
+                        },
+                        {
+                          "type": "string",
+                          "const": "return-pending"
+                        }
+                      ]
+                    },
+                    "controlEpoch": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    },
+                    "controlTransfer": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "none"
+                        },
+                        {
+                          "type": "string",
+                          "const": "taking-control"
+                        },
+                        {
+                          "type": "string",
+                          "const": "returning-control"
+                        }
+                      ]
+                    },
+                    "selectedHumanControlTabId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "captureReadiness": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "starting"
+                        },
+                        {
+                          "type": "string",
+                          "const": "warming"
+                        },
+                        {
+                          "type": "string",
+                          "const": "ready"
+                        },
+                        {
+                          "type": "string",
+                          "const": "degraded"
+                        },
+                        {
+                          "type": "string",
+                          "const": "unavailable"
+                        }
+                      ]
+                    },
+                    "leaseExpiry": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "none"
+                        },
+                        {
+                          "type": "string",
+                          "const": "healthy"
+                        },
+                        {
+                          "type": "string",
+                          "const": "expiring"
+                        },
+                        {
+                          "type": "string",
+                          "const": "grace"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "browserSessionId",
+                    "selectedHumanControlTabId",
+                    "controlState",
+                    "controlEpoch",
+                    "controlTransfer",
+                    "captureReadiness",
+                    "leaseExpiry",
+                    "leaseExpiresInMs",
+                    "inputTargetGeneration"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "controlAcquired"
+                    },
+                    "browserSessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "selectedHumanControlTabId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "controlState": {
+                      "type": "string",
+                      "const": "human"
+                    },
+                    "controlEpoch": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    },
+                    "controlTransfer": {
+                      "type": "string",
+                      "const": "none"
+                    },
+                    "captureReadiness": {
+                      "type": "string",
+                      "const": "ready"
+                    },
+                    "leaseExpiry": {
+                      "type": "string",
+                      "const": "healthy"
+                    },
+                    "leaseExpiresInMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 60000
+                    },
+                    "inputTargetGeneration": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "browserSessionId",
+                    "selectedHumanControlTabId",
+                    "controlState",
+                    "controlEpoch",
+                    "leaseExpiry",
+                    "leaseExpiresInMs"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "controlHeartbeat"
+                    },
+                    "browserSessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "selectedHumanControlTabId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "controlState": {
+                      "type": "string",
+                      "const": "human"
+                    },
+                    "controlEpoch": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    },
+                    "leaseExpiry": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "healthy"
+                        },
+                        {
+                          "type": "string",
+                          "const": "expiring"
+                        }
+                      ]
+                    },
+                    "leaseExpiresInMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 60000
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "browserSessionId",
+                    "controlState",
+                    "controlEpoch",
+                    "controlTransfer",
+                    "leaseExpiry"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "controlReleased"
+                    },
+                    "browserSessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "controlState": {
+                      "type": "string",
+                      "const": "agent"
+                    },
+                    "controlEpoch": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    },
+                    "controlTransfer": {
+                      "type": "string",
+                      "const": "none"
+                    },
+                    "leaseExpiry": {
+                      "type": "string",
+                      "const": "none"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "inputBatchSequence",
+                    "acceptedEventCount",
+                    "coalescedPointerMoveCount",
+                    "awaitingNewFrame"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "inputAck"
+                    },
+                    "inputBatchSequence": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    },
+                    "acceptedEventCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 32
+                    },
+                    "coalescedPointerMoveCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 32
+                    },
+                    "awaitingNewFrame": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
                 }
               ]
             }
@@ -778,7 +1852,7 @@
           "properties": {
             "protocolVersion": {
               "type": "string",
-              "const": "workspace.v1"
+              "const": "workspace.v2"
             },
             "kind": {
               "type": "string",
@@ -831,6 +1905,46 @@
                     {
                       "type": "string",
                       "const": "INTERNAL_ERROR"
+                    },
+                    {
+                      "type": "string",
+                      "const": "CONTROL_NOT_READY"
+                    },
+                    {
+                      "type": "string",
+                      "const": "CONTROL_TRANSFER_PENDING"
+                    },
+                    {
+                      "type": "string",
+                      "const": "CONTROL_HELD_BY_HUMAN"
+                    },
+                    {
+                      "type": "string",
+                      "const": "CONTROL_LEASE_REQUIRED"
+                    },
+                    {
+                      "type": "string",
+                      "const": "CONTROL_LEASE_EXPIRED"
+                    },
+                    {
+                      "type": "string",
+                      "const": "CONTROL_LEASE_CONFLICT"
+                    },
+                    {
+                      "type": "string",
+                      "const": "INPUT_SEQUENCE_STALE"
+                    },
+                    {
+                      "type": "string",
+                      "const": "INPUT_FRAME_STALE"
+                    },
+                    {
+                      "type": "string",
+                      "const": "INPUT_RATE_LIMITED"
+                    },
+                    {
+                      "type": "string",
+                      "const": "INPUT_UNSUPPORTED"
                     }
                   ]
                 },
@@ -858,7 +1972,7 @@
           "properties": {
             "protocolVersion": {
               "type": "string",
-              "const": "workspace.v1"
+              "const": "workspace.v2"
             },
             "kind": {
               "type": "string",
@@ -918,6 +2032,8 @@
                       "state",
                       "controlState",
                       "controlEpoch",
+                      "controlTransfer",
+                      "leaseExpiry",
                       "captureReadiness",
                       "personaDisplayId",
                       "cursor",
@@ -965,13 +2081,75 @@
                         ]
                       },
                       "controlState": {
-                        "type": "string",
-                        "const": "agent"
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "agent"
+                          },
+                          {
+                            "type": "string",
+                            "const": "takeover-pending"
+                          },
+                          {
+                            "type": "string",
+                            "const": "human"
+                          },
+                          {
+                            "type": "string",
+                            "const": "human-disconnected"
+                          },
+                          {
+                            "type": "string",
+                            "const": "return-pending"
+                          }
+                        ]
                       },
                       "controlEpoch": {
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 9007199254740991
+                      },
+                      "controlTransfer": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "none"
+                          },
+                          {
+                            "type": "string",
+                            "const": "taking-control"
+                          },
+                          {
+                            "type": "string",
+                            "const": "returning-control"
+                          }
+                        ]
+                      },
+                      "selectedHumanControlTabId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+                      },
+                      "leaseExpiry": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "none"
+                          },
+                          {
+                            "type": "string",
+                            "const": "healthy"
+                          },
+                          {
+                            "type": "string",
+                            "const": "expiring"
+                          },
+                          {
+                            "type": "string",
+                            "const": "grace"
+                          }
+                        ]
                       },
                       "captureReadiness": {
                         "anyOf": [
@@ -1283,7 +2461,7 @@
           "properties": {
             "protocolVersion": {
               "type": "string",
-              "const": "workspace.v1"
+              "const": "workspace.v2"
             },
             "kind": {
               "type": "string",
@@ -1365,13 +2543,16 @@
             "mediaType",
             "byteLength",
             "sha256",
-            "width",
-            "height"
+            "imagePixelWidth",
+            "imagePixelHeight",
+            "cssViewportWidth",
+            "cssViewportHeight",
+            "devicePixelRatio"
           ],
           "properties": {
             "protocolVersion": {
               "type": "string",
-              "const": "workspace.v1"
+              "const": "workspace.v2"
             },
             "kind": {
               "type": "string",
@@ -1462,15 +2643,30 @@
               "maxLength": 64,
               "pattern": "^[0-9a-f]{64}$"
             },
-            "width": {
+            "imagePixelWidth": {
               "type": "integer",
               "minimum": 1,
               "maximum": 32768
             },
-            "height": {
+            "imagePixelHeight": {
               "type": "integer",
               "minimum": 1,
               "maximum": 32768
+            },
+            "cssViewportWidth": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 32768
+            },
+            "cssViewportHeight": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 32768
+            },
+            "devicePixelRatio": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 16
             }
           },
           "additionalProperties": false

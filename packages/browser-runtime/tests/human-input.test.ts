@@ -1,0 +1,146 @@
+import assert from "node:assert/strict";
+import { describe, it } from "vitest";
+import { BrowserProtocolError } from "@webx/browser-protocol";
+import { HumanInputController } from "../src/control/human-input.js";
+import { bindMotorTab, SessionMotor, type DirectHumanInputEvent } from "../src/motor/session-motor.js";
+import type { TabRecord } from "../src/targets/registry.js";
+
+function target(): TabRecord {
+  return {
+    browserSessionId: "session:human-input", tabId: "tab:human-input", targetId: "target:human-input", cdpSessionId: "cdp:human-input",
+    documentGeneration: 1, viewportGeneration: 1, state: "open", latestFrameSequence: 0, url: "about:blank", title: "",
+  };
+}
+
+function code(expected: string): (error: unknown) => boolean {
+  return (error) => error instanceof BrowserProtocolError && error.code === expected;
+}
+
+describe("shared direct human input lane", () => {
+  it("coalesces only adjacent pointer samples and preserves transition order without generating a path", async () => {
+    const tab = target();
+    const sent: Array<{ readonly method: string; readonly params: Readonly<Record<string, unknown>> }> = [];
+    bindMotorTab(tab, { connected: true, async send<T>(method: string, params: Readonly<Record<string, unknown>>): Promise<T> {
+      sent.push({ method, params });
+      if (method === "Runtime.evaluate") return { result: { value: true } } as T;
+      return {} as T;
+    } });
+    const motor = new SessionMotor(tab.browserSessionId, 17);
+    const controller = new HumanInputController(motor);
+    controller.start(tab.tabId, 2);
+    let admitted = false;
+    const events: DirectHumanInputEvent[] = [
+      { kind: "pointerMove", point: { x: 10, y: 20 } },
+      { kind: "pointerMove", point: { x: 30, y: 40 } },
+      { kind: "pointerDown", point: { x: 30, y: 40 }, button: "left", clickCount: 1 },
+      { kind: "pointerMove", point: { x: 50, y: 60 } },
+      { kind: "pointerUp", point: { x: 50, y: 60 }, button: "left", clickCount: 1 },
+    ];
+    const result = await controller.dispatch(tab, 2, events, () => { admitted = true; });
+    assert.equal(admitted, true);
+    assert.equal(result.coalescedPointerMoveCount, 1);
+    assert.deepEqual(sent.filter((item) => item.method === "Input.dispatchMouseEvent").map((item) => [item.params.type, item.params.x, item.params.y, item.params.buttons]), [
+      ["mouseMoved", 30, 40, 0],
+      ["mousePressed", 30, 40, 1],
+      ["mouseMoved", 50, 60, 1],
+      ["mouseReleased", 50, 60, 0],
+    ]);
+    assert.deepEqual(motor.heldInputState, { buttons: [], keys: [] });
+    assert.deepEqual({ x: motor.state.x, y: motor.state.y }, { x: 50, y: 60 });
+  });
+
+  it("uses the shared pressed registry for repeat, transition validation, and cleanup", async () => {
+    const tab = target();
+    const sent: Array<Readonly<Record<string, unknown>>> = [];
+    bindMotorTab(tab, { connected: true, async send<T>(method: string, params: Readonly<Record<string, unknown>>): Promise<T> {
+      if (method === "Runtime.evaluate") return { result: { value: true } } as T;
+      sent.push(params);
+      return {} as T;
+    } });
+    const motor = new SessionMotor(tab.browserSessionId, 19);
+    const controller = new HumanInputController(motor);
+    controller.start(tab.tabId, 2);
+    await controller.dispatch(tab, 2, [{ kind: "keyDown", key: "ArrowDown", repeat: false }, { kind: "keyDown", key: "ArrowDown", repeat: true }], () => undefined);
+    assert.deepEqual(motor.heldInputState.keys, ["ArrowDown"]);
+    await assert.rejects(controller.dispatch(tab, 2, [{ kind: "keyDown", key: "ArrowDown", repeat: false }], () => undefined), code("INPUT_UNSUPPORTED"));
+    await motor.releaseAll(tab);
+    assert.deepEqual(motor.heldInputState, { buttons: [], keys: [] });
+    assert.equal(sent.filter((params) => params.type === "keyDown").length, 2);
+    assert.equal(sent.filter((params) => params.type === "keyUp").length, 1);
+  });
+
+  it("preserves the remaining held-button mask during multi-button cleanup", async () => {
+    const tab = target();
+    const sent: Array<Readonly<Record<string, unknown>>> = [];
+    bindMotorTab(tab, { connected: true, async send<T>(method: string, params: Readonly<Record<string, unknown>>): Promise<T> {
+      if (method === "Runtime.evaluate") return { result: { value: true } } as T;
+      if (method === "Input.dispatchMouseEvent") sent.push(params);
+      return {} as T;
+    } });
+    const motor = new SessionMotor(tab.browserSessionId, 21);
+    const controller = new HumanInputController(motor);
+    controller.start(tab.tabId, 2);
+    await controller.dispatch(tab, 2, [
+      { kind: "pointerDown", point: { x: 5, y: 6 }, button: "left", clickCount: 1 },
+      { kind: "pointerDown", point: { x: 5, y: 6 }, button: "right", clickCount: 1 },
+    ], () => undefined);
+    await motor.releaseAll(tab);
+    assert.deepEqual(sent.filter((params) => params.type === "mouseReleased").map((params) => [params.button, params.buttons]), [["left", 2], ["right", 0]]);
+    assert.deepEqual(motor.heldInputState, { buttons: [], keys: [] });
+  });
+
+  it("enforces the newer-painted-frame guard while allowing non-mutating movement", () => {
+    const motor = new SessionMotor("session:guard", 23);
+    const controller = new HumanInputController(motor);
+    controller.start("tab:guard", 2);
+    const clickRelease: DirectHumanInputEvent[] = [{ kind: "pointerUp", point: { x: 1, y: 1 }, button: "left", clickCount: 1 }];
+    assert.equal(controller.noteFrameGuard(10, clickRelease), true);
+    controller.assertFrameGuard(10, [{ kind: "pointerMove", point: { x: 2, y: 2 } }]);
+    assert.throws(() => controller.assertFrameGuard(10, [{ kind: "text", text: "x" }]), code("INPUT_FRAME_STALE"));
+    controller.assertFrameGuard(11, [{ kind: "text", text: "x" }]);
+  });
+
+  it("keeps one batch in flight and applies the pointer dispatch rate bound", async () => {
+    const tab = target();
+    let release!: () => void;
+    let enteredResolve!: () => void;
+    const entered = new Promise<void>((resolve) => { enteredResolve = resolve; });
+    let block = false;
+    bindMotorTab(tab, { connected: true, async send<T>(method: string): Promise<T> {
+      if (method === "Runtime.evaluate") return { result: { value: true } } as T;
+      if (block && method === "Input.dispatchMouseEvent") await new Promise<void>((resolve) => { release = resolve; enteredResolve(); });
+      return {} as T;
+    } });
+    const motor = new SessionMotor(tab.browserSessionId, 29);
+    const controller = new HumanInputController(motor, () => 500);
+    controller.start(tab.tabId, 2);
+    block = true;
+    const first = controller.dispatch(tab, 2, [{ kind: "pointerMove", point: { x: 1, y: 1 } }], () => undefined);
+    await entered;
+    await assert.rejects(controller.dispatch(tab, 2, [{ kind: "pointerMove", point: { x: 2, y: 2 } }], () => undefined), code("INPUT_RATE_LIMITED"));
+    release();
+    await first;
+    block = false;
+    for (let index = 1; index < 60; index++) await controller.dispatch(tab, 2, [{ kind: "pointerMove", point: { x: index, y: index } }], () => undefined);
+    await assert.rejects(controller.dispatch(tab, 2, [{ kind: "pointerMove", point: { x: 61, y: 61 } }], () => undefined), code("INPUT_RATE_LIMITED"));
+  });
+
+  it("retains only bounded sequence identity and sanitized acknowledgement, not human text", async () => {
+    const tab = target();
+    bindMotorTab(tab, { connected: true, async send<T>(method: string): Promise<T> {
+      if (method === "Runtime.evaluate") return { result: { value: true } } as T;
+      return {} as T;
+    } });
+    const motor = new SessionMotor(tab.browserSessionId, 31);
+    const controller = new HumanInputController(motor);
+    controller.start(tab.tabId, 2);
+    const secret = "phase3b-secret-DoNotRetain";
+    await controller.dispatch(tab, 2, [{ kind: "text", text: secret }], () => undefined);
+    const acknowledgement = { kind: "workspaceInputAck" as const, inputBatchSequence: 1, acceptedEventCount: 1, coalescedPointerMoveCount: 0, awaitingNewFrame: true };
+    controller.retainAcknowledgement("operation:human-text", acknowledgement);
+    assert.deepEqual(controller.retainedAcknowledgement(1, "operation:human-text"), acknowledgement);
+    assert.throws(() => controller.retainedAcknowledgement(1, "operation:conflict"), code("INPUT_SEQUENCE_STALE"));
+    assert.equal(JSON.stringify(controller).includes(secret), false);
+    assert.equal(JSON.stringify(motor).includes(secret), false);
+  });
+});

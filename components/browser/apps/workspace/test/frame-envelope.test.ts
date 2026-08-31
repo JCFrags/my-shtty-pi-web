@@ -5,23 +5,14 @@ import { decodeFrameEnvelope, verifyFrameDigest, type FrameMetadata } from "../s
 function makeEnvelope(payload: Uint8Array): ArrayBuffer {
   const metadata: FrameMetadata = {
     deliveryId: 1,
-    selectionId: "selection_AAAAAA",
-    subscriptionId: "subscription_AAA",
-    browserdRuntimeInstanceId: "runtime_AAAAAAAA",
-    browserSessionId: "session:one",
-    tabId: "tab:one",
-    controlEpoch: 4,
-    frameSequence: 8,
-    documentGeneration: 3,
-    viewportGeneration: 4,
     capturedAt: "2026-08-30T00:00:00.000Z",
     publishedAt: "2026-08-30T00:00:00.001Z",
     receivedAt: "2026-08-30T00:00:00.002Z",
     mediaType: "image/png",
     byteLength: payload.byteLength,
     sha256: createHash("sha256").update(payload).digest("hex"),
-    width: 10,
-    height: 10,
+    imagePixelWidth: 10,
+    imagePixelHeight: 10,
   };
   const header = new TextEncoder().encode(JSON.stringify(metadata));
   const output = new Uint8Array(4 + header.byteLength + payload.byteLength);

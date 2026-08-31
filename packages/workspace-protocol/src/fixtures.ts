@@ -20,6 +20,8 @@ export const validWorkspaceSnapshotFixture = {
     state: "ready",
     controlState: "agent",
     controlEpoch: 4,
+    controlTransfer: "none",
+    leaseExpiry: "none",
     captureReadiness: "ready",
     personaDisplayId: "persona-01",
     cursor: { x: 24, y: 32, visible: true, pathSequence: 3, sampleSequence: 9 },
@@ -45,8 +47,11 @@ export const validWorkspaceFrameHeaderFixture = {
   mediaType: "image/png",
   byteLength: 4,
   sha256: "a".repeat(64),
-  width: 2,
-  height: 2,
+  imagePixelWidth: 2,
+  imagePixelHeight: 2,
+  cssViewportWidth: 2,
+  cssViewportHeight: 2,
+  devicePixelRatio: 1,
 } as const;
 
 export const invalidWorkspaceFixtures: ReadonlyArray<{ name: string; value: unknown }> = [

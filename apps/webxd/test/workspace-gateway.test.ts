@@ -4,7 +4,7 @@ import { chmod, mkdtemp, stat } from "node:fs/promises";
 import { createConnection, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserdServer } from "../../browserd/src/server.js";
 import type { BrowserRuntime } from "../../../packages/browser-runtime/src/index.js";
 import { BrowserProtocolError, type FrameEvent, type WorkspaceBrokerRequest, type WorkspaceSnapshot as BrowserWorkspaceSnapshot } from "../../../packages/browser-protocol/src/index.js";
@@ -27,11 +27,11 @@ describe("private workspace gateway", () => {
     await expect(readWorkspaceDescriptor(join(runtimeDirectory, "workspace.json"), runtimeDirectory)).resolves.toEqual(descriptor);
 
     const client = await FramedClient.open(descriptor.socketPath); cleanups.push(async () => client.close());
-    const bind = encodeWorkspaceRecord({ protocolVersion: "workspace.v1", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret });
+    const bind = encodeWorkspaceRecord({ protocolVersion: "workspace.v2", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret });
     for (const byte of bind) client.write(Uint8Array.of(byte));
     expect((await client.next()).header).toMatchObject({ kind: "bound", requestId: "request:bind", webxdRuntimeInstanceId: descriptor.webxdRuntimeInstanceId });
     expect((await client.next()).header).toMatchObject({ kind: "status", status: { connection: "unavailable", browserd: "unavailable" } });
-    client.send({ protocolVersion: "workspace.v1", kind: "snapshot.get", requestId: "request:snapshot" });
+    client.send({ protocolVersion: "workspace.v2", kind: "snapshot.get", requestId: "request:snapshot" });
     expect((await client.next()).header).toMatchObject({ kind: "response", requestId: "request:snapshot", ok: true, result: { kind: "snapshot", snapshot: { browserdState: "unavailable", sessions: [] } } });
     expect(client.receivedText).not.toContain(descriptor.bindingSecret);
     expect(client.receivedText).not.toContain(descriptor.socketPath);
@@ -75,13 +75,13 @@ describe("private workspace gateway", () => {
     const gateway = new WorkspaceGateway({ runtimeDirectory: join(root, "workspace"), browserBackend: "agentcursor", browserDescriptorPath: join(browserDirectory, "browserd.json"), browserRuntimeDirectory: browserDirectory, heartbeatMs: 100 });
     const descriptor = await gateway.start(); cleanups.push(async () => await gateway.stop());
     const client = await FramedClient.open(descriptor.socketPath); cleanups.push(async () => client.close());
-    client.send({ protocolVersion: "workspace.v1", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret });
+    client.send({ protocolVersion: "workspace.v2", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret });
     await client.next(); await client.next();
-    client.send({ protocolVersion: "workspace.v1", kind: "snapshot.get", requestId: "request:snapshot" });
+    client.send({ protocolVersion: "workspace.v2", kind: "snapshot.get", requestId: "request:snapshot" });
     const snapshotResponse = (await client.next()).header as { result: { snapshot: { sessions: Array<{ cursor: Record<string, unknown> }> } } };
     expect(snapshotResponse.result.snapshot.sessions).toHaveLength(1);
     expect(snapshotResponse.result.snapshot.sessions[0]?.cursor).not.toHaveProperty("personaId");
-    client.send({ protocolVersion: "workspace.v1", kind: "frame.select", requestId: "request:select", selectionId: "selection_1234567890", browserSessionId: "session:one", tabId: "tab:one" });
+    client.send({ protocolVersion: "workspace.v2", kind: "frame.select", requestId: "request:select", selectionId: "selection_1234567890", browserSessionId: "session:one", tabId: "tab:one" });
     const selected = (await client.next()).header as { result: { subscriptionId?: string } };
     expect(selected).toMatchObject({ kind: "response", ok: true, result: { kind: "selection", selectionId: "selection_1234567890", browserSessionId: "session:one", tabId: "tab:one" } });
     await waitUntil(() => runtime.subscriptionId !== undefined);
@@ -92,7 +92,7 @@ describe("private workspace gateway", () => {
     expect(JSON.stringify(frame.header)).not.toContain("base64");
     expect(gateway.diagnostics.pendingFrames).toBe(0);
 
-    client.send({ protocolVersion: "workspace.v1", kind: "frame.clear", requestId: "request:clear" });
+    client.send({ protocolVersion: "workspace.v2", kind: "frame.clear", requestId: "request:clear" });
     expect((await client.next()).header).toMatchObject({ kind: "response", ok: true, result: { kind: "ack" } });
     expect(runtime.subscriptionId).toBeUndefined();
     expect(gateway.diagnostics.selectedClients).toBe(0);
@@ -107,9 +107,9 @@ describe("private workspace gateway", () => {
     const gateway = new WorkspaceGateway({ runtimeDirectory: join(root, "workspace"), browserBackend: "agentcursor", browserDescriptorPath: join(browserDirectory, "browserd.json"), browserRuntimeDirectory: browserDirectory, heartbeatMs: 100 });
     const descriptor = await gateway.start(); cleanups.push(async () => await gateway.stop());
     const client = await FramedClient.open(descriptor.socketPath); cleanups.push(async () => client.close());
-    client.send({ protocolVersion: "workspace.v1", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret }); await client.next(); await client.next();
-    client.send({ protocolVersion: "workspace.v1", kind: "frame.select", requestId: "request:select", selectionId: "selection_transient_01", browserSessionId: "session:one", tabId: "tab:one" });
-    expect((await client.next()).header).toMatchObject({ kind: "response", requestId: "request:select", ok: true });
+    client.send({ protocolVersion: "workspace.v2", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret }); await client.next(); await client.next();
+    client.send({ protocolVersion: "workspace.v2", kind: "frame.select", requestId: "request:select", selectionId: "selection_transient_01", browserSessionId: "session:one", tabId: "tab:one" });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:select")).header).toMatchObject({ kind: "response", requestId: "request:select", ok: true });
     runtime.failNextSnapshot = true;
     await waitUntil(() => runtime.snapshotFailures === 1, 4_000);
     expect(gateway.diagnostics.selectedClients).toBe(1);
@@ -127,11 +127,11 @@ describe("private workspace gateway", () => {
     const gateway = new WorkspaceGateway({ runtimeDirectory: join(root, "workspace"), browserBackend: "agentcursor", browserDescriptorPath: join(browserDirectory, "browserd.json"), browserRuntimeDirectory: browserDirectory, heartbeatMs: 100 });
     const descriptor = await gateway.start(); cleanups.push(async () => await gateway.stop());
     const client = await FramedClient.open(descriptor.socketPath); cleanups.push(async () => client.close());
-    client.send({ protocolVersion: "workspace.v1", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret }); await client.next(); await client.next();
-    client.send({ protocolVersion: "workspace.v1", kind: "frame.select", requestId: "request:first", selectionId: "selection_first_0001", browserSessionId: "session:one", tabId: "tab:one" });
-    expect((await client.next()).header).toMatchObject({ kind: "response", ok: true });
+    client.send({ protocolVersion: "workspace.v2", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret }); await client.next(); await client.next();
+    client.send({ protocolVersion: "workspace.v2", kind: "frame.select", requestId: "request:first", selectionId: "selection_first_0001", browserSessionId: "session:one", tabId: "tab:one" });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:first")).header).toMatchObject({ kind: "response", ok: true });
     runtime.failReplace = true;
-    client.send({ protocolVersion: "workspace.v1", kind: "frame.select", requestId: "request:failed", selectionId: "selection_failed_001", browserSessionId: "session:missing", tabId: "tab:missing" });
+    client.send({ protocolVersion: "workspace.v2", kind: "frame.select", requestId: "request:failed", selectionId: "selection_failed_001", browserSessionId: "session:missing", tabId: "tab:missing" });
     expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:failed")).header).toMatchObject({ kind: "response", requestId: "request:failed", ok: false });
     runtime.failReplace = false;
     expect(gateway.diagnostics.selectedClients).toBe(1);
@@ -151,13 +151,194 @@ describe("private workspace gateway", () => {
     const gateway = new WorkspaceGateway({ runtimeDirectory: join(root, "workspace"), browserBackend: "agentcursor", browserDescriptorPath: join(browserDirectory, "browserd.json"), browserRuntimeDirectory: browserDirectory, heartbeatMs: 100 });
     const descriptor = await gateway.start(); cleanups.push(async () => await gateway.stop());
     const client = await FramedClient.open(descriptor.socketPath); cleanups.push(async () => client.close());
-    client.send({ protocolVersion: "workspace.v1", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret }); await client.next(); await client.next();
-    client.send({ protocolVersion: "workspace.v1", kind: "frame.select", requestId: "request:cached", selectionId: "selection_cached_001", browserSessionId: "session:one", tabId: "tab:one" });
-    expect((await client.next()).header).toMatchObject({ kind: "response", requestId: "request:cached", ok: true });
+    client.send({ protocolVersion: "workspace.v2", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret }); await client.next(); await client.next();
+    client.send({ protocolVersion: "workspace.v2", kind: "frame.select", requestId: "request:cached", selectionId: "selection_cached_001", browserSessionId: "session:one", tabId: "tab:one" });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:cached")).header).toMatchObject({ kind: "response", requestId: "request:cached", ok: true });
     const cached = await client.next();
     expect(cached.header).toMatchObject({ kind: "frame", selectionId: "selection_cached_001", frameSequence: 1, sha256: runtime.sha256 });
     expect(cached.payload).toEqual(runtime.frameBytes);
     expect(gateway.diagnostics.pendingFrames).toBe(0);
+  });
+
+  it("brokers control without exposing leases or retaining human text, and returns control on disconnect", async () => {
+    const root = await mkdtemp(join(tmpdir(), "webxd-workspace-control-"));
+    const runtime = new FakeWorkspaceRuntime();
+    const browserDirectory = join(root, "browserd");
+    const browserd = new BrowserdServer({ runtimeDirectory: browserDirectory, runtime: runtime as unknown as BrowserRuntime, allowTemporaryRuntimeDirectoryForTest: true });
+    await browserd.start(); cleanups.push(async () => await browserd.stop());
+    const gateway = new WorkspaceGateway({ runtimeDirectory: join(root, "workspace"), browserBackend: "agentcursor", browserDescriptorPath: join(browserDirectory, "browserd.json"), browserRuntimeDirectory: browserDirectory, heartbeatMs: 100 });
+    const descriptor = await gateway.start(); cleanups.push(async () => await gateway.stop());
+    const client = await FramedClient.open(descriptor.socketPath); cleanups.push(async () => client.close());
+    client.send({ protocolVersion: "workspace.v2", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret }); await client.next(); await client.next();
+    client.send({ protocolVersion: "workspace.v2", kind: "frame.select", requestId: "request:select", selectionId: "selection_control_01", browserSessionId: "session:one", tabId: "tab:one" });
+    await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:select");
+    runtime.publishFrame();
+    const agentFrame = (await nextMatching(client, (header) => header.kind === "frame")).header as Record<string, unknown>;
+    const paintedAt = new Date().toISOString();
+    const agentBinding = paintedBinding(agentFrame, paintedAt);
+
+    client.send({ protocolVersion: "workspace.v2", kind: "control.acquire", requestId: "request:acquire", browserSessionId: "session:one", tabId: "tab:one", expectedControlEpoch: 1, frame: agentBinding });
+    const acquired = (await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:acquire")).header;
+    expect(acquired).toMatchObject({ ok: true, result: { kind: "controlAcquired", browserSessionId: "session:one", selectedHumanControlTabId: "tab:one", controlState: "human", controlEpoch: 2, inputTargetGeneration: 1 } });
+    expect(JSON.stringify(acquired)).not.toContain(runtime.leaseId);
+    client.send({ protocolVersion: "workspace.v2", kind: "control.acquire", requestId: "request:acquire", browserSessionId: "session:one", tabId: "tab:one", expectedControlEpoch: 1, frame: agentBinding });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:acquire")).header).toMatchObject({ ok: true, result: { kind: "controlAcquired", controlEpoch: 2 } });
+    expect(runtime.acquireCount).toBe(1);
+    client.send({ protocolVersion: "workspace.v2", kind: "control.acquire", requestId: "request:acquire", browserSessionId: "session:one", tabId: "tab:one", expectedControlEpoch: 2, frame: agentBinding });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:acquire")).header).toMatchObject({ ok: false, error: { code: "CONTROL_LEASE_CONFLICT" } });
+    expect(runtime.acquireCount).toBe(1);
+
+    client.send({ protocolVersion: "workspace.v2", kind: "frame.select", requestId: "request:blocked-select", selectionId: "selection_blocked_1", browserSessionId: "session:one", tabId: "tab:one" });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:blocked-select")).header).toMatchObject({ ok: false, error: { code: "CONTROL_HELD_BY_HUMAN" } });
+
+    runtime.controlEpoch = 2;
+    runtime.publishFrame();
+    const humanFrame = (await nextMatching(client, (header) => header.kind === "frame" && header.controlEpoch === 2)).header as Record<string, unknown>;
+    const humanBinding = paintedBinding(humanFrame, new Date().toISOString());
+    const secretText = "phase3b-secret-NeverRetain-42";
+    client.send({ protocolVersion: "workspace.v2", kind: "input.batch", requestId: "request:input", browserSessionId: "session:one", tabId: "tab:one", controlEpoch: 2, inputBatchSequence: 1, inputTargetGeneration: 1, frame: humanBinding, events: [{ kind: "pointerMove", point: { imageX: 100, imageY: 50 } }, { kind: "text", text: secretText }] });
+    const input = (await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:input")).header;
+    expect(input).toMatchObject({ ok: true, result: { kind: "inputAck", inputBatchSequence: 1, acceptedEventCount: 2 } });
+    expect(runtime.inputEventCounts).toEqual({ pointerMove: 1, text: 1 });
+    expect(runtime.inputBatchCount).toBe(1);
+    expect(JSON.stringify(input)).not.toContain(secretText);
+    client.send({ protocolVersion: "workspace.v2", kind: "input.batch", requestId: "request:input", browserSessionId: "session:one", tabId: "tab:one", controlEpoch: 2, inputBatchSequence: 1, inputTargetGeneration: 1, frame: humanBinding, events: [{ kind: "pointerMove", point: { imageX: 101, imageY: 51 } }, { kind: "text", text: "different-secret-same-shape-99" }] });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:input")).header).toMatchObject({ ok: true, result: { kind: "inputAck", inputBatchSequence: 1 } });
+    expect(runtime.inputBatchCount).toBe(1);
+    expect(client.receivedText).not.toContain(runtime.leaseId);
+
+    client.send({ protocolVersion: "workspace.v2", kind: "control.heartbeat", requestId: "request:heartbeat", browserSessionId: "session:one", controlEpoch: 2 });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:heartbeat")).header).toMatchObject({ ok: true, result: { kind: "controlHeartbeat", controlState: "human", controlEpoch: 2 } });
+    expect(runtime.heartbeatCount).toBe(1);
+
+    client.send({ protocolVersion: "workspace.v2", kind: "control.release", requestId: "request:release", browserSessionId: "session:one", controlEpoch: 2 });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:release")).header).toMatchObject({ ok: true, result: { kind: "controlReleased", controlState: "agent", controlEpoch: 3 } });
+    client.send({ protocolVersion: "workspace.v2", kind: "control.release", requestId: "request:release", browserSessionId: "session:one", controlEpoch: 2 });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:release")).header).toMatchObject({ ok: true, result: { kind: "controlReleased", controlEpoch: 3 } });
+    expect(runtime.releaseCount).toBe(1);
+    client.send({ protocolVersion: "workspace.v2", kind: "control.acquire", requestId: "request:acquire", browserSessionId: "session:one", tabId: "tab:one", expectedControlEpoch: 1, frame: agentBinding });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:acquire")).header).toMatchObject({ ok: false, error: { code: "CONTROL_LEASE_CONFLICT" } });
+
+    await client.close();
+    expect(runtime.releaseCount).toBe(1);
+    expect(runtime.controlEpoch).toBe(3);
+    expect(runtime.releasedLeaseIds).toEqual([runtime.leaseId]);
+  });
+
+  it("namespaces identical control request IDs across trusted desktop clients", async () => {
+    const root = await mkdtemp(join(tmpdir(), "webxd-workspace-cross-client-control-"));
+    const runtime = new FakeWorkspaceRuntime();
+    const browserDirectory = join(root, "browserd");
+    const browserd = new BrowserdServer({ runtimeDirectory: browserDirectory, runtime: runtime as unknown as BrowserRuntime, allowTemporaryRuntimeDirectoryForTest: true });
+    await browserd.start(); cleanups.push(async () => await browserd.stop());
+    const gateway = new WorkspaceGateway({ runtimeDirectory: join(root, "workspace"), browserBackend: "agentcursor", browserDescriptorPath: join(browserDirectory, "browserd.json"), browserRuntimeDirectory: browserDirectory, heartbeatMs: 100 });
+    const descriptor = await gateway.start(); cleanups.push(async () => await gateway.stop());
+
+    const first = await FramedClient.open(descriptor.socketPath); cleanups.push(async () => first.close());
+    first.send({ protocolVersion: "workspace.v2", kind: "bind", requestId: "request:bind-first", bindingSecret: descriptor.bindingSecret }); await first.next(); await first.next();
+    first.send({ protocolVersion: "workspace.v2", kind: "frame.select", requestId: "request:select-first", selectionId: "selection_cross_first", browserSessionId: "session:one", tabId: "tab:one" });
+    await nextMatching(first, (header) => header.kind === "response" && header.requestId === "request:select-first");
+    runtime.publishFrame();
+    const firstFrame = (await nextMatching(first, (header) => header.kind === "frame")).header as Record<string, unknown>;
+    first.send({ protocolVersion: "workspace.v2", kind: "control.acquire", requestId: "request:same-acquire", browserSessionId: "session:one", tabId: "tab:one", expectedControlEpoch: 1, frame: paintedBinding(firstFrame, new Date().toISOString()) });
+    expect((await nextMatching(first, (header) => header.kind === "response" && header.requestId === "request:same-acquire")).header).toMatchObject({ ok: true, result: { kind: "controlAcquired", controlEpoch: 2 } });
+    first.send({ protocolVersion: "workspace.v2", kind: "control.release", requestId: "request:first-release", browserSessionId: "session:one", controlEpoch: 2 });
+    expect((await nextMatching(first, (header) => header.kind === "response" && header.requestId === "request:first-release")).header).toMatchObject({ ok: true, result: { controlEpoch: 3 } });
+    await first.close();
+
+    const second = await FramedClient.open(descriptor.socketPath); cleanups.push(async () => second.close());
+    second.send({ protocolVersion: "workspace.v2", kind: "bind", requestId: "request:bind-second", bindingSecret: descriptor.bindingSecret }); await second.next(); await second.next();
+    second.send({ protocolVersion: "workspace.v2", kind: "frame.select", requestId: "request:select-second", selectionId: "selection_cross_second", browserSessionId: "session:one", tabId: "tab:one" });
+    await nextMatching(second, (header) => header.kind === "response" && header.requestId === "request:select-second");
+    runtime.publishFrame();
+    const secondFrame = (await nextMatching(second, (header) => header.kind === "frame")).header as Record<string, unknown>;
+    second.send({ protocolVersion: "workspace.v2", kind: "control.acquire", requestId: "request:same-acquire", browserSessionId: "session:one", tabId: "tab:one", expectedControlEpoch: 3, frame: paintedBinding(secondFrame, new Date().toISOString()) });
+    expect((await nextMatching(second, (header) => header.kind === "response" && header.requestId === "request:same-acquire")).header).toMatchObject({ ok: true, result: { kind: "controlAcquired", controlEpoch: 4 } });
+    expect(runtime.acquireCount).toBe(2);
+  });
+
+  it("expires control when the trusted desktop stops heartbeating and rejects stale local authority", async () => {
+    const root = await mkdtemp(join(tmpdir(), "webxd-workspace-heartbeat-expiry-"));
+    const runtime = new FakeWorkspaceRuntime();
+    const browserDirectory = join(root, "browserd");
+    const browserd = new BrowserdServer({ runtimeDirectory: browserDirectory, runtime: runtime as unknown as BrowserRuntime, allowTemporaryRuntimeDirectoryForTest: true });
+    await browserd.start(); cleanups.push(async () => await browserd.stop());
+    const gateway = new WorkspaceGateway({ runtimeDirectory: join(root, "workspace"), browserBackend: "agentcursor", browserDescriptorPath: join(browserDirectory, "browserd.json"), browserRuntimeDirectory: browserDirectory, heartbeatMs: 100, desktopHeartbeatTimeoutMs: 200 });
+    const descriptor = await gateway.start(); cleanups.push(async () => await gateway.stop());
+    const client = await FramedClient.open(descriptor.socketPath); cleanups.push(async () => client.close());
+    client.send({ protocolVersion: "workspace.v2", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret }); await client.next(); await client.next();
+    client.send({ protocolVersion: "workspace.v2", kind: "frame.select", requestId: "request:select", selectionId: "selection_expiry_001", browserSessionId: "session:one", tabId: "tab:one" });
+    await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:select");
+    runtime.publishFrame();
+    const frame = (await nextMatching(client, (header) => header.kind === "frame")).header as Record<string, unknown>;
+    client.send({ protocolVersion: "workspace.v2", kind: "control.acquire", requestId: "request:acquire", browserSessionId: "session:one", tabId: "tab:one", expectedControlEpoch: 1, frame: paintedBinding(frame, new Date().toISOString()) });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:acquire")).header).toMatchObject({ ok: true, result: { kind: "controlAcquired", controlEpoch: 2 } });
+
+    await waitUntil(() => runtime.releaseCount === 1, 2_000);
+    client.send({ protocolVersion: "workspace.v2", kind: "control.acquire", requestId: "request:acquire", browserSessionId: "session:one", tabId: "tab:one", expectedControlEpoch: 1, frame: paintedBinding(frame, new Date().toISOString()) });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:acquire")).header).toMatchObject({ ok: false, error: { code: "CONTROL_LEASE_CONFLICT" } });
+    expect(runtime.acquireCount).toBe(2);
+    client.send({ protocolVersion: "workspace.v2", kind: "control.heartbeat", requestId: "request:late-heartbeat", browserSessionId: "session:one", controlEpoch: 2 });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:late-heartbeat")).header).toMatchObject({ ok: false, error: { code: "CONTROL_LEASE_REQUIRED", retryable: false } });
+    expect(runtime.heartbeatCount).toBe(0);
+    expect(runtime.controlEpoch).toBe(3);
+  });
+
+  it("rejects stale painted bindings before control or input reaches browserd", async () => {
+    const root = await mkdtemp(join(tmpdir(), "webxd-workspace-stale-control-"));
+    const runtime = new FakeWorkspaceRuntime();
+    const browserDirectory = join(root, "browserd");
+    const browserd = new BrowserdServer({ runtimeDirectory: browserDirectory, runtime: runtime as unknown as BrowserRuntime, allowTemporaryRuntimeDirectoryForTest: true });
+    await browserd.start(); cleanups.push(async () => await browserd.stop());
+    const gateway = new WorkspaceGateway({ runtimeDirectory: join(root, "workspace"), browserBackend: "agentcursor", browserDescriptorPath: join(browserDirectory, "browserd.json"), browserRuntimeDirectory: browserDirectory, heartbeatMs: 100 });
+    const descriptor = await gateway.start(); cleanups.push(async () => await gateway.stop());
+    const client = await FramedClient.open(descriptor.socketPath); cleanups.push(async () => client.close());
+    client.send({ protocolVersion: "workspace.v2", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret }); await client.next(); await client.next();
+    client.send({ protocolVersion: "workspace.v2", kind: "frame.select", requestId: "request:select", selectionId: "selection_stale_001", browserSessionId: "session:one", tabId: "tab:one" });
+    await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:select");
+    runtime.publishFrame();
+    const frame = (await nextMatching(client, (header) => header.kind === "frame")).header as Record<string, unknown>;
+    const stale = { ...paintedBinding(frame, new Date().toISOString()), frameSequence: 99 };
+    client.send({ protocolVersion: "workspace.v2", kind: "control.acquire", requestId: "request:stale", browserSessionId: "session:one", tabId: "tab:one", expectedControlEpoch: 1, frame: stale });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:stale")).header).toMatchObject({ ok: false, error: { code: "INPUT_FRAME_STALE", retryable: true } });
+    expect(runtime.acquireCount).toBe(0);
+  });
+
+  it("forwards only held-input release shapes after the painted-frame age limit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "webxd-workspace-stale-release-"));
+    const runtime = new FakeWorkspaceRuntime();
+    const browserDirectory = join(root, "browserd");
+    const browserd = new BrowserdServer({ runtimeDirectory: browserDirectory, runtime: runtime as unknown as BrowserRuntime, allowTemporaryRuntimeDirectoryForTest: true });
+    await browserd.start(); cleanups.push(async () => await browserd.stop());
+    const gateway = new WorkspaceGateway({ runtimeDirectory: join(root, "workspace"), browserBackend: "agentcursor", browserDescriptorPath: join(browserDirectory, "browserd.json"), browserRuntimeDirectory: browserDirectory, heartbeatMs: 100 });
+    const descriptor = await gateway.start(); cleanups.push(async () => await gateway.stop());
+    const client = await FramedClient.open(descriptor.socketPath); cleanups.push(async () => client.close());
+    client.send({ protocolVersion: "workspace.v2", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret }); await client.next(); await client.next();
+    client.send({ protocolVersion: "workspace.v2", kind: "frame.select", requestId: "request:select", selectionId: "selection_release_01", browserSessionId: "session:one", tabId: "tab:one" });
+    await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:select");
+    runtime.publishFrame();
+    const frame = (await nextMatching(client, (header) => header.kind === "frame")).header as Record<string, unknown>;
+    const binding = paintedBinding(frame, new Date().toISOString());
+    client.send({ protocolVersion: "workspace.v2", kind: "control.acquire", requestId: "request:acquire", browserSessionId: "session:one", tabId: "tab:one", expectedControlEpoch: 1, frame: binding });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:acquire")).header).toMatchObject({ ok: true, result: { kind: "controlAcquired", controlEpoch: 2 } });
+
+    runtime.controlEpoch = 2;
+    runtime.publishFrame();
+    const humanFrame = (await nextMatching(client, (header) => header.kind === "frame" && header.controlEpoch === 2)).header as Record<string, unknown>;
+    const humanBinding = paintedBinding(humanFrame, new Date().toISOString());
+    client.send({ protocolVersion: "workspace.v2", kind: "input.batch", requestId: "request:down", browserSessionId: "session:one", tabId: "tab:one", controlEpoch: 2, inputBatchSequence: 1, inputTargetGeneration: 1, frame: humanBinding, events: [{ kind: "pointerDown", point: { imageX: 100, imageY: 50 }, button: "left", clickCount: 1 }] });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:down")).header).toMatchObject({ ok: true, result: { kind: "inputAck", inputBatchSequence: 1 } });
+
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 6_000);
+    try {
+      client.send({ protocolVersion: "workspace.v2", kind: "input.batch", requestId: "request:up", browserSessionId: "session:one", tabId: "tab:one", controlEpoch: 2, inputBatchSequence: 2, inputTargetGeneration: 1, frame: humanBinding, events: [{ kind: "pointerUp", point: { imageX: 100, imageY: 50 }, button: "left", clickCount: 1 }] });
+      expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:up")).header).toMatchObject({ ok: true, result: { kind: "inputAck", inputBatchSequence: 2 } });
+      client.send({ protocolVersion: "workspace.v2", kind: "input.batch", requestId: "request:stale-mutation", browserSessionId: "session:one", tabId: "tab:one", controlEpoch: 2, inputBatchSequence: 3, inputTargetGeneration: 1, frame: humanBinding, events: [{ kind: "pointerDown", point: { imageX: 100, imageY: 50 }, button: "left", clickCount: 1 }] });
+      expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:stale-mutation")).header).toMatchObject({ ok: false, error: { code: "INPUT_FRAME_STALE" } });
+    } finally {
+      clock.mockRestore();
+    }
+    expect(runtime.inputBatchCount).toBe(2);
   });
 
   it("rejects insecure descriptor permissions and connection rebinding", async () => {
@@ -169,9 +350,9 @@ describe("private workspace gateway", () => {
     await expect(readWorkspaceDescriptor(join(runtimeDirectory, "workspace.json"), runtimeDirectory)).rejects.toThrow("private regular file");
     await chmod(join(runtimeDirectory, "workspace.json"), 0o600);
     const client = await FramedClient.open(descriptor.socketPath); cleanups.push(async () => client.close());
-    client.send({ protocolVersion: "workspace.v1", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret });
+    client.send({ protocolVersion: "workspace.v2", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret });
     await client.next(); await client.next();
-    client.send({ protocolVersion: "workspace.v1", kind: "bind", requestId: "request:rebind", bindingSecret: descriptor.bindingSecret });
+    client.send({ protocolVersion: "workspace.v2", kind: "bind", requestId: "request:rebind", bindingSecret: descriptor.bindingSecret });
     expect((await client.next()).header).toMatchObject({ kind: "response", requestId: "request:rebind", ok: false, error: { code: "AUTH_FAILED" } });
     await waitUntil(() => client.closed);
   });
@@ -205,6 +386,14 @@ class FramedClient {
 class FakeWorkspaceRuntime extends EventEmitter {
   readonly frameBytes = Uint8Array.from({ length: 8192 }, (_, index) => (index * 31) & 0xff);
   readonly sha256 = createHash("sha256").update(this.frameBytes).digest("hex");
+  readonly leaseId = "raw-lease-NeverExpose-1234567890";
+  controlEpoch = 1;
+  acquireCount = 0;
+  heartbeatCount = 0;
+  releaseCount = 0;
+  readonly releasedLeaseIds: string[] = [];
+  inputEventCounts: Record<string, number> = {};
+  inputBatchCount = 0;
   subscriptionId?: string;
   connectionId?: string;
   failReplace = false;
@@ -212,7 +401,7 @@ class FakeWorkspaceRuntime extends EventEmitter {
   failNextSnapshot = false;
   snapshotFailures = 0;
   readonly snapshot: BrowserWorkspaceSnapshot = {
-    kind: "workspaceSnapshot", workspaceRevision: 1, generatedAt: new Date().toISOString(), sessions: [{ browserSessionId: "session:one", agentSessionId: "agent:one", actorDisplayId: "actor_1234567890123456", pathId: "agentcursor/chrome", state: "ready", controlState: "agent", controlEpoch: 1, captureReadiness: "ready", personaId: "persona_1234567890123456", cursor: { x: 10, y: 20, visible: true, pathSequence: 1, sampleSequence: 2, personaId: "persona_1234567890123456" }, tabs: [{ tabId: "tab:one", url: "http://fixture.local/", title: "Fixture <script>", state: "ready", captureReadiness: "ready", documentGeneration: 1, viewportGeneration: 1, frameSequence: 0 }] }],
+    kind: "workspaceSnapshot", workspaceRevision: 1, generatedAt: new Date().toISOString(), sessions: [{ browserSessionId: "session:one", agentSessionId: "agent:one", actorDisplayId: "actor_1234567890123456", pathId: "agentcursor/chrome", state: "ready", controlState: "agent", controlEpoch: 1, controlTransfer: "none", leaseExpiry: "none", captureReadiness: "ready", personaId: "persona_1234567890123456", cursor: { x: 10, y: 20, visible: true, pathSequence: 1, sampleSequence: 2, personaId: "persona_1234567890123456" }, tabs: [{ tabId: "tab:one", url: "http://fixture.local/", title: "Fixture <script>", state: "ready", captureReadiness: "ready", documentGeneration: 1, viewportGeneration: 1, frameSequence: 0 }] }],
   };
   workspaceSnapshot(): BrowserWorkspaceSnapshot {
     if (this.failNextSnapshot) { this.failNextSnapshot = false; this.snapshotFailures++; throw new BrowserProtocolError("CAPABILITY_UNAVAILABLE", "injected transient snapshot failure", true); }
@@ -230,21 +419,57 @@ class FakeWorkspaceRuntime extends EventEmitter {
   }
   workspaceFrameDeliveries(connectionId: string, frame: FrameEvent): Array<{ subscriptionId: string; frame: FrameEvent }> { return connectionId === this.connectionId && this.subscriptionId !== undefined ? [{ subscriptionId: this.subscriptionId, frame }] : []; }
   recordWorkspaceFrameDelivered(): void {}
+  async workspaceAcquireControl(_connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.control.acquire" }>): Promise<unknown> {
+    this.acquireCount++;
+    if (request.expectedControlEpoch !== this.controlEpoch) throw new BrowserProtocolError("CONTROL_LEASE_CONFLICT", "injected control epoch conflict", true);
+    this.controlEpoch++;
+    return { kind: "workspaceControlLease", browserSessionId: "session:one", selectedTabId: "tab:one", controlState: "human", controlEpoch: this.controlEpoch, controlTransfer: "none", captureReadiness: "ready", leaseExpiry: "healthy", inputTargetGeneration: 1, leaseId: this.leaseId, leaseExpiresInMs: 8_000 };
+  }
+  workspaceHeartbeatControl(_connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.control.heartbeat" }>): unknown {
+    if (request.leaseId !== this.leaseId) throw new BrowserProtocolError("CONTROL_LEASE_CONFLICT", "injected lease conflict");
+    this.heartbeatCount++;
+    return { kind: "workspaceControlHeartbeat", browserSessionId: "session:one", selectedTabId: "tab:one", controlState: "human", controlEpoch: this.controlEpoch, leaseExpiry: "healthy", leaseExpiresInMs: 8_000 };
+  }
+  async workspaceReleaseControl(_connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.control.release" }>): Promise<unknown> {
+    if (request.leaseId !== this.leaseId) throw new BrowserProtocolError("CONTROL_LEASE_CONFLICT", "injected lease conflict");
+    this.releaseCount++; this.releasedLeaseIds.push(request.leaseId); this.controlEpoch++;
+    return this.workspaceControlStatus("session:one");
+  }
+  workspaceControlStatus(_browserSessionId: string): unknown { return { kind: "workspaceControlStatus", browserSessionId: "session:one", controlState: this.releaseCount > 0 ? "agent" : this.controlEpoch > 1 ? "human" : "agent", controlEpoch: this.controlEpoch, controlTransfer: "none", ...(this.controlEpoch > 1 && this.releaseCount === 0 ? { selectedHumanControlTabId: "tab:one" } : {}), captureReadiness: "ready", leaseExpiry: this.controlEpoch > 1 && this.releaseCount === 0 ? "healthy" : "none" }; }
+  async workspaceInputBatch(_connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.input.batch" }>): Promise<unknown> {
+    if (request.leaseId !== this.leaseId) throw new BrowserProtocolError("CONTROL_LEASE_CONFLICT", "injected lease conflict");
+    this.inputBatchCount++;
+    this.inputEventCounts = {};
+    for (const event of request.events) this.inputEventCounts[event.kind] = (this.inputEventCounts[event.kind] ?? 0) + 1;
+    return { kind: "workspaceInputAck", inputBatchSequence: request.inputBatchSequence, acceptedEventCount: request.events.length, coalescedPointerMoveCount: 0, awaitingNewFrame: true };
+  }
   async workspaceReadFrame(_connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.frame.read" }>): Promise<unknown> {
     const offset = request.offset ?? 0; const max = request.maxBytes ?? this.frameBytes.byteLength; const chunk = this.frameBytes.slice(offset, Math.min(this.frameBytes.byteLength, offset + max));
     return { kind: "workspaceFrameArtifact", artifactId: "artifact_1234567890123456", browserSessionId: "session:one", tabId: "tab:one", subscriptionId: request.subscriptionId, frameSequence: 1, mediaType: "image/png", byteLength: chunk.byteLength, sha256: this.sha256, offset, totalBytes: this.frameBytes.byteLength, eof: offset + chunk.byteLength === this.frameBytes.byteLength, base64: Buffer.from(chunk).toString("base64") };
   }
   releaseConnection(): void { this.subscriptionId = undefined; this.connectionId = undefined; }
   async close(): Promise<void> {}
-  frame(): FrameEvent { return { protocolVersion: "browser.v2", kind: "frame.available", address: { browserSessionId: "session:one", tabId: "tab:one", targetId: "target_1234567890123456", controlEpoch: 1 }, documentGeneration: 1, viewportGeneration: 1, frameSequence: 1, capturedMonotonicMs: 100, publishedMonotonicMs: 110, mediaType: "image/png", byteLength: this.frameBytes.byteLength, artifactId: "artifact_1234567890123456", sha256: this.sha256, viewport: { width: 800, height: 600, devicePixelRatio: 1 }, url: "http://fixture.local/", title: "Fixture", cursor: { x: 10, y: 20, visible: true, pathSequence: 1, sampleSequence: 2, personaId: "persona_1234567890123456" } }; }
+  frame(): FrameEvent { return { protocolVersion: "browser.v3", kind: "frame.available", address: { browserSessionId: "session:one", tabId: "tab:one", targetId: "target_1234567890123456", controlEpoch: this.controlEpoch }, documentGeneration: 1, viewportGeneration: 1, frameSequence: 1, capturedMonotonicMs: 100, publishedMonotonicMs: 110, mediaType: "image/png", byteLength: this.frameBytes.byteLength, artifactId: "artifact_1234567890123456", sha256: this.sha256, imagePixelWidth: 800, imagePixelHeight: 600, viewport: { width: 800, height: 600, devicePixelRatio: 1 }, url: "http://fixture.local/", title: "Fixture", cursor: { x: 10, y: 20, visible: true, pathSequence: 1, sampleSequence: 2, personaId: "persona_1234567890123456" } }; }
   publishFrame(): void { this.emit("frame", this.frame()); }
+}
+
+function paintedBinding(frame: Record<string, unknown>, paintedAt: string): Record<string, unknown> {
+  return {
+    selectionId: frame.selectionId, browserdRuntimeInstanceId: frame.browserdRuntimeInstanceId,
+    browserSessionId: frame.browserSessionId, tabId: frame.tabId, subscriptionId: frame.subscriptionId,
+    controlEpoch: frame.controlEpoch, frameSequence: frame.frameSequence,
+    documentGeneration: frame.documentGeneration, viewportGeneration: frame.viewportGeneration,
+    imagePixelWidth: frame.imagePixelWidth, imagePixelHeight: frame.imagePixelHeight,
+    cssViewportWidth: frame.cssViewportWidth, cssViewportHeight: frame.cssViewportHeight,
+    devicePixelRatio: frame.devicePixelRatio, paintedAt,
+  };
 }
 
 async function bindAndSnapshot(descriptor: { socketPath: string; bindingSecret: string }): Promise<Record<string, unknown>> {
   const client = await FramedClient.open(descriptor.socketPath);
   try {
-    client.send({ protocolVersion: "workspace.v1", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret }); await client.next(); await client.next();
-    client.send({ protocolVersion: "workspace.v1", kind: "snapshot.get", requestId: "request:snapshot" });
+    client.send({ protocolVersion: "workspace.v2", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret }); await client.next(); await client.next();
+    client.send({ protocolVersion: "workspace.v2", kind: "snapshot.get", requestId: "request:snapshot" });
     const response = (await client.next()).header as { result: { snapshot: Record<string, unknown> } }; return response.result.snapshot;
   } finally { await client.close(); }
 }

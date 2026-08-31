@@ -219,7 +219,7 @@ export class BrowserdServer {
     }
     if (state.role === "workspace") {
       let request: WorkspaceBrokerRequest;
-      try { request = parseWorkspaceBrokerRequest(value); } catch (error) { this.sendCaught(state, isRecord(value) && typeof value.requestId === "string" ? value.requestId : undefined, error); return; }
+      try { request = parseWorkspaceBrokerRequest(value, Date.now(), Buffer.byteLength(line, "utf8")); } catch (error) { this.sendCaught(state, isRecord(value) && typeof value.requestId === "string" ? value.requestId : undefined, error); return; }
       await this.handleWorkspaceRequest(state, request);
       return;
     }
@@ -257,6 +257,11 @@ export class BrowserdServer {
         if (frame !== undefined) cachedDelivery = { subscriptionId: request.next.subscriptionId, frame };
       }
       else if (request.kind === "workspace.frame.read") result = await this.runtime.workspaceReadFrame(state.connectionId, request);
+      else if (request.kind === "workspace.control.acquire") result = await this.runtime.workspaceAcquireControl(state.connectionId, request);
+      else if (request.kind === "workspace.control.heartbeat") result = this.runtime.workspaceHeartbeatControl(state.connectionId, request);
+      else if (request.kind === "workspace.control.release") result = await this.runtime.workspaceReleaseControl(state.connectionId, request);
+      else if (request.kind === "workspace.control.status") result = this.runtime.workspaceControlStatus(request.browserSessionId);
+      else if (request.kind === "workspace.input.batch") result = await this.runtime.workspaceInputBatch(state.connectionId, request, controller.signal);
       else result = { kind: "workspacePong", generatedAt: new Date().toISOString() };
       this.send(state, { protocolVersion: PROTOCOL_VERSION, kind: "response", requestId: request.requestId, operationId: request.operationId, ok: true, result });
       if (cachedDelivery !== undefined) this.sendWorkspaceFrame(state, cachedDelivery.subscriptionId, cachedDelivery.frame);
@@ -294,8 +299,8 @@ export class BrowserdServer {
 
   private sendWorkspaceFrame(state: ConnectionState, subscriptionId: string, frame: FrameEvent): void {
     if (state.closed || state.role !== "workspace") return;
-    const message = { protocolVersion: PROTOCOL_VERSION, kind: "workspace.frame.available", runtimeInstanceId: this.descriptor.runtimeInstanceId, subscriptionId, browserSessionId: frame.address.browserSessionId, tabId: frame.address.tabId, controlEpoch: frame.address.controlEpoch, documentGeneration: frame.documentGeneration, viewportGeneration: frame.viewportGeneration, frameSequence: frame.frameSequence, capturedMonotonicMs: frame.capturedMonotonicMs, publishedMonotonicMs: frame.publishedMonotonicMs, mediaType: frame.mediaType, byteLength: frame.byteLength, artifactId: frame.artifactId, sha256: frame.sha256, width: frame.viewport.width, height: frame.viewport.height };
-    if (this.send(state, message, true)) this.runtime.recordWorkspaceFrameDelivered(state.connectionId, subscriptionId, frame);
+    const message = { protocolVersion: PROTOCOL_VERSION, kind: "workspace.frame.available", runtimeInstanceId: this.descriptor.runtimeInstanceId, subscriptionId, browserSessionId: frame.address.browserSessionId, tabId: frame.address.tabId, controlEpoch: frame.address.controlEpoch, documentGeneration: frame.documentGeneration, viewportGeneration: frame.viewportGeneration, frameSequence: frame.frameSequence, capturedMonotonicMs: frame.capturedMonotonicMs, publishedMonotonicMs: frame.publishedMonotonicMs, mediaType: frame.mediaType, byteLength: frame.byteLength, artifactId: frame.artifactId, sha256: frame.sha256, imagePixelWidth: frame.imagePixelWidth, imagePixelHeight: frame.imagePixelHeight, cssViewportWidth: frame.viewport.width, cssViewportHeight: frame.viewport.height, devicePixelRatio: frame.viewport.devicePixelRatio };
+    if (this.send(state, message, true)) this.runtime.recordWorkspaceFrameDelivered(state.connectionId, subscriptionId, this.descriptor.runtimeInstanceId, frame);
   }
 
   private readonly onWorkspaceState = (event: WorkspaceStateEvent): void => {

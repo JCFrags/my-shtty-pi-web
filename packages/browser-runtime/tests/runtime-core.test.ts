@@ -87,6 +87,26 @@ describe("bounded actor-scoped operations", () => {
     assert.equal(status.dispatchState, "dispatched");
   });
 
+  it("waits for physical task settlement after public epoch cancellation", async () => {
+    const registry = new OperationRegistry();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    registry.submit(actor, {
+      operationId: "operation:settlement", laneKey: "settlement", deadline: deadline(),
+      browserSessionId: "session:settlement", controlEpoch: 1,
+    }, async (context) => { context.markDispatched(); await held; });
+    while (registry.status(actor, "operation:settlement").dispatchState !== "dispatched") await sleep(1);
+    registry.incrementEpoch(actor, "session:settlement");
+    assert.equal((await registry.wait(actor, "operation:settlement")).state, "cancelled");
+    let settled = false;
+    const settlement = registry.awaitSessionSettlement(actor, "session:settlement").then(() => { settled = true; });
+    await sleep(5);
+    assert.equal(settled, false, "public cancellation must not claim physical settlement");
+    release();
+    await settlement;
+    assert.equal(settled, true);
+  });
+
   it("cancels prior epochs and prevents an agent-user-agent ABA revival", async () => {
     const registry = new OperationRegistry();
     registry.submit(actor, { operationId: "operation:aba", laneKey: "aba", deadline: deadline(), browserSessionId: "session:aba", controlEpoch: 1 }, async (context) => { while (true) { context.checkpoint(); await sleep(2); } });

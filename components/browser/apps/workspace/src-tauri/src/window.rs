@@ -1,4 +1,4 @@
-use crate::{capture::{EvidenceCapture, EvidenceCaptureService}, client::WorkspaceClientService, protocol::valid_id};
+use crate::{capture::{EvidenceCapture, EvidenceCaptureService}, client::WorkspaceClientService, error::{PublicError, WorkspaceError}, protocol::valid_id};
 use serde::Deserialize;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
@@ -42,6 +42,7 @@ where I: IntoIterator<Item = String> {
         else { return Err("unknown workspace launch argument".into()); }
     }
     if request.raise && request.hide { return Err("--raise and --hide conflict".into()); }
+    if request.hide && (request.browser_session_id.is_some() || request.evidence_capture.is_some()) { return Err("--hide cannot select or capture".into()); }
     if request.tab_id.is_some() && request.browser_session_id.is_none() { return Err("--select-tab requires --select-session".into()); }
     Ok(request)
 }
@@ -55,25 +56,40 @@ pub fn apply_window_action<R: Runtime>(window: &WebviewWindow<R>, action: Window
 }
 
 pub fn apply_launch_request<R: Runtime>(app: &AppHandle<R>, request: LaunchRequest, default_raise: bool) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = apply_launch_request_async(&app, request, default_raise).await {
+            app.state::<WorkspaceClientService>().notify_error(error);
+        }
+    });
+}
+
+async fn apply_launch_request_async<R: Runtime>(app: &AppHandle<R>, request: LaunchRequest, default_raise: bool) -> Result<(), PublicError> {
+    let service = app.state::<WorkspaceClientService>();
     if let Some(window) = app.get_webview_window("main") {
-        if request.hide { app.state::<WorkspaceClientService>().record_window_action("hide"); let _ = apply_window_action(&window, WindowAction::Hide); }
-        else if request.raise || default_raise || request.browser_session_id.is_some() { app.state::<WorkspaceClientService>().record_window_action("raise"); let _ = apply_window_action(&window, WindowAction::Raise); }
-        if let Some(name) = request.evidence_capture { if let Err(error) = app.state::<EvidenceCaptureService>().capture(&window, name) { eprintln!("rejected Tauri evidence capture: {error}"); } }
+        if request.hide {
+            if !service.may_hide_without_return() { service.release_for_hide().await?; }
+            apply_window_action(&window, WindowAction::Hide).map_err(|_| WorkspaceError::Unavailable.public())?;
+            service.record_window_action("hide");
+        } else if request.raise || default_raise || request.browser_session_id.is_some() {
+            apply_window_action(&window, WindowAction::Raise).map_err(|_| WorkspaceError::Unavailable.public())?;
+            service.record_window_action("raise");
+        }
+        if let Some(name) = request.evidence_capture {
+            if let Err(error) = app.state::<EvidenceCaptureService>().capture(&window, name) { eprintln!("rejected Tauri evidence capture: {error}"); }
+        }
     }
     if let Some(browser_session_id) = request.browser_session_id {
         let tab_id = request.tab_id;
-        let service = app.state::<WorkspaceClientService>();
-        if service.stage_launch_selection_if_offline(browser_session_id.clone(), tab_id.clone()) { return; }
-        let app = app.clone();
-        tauri::async_runtime::spawn(async move {
-            let service = app.state::<WorkspaceClientService>();
-            let resolved = match tab_id {
-                Some(value) => Some(value),
-                None => service.current().await.snapshot.and_then(|snapshot| snapshot.sessions.into_iter().find(|session| session.browser_session_id == browser_session_id)).and_then(|session| session.tabs.into_iter().next()).map(|tab| tab.tab_id),
-            };
-            if let Some(tab_id) = resolved { let _ = service.select(browser_session_id, tab_id).await; }
-        });
+        if service.stage_launch_selection_if_offline(browser_session_id.clone(), tab_id.clone()) { return Ok(()); }
+        let resolved = match tab_id {
+            Some(value) => Some(value),
+            None => service.current().await.snapshot.and_then(|snapshot| snapshot.sessions.into_iter().find(|session| session.browser_session_id == browser_session_id)).and_then(|session| session.tabs.into_iter().next()).map(|tab| tab.tab_id),
+        };
+        if let Some(tab_id) = resolved { service.select(browser_session_id, tab_id).await?; }
+        else { return Err(WorkspaceError::InvalidSelection.public()); }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -84,6 +100,7 @@ mod tests {
         assert_eq!(parse_launch_args(["--raise".into(), "--select-session=session:one".into(), "--select-tab=tab:one".into()]).unwrap(), LaunchRequest { raise: true, hide: false, browser_session_id: Some("session:one".into()), tab_id: Some("tab:one".into()), acceptance_output: None, evidence_capture: None });
         assert!(parse_launch_args(["--shell=rm".into()]).is_err());
         assert!(parse_launch_args(["--raise".into(), "--hide".into()]).is_err());
+        assert!(parse_launch_args(["--hide".into(), "--select-session=session:one".into()]).is_err());
         assert!(parse_launch_args(["--select-tab=tab:one".into()]).is_err());
         assert!(parse_launch_args(["--select-session=/tmp/socket".into()]).is_err());
         assert_eq!(parse_launch_args(["--hide".into()]).unwrap(), LaunchRequest { hide: true, ..LaunchRequest::default() });

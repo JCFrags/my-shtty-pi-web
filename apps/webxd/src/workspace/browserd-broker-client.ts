@@ -2,7 +2,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { createConnection, type Socket } from "node:net";
 import {
   MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, PROTOCOL_VERSION, parseServerMessage,
-  type ServerMessage, type WorkspaceFrameEvent, type WorkspaceSnapshot, type WorkspaceStateEvent,
+  type HumanInputEvent, type ServerMessage, type WorkspaceControlFrameBinding, type WorkspaceControlHeartbeatResult,
+  type WorkspaceControlLeaseResult, type WorkspaceControlStatusResult, type WorkspaceFrameEvent,
+  type WorkspaceInputAckResult, type WorkspaceSnapshot, type WorkspaceStateEvent,
 } from "../../../../packages/browser-protocol/src/index.js";
 import { BrowserdClientError, readSecureDescriptor, type BrowserdDescriptor } from "../browserd-client.js";
 
@@ -64,6 +66,36 @@ export class BrowserdWorkspaceBrokerClient {
 
   async ping(): Promise<void> { await this.call("workspace.ping", {}); }
 
+  async acquireControl(browserSessionId: string, tabId: string, expectedControlEpoch: number, frame: WorkspaceControlFrameBinding, stableOperationId: string): Promise<WorkspaceControlLeaseResult> {
+    const result = await this.call("workspace.control.acquire", { browserSessionId, tabId, expectedControlEpoch, frame }, stableOperationId);
+    if (!isRecord(result) || result.kind !== "workspaceControlLease") throw new BrowserdClientError("INTERNAL_ERROR", "browser workspace returned an invalid control lease", false, this.#runtimeInstanceId);
+    return result as unknown as WorkspaceControlLeaseResult;
+  }
+
+  async heartbeatControl(browserSessionId: string, leaseId: string): Promise<WorkspaceControlHeartbeatResult> {
+    const result = await this.call("workspace.control.heartbeat", { browserSessionId, leaseId });
+    if (!isRecord(result) || result.kind !== "workspaceControlHeartbeat") throw new BrowserdClientError("INTERNAL_ERROR", "browser workspace returned an invalid control heartbeat", false, this.#runtimeInstanceId);
+    return result as unknown as WorkspaceControlHeartbeatResult;
+  }
+
+  async releaseControl(browserSessionId: string, leaseId: string, stableOperationId: string): Promise<WorkspaceControlStatusResult> {
+    const result = await this.call("workspace.control.release", { browserSessionId, leaseId }, stableOperationId);
+    if (!isRecord(result) || result.kind !== "workspaceControlStatus") throw new BrowserdClientError("INTERNAL_ERROR", "browser workspace returned an invalid control release", false, this.#runtimeInstanceId);
+    return result as unknown as WorkspaceControlStatusResult;
+  }
+
+  async controlStatus(browserSessionId: string): Promise<WorkspaceControlStatusResult> {
+    const result = await this.call("workspace.control.status", { browserSessionId });
+    if (!isRecord(result) || result.kind !== "workspaceControlStatus") throw new BrowserdClientError("INTERNAL_ERROR", "browser workspace returned an invalid control status", false, this.#runtimeInstanceId);
+    return result as unknown as WorkspaceControlStatusResult;
+  }
+
+  async inputBatch(payload: { readonly browserSessionId: string; readonly tabId: string; readonly controlEpoch: number; readonly leaseId: string; readonly inputBatchSequence: number; readonly inputTargetGeneration: number; readonly frame: WorkspaceControlFrameBinding; readonly events: readonly HumanInputEvent[] }, stableOperationId: string): Promise<WorkspaceInputAckResult> {
+    const result = await this.call("workspace.input.batch", { ...payload, events: [...payload.events] }, stableOperationId);
+    if (!isRecord(result) || result.kind !== "workspaceInputAck") throw new BrowserdClientError("INTERNAL_ERROR", "browser workspace returned an invalid input acknowledgement", false, this.#runtimeInstanceId);
+    return result as unknown as WorkspaceInputAckResult;
+  }
+
   async subscribeFrames(subscriptionId: string, browserSessionId: string, tabId: string, interest: "idle" | "selected" = "selected"): Promise<void> {
     const prior = this.#subscriptions.get(subscriptionId);
     if (prior !== undefined) {
@@ -121,6 +153,15 @@ export class BrowserdWorkspaceBrokerClient {
     return output;
   }
 
+  async disconnectCurrent(): Promise<void> {
+    const connection = this.#connection;
+    if (connection === undefined) return;
+    this.#connection = undefined;
+    this.#subscriptions.clear();
+    await connection.close();
+    this.options.onConnectionChanged?.(false);
+  }
+
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
@@ -134,9 +175,9 @@ export class BrowserdWorkspaceBrokerClient {
     this.options.onConnectionChanged?.(false);
   }
 
-  private async call(kind: string, payload: Record<string, unknown>): Promise<unknown> {
+  private async call(kind: string, payload: Record<string, unknown>, stableOperationId?: string): Promise<unknown> {
     const connection = await this.connection();
-    const operationId = nextId("workspaceOperation");
+    const operationId = stableOperationId ?? nextId("workspaceOperation");
     return await connection.call({ protocolVersion: PROTOCOL_VERSION, kind, requestId: nextId("workspaceRequest"), operationId, deadline: new Date(Date.now() + this.#requestTimeoutMs).toISOString(), ...payload }, operationId);
   }
 
@@ -145,17 +186,24 @@ export class BrowserdWorkspaceBrokerClient {
     const descriptor = await readSecureDescriptor(this.#descriptorPath, this.#runtimeDirectory);
     const current = this.#connection;
     if (current !== undefined && !current.closed && current.runtimeInstanceId === descriptor.runtimeInstanceId) return current;
-    if (current !== undefined) { this.#connection = undefined; await current.close(); }
+    if (current !== undefined) await this.retireConnection(current);
     const opening = this.#connecting;
     if (opening !== undefined) {
       const connected = await opening;
       if (!connected.closed && connected.runtimeInstanceId === descriptor.runtimeInstanceId) return connected;
-      await connected.close();
+      await this.retireConnection(connected);
     }
     const promise = this.open(descriptor);
     this.#connecting = promise;
     try { return await promise; }
     finally { if (this.#connecting === promise) this.#connecting = undefined; }
+  }
+
+  private async retireConnection(connection: WorkspaceBrokerConnection): Promise<void> {
+    if (this.#connection === connection) this.#connection = undefined;
+    this.#subscriptions.clear();
+    this.options.onConnectionChanged?.(false);
+    await connection.close();
   }
 
   private async open(descriptor: BrowserdDescriptor): Promise<WorkspaceBrokerConnection> {

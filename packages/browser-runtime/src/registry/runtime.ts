@@ -1,18 +1,39 @@
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { BrowserProtocolError, type ActorIdentity, type BrowserRequest, type FrameEvent, type OperationStatus, type SessionDescriptor, type TabAddress, type WorkspaceBrokerRequest, type WorkspaceSnapshot, type WorkspaceStateEvent } from "@webx/browser-protocol";
+import { BrowserProtocolError, PROTOCOL_VERSION, type ActorIdentity, type BrowserRequest, type FrameEvent, type HumanInputEvent, type OperationStatus, type SessionDescriptor, type TabAddress, type WorkspaceBrokerRequest, type WorkspaceControlFrameBinding, type WorkspaceSnapshot, type WorkspaceStateEvent } from "@webx/browser-protocol";
 import { actorKey, DenyNavigationAuthorization, type NavigationAuthorization } from "../actor/identity.js";
 import { BrowserArtifactStore } from "../artifacts/store.js";
 import { findChromeExecutable, type ChromeHostOptions } from "../chrome/host.js";
 import { ProfileManager } from "../chrome/profile-manager.js";
-import type { CoordinateAction } from "../motor/session-motor.js";
+import type { ControlLeaseProof } from "../control/session-control.js";
+import type { CoordinateAction, DirectHumanInputEvent } from "../motor/session-motor.js";
 import { canonicalOperationFingerprint, OperationRegistry, type OperationContext } from "../operations/registry.js";
 import { BrowserSession, type DomFallbackAction } from "./session.js";
 
 interface RuntimeSubscription { readonly actor: string; readonly connectionId: string; readonly subscriptionId: string; readonly address: TabAddress; readonly interest: "idle" | "selected"; readonly consumerKey: string }
-interface WorkspaceSubscription { readonly connectionId: string; readonly subscriptionId: string; readonly browserSessionId: string; readonly tabId: string; readonly interest: "idle" | "selected"; readonly consumerKey: string }
+interface WorkspaceSubscription { readonly connectionId: string; readonly subscriptionId: string; readonly browserSessionId: string; readonly tabId: string; readonly interest: "idle" | "selected"; readonly consumerKey: string; controlEpoch: number }
 interface WorkspaceFrameSelection { readonly subscriptionId: string; readonly browserSessionId: string; readonly tabId: string }
-interface WorkspaceFrameLedgerEntry { readonly subscriptionId: string; readonly actor: ActorIdentity; readonly browserSessionId: string; readonly tabId: string; readonly frameSequence: number; readonly artifactId: string; readonly deliveredAtMs: number }
+interface WorkspaceFrameLedgerEntry {
+  readonly runtimeInstanceId: string;
+  readonly subscriptionId: string;
+  readonly actor: ActorIdentity;
+  readonly browserSessionId: string;
+  readonly tabId: string;
+  readonly controlEpoch: number;
+  readonly frameSequence: number;
+  readonly documentGeneration: number;
+  readonly viewportGeneration: number;
+  readonly imagePixelWidth: number;
+  readonly imagePixelHeight: number;
+  readonly cssViewportWidth: number;
+  readonly cssViewportHeight: number;
+  readonly devicePixelRatio: number;
+  readonly capturedMonotonicMs: number;
+  readonly artifactId: string;
+  readonly sha256: string;
+  readonly byteLength: number;
+  readonly deliveredAtMs: number;
+}
 
 export const DEFAULT_SCREENSHOT_OBSERVATION_TTL_MS = 60_000;
 export const DEFAULT_DOM_OBSERVATION_TTL_MS = 60_000;
@@ -45,6 +66,8 @@ export class BrowserRuntime extends EventEmitter {
   private readonly workspaceSubscriptions = new Map<string, Map<string, WorkspaceSubscription>>();
   private readonly workspaceEventSubscribers = new Set<string>();
   private readonly workspaceFrameLedgers = new Map<string, WorkspaceFrameLedgerEntry[]>();
+  private readonly workspaceInputInFlight = new Map<string, { readonly inputBatchSequence: number; readonly operationId: string; readonly promise: Promise<unknown> }>();
+  private readonly workspaceControlOperations = new Map<string, { readonly fingerprint: string; readonly promise: Promise<unknown> }>();
   private workspaceRevision = 0;
   private readonly navigationAuthorization: NavigationAuthorization;
   private readonly chrome: Omit<ChromeHostOptions, "hostId" | "profileManager">;
@@ -88,7 +111,7 @@ export class BrowserRuntime extends EventEmitter {
   get workspaceSubscriptionCount(): number { let count = 0; for (const values of this.workspaceSubscriptions.values()) count += values.size; return count; }
   get workspaceLedgerCount(): number { let count = 0; for (const values of this.workspaceFrameLedgers.values()) count += values.length; return count; }
 
-  listSessions(actor: ActorIdentity): SessionDescriptor[] { const owner = actorKey(actor); return [...this.sessions.values()].filter((session) => actorKey(session.actor) === owner).map((session) => session.descriptor()); }
+  listSessions(actor: ActorIdentity): SessionDescriptor[] { const owner = actorKey(actor); return [...this.sessions.values()].filter((session) => actorKey(session.actor) === owner).map((session) => session.actorDescriptor()); }
   ownsSession(actor: ActorIdentity, browserSessionId: string): boolean { const session = this.sessions.get(browserSessionId); return session !== undefined && actorKey(session.actor) === actorKey(actor); }
 
   workspaceSnapshot(): WorkspaceSnapshot {
@@ -98,6 +121,7 @@ export class BrowserRuntime extends EventEmitter {
       generatedAt: new Date().toISOString(),
       sessions: [...this.sessions.values()].map((session) => {
         const descriptor = session.descriptor();
+        const control = session.control.snapshot();
         const activeOperation = this.operations.workspaceSummary(descriptor.browserSessionId);
         return {
           browserSessionId: descriptor.browserSessionId,
@@ -105,8 +129,11 @@ export class BrowserRuntime extends EventEmitter {
           actorDisplayId: `actor_${createHash("sha256").update(actorKey(session.actor)).digest("base64url").slice(0, 24)}`,
           pathId: "agentcursor/chrome" as const,
           state: descriptor.state,
-          controlState: "agent" as const,
-          controlEpoch: descriptor.controlEpoch,
+          controlState: control.controlState,
+          controlEpoch: control.controlEpoch,
+          controlTransfer: control.controlTransfer,
+          ...(control.selectedHumanControlTabId === undefined ? {} : { selectedHumanControlTabId: control.selectedHumanControlTabId }),
+          leaseExpiry: control.leaseExpiry,
           captureReadiness: session.captureReadinessState,
           personaId: descriptor.personaId,
           cursor: descriptor.cursor,
@@ -132,7 +159,7 @@ export class BrowserRuntime extends EventEmitter {
     const session = this.sessions.get(browserSessionId);
     const tab = session?.descriptor().tabs.find((item) => item.address.tabId === tabId);
     if (session === undefined || tab === undefined || tab.state !== "ready") throw new BrowserProtocolError("TAB_NOT_FOUND", "Workspace tab not found.");
-    const subscription: WorkspaceSubscription = { connectionId, subscriptionId, browserSessionId, tabId, interest, consumerKey: `workspace\u0000${connectionId}\u0000${subscriptionId}` };
+    const subscription: WorkspaceSubscription = { connectionId, subscriptionId, browserSessionId, tabId, interest, consumerKey: `workspace\u0000${connectionId}\u0000${subscriptionId}`, controlEpoch: tab.address.controlEpoch };
     session.subscribeFrames(subscription.consumerKey, tab.address, interest);
     values.set(subscriptionId, subscription);
     this.workspaceSubscriptions.set(connectionId, values);
@@ -168,7 +195,7 @@ export class BrowserRuntime extends EventEmitter {
     const projectedConnectionCount = values.size - Number(priorSubscription !== undefined) + 1;
     const projectedGlobalCount = this.workspaceSubscriptionCount - Number(priorSubscription !== undefined) + 1;
     if (projectedConnectionCount > 16 || projectedGlobalCount > 32) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Workspace subscription limit reached.", true);
-    const subscription: WorkspaceSubscription = { connectionId, subscriptionId: next.subscriptionId, browserSessionId: next.browserSessionId, tabId: next.tabId, interest: next.interest, consumerKey: `workspace\u0000${connectionId}\u0000${next.subscriptionId}` };
+    const subscription: WorkspaceSubscription = { connectionId, subscriptionId: next.subscriptionId, browserSessionId: next.browserSessionId, tabId: next.tabId, interest: next.interest, consumerKey: `workspace\u0000${connectionId}\u0000${next.subscriptionId}`, controlEpoch: tab.address.controlEpoch };
     const cached = session.latestValidWorkspaceFrame(tab.address, 2_000);
     session.subscribeFrames(subscription.consumerKey, tab.address, next.interest, cached !== undefined);
     if (priorSubscription !== undefined) this.invalidateWorkspaceSubscription(connectionId, values, priorSubscription, false);
@@ -180,17 +207,26 @@ export class BrowserRuntime extends EventEmitter {
   workspaceFrameDeliveries(connectionId: string, frame: FrameEvent): Array<{ subscriptionId: string; frame: FrameEvent }> {
     const deliveries: Array<{ subscriptionId: string; frame: FrameEvent }> = [];
     for (const subscription of this.workspaceSubscriptions.get(connectionId)?.values() ?? []) {
-      if (subscription.browserSessionId === frame.address.browserSessionId && subscription.tabId === frame.address.tabId) deliveries.push({ subscriptionId: subscription.subscriptionId, frame });
+      if (subscription.browserSessionId === frame.address.browserSessionId && subscription.tabId === frame.address.tabId && subscription.controlEpoch === frame.address.controlEpoch) deliveries.push({ subscriptionId: subscription.subscriptionId, frame });
     }
     return deliveries;
   }
 
-  recordWorkspaceFrameDelivered(connectionId: string, subscriptionId: string, frame: FrameEvent): void {
+  recordWorkspaceFrameDelivered(connectionId: string, subscriptionId: string, runtimeInstanceId: string, frame: FrameEvent): void {
     const session = this.sessions.get(frame.address.browserSessionId);
     const subscription = this.workspaceSubscriptions.get(connectionId)?.get(subscriptionId);
-    if (session === undefined || subscription === undefined || subscription.browserSessionId !== frame.address.browserSessionId || subscription.tabId !== frame.address.tabId) return;
+    if (session === undefined || subscription === undefined || subscription.browserSessionId !== frame.address.browserSessionId || subscription.tabId !== frame.address.tabId || subscription.controlEpoch !== frame.address.controlEpoch) return;
     const values = (this.workspaceFrameLedgers.get(connectionId) ?? []).filter((item) => Date.now() - item.deliveredAtMs <= 60_000);
-    values.push({ subscriptionId, actor: session.actor, browserSessionId: frame.address.browserSessionId, tabId: frame.address.tabId, frameSequence: frame.frameSequence, artifactId: frame.artifactId, deliveredAtMs: Date.now() });
+    values.push({
+      runtimeInstanceId, subscriptionId, actor: session.actor,
+      browserSessionId: frame.address.browserSessionId, tabId: frame.address.tabId,
+      controlEpoch: frame.address.controlEpoch, frameSequence: frame.frameSequence,
+      documentGeneration: frame.documentGeneration, viewportGeneration: frame.viewportGeneration,
+      imagePixelWidth: frame.imagePixelWidth, imagePixelHeight: frame.imagePixelHeight,
+      cssViewportWidth: frame.viewport.width, cssViewportHeight: frame.viewport.height,
+      devicePixelRatio: frame.viewport.devicePixelRatio, capturedMonotonicMs: frame.capturedMonotonicMs,
+      artifactId: frame.artifactId, sha256: frame.sha256, byteLength: frame.byteLength, deliveredAtMs: Date.now(),
+    });
     while (values.filter((item) => item.subscriptionId === subscriptionId).length > 2) values.splice(values.findIndex((item) => item.subscriptionId === subscriptionId), 1);
     while (values.length > 32) values.shift();
     this.workspaceFrameLedgers.set(connectionId, values);
@@ -209,6 +245,112 @@ export class BrowserRuntime extends EventEmitter {
     return { kind: "workspaceFrameArtifact", artifactId: entry.artifactId, browserSessionId: entry.browserSessionId, tabId: entry.tabId, subscriptionId: entry.subscriptionId, frameSequence: entry.frameSequence, mediaType: artifact.descriptor.mediaType, byteLength: chunk.byteLength, sha256: artifact.descriptor.sha256, offset, totalBytes: artifact.bytes.byteLength, eof: offset + chunk.byteLength >= artifact.bytes.byteLength, base64: Buffer.from(chunk).toString("base64") };
   }
 
+  async workspaceAcquireControl(connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.control.acquire" }>): Promise<unknown> {
+    return await this.executeWorkspaceControlOperation(connectionId, request, async () => {
+      const session = this.requireWorkspaceSession(request.browserSessionId);
+      this.requireWorkspaceControlFrame(connectionId, request.browserSessionId, request.tabId, request.frame, 1_500);
+      if (request.expectedControlEpoch !== request.frame.controlEpoch) throw new BrowserProtocolError("CONTROL_LEASE_CONFLICT", "Browser control frame epoch does not match the expected state.", true);
+      const lease = await session.control.acquire({ connectionId, subscriptionId: request.frame.subscriptionId, tabId: request.tabId, expectedControlEpoch: request.expectedControlEpoch });
+      return {
+        kind: "workspaceControlLease", browserSessionId: request.browserSessionId,
+        selectedTabId: lease.selectedTabId, controlState: "human", controlEpoch: lease.controlEpoch,
+        controlTransfer: "none", captureReadiness: "ready", leaseExpiry: "healthy",
+        inputTargetGeneration: lease.inputTargetGeneration, leaseId: lease.leaseId,
+        leaseExpiresInMs: lease.leaseExpiresInMs,
+      };
+    });
+  }
+
+  workspaceHeartbeatControl(connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.control.heartbeat" }>): unknown {
+    const session = this.requireWorkspaceSession(request.browserSessionId);
+    const lease = session.control.heartbeat(connectionId, request.leaseId);
+    return {
+      kind: "workspaceControlHeartbeat", browserSessionId: request.browserSessionId,
+      selectedTabId: lease.selectedTabId, controlState: "human", controlEpoch: lease.controlEpoch,
+      leaseExpiry: lease.leaseExpiresInMs <= session.control.expectedHeartbeatIntervalMs * 2 ? "expiring" : "healthy",
+      leaseExpiresInMs: lease.leaseExpiresInMs,
+    };
+  }
+
+  async workspaceReleaseControl(connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.control.release" }>): Promise<unknown> {
+    return await this.executeWorkspaceControlOperation(connectionId, request, async () => {
+      const session = this.requireWorkspaceSession(request.browserSessionId);
+      await session.control.release({ connectionId, leaseId: request.leaseId });
+      return this.workspaceControlStatus(request.browserSessionId);
+    });
+  }
+
+  async workspaceInputBatch(connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.input.batch" }>, signal?: AbortSignal): Promise<unknown> {
+    const session = this.requireWorkspaceSession(request.browserSessionId);
+    const proof: ControlLeaseProof = {
+      connectionId, leaseId: request.leaseId, browserSessionId: request.browserSessionId,
+      tabId: request.tabId, controlEpoch: request.controlEpoch, inputTargetGeneration: request.inputTargetGeneration,
+    };
+    session.control.authorizeInputLease(proof);
+    const retained = session.humanInput.retainedAcknowledgement(request.inputBatchSequence, request.operationId);
+    if (retained !== undefined) return retained;
+    const active = this.workspaceInputInFlight.get(request.browserSessionId);
+    if (active !== undefined) {
+      if (active.inputBatchSequence === request.inputBatchSequence && active.operationId === request.operationId) return await active.promise;
+      if (active.inputBatchSequence === request.inputBatchSequence) throw new BrowserProtocolError("INPUT_SEQUENCE_STALE", "Browser input sequence is stale.", false);
+      throw new BrowserProtocolError("INPUT_RATE_LIMITED", "A browser input batch is already in flight.", true);
+    }
+    const promise = this.dispatchWorkspaceInputBatch(session, connectionId, request, proof, signal);
+    const record = { inputBatchSequence: request.inputBatchSequence, operationId: request.operationId, promise };
+    this.workspaceInputInFlight.set(request.browserSessionId, record);
+    try { return await promise; }
+    finally { if (this.workspaceInputInFlight.get(request.browserSessionId) === record) this.workspaceInputInFlight.delete(request.browserSessionId); }
+  }
+
+  private async dispatchWorkspaceInputBatch(session: BrowserSession, connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.input.batch" }>, proof: ControlLeaseProof, signal?: AbortSignal): Promise<unknown> {
+    const releaseOnly = isHeldReleaseOnly(request.events, session.motor);
+    const ledger = this.requireWorkspaceControlFrame(
+      connectionId, request.browserSessionId, request.tabId, request.frame,
+      releaseOnly ? Number.POSITIVE_INFINITY : inputFrameFreshnessMs(request.events),
+      releaseOnly,
+    );
+    const events = mapHumanInputEvents(request.events, ledger, releaseOnly ? { x: session.motor.state.x, y: session.motor.state.y } : undefined);
+    if (!releaseOnly) session.humanInput.assertFrameGuard(request.frame.frameSequence, events);
+    let awaitingNewFrame = false;
+    let reserved = false;
+    let dispatched;
+    try {
+      dispatched = await session.dispatchHumanInput(request.tabId, request.controlEpoch, events, () => {
+        session.control.commitInputBatch(proof, request.inputBatchSequence);
+        reserved = true;
+        awaitingNewFrame = session.humanInput.noteFrameGuard(request.frame.frameSequence, events);
+      }, signal);
+    } catch (error) {
+      if (reserved) {
+        session.humanInput.stop();
+        void this.terminateControlFailedSession(request.browserSessionId);
+      }
+      throw error;
+    }
+    if (awaitingNewFrame) session.frames.requestCapture(request.tabId);
+    const acknowledgement = {
+      kind: "workspaceInputAck" as const,
+      inputBatchSequence: request.inputBatchSequence,
+      acceptedEventCount: request.events.length,
+      coalescedPointerMoveCount: dispatched.coalescedPointerMoveCount,
+      awaitingNewFrame,
+    };
+    session.humanInput.retainAcknowledgement(request.operationId, acknowledgement);
+    return acknowledgement;
+  }
+
+  workspaceControlStatus(browserSessionId: string): unknown {
+    const session = this.requireWorkspaceSession(browserSessionId);
+    const control = session.control.snapshot();
+    return {
+      kind: "workspaceControlStatus", browserSessionId,
+      controlState: control.controlState, controlEpoch: control.controlEpoch,
+      controlTransfer: control.controlTransfer,
+      ...(control.selectedHumanControlTabId === undefined ? {} : { selectedHumanControlTabId: control.selectedHumanControlTabId }),
+      captureReadiness: session.captureReadinessState, leaseExpiry: control.leaseExpiry,
+    };
+  }
+
   shouldDeliverFrame(connectionId: string, actor: ActorIdentity, frame: FrameEvent): boolean {
     for (const subscription of this.subscriptions.get(connectionId)?.values() ?? []) if (subscription.actor === actorKey(actor) && sameAddress(subscription.address, frame.address)) return true;
     return false;
@@ -222,11 +364,120 @@ export class BrowserRuntime extends EventEmitter {
   }
 
   releaseWorkspaceConnection(connectionId: string): void {
+    for (const session of this.sessions.values()) session.control.workspaceDisconnected(connectionId);
     const workspace = this.workspaceSubscriptions.get(connectionId);
     this.workspaceSubscriptions.delete(connectionId);
     this.workspaceEventSubscribers.delete(connectionId);
     this.workspaceFrameLedgers.delete(connectionId);
+    for (const key of [...this.workspaceControlOperations.keys()]) if (key.startsWith(`${connectionId}\u0000`)) this.workspaceControlOperations.delete(key);
     for (const subscription of workspace?.values() ?? []) this.sessions.get(subscription.browserSessionId)?.frames.removeConsumer(subscription.consumerKey);
+  }
+
+  private async executeWorkspaceControlOperation(connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.control.acquire" | "workspace.control.release" }>, task: () => Promise<unknown>): Promise<unknown> {
+    const key = `${connectionId}\u0000${request.operationId}`;
+    const fingerprint = workspaceControlFingerprint(request);
+    const existing = this.workspaceControlOperations.get(key);
+    if (existing !== undefined) {
+      if (existing.fingerprint !== fingerprint) throw new BrowserProtocolError("CONTROL_LEASE_CONFLICT", "Browser control operation identity is already bound.", false);
+      return await existing.promise;
+    }
+    const promise = task();
+    this.workspaceControlOperations.set(key, { fingerprint, promise });
+    while (this.workspaceControlOperations.size > 128) {
+      const first = this.workspaceControlOperations.keys().next().value as string | undefined;
+      if (first === undefined || first === key) break;
+      this.workspaceControlOperations.delete(first);
+    }
+    return await promise;
+  }
+
+  private fenceSessionAuthority(browserSessionId: string, nextEpoch: number): void {
+    if (!Number.isSafeInteger(nextEpoch) || nextEpoch < 1) throw new BrowserProtocolError("CONTROL_TRANSFER_PENDING", "Browser control epoch is unavailable.", true);
+    for (const [connectionId, values] of this.subscriptions) {
+      for (const [subscriptionId, subscription] of values) if (subscription.address.browserSessionId === browserSessionId) values.delete(subscriptionId);
+      if (values.size === 0) this.subscriptions.delete(connectionId);
+    }
+    for (const [connectionId, entries] of this.workspaceFrameLedgers) {
+      const retained = entries.filter((entry) => entry.browserSessionId !== browserSessionId);
+      if (retained.length === 0) this.workspaceFrameLedgers.delete(connectionId); else this.workspaceFrameLedgers.set(connectionId, retained);
+    }
+  }
+
+  private async establishHumanWorkspaceFrameStream(connectionId: string, subscriptionId: string, browserSessionId: string, tabId: string, epoch: number, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    const session = this.requireWorkspaceSession(browserSessionId);
+    const values = this.workspaceSubscriptions.get(connectionId);
+    const selected = values?.get(subscriptionId);
+    if (selected === undefined || selected.browserSessionId !== browserSessionId || selected.tabId !== tabId || selected.interest !== "selected") {
+      throw new BrowserProtocolError("CONTROL_LEASE_CONFLICT", "Browser control selection is no longer current.", true);
+    }
+    for (const [otherConnectionId, otherValues] of this.workspaceSubscriptions) {
+      for (const subscription of [...otherValues.values()]) {
+        if (subscription.browserSessionId === browserSessionId && subscription !== selected) this.invalidateWorkspaceSubscription(otherConnectionId, otherValues, subscription);
+      }
+    }
+    const tab = session.descriptor().tabs.find((item) => item.address.tabId === tabId);
+    if (tab === undefined || tab.state !== "ready" || tab.address.controlEpoch !== epoch) throw new BrowserProtocolError("CONTROL_NOT_READY", "Browser view is preparing.", true);
+    selected.controlEpoch = epoch;
+    session.subscribeFrames(selected.consumerKey, tab.address, "selected");
+    signal.throwIfAborted();
+  }
+
+  private async establishAgentWorkspaceFrameStreams(browserSessionId: string, epoch: number, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    const session = this.requireWorkspaceSession(browserSessionId);
+    for (const values of this.workspaceSubscriptions.values()) {
+      for (const subscription of values.values()) {
+        if (subscription.browserSessionId !== browserSessionId) continue;
+        const tab = session.descriptor().tabs.find((item) => item.address.tabId === subscription.tabId);
+        if (tab === undefined || tab.state !== "ready" || tab.address.controlEpoch !== epoch) continue;
+        subscription.controlEpoch = epoch;
+        session.subscribeFrames(subscription.consumerKey, tab.address, subscription.interest);
+      }
+    }
+    signal.throwIfAborted();
+  }
+
+  private async terminateControlFailedSession(browserSessionId: string): Promise<void> {
+    const session = this.sessions.get(browserSessionId);
+    if (session === undefined) return;
+    try { await session.close(); } catch { /* The failed control session remains terminal and inaccessible. */ }
+    if (this.sessions.get(browserSessionId) !== session) return;
+    this.sessions.delete(browserSessionId);
+    this.removeSessionSubscriptions(browserSessionId);
+    this.workspaceChanged("session", browserSessionId);
+  }
+
+  private requireWorkspaceSession(browserSessionId: string): BrowserSession {
+    const session = this.sessions.get(browserSessionId);
+    if (session === undefined) throw new BrowserProtocolError("SESSION_NOT_FOUND", "Browser session not found.");
+    return session;
+  }
+
+  private requireWorkspaceControlFrame(connectionId: string, browserSessionId: string, tabId: string, binding: WorkspaceControlFrameBinding, maxAgeMs: number, releaseException = false): WorkspaceFrameLedgerEntry {
+    const values = (this.workspaceFrameLedgers.get(connectionId) ?? []).filter((entry) => Date.now() - entry.deliveredAtMs <= 60_000);
+    if (values.length === 0) this.workspaceFrameLedgers.delete(connectionId); else this.workspaceFrameLedgers.set(connectionId, values);
+    const exact = [...values].reverse().find((entry) => entry.subscriptionId === binding.subscriptionId
+      && entry.runtimeInstanceId === binding.runtimeInstanceId && entry.browserSessionId === browserSessionId && entry.tabId === tabId
+      && entry.controlEpoch === binding.controlEpoch && entry.frameSequence === binding.frameSequence
+      && entry.documentGeneration === binding.documentGeneration && entry.viewportGeneration === binding.viewportGeneration
+      && entry.imagePixelWidth === binding.imagePixelWidth && entry.imagePixelHeight === binding.imagePixelHeight);
+    const subscription = this.workspaceSubscriptions.get(connectionId)?.get(binding.subscriptionId);
+    if (exact === undefined || subscription === undefined
+      || subscription.browserSessionId !== browserSessionId || subscription.tabId !== tabId
+      || (!releaseException && subscription.controlEpoch !== binding.controlEpoch)
+      || performance.now() - exact.capturedMonotonicMs > maxAgeMs) {
+      throw new BrowserProtocolError("INPUT_FRAME_STALE", "Browser control frame is stale.", true);
+    }
+    const session = this.requireWorkspaceSession(browserSessionId);
+    const tab = session.descriptor().tabs.find((item) => item.address.tabId === tabId);
+    if (tab === undefined || tab.state !== "ready") throw new BrowserProtocolError("INPUT_FRAME_STALE", "Browser control frame is stale.", true);
+    if (!releaseException && (tab.address.controlEpoch !== binding.controlEpoch
+      || tab.documentGeneration !== binding.documentGeneration || tab.viewportGeneration !== binding.viewportGeneration
+      || !this.artifacts.hasWorkspaceFrame(exact.actor, exact.artifactId, browserSessionId, tabId, exact.sha256, exact.byteLength))) {
+      throw new BrowserProtocolError("INPUT_FRAME_STALE", "Browser control frame is stale.", true);
+    }
+    return exact;
   }
 
   private getSession(actor: ActorIdentity, browserSessionId: string): BrowserSession {
@@ -254,7 +505,13 @@ export class BrowserRuntime extends EventEmitter {
 
     if (isExecutedRequest(request)) {
       const existing = this.operations.lookup(actor, request.operationId, requestFingerprint(request, connectionId));
-      if (existing !== undefined) return await this.awaitExisting(actor, request.operationId, signal);
+      if (existing !== undefined) {
+        if (request.kind !== "session.create") {
+          const existingSessionId = request.kind === "session.close" || request.kind === "tab.create" || request.kind === "tab.list" ? request.browserSessionId : request.address.browserSessionId;
+          this.sessions.get(existingSessionId)?.control?.assertAgentAdmission();
+        }
+        return await this.awaitExisting(actor, request.operationId, signal);
+      }
     }
 
     if (request.kind === "session.create") {
@@ -272,6 +529,13 @@ export class BrowserRuntime extends EventEmitter {
             motorMinimumPathMs: this.motorMinimumPathMsForTest,
             screenshotObservationTtlMs: this.screenshotObservationTtlMs,
             domObservationTtlMs: this.domObservationTtlMs,
+            controlIntegration: {
+              authorityFenced: (browserSessionId, nextEpoch) => this.fenceSessionAuthority(browserSessionId, nextEpoch),
+              establishHumanFrameStream: async (connectionId, subscriptionId, browserSessionId, tabId, epoch, signal) => await this.establishHumanWorkspaceFrameStream(connectionId, subscriptionId, browserSessionId, tabId, epoch, signal),
+              establishAgentFrameStream: async (browserSessionId, epoch, signal) => await this.establishAgentWorkspaceFrameStreams(browserSessionId, epoch, signal),
+              changed: (browserSessionId) => this.workspaceChanged("control", browserSessionId),
+              terminalCleanupRequired: (browserSessionId) => { void this.terminateControlFailedSession(browserSessionId); },
+            },
           }, context.signal, () => context.markDispatched());
           if (context.signal.aborted) { await session.close(); throw context.signal.reason; }
           this.sessions.set(session.browserSessionId, session);
@@ -289,8 +553,10 @@ export class BrowserRuntime extends EventEmitter {
     const controlEpoch = request.kind === "session.close" || request.kind === "tab.create" || request.kind === "tab.list" ? request.controlEpoch : request.address.controlEpoch;
     const motorLane = `motor:${actorKey(actor)}:${browserSessionId}`;
 
-    if (request.kind === "session.close") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); context.markDispatched(); await session.close(); this.sessions.delete(browserSessionId); this.removeSessionSubscriptions(browserSessionId); this.workspaceChanged("session", browserSessionId); return session.descriptor(); }, signal);
     if (request.kind === "tab.list") return { kind: "tabs", tabs: session.listTabs() };
+    session.control?.assertAgentAdmission();
+
+    if (request.kind === "session.close") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); context.markDispatched(); await session.close(); this.sessions.delete(browserSessionId); this.removeSessionSubscriptions(browserSessionId); this.workspaceChanged("session", browserSessionId); return session.descriptor(); }, signal);
     if (request.kind === "tab.create") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const tab = await session.createTab(request.url, context.signal, () => context.markDispatched(), { operationId: request.operationId, ...(request.navigationAuthorization !== undefined ? { authorization: request.navigationAuthorization } : {}) }); this.workspaceChanged("tab", browserSessionId, tab.tabId); return session.listTabs().find((item) => item.address.tabId === tab.tabId); }, signal);
     if (request.kind === "tab.focus") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); await session.targets.focus(request.address, context.signal, () => context.markDispatched()); return session.listTabs().find((item) => item.address.tabId === request.address.tabId); }, signal);
     if (request.kind === "tab.close") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const tab = session.resolve(request.address); if (session.motor.isActiveTab(tab.tabId)) await session.motor.releaseAll(tab); await session.targets.closeTab(request.address, context.signal, () => context.markDispatched()); this.removeTabSubscriptions(browserSessionId, request.address.tabId); this.workspaceChanged("tab", browserSessionId, request.address.tabId); return { kind: "ack", operationId: request.operationId }; }, signal);
@@ -334,6 +600,8 @@ export class BrowserRuntime extends EventEmitter {
     this.workspaceSubscriptions.clear();
     this.workspaceEventSubscribers.clear();
     this.workspaceFrameLedgers.clear();
+    this.workspaceControlOperations.clear();
+    this.workspaceInputInFlight.clear();
     for (const [id, session] of [...this.sessions]) {
       session.offFrame(this.onFrame);
       try { await session.close(); this.sessions.delete(id); }
@@ -375,7 +643,10 @@ export class BrowserRuntime extends EventEmitter {
       operationId: request.operationId, kind: request.kind, fingerprint: requestFingerprint(request, connectionId), laneKey, deadline: request.deadline,
       ...(browserSessionId !== undefined ? { browserSessionId } : {}), ...("address" in request ? { tabId: request.address.tabId } : {}), ...(controlEpoch !== undefined ? { controlEpoch } : {}),
       ...(request.kind === "tab.close" ? { failOnTargetTermination: false } : {}),
-    }, task);
+    }, async (context) => {
+      if (browserSessionId !== undefined) this.getSession(actor, browserSessionId).control?.assertAgentAdmission();
+      return await task(context);
+    });
     this.workspaceChanged("operation", browserSessionId, "address" in request ? request.address.tabId : undefined);
     const abort = (): void => { try { this.operations.cancel(actor, request.operationId); } catch { /* Already pruned. */ } };
     signal?.addEventListener("abort", abort, { once: true });
@@ -439,9 +710,60 @@ export class BrowserRuntime extends EventEmitter {
   private readonly onFrame = (frame: FrameEvent): void => { this.emit("frame", frame); };
   private workspaceChanged(eventKind: WorkspaceStateEvent["eventKind"], browserSessionId?: string, tabId?: string): void {
     this.workspaceRevision++;
-    const event: WorkspaceStateEvent = { protocolVersion: "browser.v2", kind: "workspace.state.changed", revision: this.workspaceRevision, eventKind, ...(browserSessionId === undefined ? {} : { browserSessionId }), ...(tabId === undefined ? {} : { tabId }) };
+    const event: WorkspaceStateEvent = { protocolVersion: PROTOCOL_VERSION, kind: "workspace.state.changed", revision: this.workspaceRevision, eventKind, ...(browserSessionId === undefined ? {} : { browserSessionId }), ...(tabId === undefined ? {} : { tabId }) };
     this.emit("workspaceState", event);
   }
+}
+
+function isHeldReleaseOnly(events: readonly HumanInputEvent[], motor: { isButtonHeld(button: "left" | "middle" | "right"): boolean; isHumanKeyHeld(key: string, code?: string): boolean }): boolean {
+  if (events.length === 0) return false;
+  const releasedButtons = new Set<string>();
+  const releasedKeys = new Set<string>();
+  for (const event of events) {
+    if (event.kind === "pointerUp") {
+      if (releasedButtons.has(event.button) || !motor.isButtonHeld(event.button)) return false;
+      releasedButtons.add(event.button);
+    } else if (event.kind === "keyUp") {
+      const identity = event.code ?? event.key;
+      if (releasedKeys.has(identity) || !motor.isHumanKeyHeld(event.key, event.code)) return false;
+      releasedKeys.add(identity);
+    } else return false;
+  }
+  return true;
+}
+
+function inputFrameFreshnessMs(events: readonly HumanInputEvent[]): number {
+  if (events.some((event) => event.kind === "pointerDown" || event.kind === "pointerUp" || event.kind === "wheel")) return 2_000;
+  if (events.some((event) => event.kind === "keyDown" || event.kind === "keyUp" || event.kind === "text")) return 3_000;
+  return 5_000;
+}
+
+function mapHumanInputEvents(events: readonly HumanInputEvent[], frame: WorkspaceFrameLedgerEntry, staleReleasePoint?: { readonly x: number; readonly y: number }): DirectHumanInputEvent[] {
+  const point = (value: { readonly imageX: number; readonly imageY: number }): { readonly x: number; readonly y: number } => {
+    if (!Number.isFinite(value.imageX) || !Number.isFinite(value.imageY)
+      || value.imageX < 0 || value.imageY < 0 || value.imageX >= frame.imagePixelWidth || value.imageY >= frame.imagePixelHeight) {
+      throw new BrowserProtocolError("COORDINATE_OUT_OF_BOUNDS", "Browser input coordinate is outside the painted frame.");
+    }
+    return {
+      x: value.imageX * frame.cssViewportWidth / frame.imagePixelWidth,
+      y: value.imageY * frame.cssViewportHeight / frame.imagePixelHeight,
+    };
+  };
+  return events.map((event): DirectHumanInputEvent => {
+    if (event.kind === "pointerMove") return { kind: event.kind, point: point(event.point) };
+    if (event.kind === "pointerDown" || event.kind === "pointerUp") return { kind: event.kind, point: event.kind === "pointerUp" && staleReleasePoint !== undefined ? staleReleasePoint : point(event.point), button: event.button, clickCount: event.clickCount ?? 1 };
+    if (event.kind === "wheel") return { kind: event.kind, point: point(event.point), deltaX: event.deltaX, deltaY: event.deltaY };
+    if (event.kind === "keyDown") return { kind: event.kind, key: event.key, ...(event.code === undefined ? {} : { code: event.code }), repeat: event.repeat ?? false };
+    if (event.kind === "keyUp") return { kind: event.kind, key: event.key, ...(event.code === undefined ? {} : { code: event.code }) };
+    return { kind: "text", text: event.text };
+  });
+}
+
+function workspaceControlFingerprint(request: Extract<WorkspaceBrokerRequest, { kind: "workspace.control.acquire" | "workspace.control.release" }>): string {
+  const semantics = request.kind === "workspace.control.acquire"
+    ? { kind: request.kind, browserSessionId: request.browserSessionId, tabId: request.tabId, expectedControlEpoch: request.expectedControlEpoch, frame: request.frame }
+    : { kind: request.kind, browserSessionId: request.browserSessionId, leaseId: request.leaseId };
+  return createHash("sha256").update(JSON.stringify(semantics)).digest("base64url");
 }
 
 function requestFingerprint(request: BrowserRequest, connectionId?: string): string {

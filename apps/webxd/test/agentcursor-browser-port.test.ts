@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { verifyNavigationAuthorization, type SessionDescriptor, type TabDescriptor } from "../../../packages/browser-protocol/src/index.js";
+import { PROTOCOL_VERSION, verifyNavigationAuthorization, type SessionDescriptor, type TabDescriptor } from "../../../packages/browser-protocol/src/index.js";
 import { AgentCursorBrowserPort } from "../src/agentcursor-browser-port.js";
 import { browserBackendSelection } from "../src/browser-backend-selection.js";
 import type { BrowserdClientPool, BrowserdDescriptor, BrowserdRequestFields } from "../src/browserd-client.js";
@@ -12,7 +12,7 @@ const other: AuthorityActor = { principalId: "principal-b", agentId: "agent-b", 
 const bytes = (() => { const value = Buffer.alloc(24); Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(value); value.write("IHDR", 12, "ascii"); value.writeUInt32BE(1600, 16); value.writeUInt32BE(1200, 20); return value; })();
 const digest = createHash("sha256").update(bytes).digest("hex");
 const descriptor: BrowserdDescriptor = {
-  protocolVersion: "browser.v2",
+  protocolVersion: PROTOCOL_VERSION,
   runtimeInstanceId: "runtime_fixture_a",
   pid: process.pid,
   processStartTicks: "1",

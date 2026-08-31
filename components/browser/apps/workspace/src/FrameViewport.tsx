@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type HTMLAttributes, type RefObject } from "react";
 import {
   decodeFrameEnvelope,
   frontendBinaryType,
@@ -26,6 +26,7 @@ export interface FrameMetrics {
   digestFailures: number;
   dimensionFailures: number;
   lastDropReason?: string;
+  acknowledgedPaintDeliveryId?: number;
 }
 
 const emptyMetrics: FrameMetrics = {
@@ -124,7 +125,7 @@ export function useFrameRenderer(bridge: WorkspaceApi, publicState: PublicWorksp
       const bitmap = await createImageBitmap(blob);
       maximumFrontendImageBitmaps = 1;
       try {
-        if (bitmap.width !== frame.metadata.width || bitmap.height !== frame.metadata.height) {
+        if (bitmap.width !== frame.metadata.imagePixelWidth || bitmap.height !== frame.metadata.imagePixelHeight) {
           disposition = { outcome: "dropped", frontendType: receivedType, reason: "decoded-dimensions" };
           setMetrics((current) => ({ ...current, dimensionFailures: current.dimensionFailures + 1, lastDropReason: "decoded-dimensions" }));
           return;
@@ -150,9 +151,9 @@ export function useFrameRenderer(bridge: WorkspaceApi, publicState: PublicWorksp
         fitCanvas(canvas);
         const paintStarted = performance.now();
         context.drawImage(bitmap, 0, 0);
-        sequenceRef.current.commit(frame.metadata.frameSequence);
+        sequenceRef.current.commit(frame.metadata.deliveryId);
         const paintedAt = performance.now();
-        canvas.dataset.frameSequence = String(frame.metadata.frameSequence);
+        canvas.dataset.frameSequence = String(frame.metadata.deliveryId);
         const published = Date.parse(frame.metadata.publishedAt);
         const received = Date.parse(frame.metadata.receivedAt);
         disposition = {
@@ -163,6 +164,8 @@ export function useFrameRenderer(bridge: WorkspaceApi, publicState: PublicWorksp
           totalMs: boundedDifference(performance.timeOrigin + paintedAt, published) ?? 0,
           decodedAt: new Date(performance.timeOrigin + decodedAt).toISOString(),
           paintedAt: new Date(performance.timeOrigin + paintedAt).toISOString(),
+          decodedWidth: bitmap.width,
+          decodedHeight: bitmap.height,
         };
         setMetrics((current) => ({
           ...current,
@@ -190,7 +193,12 @@ export function useFrameRenderer(bridge: WorkspaceApi, publicState: PublicWorksp
           frontendImageBitmaps: 0,
           maximumFrontendImageBitmaps,
         };
-        await bridge.acknowledgeFrame(deliveryId, retention).catch(() => undefined);
+        try {
+          await bridge.acknowledgeFrame(deliveryId, retention);
+          if (retention.outcome === "painted") setMetrics((current) => ({ ...current, acknowledgedPaintDeliveryId: deliveryId }));
+        } catch {
+          if (retention.outcome === "painted") setMetrics((current) => ({ ...current, acknowledgedPaintDeliveryId: undefined, lastDropReason: "paint-ack" }));
+        }
       }
     }
   }, [bridge]);
@@ -198,8 +206,10 @@ export function useFrameRenderer(bridge: WorkspaceApi, publicState: PublicWorksp
   return { canvasRef, metrics, handleFrame, clear, resume };
 }
 
-export function FrameViewport({ canvasRef, state, frameAgeMs }: {
+export function FrameViewport({ canvasRef, state, frameAgeMs, humanControl, inputHandlers }: {
   canvasRef: RefObject<HTMLCanvasElement | null>;
+  humanControl?: boolean;
+  inputHandlers?: HTMLAttributes<HTMLCanvasElement>;
   state: "idle" | "connecting" | "preparing" | "live" | "stale" | "unsupported" | "crashed";
   frameAgeMs?: number;
 }) {
@@ -212,7 +222,7 @@ export function FrameViewport({ canvasRef, state, frameAgeMs }: {
               : undefined;
   return (
     <section className="viewport" aria-label="Selected browser screenshot">
-      <canvas ref={canvasRef} className="frame-canvas" aria-label="Live read-only browser screenshot" />
+      <canvas ref={canvasRef} {...inputHandlers} className={`frame-canvas${humanControl ? " human-control" : ""}`} aria-label={humanControl ? "Live browser screenshot under human control" : "Live read-only browser screenshot"} />
       {message && <div className="viewport-state" role="status"><span className="viewport-state-icon" aria-hidden="true" />{message}</div>}
       {state === "live" && frameAgeMs !== undefined && <span className="frame-age">{formatFrameAge(frameAgeMs)}</span>}
     </section>

@@ -22,6 +22,10 @@ interface MutableOperation {
   error?: ProtocolError;
   result?: unknown;
   task: OperationTask<unknown>;
+  physicallyRunning: boolean;
+  physicallySettled: boolean;
+  readonly settlement: Promise<void>;
+  settle(): void;
 }
 
 export interface OperationContext {
@@ -86,6 +90,16 @@ export class OperationRegistry {
     return this.epochs.get(epochKey(actor, browserSessionId)) ?? 1;
   }
 
+  async awaitSessionSettlement(actor: ActorIdentity, browserSessionId: string, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    const owner = actorKey(actor);
+    const pending = [...this.operations.values()]
+      .filter((operation) => operation.actor === owner && operation.browserSessionId === browserSessionId && !operation.physicallySettled)
+      .map((operation) => operation.settlement);
+    if (pending.length === 0) return;
+    await abortable(Promise.all(pending).then(() => undefined), signal);
+  }
+
   incrementEpoch(actor: ActorIdentity, browserSessionId: string): number {
     const key = epochKey(actor, browserSessionId);
     const next = this.currentEpoch(actor, browserSessionId) + 1;
@@ -116,6 +130,8 @@ export class OperationRegistry {
     }
     const lane = this.queues.get(options.laneKey) ?? [];
     if (lane.length >= this.maxQueuedPerLane) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Operation lane is full.", true);
+    let settle!: () => void;
+    const settlement = new Promise<void>((resolve) => { settle = resolve; });
     const operation: MutableOperation = {
       actor: actorKey(actor), operationId: options.operationId, kind: options.kind ?? "operation", fingerprint, laneKey: options.laneKey,
       ...(options.browserSessionId !== undefined ? { browserSessionId: options.browserSessionId } : {}),
@@ -125,6 +141,8 @@ export class OperationRegistry {
       deadlineMonotonicMs: this.monotonic() + remaining,
       controller: new AbortController(), state: "queued", dispatchState: "not-dispatched",
       queuedAt: new Date(this.wall()).toISOString(), task: task as OperationTask<unknown>,
+      physicallyRunning: false, physicallySettled: false, settlement,
+      settle: () => { if (operation.physicallySettled) return; operation.physicallySettled = true; settle(); },
     };
     this.operations.set(key, operation);
     lane.push(operation);
@@ -219,6 +237,7 @@ export class OperationRegistry {
           if (operation.controlEpoch !== this.currentEpoch(actor, operation.browserSessionId)) { this.cancelMutable(operation, new BrowserProtocolError("CONTROL_EPOCH_STALE", "Control epoch is stale.")); continue; }
         }
         operation.state = "running";
+        operation.physicallyRunning = true;
         operation.startedAt = new Date(this.wall()).toISOString();
         const deadlineTimer = setTimeout(() => {
           if (!isTerminal(operation.state)) {
@@ -242,7 +261,11 @@ export class OperationRegistry {
           if (!isTerminal(operation.state)) { operation.result = result; operation.state = "committed"; operation.finishedAt = new Date(this.wall()).toISOString(); }
         } catch (error) {
           if (!isTerminal(operation.state)) this.failMutable(operation, toProtocolError(error));
-        } finally { clearTimeout(deadlineTimer); }
+        } finally {
+          clearTimeout(deadlineTimer);
+          operation.physicallyRunning = false;
+          operation.settle();
+        }
       }
     } finally {
       this.runningLanes.delete(laneKey);
@@ -257,6 +280,7 @@ export class OperationRegistry {
     operation.state = "cancelled";
     operation.finishedAt = new Date(this.wall()).toISOString();
     operation.error = error.sanitized();
+    if (!operation.physicallyRunning) operation.settle();
   }
   private failMutable(operation: MutableOperation, error: BrowserProtocolError): void {
     this.removeQueued(operation);
@@ -264,6 +288,7 @@ export class OperationRegistry {
     operation.state = "failed";
     operation.finishedAt = new Date(this.wall()).toISOString();
     operation.error = error.sanitized();
+    if (!operation.physicallyRunning) operation.settle();
   }
   private expireMutable(operation: MutableOperation): void {
     this.removeQueued(operation);
@@ -272,6 +297,7 @@ export class OperationRegistry {
     operation.state = "expired";
     operation.finishedAt = new Date(this.wall()).toISOString();
     operation.error = error.sanitized();
+    if (!operation.physicallyRunning) operation.settle();
   }
 
   private removeQueued(operation: MutableOperation): void {
@@ -319,3 +345,14 @@ function isTerminal(state: OperationState): boolean { return state === "committe
 function operationKey(actor: ActorIdentity, operationId: string): string { return `${actorKey(actor)}\u0000${operationId}`; }
 function epochKey(actor: ActorIdentity, browserSessionId: string): string { return `${actorKey(actor)}\u0000${browserSessionId}`; }
 function splitActor(key: string): ActorIdentity { const [principalId = "", agentSessionId = ""] = key.split("\u0000"); return { principalId, agentSessionId }; }
+async function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (signal === undefined) return await promise;
+  signal.throwIfAborted();
+  return await new Promise<T>((resolve, reject) => {
+    const abort = (): void => { cleanup(); reject(signal.reason ?? new BrowserProtocolError("OPERATION_CANCELLED", "Operation settlement wait cancelled.")); };
+    const cleanup = (): void => signal.removeEventListener("abort", abort);
+    signal.addEventListener("abort", abort, { once: true });
+    void promise.then((value) => { cleanup(); resolve(value); }, (error) => { cleanup(); reject(error); });
+    if (signal.aborted) abort();
+  });
+}

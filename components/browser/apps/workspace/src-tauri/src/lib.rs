@@ -30,11 +30,36 @@ pub fn run() {
         .manage(WorkspaceClientService::default())
         .manage(EvidenceCaptureService::default())
         .manage(probe::BinaryProbeService::default())
+        .on_window_event(|window, event| {
+            if window.label() != "main" { return; }
+            let tauri::WindowEvent::CloseRequested { api, .. } = event else { return; };
+            api.prevent_close();
+            let app = window.app_handle().clone();
+            let window = window.clone();
+            let service = app.state::<WorkspaceClientService>();
+            if !service.begin_close() { return; }
+            tauri::async_runtime::spawn(async move {
+                let service = app.state::<WorkspaceClientService>();
+                let result = if service.may_hide_without_return() { Ok(()) } else { service.close_task().await };
+                match result {
+                    Ok(()) => {
+                        let _ = window.destroy();
+                    }
+                    Err(error) => {
+                        service.notify_error(error);
+                        service.finish_close();
+                    }
+                }
+            });
+        })
         .invoke_handler(tauri::generate_handler![
             commands::workspace_open,
             commands::workspace_select,
             commands::workspace_clear_selection,
             commands::workspace_frame_ack,
+            commands::workspace_take_control,
+            commands::workspace_return_control,
+            commands::workspace_input_batch,
             commands::workspace_current_state,
             commands::workspace_window_action,
             commands::workspace_binary_probe_open,

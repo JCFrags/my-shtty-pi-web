@@ -1,17 +1,18 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, lstat } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import {
   WORKSPACE_PROTOCOL_VERSION, WorkspaceProtocolError, WorkspaceRecordDecoder, encodeWorkspaceRecord,
   parseWorkspaceBind, parseWorkspaceClientCommand,
-  type WorkspaceClientCommand, type WorkspaceFrameHeader, type WorkspaceServerHeader, type WorkspaceSnapshot, type WorkspaceStatus,
+  type WorkspaceClientCommand, type WorkspaceErrorCode, type WorkspaceFrameHeader, type WorkspacePaintedFrameBinding,
+  type WorkspaceServerHeader, type WorkspaceSnapshot, type WorkspaceStatus,
 } from "../../../../packages/workspace-protocol/src/index.js";
 import type { BrowserBackendSelection } from "../browser-backend-selection.js";
 import { BrowserdClientError } from "../browserd-client.js";
 import { BrowserdWorkspaceBrokerClient, type BrowserdBrokerDiagnostics } from "./browserd-broker-client.js";
 import { cleanupWorkspaceDescriptor, prepareWorkspaceDescriptor, publishWorkspaceDescriptor, type PreparedWorkspaceDescriptor, type WorkspaceDescriptor } from "./descriptor.js";
 import { sanitizeWorkspaceSnapshot, unavailableWorkspaceSnapshot, workspaceFrameHeader } from "./sanitizer.js";
-import type { WorkspaceFrameEvent, WorkspaceStateEvent } from "../../../../packages/browser-protocol/src/index.js";
+import type { HumanInputEvent, WorkspaceControlFrameBinding, WorkspaceFrameEvent, WorkspaceStateEvent } from "../../../../packages/browser-protocol/src/index.js";
 
 const DEFAULT_MAX_OUTBOUND_BYTES = 12 * 1024 * 1024;
 
@@ -22,7 +23,24 @@ interface Selection {
   readonly tabId: string;
 }
 
+interface TrustedClientControl {
+  readonly browserSessionId: string;
+  readonly tabId: string;
+  readonly leaseId: string;
+  readonly controlEpoch: number;
+  readonly inputTargetGeneration: number;
+  lastDesktopHeartbeatAt: number;
+}
+
+type WorkspaceSuccessResult = Extract<WorkspaceServerHeader, { kind: "response"; ok: true }>["result"];
+
+interface CachedControlResponse {
+  readonly identity: string;
+  readonly result: WorkspaceSuccessResult;
+}
+
 interface GatewayClient {
+  readonly authorityId: string;
   readonly socket: Socket;
   readonly decoder: WorkspaceRecordDecoder;
   chain: Promise<void>;
@@ -32,12 +50,15 @@ interface GatewayClient {
   snapshotSubscribed: boolean;
   outboundBytes: number;
   blocked: boolean;
-  pendingFrame?: Uint8Array;
+  pendingFrame?: { readonly header: WorkspaceFrameHeader; readonly encoded: Uint8Array };
   selection?: Selection;
   selectionReady: boolean;
   pendingBrokerFrame?: WorkspaceFrameEvent;
   frameReadRunning: boolean;
   droppedFrames: number;
+  deliveredFrames: WorkspaceFrameHeader[];
+  readonly controlResponses: Map<string, CachedControlResponse>;
+  control?: TrustedClientControl;
   bindTimer?: NodeJS.Timeout;
 }
 
@@ -51,6 +72,7 @@ export interface WorkspaceGatewayOptions {
   readonly maxQueuedRequestsPerClient?: number;
   readonly maxOutboundBytesPerClient?: number;
   readonly heartbeatMs?: number;
+  readonly desktopHeartbeatTimeoutMs?: number;
 }
 
 export interface WorkspaceGatewayDiagnostics {
@@ -71,6 +93,7 @@ export class WorkspaceGateway {
   readonly #maxQueued: number;
   readonly #maxOutboundBytes: number;
   readonly #heartbeatMs: number;
+  readonly #desktopHeartbeatTimeoutMs: number;
   readonly #broker?: BrowserdWorkspaceBrokerClient;
   #prepared?: PreparedWorkspaceDescriptor;
   #descriptor?: WorkspaceDescriptor;
@@ -90,6 +113,7 @@ export class WorkspaceGateway {
     this.#maxQueued = bounded(options.maxQueuedRequestsPerClient ?? 8, 1, 64, "workspace queued request");
     this.#maxOutboundBytes = bounded(options.maxOutboundBytesPerClient ?? DEFAULT_MAX_OUTBOUND_BYTES, 4 * 1024 * 1024, 32 * 1024 * 1024, "workspace outbound byte");
     this.#heartbeatMs = bounded(options.heartbeatMs ?? 1_000, 100, 60_000, "workspace heartbeat");
+    this.#desktopHeartbeatTimeoutMs = bounded(options.desktopHeartbeatTimeoutMs ?? 6_000, 100, 60_000, "workspace desktop heartbeat timeout");
     if (options.browserBackend === "agentcursor") {
       if (options.browserDescriptorPath === undefined || options.browserRuntimeDirectory === undefined) throw new Error("AgentCursor workspace gateway requires browserd descriptor configuration");
       this.#broker = new BrowserdWorkspaceBrokerClient({
@@ -157,7 +181,7 @@ export class WorkspaceGateway {
 
   private accept(socket: Socket): void {
     if (this.#clients.size >= this.#maxClients) { socket.destroy(); return; }
-    const client: GatewayClient = { socket, decoder: new WorkspaceRecordDecoder(), chain: Promise.resolve(), queued: 0, bound: false, closed: false, snapshotSubscribed: false, outboundBytes: 0, blocked: false, selectionReady: false, frameReadRunning: false, droppedFrames: 0 };
+    const client: GatewayClient = { authorityId: randomBytes(18).toString("base64url"), socket, decoder: new WorkspaceRecordDecoder(), chain: Promise.resolve(), queued: 0, bound: false, closed: false, snapshotSubscribed: false, outboundBytes: 0, blocked: false, selectionReady: false, frameReadRunning: false, droppedFrames: 0, deliveredFrames: [], controlResponses: new Map() };
     this.#clients.add(client);
     client.bindTimer = setTimeout(() => { if (!client.bound) void this.closeClient(client); }, this.#bindTimeoutMs); client.bindTimer.unref?.();
     socket.on("data", (chunk) => {
@@ -196,12 +220,95 @@ export class WorkspaceGateway {
     if (command.kind === "snapshot.get") { this.sendSuccess(client, command.requestId, { kind: "snapshot", snapshot: this.#snapshot }); return; }
     if (command.kind === "snapshot.subscribe") { client.snapshotSubscribed = true; this.sendSuccess(client, command.requestId, { kind: "ack" }); this.sendHeader(client, { protocolVersion: WORKSPACE_PROTOCOL_VERSION, kind: "snapshot", snapshot: this.#snapshot }); return; }
     if (command.kind === "ping") { this.sendSuccess(client, command.requestId, { kind: "pong", generatedAt: new Date().toISOString() }); return; }
-    if (command.kind === "frame.clear") { await this.clearSelection(client); this.sendSuccess(client, command.requestId, { kind: "ack" }); return; }
-    if (command.kind === "close") { this.sendSuccess(client, command.requestId, { kind: "ack" }); await this.closeClient(client, true); return; }
+    if (this.#broker === undefined) throw new WorkspaceProtocolError("UNAVAILABLE", "AgentCursor browser workspace is not active.", true);
+    if (command.kind === "frame.clear") {
+      if (client.control !== undefined) throw new WorkspaceProtocolError("CONTROL_HELD_BY_HUMAN", "Return control before changing the browser selection.", true);
+      await this.clearSelection(client); this.sendSuccess(client, command.requestId, { kind: "ack" }); return;
+    }
+    if (command.kind === "close") {
+      if (client.control !== undefined) await this.releaseClientControl(client, brokerOperationId(client.authorityId, "release", command.requestId));
+      this.sendSuccess(client, command.requestId, { kind: "ack" }); await this.closeClient(client, true); return;
+    }
+    if (command.kind === "frame.select") {
+      if (client.control !== undefined) throw new WorkspaceProtocolError("CONTROL_HELD_BY_HUMAN", "Return control before changing the browser selection.", true);
+      await this.selectFrame(client, command);
+      return;
+    }
+    if (command.kind === "control.acquire") {
+      const identity = controlCommandIdentity(command);
+      if (this.replayControlResponse(client, command.requestId, identity)) return;
+      if (client.control !== undefined) throw new WorkspaceProtocolError("CONTROL_LEASE_CONFLICT", "Browser control is already held by this workspace.", true);
+      const frame = this.requireDeliveredFrame(client, command.frame);
+      const lease = await this.#broker.acquireControl(command.browserSessionId, command.tabId, command.expectedControlEpoch, browserFrameBinding(frame), brokerOperationId(client.authorityId, "acquire", command.requestId));
+      if (client.closed) {
+        await this.#broker.releaseControl(command.browserSessionId, lease.leaseId, brokerOperationId(client.authorityId, "release", `closed:${command.requestId}`)).catch(async () => await this.#broker?.disconnectCurrent());
+        throw new WorkspaceProtocolError("UNAVAILABLE", "Workspace connection closed during control transfer.", true);
+      }
+      client.controlResponses.clear();
+      client.control = { browserSessionId: command.browserSessionId, tabId: command.tabId, leaseId: lease.leaseId, controlEpoch: lease.controlEpoch, inputTargetGeneration: lease.inputTargetGeneration, lastDesktopHeartbeatAt: Date.now() };
+      const result = { kind: "controlAcquired" as const, browserSessionId: command.browserSessionId, selectedHumanControlTabId: command.tabId, controlState: "human" as const, controlEpoch: lease.controlEpoch, controlTransfer: "none" as const, captureReadiness: "ready" as const, leaseExpiry: "healthy" as const, leaseExpiresInMs: lease.leaseExpiresInMs, inputTargetGeneration: lease.inputTargetGeneration };
+      this.rememberControlResponse(client, command.requestId, identity, result);
+      this.sendSuccess(client, command.requestId, result);
+      return;
+    }
+    if (command.kind === "control.heartbeat") {
+      const control = requireClientControl(client, command.browserSessionId, command.controlEpoch);
+      const heartbeat = await this.#broker.heartbeatControl(control.browserSessionId, control.leaseId);
+      control.lastDesktopHeartbeatAt = Date.now();
+      this.sendSuccess(client, command.requestId, { kind: "controlHeartbeat", browserSessionId: control.browserSessionId, selectedHumanControlTabId: control.tabId, controlState: "human", controlEpoch: heartbeat.controlEpoch, leaseExpiry: heartbeat.leaseExpiry, leaseExpiresInMs: heartbeat.leaseExpiresInMs });
+      return;
+    }
+    if (command.kind === "control.release") {
+      const identity = controlCommandIdentity(command);
+      if (this.replayControlResponse(client, command.requestId, identity)) return;
+      requireClientControl(client, command.browserSessionId, command.controlEpoch);
+      const status = await this.releaseClientControl(client, brokerOperationId(client.authorityId, "release", command.requestId));
+      client.controlResponses.clear();
+      const result = { kind: "controlReleased" as const, browserSessionId: command.browserSessionId, controlState: "agent" as const, controlEpoch: status.controlEpoch, controlTransfer: "none" as const, leaseExpiry: "none" as const };
+      this.rememberControlResponse(client, command.requestId, identity, result);
+      this.sendSuccess(client, command.requestId, result);
+      return;
+    }
+    if (command.kind === "control.status") {
+      const status = await this.#broker.controlStatus(command.browserSessionId);
+      this.sendSuccess(client, command.requestId, { kind: "controlStatus", browserSessionId: command.browserSessionId, controlState: status.controlState, controlEpoch: status.controlEpoch, controlTransfer: status.controlTransfer, ...(status.selectedHumanControlTabId === undefined ? {} : { selectedHumanControlTabId: status.selectedHumanControlTabId }), captureReadiness: status.captureReadiness, leaseExpiry: status.leaseExpiry });
+      return;
+    }
+    const inputIdentity = controlCommandIdentity(command);
+    if (this.replayControlResponse(client, command.requestId, inputIdentity)) return;
+    const control = requireClientControl(client, command.browserSessionId, command.controlEpoch, command.tabId);
+    if (command.inputTargetGeneration !== control.inputTargetGeneration) throw new WorkspaceProtocolError("CONTROL_LEASE_CONFLICT", "Browser input target changed.", false);
+    const releaseOnly = command.events.length > 0 && command.events.every((event) => event.kind === "pointerUp" || event.kind === "keyUp");
+    const frame = this.requireDeliveredFrame(client, command.frame, releaseOnly);
+    const acknowledgement = await this.#broker.inputBatch({ browserSessionId: control.browserSessionId, tabId: control.tabId, controlEpoch: control.controlEpoch, leaseId: control.leaseId, inputBatchSequence: command.inputBatchSequence, inputTargetGeneration: control.inputTargetGeneration, frame: browserFrameBinding(frame), events: command.events as readonly HumanInputEvent[] }, brokerOperationId(client.authorityId, "input", command.requestId));
+    const result = { kind: "inputAck" as const, inputBatchSequence: acknowledgement.inputBatchSequence, acceptedEventCount: acknowledgement.acceptedEventCount, coalescedPointerMoveCount: acknowledgement.coalescedPointerMoveCount, awaitingNewFrame: acknowledgement.awaitingNewFrame };
+    this.rememberControlResponse(client, command.requestId, inputIdentity, result);
+    this.sendSuccess(client, command.requestId, result);
+  }
+
+  private replayControlResponse(client: GatewayClient, requestIdValue: string, identity: string): boolean {
+    const cached = client.controlResponses.get(requestIdValue);
+    if (cached === undefined) return false;
+    if (cached.identity !== identity) throw new WorkspaceProtocolError("CONTROL_LEASE_CONFLICT", "Workspace control request identity conflicts with an earlier request.", false);
+    this.sendSuccess(client, requestIdValue, cached.result);
+    return true;
+  }
+
+  private rememberControlResponse(client: GatewayClient, requestIdValue: string, identity: string, result: WorkspaceSuccessResult): void {
+    client.controlResponses.set(requestIdValue, { identity, result });
+    while (client.controlResponses.size > 32) {
+      const first = client.controlResponses.keys().next().value as string | undefined;
+      if (first === undefined) break;
+      client.controlResponses.delete(first);
+    }
+  }
+
+  private async selectFrame(client: GatewayClient, command: Extract<WorkspaceClientCommand, { kind: "frame.select" }>): Promise<void> {
     if (this.#broker === undefined) throw new WorkspaceProtocolError("UNAVAILABLE", "AgentCursor browser workspace is not active.", true);
     const prior = client.selection;
+    client.controlResponses.clear();
     const selection: Selection = { selectionId: command.selectionId, subscriptionId: randomBytes(18).toString("base64url"), browserSessionId: command.browserSessionId, tabId: command.tabId };
-    client.selection = selection; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined;
+    client.selection = selection; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; client.deliveredFrames = [];
     try {
       await this.#broker.replaceFrames(prior, { subscriptionId: selection.subscriptionId, browserSessionId: selection.browserSessionId, tabId: selection.tabId, interest: "selected" });
     } catch (error) {
@@ -216,9 +323,36 @@ export class WorkspaceGateway {
     if (client.pendingBrokerFrame !== undefined && !client.frameReadRunning) void this.readFrames(client);
   }
 
+  private requireDeliveredFrame(client: GatewayClient, binding: WorkspacePaintedFrameBinding, allowExpiredPaintedAt = false): WorkspaceFrameHeader {
+    const selection = client.selection;
+    if (selection === undefined || !client.selectionReady || selection.selectionId !== binding.selectionId
+      || selection.subscriptionId !== binding.subscriptionId || selection.browserSessionId !== binding.browserSessionId || selection.tabId !== binding.tabId) {
+      throw new WorkspaceProtocolError("INPUT_FRAME_STALE", "The painted browser frame is no longer current.", true);
+    }
+    const frame = [...client.deliveredFrames].reverse().find((candidate) => frameMatchesPaintedBinding(candidate, binding));
+    if (frame === undefined) throw new WorkspaceProtocolError("INPUT_FRAME_STALE", "The painted browser frame is no longer current.", true);
+    const paintedAt = Date.parse(binding.paintedAt);
+    const publishedAt = Date.parse(frame.publishedAt);
+    const now = Date.now();
+    if (!Number.isFinite(paintedAt) || !Number.isFinite(publishedAt) || paintedAt < publishedAt || paintedAt > now + 1_000 || (!allowExpiredPaintedAt && now - paintedAt > 5_000)) {
+      throw new WorkspaceProtocolError("INPUT_FRAME_STALE", "The painted browser frame is no longer current.", true);
+    }
+    return frame;
+  }
+
+  private async releaseClientControl(client: GatewayClient, operationId: string) {
+    const control = client.control;
+    if (control === undefined) throw new WorkspaceProtocolError("CONTROL_LEASE_REQUIRED", "A current browser control lease is required.", false);
+    if (this.#broker === undefined) throw new WorkspaceProtocolError("UNAVAILABLE", "AgentCursor browser workspace is not active.", true);
+    const status = await this.#broker.releaseControl(control.browserSessionId, control.leaseId, operationId);
+    if (client.control === control) client.control = undefined;
+    return status;
+  }
+
   private async clearSelection(client: GatewayClient): Promise<void> {
     const prior = client.selection;
-    client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined;
+    client.controlResponses.clear();
+    client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; client.deliveredFrames = [];
     if (prior !== undefined && this.#broker !== undefined) await this.#broker.unsubscribeFrames(prior.subscriptionId, prior.browserSessionId, prior.tabId);
   }
 
@@ -259,9 +393,20 @@ export class WorkspaceGateway {
   private async refreshBrowser(): Promise<void> {
     if (this.#broker === undefined || this.#refreshRunning) return;
     this.#refreshRunning = true;
-    try { await this.#broker.refresh(); await this.#broker.ping(); await this.refreshSnapshot(); }
+    try { await this.expireInactiveControls(); await this.#broker.refresh(); await this.#broker.ping(); await this.refreshSnapshot(); }
     catch { if (!this.#broker.diagnostics.connected) this.onBrowserConnectionChanged(false); }
     finally { this.#refreshRunning = false; }
+  }
+
+  private async expireInactiveControls(now = Date.now()): Promise<void> {
+    if (this.#broker === undefined) return;
+    for (const client of this.#clients) {
+      const control = client.control;
+      if (control === undefined || now - control.lastDesktopHeartbeatAt <= this.#desktopHeartbeatTimeoutMs) continue;
+      client.control = undefined;
+      client.controlResponses.clear();
+      await this.#broker.releaseControl(control.browserSessionId, control.leaseId, brokerOperationId(client.authorityId, "release", `heartbeat-expired:${control.controlEpoch}`)).catch(async () => await this.#broker?.disconnectCurrent());
+    }
   }
 
   private async refreshSnapshot(): Promise<void> {
@@ -272,14 +417,29 @@ export class WorkspaceGateway {
       if (runtime === undefined) return;
       this.#lastBrowserRevision = snapshot.workspaceRevision;
       this.#snapshot = sanitizeWorkspaceSnapshot(snapshot, runtime);
+      this.reconcileClientControls(this.#snapshot);
       this.broadcastSnapshot(); this.broadcastStatus(this.currentStatus());
     } catch { if (!this.#broker.diagnostics.connected) this.onBrowserConnectionChanged(false); }
+  }
+
+  private reconcileClientControls(snapshot: WorkspaceSnapshot): void {
+    for (const client of this.#clients) {
+      const control = client.control;
+      if (control === undefined) continue;
+      const session = snapshot.sessions.find((candidate) => candidate.browserSessionId === control.browserSessionId);
+      // A snapshot from before acquire may arrive after the lease result. Only a
+      // current-or-newer epoch can invalidate the trusted local lease mirror.
+      if (session !== undefined && session.controlEpoch < control.controlEpoch) continue;
+      const stillAuthoritative = session !== undefined && session.controlState === "human" && session.controlEpoch === control.controlEpoch
+        && session.selectedHumanControlTabId === control.tabId;
+      if (!stillAuthoritative) { client.control = undefined; client.controlResponses.clear(); }
+    }
   }
 
   private onBrowserRuntimeChanged(prior: string | undefined, current: string | undefined): void {
     if (prior !== undefined && prior !== current) {
       this.#snapshot = unavailableWorkspaceSnapshot("replaced", this.#lastBrowserRevision + 1); this.#lastBrowserRevision = 0;
-      for (const client of this.#clients) { client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; }
+      for (const client of this.#clients) { client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; client.deliveredFrames = []; client.control = undefined; client.controlResponses.clear(); }
       this.broadcastSnapshot(); this.broadcastStatus({ connection: "reconnecting", browserd: "replaced", message: "Browser service was replaced." });
     }
   }
@@ -287,7 +447,7 @@ export class WorkspaceGateway {
   private onBrowserConnectionChanged(ready: boolean): void {
     if (ready) { this.broadcastStatus(this.currentStatus()); return; }
     if (this.#snapshot.browserdState !== "replaced") this.#snapshot = unavailableWorkspaceSnapshot("unavailable", this.#lastBrowserRevision);
-    for (const client of this.#clients) { client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; }
+    for (const client of this.#clients) { client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; client.deliveredFrames = []; client.control = undefined; client.controlResponses.clear(); }
     this.broadcastSnapshot(); this.broadcastStatus(this.currentStatus());
   }
 
@@ -303,19 +463,32 @@ export class WorkspaceGateway {
   private sendStatus(client: GatewayClient, status: WorkspaceStatus): void { this.sendHeader(client, { protocolVersion: WORKSPACE_PROTOCOL_VERSION, kind: "status", status }); }
   private sendSuccess(client: GatewayClient, requestIdValue: string, result: Extract<WorkspaceServerHeader, { kind: "response"; ok: true }>["result"]): void { this.sendHeader(client, { protocolVersion: WORKSPACE_PROTOCOL_VERSION, kind: "response", requestId: requestIdValue, ok: true, result }); }
   private sendFailure(client: GatewayClient, requestIdValue: string, error: unknown): void {
-    const protocol = error instanceof WorkspaceProtocolError ? error : error instanceof BrowserdClientError ? new WorkspaceProtocolError(workspaceErrorCode(error.code), error.message, error.retryable) : new WorkspaceProtocolError("INTERNAL_ERROR", "Workspace request failed.");
-    this.sendHeader(client, { protocolVersion: WORKSPACE_PROTOCOL_VERSION, kind: "response", requestId: requestIdValue, ok: false, error: { code: workspaceErrorCode(protocol.code), message: protocol.message.slice(0, 256), retryable: protocol.retryable } });
+    const code = workspaceErrorCode(error instanceof WorkspaceProtocolError || error instanceof BrowserdClientError ? error.code : "INTERNAL_ERROR");
+    const retryable = error instanceof WorkspaceProtocolError || error instanceof BrowserdClientError ? error.retryable : false;
+    this.sendHeader(client, { protocolVersion: WORKSPACE_PROTOCOL_VERSION, kind: "response", requestId: requestIdValue, ok: false, error: { code, message: workspaceErrorMessage(code), retryable } });
   }
-  private sendHeader(client: GatewayClient, header: WorkspaceServerHeader): void { this.write(client, encodeWorkspaceRecord(header), false); }
-  private sendFrame(client: GatewayClient, header: WorkspaceFrameHeader, payload: Uint8Array): void { this.write(client, encodeWorkspaceRecord(header, payload), true); }
+  private sendHeader(client: GatewayClient, header: WorkspaceServerHeader): void { this.write(client, encodeWorkspaceRecord(header)); }
+  private sendFrame(client: GatewayClient, header: WorkspaceFrameHeader, payload: Uint8Array): void {
+    this.writeFrame(client, { header, encoded: encodeWorkspaceRecord(header, payload) });
+  }
 
-  private write(client: GatewayClient, encoded: Uint8Array, droppable: boolean): void {
+  private writeFrame(client: GatewayClient, frame: { readonly header: WorkspaceFrameHeader; readonly encoded: Uint8Array }): void {
     if (client.closed || client.socket.destroyed) return;
-    if (droppable && client.blocked) { if (client.pendingFrame !== undefined) client.droppedFrames++; client.pendingFrame = encoded; return; }
-    if (client.outboundBytes + encoded.byteLength > this.#maxOutboundBytes) {
-      if (droppable) { client.droppedFrames++; client.pendingFrame = encoded.byteLength <= this.#maxOutboundBytes ? encoded : undefined; return; }
-      void this.closeClient(client); return;
+    if (client.blocked || client.outboundBytes + frame.encoded.byteLength > this.#maxOutboundBytes) {
+      if (client.pendingFrame !== undefined || frame.encoded.byteLength > this.#maxOutboundBytes) client.droppedFrames++;
+      client.pendingFrame = frame.encoded.byteLength <= this.#maxOutboundBytes ? frame : undefined;
+      return;
     }
+    client.outboundBytes += frame.encoded.byteLength;
+    const writable = client.socket.write(frame.encoded, () => { client.outboundBytes = Math.max(0, client.outboundBytes - frame.encoded.byteLength); });
+    client.deliveredFrames.push(frame.header);
+    while (client.deliveredFrames.length > 2) client.deliveredFrames.shift();
+    if (!writable) client.blocked = true;
+  }
+
+  private write(client: GatewayClient, encoded: Uint8Array): void {
+    if (client.closed || client.socket.destroyed) return;
+    if (client.outboundBytes + encoded.byteLength > this.#maxOutboundBytes) { void this.closeClient(client); return; }
     client.outboundBytes += encoded.byteLength;
     const writable = client.socket.write(encoded, () => { client.outboundBytes = Math.max(0, client.outboundBytes - encoded.byteLength); });
     if (!writable) client.blocked = true;
@@ -323,7 +496,7 @@ export class WorkspaceGateway {
 
   private flushPendingFrame(client: GatewayClient): void {
     const pending = client.pendingFrame; client.pendingFrame = undefined;
-    if (pending !== undefined && !client.closed) this.write(client, pending, true);
+    if (pending !== undefined && !client.closed) this.writeFrame(client, pending);
   }
 
   private async closeClient(client: GatewayClient, graceful = false): Promise<void> {
@@ -331,15 +504,77 @@ export class WorkspaceGateway {
     client.closed = true;
     if (client.bindTimer !== undefined) clearTimeout(client.bindTimer); client.bindTimer = undefined;
     this.#clients.delete(client);
-    const selection = client.selection; client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined;
+    const control = client.control; client.control = undefined;
+    if (control !== undefined && this.#broker !== undefined) await this.#broker.releaseControl(control.browserSessionId, control.leaseId, brokerOperationId(client.authorityId, "release", `disconnect:${randomBytes(18).toString("base64url")}`)).catch(async () => await this.#broker?.disconnectCurrent());
+    const selection = client.selection; client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; client.deliveredFrames = []; client.controlResponses.clear();
     if (selection !== undefined && this.#broker !== undefined) await this.#broker.unsubscribeFrames(selection.subscriptionId, selection.browserSessionId, selection.tabId).catch(() => undefined);
     if (graceful) client.socket.end(); else client.socket.destroy();
   }
 }
 
+function requireClientControl(client: GatewayClient, browserSessionId: string, controlEpoch: number, tabId?: string): TrustedClientControl {
+  const control = client.control;
+  if (control === undefined) throw new WorkspaceProtocolError("CONTROL_LEASE_REQUIRED", "A current browser control lease is required.", false);
+  if (control.browserSessionId !== browserSessionId || control.controlEpoch !== controlEpoch || (tabId !== undefined && control.tabId !== tabId)) {
+    throw new WorkspaceProtocolError("CONTROL_LEASE_CONFLICT", "Browser control lease does not match the selected target.", false);
+  }
+  return control;
+}
+function frameMatchesPaintedBinding(frame: WorkspaceFrameHeader, binding: WorkspacePaintedFrameBinding): boolean {
+  return frame.selectionId === binding.selectionId && frame.browserdRuntimeInstanceId === binding.browserdRuntimeInstanceId
+    && frame.browserSessionId === binding.browserSessionId && frame.tabId === binding.tabId && frame.subscriptionId === binding.subscriptionId
+    && frame.controlEpoch === binding.controlEpoch && frame.frameSequence === binding.frameSequence
+    && frame.documentGeneration === binding.documentGeneration && frame.viewportGeneration === binding.viewportGeneration
+    && frame.imagePixelWidth === binding.imagePixelWidth && frame.imagePixelHeight === binding.imagePixelHeight
+    && frame.cssViewportWidth === binding.cssViewportWidth && frame.cssViewportHeight === binding.cssViewportHeight
+    && frame.devicePixelRatio === binding.devicePixelRatio;
+}
+function browserFrameBinding(frame: WorkspaceFrameHeader): WorkspaceControlFrameBinding {
+  return {
+    runtimeInstanceId: frame.browserdRuntimeInstanceId, subscriptionId: frame.subscriptionId,
+    controlEpoch: frame.controlEpoch, frameSequence: frame.frameSequence,
+    documentGeneration: frame.documentGeneration, viewportGeneration: frame.viewportGeneration,
+    imagePixelWidth: frame.imagePixelWidth, imagePixelHeight: frame.imagePixelHeight,
+  };
+}
+function brokerOperationId(authorityId: string, kind: "acquire" | "release" | "input", requestIdValue: string): string {
+  return `workspaceControl:${kind}:${createHash("sha256").update(`${authorityId}\u0000${requestIdValue}`).digest("base64url")}`;
+}
+function controlCommandIdentity(command: Extract<WorkspaceClientCommand, { kind: "control.acquire" | "control.release" | "input.batch" }>): string {
+  const common = { kind: command.kind, browserSessionId: command.browserSessionId };
+  let safe: Record<string, unknown>;
+  if (command.kind === "control.release") safe = { ...common, controlEpoch: command.controlEpoch };
+  else if (command.kind === "control.acquire") safe = { ...common, tabId: command.tabId, expectedControlEpoch: command.expectedControlEpoch, frame: command.frame };
+  else {
+    const eventCounts: Record<string, number> = {};
+    for (const event of command.events) eventCounts[event.kind] = (eventCounts[event.kind] ?? 0) + 1;
+    safe = { ...common, tabId: command.tabId, controlEpoch: command.controlEpoch, inputBatchSequence: command.inputBatchSequence, inputTargetGeneration: command.inputTargetGeneration, frame: command.frame, eventCounts };
+  }
+  return createHash("sha256").update(JSON.stringify(safe)).digest("base64url");
+}
 function bounded(value: number, minimum: number, maximum: number, name: string): number { if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw new Error(`${name} bound is invalid`); return value; }
 function secretMatches(actual: string, expected: string): boolean { const a = Buffer.from(actual); const b = Buffer.from(expected); return a.byteLength === b.byteLength && timingSafeEqual(a, b); }
 function requestId(value: unknown): string { return isRecord(value) && typeof value.requestId === "string" && /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/.test(value.requestId) ? value.requestId : "request:error"; }
-function workspaceErrorCode(code: string): "INVALID_REQUEST" | "AUTH_FAILED" | "NOT_FOUND" | "CONFLICT" | "LIMIT_EXCEEDED" | "UNAVAILABLE" | "INTERNAL_ERROR" { if (code === "AUTH_FAILED" || code === "LIMIT_EXCEEDED" || code === "UNAVAILABLE" || code === "INTERNAL_ERROR") return code; if (code === "OPERATION_CONFLICT" || code === "CONFLICT") return "CONFLICT"; if (code.includes("NOT_FOUND")) return "NOT_FOUND"; return "INVALID_REQUEST"; }
+function workspaceErrorMessage(code: WorkspaceErrorCode): string {
+  const messages: Record<WorkspaceErrorCode, string> = {
+    INVALID_REQUEST: "Workspace request is invalid.", AUTH_FAILED: "Workspace authentication failed.",
+    NOT_FOUND: "Browser workspace target is unavailable.", CONFLICT: "Workspace request conflicts with current state.", LIMIT_EXCEEDED: "Workspace capacity limit was reached.",
+    UNAVAILABLE: "Browser workspace is unavailable.", INTERNAL_ERROR: "Workspace request failed.", CONTROL_NOT_READY: "Browser view is preparing.",
+    CONTROL_TRANSFER_PENDING: "Browser control transfer is still pending.", CONTROL_HELD_BY_HUMAN: "Browser control is held by the local user.",
+    CONTROL_LEASE_REQUIRED: "A current browser control lease is required.", CONTROL_LEASE_EXPIRED: "Browser control lease expired.", CONTROL_LEASE_CONFLICT: "Browser control lease conflicts with current state.",
+    INPUT_SEQUENCE_STALE: "Browser input sequence is stale.", INPUT_FRAME_STALE: "Painted browser frame is stale.", INPUT_RATE_LIMITED: "Browser input rate limit was reached.", INPUT_UNSUPPORTED: "Browser input is unsupported.",
+  };
+  return messages[code];
+}
+function workspaceErrorCode(code: string): WorkspaceErrorCode {
+  if (code === "AUTH_FAILED" || code === "LIMIT_EXCEEDED" || code === "UNAVAILABLE" || code === "INTERNAL_ERROR"
+    || code === "CONTROL_NOT_READY" || code === "CONTROL_TRANSFER_PENDING" || code === "CONTROL_HELD_BY_HUMAN"
+    || code === "CONTROL_LEASE_REQUIRED" || code === "CONTROL_LEASE_EXPIRED" || code === "CONTROL_LEASE_CONFLICT"
+    || code === "INPUT_SEQUENCE_STALE" || code === "INPUT_FRAME_STALE" || code === "INPUT_RATE_LIMITED" || code === "INPUT_UNSUPPORTED") return code;
+  if (code === "CAPABILITY_UNAVAILABLE" || code === "BROWSER_EXITED" || code === "CDP_DISCONNECTED") return "UNAVAILABLE";
+  if (code === "OPERATION_CONFLICT" || code === "CONFLICT") return "CONFLICT";
+  if (code.includes("NOT_FOUND")) return "NOT_FOUND";
+  return "INVALID_REQUEST";
+}
 function closeServer(server: Server): Promise<void> { return !server.listening ? Promise.resolve() : new Promise((resolve) => server.close(() => resolve())); }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }

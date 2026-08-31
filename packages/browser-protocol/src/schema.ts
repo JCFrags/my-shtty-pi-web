@@ -1,9 +1,12 @@
 import { Type, type TSchema } from "typebox";
 
-export const PROTOCOL_VERSION = "browser.v2" as const;
+export const PROTOCOL_VERSION = "browser.v3" as const;
 export const MAX_REQUEST_BYTES = 256 * 1024;
 export const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 export const MAX_DEADLINE_FUTURE_MS = 5 * 60_000;
+export const MAX_HUMAN_INPUT_EVENTS = 32;
+export const MAX_HUMAN_INPUT_BATCH_BYTES = 64 * 1024;
+export const MAX_HUMAN_INPUT_TEXT_BYTES = 4 * 1024;
 
 const strict = { additionalProperties: false } as const;
 const idPattern = "^[A-Za-z][A-Za-z0-9._:-]{0,127}$";
@@ -131,6 +134,50 @@ const workspaceFrameSelection = Type.Object({
   subscriptionId: OpaqueIdSchema,
 }, strict);
 
+export const ControlStateSchema = Type.Union([
+  Type.Literal("agent"),
+  Type.Literal("takeover-pending"),
+  Type.Literal("human"),
+  Type.Literal("human-disconnected"),
+  Type.Literal("return-pending"),
+]);
+export const ControlTransferStateSchema = Type.Union([
+  Type.Literal("none"), Type.Literal("taking-control"), Type.Literal("returning-control"),
+]);
+export const ControlLeaseExpirySchema = Type.Union([
+  Type.Literal("none"), Type.Literal("healthy"), Type.Literal("expiring"), Type.Literal("grace"),
+]);
+export const CaptureReadinessSchema = Type.Union([
+  Type.Literal("starting"), Type.Literal("warming"), Type.Literal("ready"),
+  Type.Literal("degraded"), Type.Literal("unavailable"),
+]);
+
+export const WorkspaceControlFrameBindingSchema = Type.Object({
+  runtimeInstanceId: OpaqueIdSchema,
+  subscriptionId: OpaqueIdSchema,
+  controlEpoch: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  frameSequence: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  documentGeneration: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  viewportGeneration: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  imagePixelWidth: Type.Integer({ minimum: 1, maximum: 32_768 }),
+  imagePixelHeight: Type.Integer({ minimum: 1, maximum: 32_768 }),
+}, strict);
+
+const humanPoint = Type.Object({
+  imageX: Type.Number({ minimum: 0, maximum: 32_768 }),
+  imageY: Type.Number({ minimum: 0, maximum: 32_768 }),
+}, strict);
+const humanButton = Type.Union([Type.Literal("left"), Type.Literal("middle"), Type.Literal("right")]);
+export const HumanInputEventSchema = Type.Union([
+  Type.Object({ kind: Type.Literal("pointerMove"), point: humanPoint }, strict),
+  Type.Object({ kind: Type.Literal("pointerDown"), point: humanPoint, button: humanButton, clickCount: Type.Optional(Type.Integer({ minimum: 1, maximum: 2 })) }, strict),
+  Type.Object({ kind: Type.Literal("pointerUp"), point: humanPoint, button: humanButton, clickCount: Type.Optional(Type.Integer({ minimum: 1, maximum: 2 })) }, strict),
+  Type.Object({ kind: Type.Literal("wheel"), point: humanPoint, deltaX: Type.Number({ minimum: -100_000, maximum: 100_000 }), deltaY: Type.Number({ minimum: -100_000, maximum: 100_000 }) }, strict),
+  Type.Object({ kind: Type.Literal("keyDown"), key: Type.String({ minLength: 1, maxLength: 64 }), code: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })), repeat: Type.Optional(Type.Boolean()) }, strict),
+  Type.Object({ kind: Type.Literal("keyUp"), key: Type.String({ minLength: 1, maxLength: 64 }), code: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })) }, strict),
+  Type.Object({ kind: Type.Literal("text"), text: Type.String({ minLength: 1, maxLength: MAX_HUMAN_INPUT_TEXT_BYTES }) }, strict),
+]);
+
 export const WorkspaceBrokerRequestSchema = Type.Union([
   request("workspace.snapshot.get", {}),
   request("workspace.events.subscribe", {}),
@@ -142,6 +189,25 @@ export const WorkspaceBrokerRequestSchema = Type.Union([
     next: Type.Object({ browserSessionId: IdSchema, tabId: IdSchema, subscriptionId: OpaqueIdSchema, interest: Type.Union([Type.Literal("idle"), Type.Literal("selected")]) }, strict),
   }),
   request("workspace.frame.read", { browserSessionId: IdSchema, tabId: IdSchema, subscriptionId: OpaqueIdSchema, frameSequence: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }), artifactId: OpaqueIdSchema, offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 4 * 1024 * 1024 })), maxBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 * 1024 })) }),
+  request("workspace.control.acquire", {
+    browserSessionId: IdSchema,
+    tabId: IdSchema,
+    expectedControlEpoch: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+    frame: WorkspaceControlFrameBindingSchema,
+  }),
+  request("workspace.control.heartbeat", { browserSessionId: IdSchema, leaseId: OpaqueIdSchema }),
+  request("workspace.control.release", { browserSessionId: IdSchema, leaseId: OpaqueIdSchema }),
+  request("workspace.control.status", { browserSessionId: IdSchema }),
+  request("workspace.input.batch", {
+    browserSessionId: IdSchema,
+    tabId: IdSchema,
+    controlEpoch: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+    leaseId: OpaqueIdSchema,
+    inputBatchSequence: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+    inputTargetGeneration: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+    frame: WorkspaceControlFrameBindingSchema,
+    events: Type.Array(HumanInputEventSchema, { minItems: 1, maxItems: MAX_HUMAN_INPUT_EVENTS }),
+  }),
   request("workspace.ping", {}),
 ]);
 
@@ -166,6 +232,10 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal("TARGET_CRASHED"), Type.Literal("CDP_ERROR"), Type.Literal("ARTIFACT_FORBIDDEN"),
   Type.Literal("OPERATION_NOT_FOUND"), Type.Literal("ARTIFACT_NOT_FOUND"), Type.Literal("INTERNAL_ERROR"),
   Type.Literal("CAPABILITY_UNAVAILABLE"), Type.Literal("NAVIGATION_DENIED"), Type.Literal("LIMIT_EXCEEDED"),
+  Type.Literal("CONTROL_NOT_READY"), Type.Literal("CONTROL_TRANSFER_PENDING"), Type.Literal("CONTROL_HELD_BY_HUMAN"),
+  Type.Literal("CONTROL_LEASE_REQUIRED"), Type.Literal("CONTROL_LEASE_EXPIRED"), Type.Literal("CONTROL_LEASE_CONFLICT"),
+  Type.Literal("INPUT_SEQUENCE_STALE"), Type.Literal("INPUT_FRAME_STALE"), Type.Literal("INPUT_RATE_LIMITED"),
+  Type.Literal("INPUT_UNSUPPORTED"),
 ]);
 
 export const ProtocolErrorSchema = Type.Object({
@@ -216,16 +286,17 @@ export const WorkspaceOperationSummarySchema = Type.Object({
   cancellable: Type.Boolean(),
 }, strict);
 
-const CaptureReadinessSchema = Type.Union([Type.Literal("starting"), Type.Literal("warming"), Type.Literal("ready"), Type.Literal("degraded"), Type.Literal("unavailable")]);
-
 export const WorkspaceSessionSnapshotSchema = Type.Object({
   browserSessionId: IdSchema,
   agentSessionId: IdSchema,
   actorDisplayId: OpaqueIdSchema,
   pathId: Type.Literal("agentcursor/chrome"),
   state: Type.Union([Type.Literal("starting"), Type.Literal("ready"), Type.Literal("degraded"), Type.Literal("closed")]),
-  controlState: Type.Literal("agent"),
+  controlState: ControlStateSchema,
   controlEpoch: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  controlTransfer: ControlTransferStateSchema,
+  selectedHumanControlTabId: Type.Optional(IdSchema),
+  leaseExpiry: ControlLeaseExpirySchema,
   captureReadiness: CaptureReadinessSchema,
   personaId: OpaqueIdSchema,
   cursor,
@@ -276,8 +347,11 @@ export const WorkspaceFrameEventSchema = Type.Object({
   byteLength: Type.Integer({ minimum: 1, maximum: 4 * 1024 * 1024 }),
   artifactId: OpaqueIdSchema,
   sha256: Sha256Schema,
-  width: Type.Integer({ minimum: 1, maximum: 32_768 }),
-  height: Type.Integer({ minimum: 1, maximum: 32_768 }),
+  imagePixelWidth: Type.Integer({ minimum: 1, maximum: 32_768 }),
+  imagePixelHeight: Type.Integer({ minimum: 1, maximum: 32_768 }),
+  cssViewportWidth: Type.Number({ exclusiveMinimum: 0, maximum: 32_768 }),
+  cssViewportHeight: Type.Number({ exclusiveMinimum: 0, maximum: 32_768 }),
+  devicePixelRatio: Type.Number({ exclusiveMinimum: 0, maximum: 16 }),
 }, strict);
 
 const imageDelivery = Type.Union([
@@ -343,6 +417,8 @@ export const FrameEventSchema = Type.Object({
   byteLength: Type.Integer({ minimum: 1, maximum: 4 * 1024 * 1024 }),
   artifactId: OpaqueIdSchema,
   sha256: Sha256Schema,
+  imagePixelWidth: Type.Integer({ minimum: 1, maximum: 32_768 }),
+  imagePixelHeight: Type.Integer({ minimum: 1, maximum: 32_768 }),
   viewport,
   url: PageUrlSchema,
   title: Type.String({ maxLength: 4096 }),
@@ -373,9 +449,52 @@ const subscriptionResult = Type.Object({ kind: Type.Literal("subscription"), ope
 const workspaceSubscriptionResult = Type.Object({ kind: Type.Literal("workspaceSubscription"), operationId: IdSchema, subscriptionId: OpaqueIdSchema, subscribed: Type.Boolean() }, strict);
 const workspaceArtifactResult = Type.Object({ kind: Type.Literal("workspaceFrameArtifact"), artifactId: OpaqueIdSchema, browserSessionId: IdSchema, tabId: IdSchema, subscriptionId: OpaqueIdSchema, frameSequence: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }), mediaType: Type.Union([Type.Literal("image/png"), Type.Literal("image/jpeg")]), byteLength: Type.Integer({ minimum: 1, maximum: 1024 * 1024 }), sha256: Sha256Schema, offset: Type.Integer({ minimum: 0, maximum: 4 * 1024 * 1024 }), totalBytes: Type.Integer({ minimum: 1, maximum: 4 * 1024 * 1024 }), eof: Type.Boolean(), base64: Type.String({ maxLength: 1_500_000 }) }, strict);
 const workspacePongResult = Type.Object({ kind: Type.Literal("workspacePong"), generatedAt: TimestampSchema }, strict);
+export const WorkspaceControlStatusResultSchema = Type.Object({
+  kind: Type.Literal("workspaceControlStatus"),
+  browserSessionId: IdSchema,
+  controlState: ControlStateSchema,
+  controlEpoch: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  controlTransfer: ControlTransferStateSchema,
+  selectedHumanControlTabId: Type.Optional(IdSchema),
+  captureReadiness: CaptureReadinessSchema,
+  leaseExpiry: ControlLeaseExpirySchema,
+}, strict);
+export const WorkspaceControlHeartbeatResultSchema = Type.Object({
+  kind: Type.Literal("workspaceControlHeartbeat"),
+  browserSessionId: IdSchema,
+  selectedTabId: IdSchema,
+  controlState: Type.Literal("human"),
+  controlEpoch: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  leaseExpiry: Type.Union([Type.Literal("healthy"), Type.Literal("expiring")]),
+  leaseExpiresInMs: Type.Integer({ minimum: 0, maximum: 60_000 }),
+}, strict);
+export const WorkspaceControlLeaseResultSchema = Type.Object({
+  kind: Type.Literal("workspaceControlLease"),
+  browserSessionId: IdSchema,
+  selectedTabId: IdSchema,
+  controlState: Type.Literal("human"),
+  controlEpoch: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  controlTransfer: Type.Literal("none"),
+  captureReadiness: Type.Literal("ready"),
+  leaseExpiry: Type.Literal("healthy"),
+  inputTargetGeneration: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  leaseId: OpaqueIdSchema,
+  leaseExpiresInMs: Type.Integer({ minimum: 0, maximum: 60_000 }),
+}, strict);
+export const WorkspaceInputAckResultSchema = Type.Object({
+  kind: Type.Literal("workspaceInputAck"),
+  inputBatchSequence: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  acceptedEventCount: Type.Integer({ minimum: 0, maximum: MAX_HUMAN_INPUT_EVENTS }),
+  coalescedPointerMoveCount: Type.Integer({ minimum: 0, maximum: MAX_HUMAN_INPUT_EVENTS }),
+  awaitingNewFrame: Type.Boolean(),
+}, strict);
 
 export const ResultSchema = Type.Union([capabilityResult, SessionDescriptorSchema, sessionsResult, TabDescriptorSchema, tabsResult, ScreenshotObservationSchema, DomObservationSchema, OperationStatusSchema, artifactResult, ackResult, subscriptionResult]);
-export const WorkspaceResultSchema = Type.Union([WorkspaceSnapshotSchema, workspaceSubscriptionResult, workspaceArtifactResult, workspacePongResult]);
+export const WorkspaceResultSchema = Type.Union([
+  WorkspaceSnapshotSchema, workspaceSubscriptionResult, workspaceArtifactResult, workspacePongResult,
+  WorkspaceControlStatusResultSchema, WorkspaceControlHeartbeatResultSchema,
+  WorkspaceControlLeaseResultSchema, WorkspaceInputAckResultSchema,
+]);
 
 export const BindResponseSchema = Type.Object({
   protocolVersion: Type.Literal(PROTOCOL_VERSION),
@@ -422,5 +541,5 @@ export const ServerMessageSchema = Type.Union([BindResponseSchema, SuccessRespon
 
 export const ProtocolSchemaDocument = Type.Union(
   [BindRequestSchema, WorkspaceBrokerBindRequestSchema, BrowserRequestSchema, WorkspaceBrokerRequestSchema, ServerMessageSchema],
-  { $id: "https://webx.local/schema/browser.v2" },
+  { $id: "https://webx.local/schema/browser.v3" },
 );

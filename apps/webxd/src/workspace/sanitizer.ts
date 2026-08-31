@@ -18,17 +18,20 @@ export function sanitizeWorkspaceSnapshot(snapshot: BrowserWorkspaceSnapshot, br
       actorDisplayId: session.actorDisplayId,
       pathId: "agentcursor/chrome",
       state: session.state,
-      controlState: "agent",
+      controlState: session.controlState,
       controlEpoch: session.controlEpoch,
+      controlTransfer: session.controlTransfer,
+      ...(session.selectedHumanControlTabId === undefined ? {} : { selectedHumanControlTabId: session.selectedHumanControlTabId }),
+      leaseExpiry: session.leaseExpiry,
       captureReadiness: session.captureReadiness,
       personaDisplayId: sanitizePersona(session.personaId),
-      cursor: {
+      cursor: session.controlState === "agent" ? {
         x: session.cursor.x,
         y: session.cursor.y,
         visible: session.cursor.visible,
         pathSequence: session.cursor.pathSequence,
         sampleSequence: session.cursor.sampleSequence,
-      },
+      } : { x: 0, y: 0, visible: false, pathSequence: 0, sampleSequence: 0 },
       tabs: session.tabs.slice(0, 16).map((tab) => ({ ...tab, url: safeText(tab.url, 8192), title: safeText(tab.title, 512) })),
       ...(session.activeOperation !== undefined && OPERATION_KINDS.has(session.activeOperation.kind) ? { activeOperation: { ...session.activeOperation, kind: session.activeOperation.kind as "session.create" } } : {}),
       ...(session.lastActivityAt === undefined ? {} : { lastActivityAt: validTimestamp(session.lastActivityAt) }),
@@ -43,7 +46,7 @@ export function unavailableWorkspaceSnapshot(state: "unavailable" | "replaced", 
 export function workspaceFrameHeader(event: WorkspaceFrameEvent, selectionId: string, receivedAtMs = Date.now()): WorkspaceFrameHeader {
   const transitMs = Math.max(0, Math.min(60_000, event.publishedMonotonicMs - event.capturedMonotonicMs));
   return {
-    protocolVersion: "workspace.v1",
+    protocolVersion: "workspace.v2",
     kind: "frame",
     selectionId,
     subscriptionId: event.subscriptionId,
@@ -59,8 +62,11 @@ export function workspaceFrameHeader(event: WorkspaceFrameEvent, selectionId: st
     mediaType: event.mediaType,
     byteLength: event.byteLength,
     sha256: event.sha256,
-    width: event.width,
-    height: event.height,
+    imagePixelWidth: event.imagePixelWidth,
+    imagePixelHeight: event.imagePixelHeight,
+    cssViewportWidth: event.cssViewportWidth,
+    cssViewportHeight: event.cssViewportHeight,
+    devicePixelRatio: event.devicePixelRatio,
   };
 }
 

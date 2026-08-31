@@ -9,6 +9,7 @@
     "tauri": "tauri",
     "test": "node --test test/*.test.mjs && vitest run test/*.test.ts",
     "test:binary-ipc": "cargo test --manifest-path src-tauri/Cargo.toml probe::tests::produces_one_hundred_unique_one_megabyte_payload_digests && node --test test/security.test.mjs",
+    "test:input-ipc": "vitest run test/input-ipc.test.ts && cargo test --manifest-path src-tauri/Cargo.toml protocol::tests::bounds_typed_human_input_records",
     "test:release-arguments": "cargo test --release --manifest-path src-tauri/Cargo.toml window::tests::accepts_only_bounded_fixed_launch_arguments",
     "test:live": "pnpm --filter @webx/webxd test:workspace-live",
     "test:soak": "pnpm --filter @webx/webxd test:workspace-soak",

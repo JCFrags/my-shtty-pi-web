@@ -1,4 +1,4 @@
-use crate::{acceptance::FrameDisposition, client::{OpenResult, SelectionResult, WorkspaceClientService}, error::PublicError, probe::{BinaryProbeService, ProbeStatus}, state::{FrontendStateRecord, PublicWorkspaceState}, window::{WindowAction, apply_window_action}};
+use crate::{acceptance::FrameDisposition, client::{ControlActionResult, FrontendInputAck, OpenResult, SelectionResult, WorkspaceClientService}, error::PublicError, probe::{BinaryProbeService, ProbeStatus}, protocol::FrontendInputBatch, state::{FrontendStateRecord, PublicWorkspaceState}, window::{WindowAction, apply_window_action}};
 use tauri::{State, WebviewWindow, ipc::{Channel, Response}};
 
 #[tauri::command]
@@ -25,10 +25,24 @@ pub async fn workspace_clear_selection(service: State<'_, WorkspaceClientService
 pub async fn workspace_frame_ack(service: State<'_, WorkspaceClientService>, delivery_id: u64, disposition: FrameDisposition) -> Result<(), PublicError> { service.frame_ack(delivery_id, disposition).await }
 
 #[tauri::command]
+pub async fn workspace_take_control(service: State<'_, WorkspaceClientService>) -> Result<ControlActionResult, PublicError> { service.take_control().await }
+
+#[tauri::command]
+pub async fn workspace_return_control(service: State<'_, WorkspaceClientService>) -> Result<ControlActionResult, PublicError> { service.return_control().await }
+
+#[tauri::command]
+pub async fn workspace_input_batch(service: State<'_, WorkspaceClientService>, batch: FrontendInputBatch) -> Result<FrontendInputAck, PublicError> { service.input(batch).await }
+
+#[tauri::command]
 pub async fn workspace_current_state(service: State<'_, WorkspaceClientService>) -> Result<PublicWorkspaceState, PublicError> { Ok(service.current().await) }
 
 #[tauri::command]
-pub fn workspace_window_action(window: WebviewWindow, action: WindowAction) -> Result<(), PublicError> { apply_window_action(&window, action).map_err(|_| crate::error::WorkspaceError::Unavailable.public()) }
+pub async fn workspace_window_action(service: State<'_, WorkspaceClientService>, window: WebviewWindow, action: WindowAction) -> Result<(), PublicError> {
+    if matches!(action, WindowAction::Hide) { service.release_for_hide().await?; }
+    apply_window_action(&window, action).map_err(|_| crate::error::WorkspaceError::Unavailable.public())?;
+    service.record_window_action(match action { WindowAction::Raise => "raise", WindowAction::Hide => "hide" });
+    Ok(())
+}
 
 #[tauri::command]
 pub fn workspace_binary_probe_open(service: State<'_, BinaryProbeService>, frame_channel: Channel<Response>) -> Result<ProbeStatus, PublicError> { service.open(frame_channel) }

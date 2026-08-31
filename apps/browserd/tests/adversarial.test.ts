@@ -237,7 +237,7 @@ describe("connection frame isolation and typed failures", () => {
     assert.equal(((await subscribed.next()) as { result: { subscribed: boolean } }).result.subscribed, true);
     const frame: FrameEvent = {
       protocolVersion: PROTOCOL_VERSION, kind: "frame.available", address: frameAddress, documentGeneration: 1, viewportGeneration: 1, frameSequence: 1,
-      capturedMonotonicMs: 10, publishedMonotonicMs: 11, mediaType: "image/png", byteLength: 3, artifactId: "artifact_routing", sha256: "a".repeat(64),
+      capturedMonotonicMs: 10, publishedMonotonicMs: 11, mediaType: "image/png", byteLength: 3, artifactId: "artifact_routing", sha256: "a".repeat(64), imagePixelWidth: 800, imagePixelHeight: 600,
       viewport: { width: 800, height: 600, devicePixelRatio: 1 }, url: "https://fixture.invalid/", title: "Fixture",
       cursor: { x: 1, y: 2, pathSequence: 1, sampleSequence: 1, personaId: "persona_routing_01", visible: true },
     };
