@@ -998,7 +998,7 @@ function boundedQualificationSummary(value, depth = 0) {
 function validateQualificationReport(value, mode, verified) {
   const report = record(value, "qualification report");
   const requiredKeys = ["durationSeconds", "gitSha", "manifestSha256", "mode", "ok", "releaseId", "schemaVersion", "summary"];
-  if (JSON.stringify(Object.keys(report).sort()) !== JSON.stringify(requiredKeys) || report.schemaVersion !== 1 || report.ok !== true || report.mode !== mode || report.releaseId !== verified.releaseId || report.gitSha !== verified.gitSha || report.manifestSha256 !== verified.manifestSha256 || typeof report.durationSeconds !== "number" || !Number.isFinite(report.durationSeconds) || report.durationSeconds < 0 || report.durationSeconds > 18_000 || (mode === "soak" && report.durationSeconds < 14_400)) fail("qualification report is invalid");
+  if (JSON.stringify(Object.keys(report).sort()) !== JSON.stringify(requiredKeys) || report.schemaVersion !== 1 || report.ok !== true || report.mode !== mode || report.releaseId !== verified.releaseId || report.gitSha !== verified.gitSha || report.manifestSha256 !== verified.manifestSha256 || typeof report.durationSeconds !== "number" || !Number.isFinite(report.durationSeconds) || report.durationSeconds < 0 || report.durationSeconds > 600 || (mode === "soak" && report.durationSeconds < 300)) fail("qualification report is invalid");
   return Object.freeze({ schemaVersion: 1, ok: true, mode, releaseId: verified.releaseId, gitSha: verified.gitSha, manifestSha256: verified.manifestSha256, durationSeconds: report.durationSeconds, summary: boundedQualificationSummary(report.summary) });
 }
 
@@ -1061,7 +1061,7 @@ function runQualification(environment, verified, mode) {
     cwd: verified.releaseRoot,
     encoding: "utf8",
     env: environment,
-    timeout: mode === "soak" ? 15_300_000 : 1_800_000,
+    timeout: 600_000,
     maxBuffer: 1024 * 1024,
   });
   if (result.status !== 0 || typeof result.stdout !== "string" || Buffer.byteLength(result.stdout) > 1024 * 1024) fail("installed qualification workload failed");

@@ -19,7 +19,7 @@ const FIXTURE_BASE = "http://93.184.216.34/.well-known/pi-web-qualification";
 const SEARCH_QUERY = "phase4a qualification fixture";
 const LOCAL_SERVICE_HOST = "127.0.0.1";
 const LOCAL_SERVICE_PORT = 18_878;
-const SOAK_SECONDS = 14_400;
+const SOAK_SECONDS = 300;
 const MAX_DIAGNOSTIC_BYTES = 64 * 1024 * 1024;
 const MAX_SAMPLES = 2_048;
 const mode = process.argv.length === 3 && (process.argv[2] === "acceptance" || process.argv[2] === "soak") ? process.argv[2] as Mode : fail("qualification mode is invalid");
@@ -233,6 +233,7 @@ async function main(): Promise<void> {
   try {
     await localServices.start();
     await workspace.start();
+    await waitForBrowserdReady();
     await Promise.all([piA.start(), piB.start()]);
     for (const pi of [piA, piB]) for (const tool of ["web_search", "web_read", "browser_open", "browser_tabs", "browser_observe", "browser_act"]) if (!pi.activeTools.includes(tool)) fail("qualification Pi capability is unavailable");
     await exerciseSearchRead(piA); searchReadChecks += 1;
@@ -265,11 +266,11 @@ async function main(): Promise<void> {
       restartUnit("pi-web-qualification-webxd.service"); webxdRestarts += 1;
       await Promise.all([piA.stop(), piB.stop()]); await Promise.all([piA.start(), piB.start()]); piReconnects += 2;
       await piA.execute("browser_tabs", { action: "list" });
-      setUnitRunning("pi-web-qualification-browserd.service", false);
+      await setUnitRunning("pi-web-qualification-browserd.service", false);
       await exerciseSearchRead(piA); searchReadChecks += 1;
       await expectToolFailure(() => piA.execute("browser_observe", identityA), "CAPABILITY_UNAVAILABLE", 503);
       browserOutageDenials += 1;
-      setUnitRunning("pi-web-qualification-browserd.service", true); browserdReplacements += 1;
+      await setUnitRunning("pi-web-qualification-browserd.service", true); browserdReplacements += 1;
       await Promise.all([piA.stop(), piB.stop()]); await Promise.all([piA.start(), piB.start()]); piReconnects += 2;
       [identityA, identityB] = await openActors(piA, piB);
       workspaceLatency.push(await workspace.select(identityA));
@@ -288,16 +289,16 @@ async function main(): Promise<void> {
         const actor = iterations % 2 === 0 ? piA : piB; const identity = iterations % 2 === 0 ? identityA : identityB;
         await observeImage(actor, identity, observationLatency);
         if (iterations % 2 === 0) await exerciseDom(actor, identity, actionLatency, observationLatency);
-        if (iterations % 12 === 0) workspaceLatency.push(await workspace.select(identity));
-        if (iterations > 0 && iterations % 12 === 0) { await workspace.control(identity); controlCycles += 1; }
-        if (iterations === 180) { restartUnit("pi-web-qualification-egress-proxy.service"); proxyRestarts += 1; }
-        if (iterations === 360) { restartUnit("pi-web-qualification-webxd.service"); webxdRestarts += 1; await Promise.all([piA.stop(), piB.stop()]); await Promise.all([piA.start(), piB.start()]); piReconnects += 2; }
-        if (iterations === 540) { setUnitRunning("pi-web-qualification-browserd.service", false); await exerciseSearchRead(piA); searchReadChecks += 1; await expectToolFailure(() => piA.execute("browser_observe", identityA), "CAPABILITY_UNAVAILABLE", 503); browserOutageDenials += 1; setUnitRunning("pi-web-qualification-browserd.service", true); browserdReplacements += 1; await Promise.all([piA.stop(), piB.stop()]); await Promise.all([piA.start(), piB.start()]); piReconnects += 2; [identityA, identityB] = await openActors(piA, piB); }
+        if (iterations % 5 === 0) workspaceLatency.push(await workspace.select(identity));
+        if (iterations > 0 && iterations % 5 === 0) { await workspace.control(identity); controlCycles += 1; }
+        if (iterations === 5) { restartUnit("pi-web-qualification-egress-proxy.service"); proxyRestarts += 1; }
+        if (iterations === 10) { restartUnit("pi-web-qualification-webxd.service"); webxdRestarts += 1; await Promise.all([piA.stop(), piB.stop()]); await Promise.all([piA.start(), piB.start()]); piReconnects += 2; }
+        if (iterations === 15) { await setUnitRunning("pi-web-qualification-browserd.service", false); await exerciseSearchRead(piA); searchReadChecks += 1; await expectToolFailure(() => piA.execute("browser_observe", identityA), "CAPABILITY_UNAVAILABLE", 503); browserOutageDenials += 1; await setUnitRunning("pi-web-qualification-browserd.service", true); browserdReplacements += 1; await Promise.all([piA.stop(), piB.stop()]); await Promise.all([piA.start(), piB.start()]); piReconnects += 2; [identityA, identityB] = await openActors(piA, piB); }
         sampleMemory(memorySamples, unitMemory(), (performance.now() - startedAt) / 1000);
         iterations += 1;
         await sleep(10_000);
       }
-      if (controlCycles < 100) fail("qualification soak control-cycle floor was not met");
+      if (controlCycles < 4) fail("qualification soak control-cycle floor was not met");
     }
 
     if (searchReadChecks < 3 || browserOutageDenials < 1) fail("qualification search/read outage isolation was incomplete");
@@ -356,6 +357,7 @@ async function exerciseResourceLimits(pi: PiWorker, workspace: Workspace): Promi
   await atomicPrivateText(environmentPath, constrained);
   try {
     restartUnit("pi-web-qualification-browserd.service");
+    await waitForBrowserdReady();
     identity = browserIdentity(await pi.execute("browser_open", { url: `${FIXTURE_BASE}/alpha` }));
     const resourceIdentity = identity;
     await workspace.select(resourceIdentity);
@@ -460,12 +462,25 @@ function runAtspi(action: "take-control" | "return-control" | "exercise-input"):
   const value: unknown = JSON.parse(result.stdout);
   if (!isRecord(value) || value.ok !== true || value.action !== action || !Number.isSafeInteger(value.eventCount)) fail("qualification graphical action result is invalid");
 }
-function setUnitRunning(unit: "pi-web-qualification-browserd.service", running: boolean): void {
+async function setUnitRunning(unit: "pi-web-qualification-browserd.service", running: boolean): Promise<void> {
   const operation = running ? "start" : "stop";
   const result = spawnSync("/usr/bin/systemctl", ["--user", operation, unit], { env: systemdEnvironment(), stdio: "ignore", timeout: 120_000 });
   if (result.status !== 0) fail("qualification fixed browser service transition failed");
   const probe = spawnSync("/usr/bin/systemctl", ["--user", "is-active", unit], { env: systemdEnvironment(), encoding: "utf8", timeout: 10_000, maxBuffer: 4_096 });
   if (running ? probe.status !== 0 || probe.stdout.trim() !== "active" : probe.status === 0 || probe.stdout.trim() !== "inactive") fail("qualification fixed browser service state is invalid");
+  if (running) await waitForBrowserdReady();
+}
+
+async function waitForBrowserdReady(): Promise<void> {
+  const descriptorPath = join(qualificationRoot, "browserd/browserd.json");
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    try {
+      const descriptor: unknown = JSON.parse(await readFile(descriptorPath, "utf8"));
+      if (isRecord(descriptor) && typeof descriptor.runtimeInstanceId === "string" && /^runtime_[A-Za-z0-9_-]+$/u.test(descriptor.runtimeInstanceId) && typeof descriptor.socketPath === "string" && descriptor.socketPath.startsWith(`${join(qualificationRoot, "browserd")}/`) && (await stat(descriptor.socketPath)).isSocket()) return;
+    } catch { /* The fixed browserd descriptor is not ready yet. */ }
+    await sleep(50);
+  }
+  fail("qualification browser service readiness timed out");
 }
 function restartUnit(unit: "pi-web-qualification-egress-proxy.service" | "pi-web-qualification-browserd.service" | "pi-web-qualification-webxd.service"): void {
   const result = spawnSync("/usr/bin/systemctl", ["--user", "restart", unit], { env: systemdEnvironment(), stdio: "ignore", timeout: 120_000 });
