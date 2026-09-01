@@ -161,6 +161,22 @@ async function removeOwnedTree(path) {
   }
   await rm(path, { recursive: true, force: true });
 }
+/**
+ * Linux can reject renaming an owner-read-only directory. Keep the verified
+ * payload immutable, briefly restore only the root's owner-write bit for the
+ * atomic rename, then seal the published root again.
+ * @param {string} releaseRoot
+ * @param {string} finalRoot
+ */
+async function publishImmutableRelease(releaseRoot, finalRoot) {
+  await chmod(releaseRoot, 0o755);
+  await rename(releaseRoot, finalRoot);
+  try { await chmod(finalRoot, 0o555); }
+  catch (error) {
+    await removeOwnedTree(finalRoot).catch(() => undefined);
+    throw error;
+  }
+}
 
 /**
  * @param {string} source
@@ -464,9 +480,10 @@ async function buildRelease(options) {
     await writeChecksums(releaseRoot);
     await chmod(join(releaseRoot, "checksums.json"), 0o444);
     await chmod(releaseRoot, 0o555);
-    const result = await verifyRelease(releaseRoot, expectedSha);
-    await rename(releaseRoot, finalRoot);
+    await verifyRelease(releaseRoot, expectedSha);
+    await publishImmutableRelease(releaseRoot, finalRoot);
     published = true;
+    const result = await verifyRelease(finalRoot, expectedSha);
     await removeOwnedTree(stageParent);
     process.stdout.write(`${JSON.stringify({ ok: true, releaseRoot: finalRoot, releaseId, manifestSha256: result.manifestSha256 }, null, 2)}\n`);
     return finalRoot;
@@ -571,7 +588,7 @@ async function reproducibility(options) {
   process.stdout.write(`${JSON.stringify({ ok: true, report: reportPath }, null, 2)}\n`);
 }
 
-export const releaseInternals = { assertAbsoluteOutsideSource, buildNodeBundles, buildRelease, deterministicTreeDigest, immutablePayloadDigests, normalizedRelease, parse, removeOwnedTree, resolvedOutsideSource, setImmutableModes, validateBuildIdentity, verifyRelease, withFixedPythonInterpreter, writeBundledLicenses, writeChecksums, writeRustLicenses };
+export const releaseInternals = { assertAbsoluteOutsideSource, buildNodeBundles, buildRelease, deterministicTreeDigest, immutablePayloadDigests, normalizedRelease, parse, publishImmutableRelease, removeOwnedTree, resolvedOutsideSource, setImmutableModes, validateBuildIdentity, verifyRelease, withFixedPythonInterpreter, writeBundledLicenses, writeChecksums, writeRustLicenses };
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === releaseFile) {
   const { operation, options } = parse(process.argv.slice(2));

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +35,21 @@ async function syntheticRelease() {
 test("release CLI rejects unknown and duplicate options", () => {
   assert.throws(() => releaseInternals.parse(["build", "--output-root", "/tmp/out", "--bogus", "x"]), /unsupported build option/u);
   assert.throws(() => releaseInternals.parse(["verify", "--release-root", "/tmp/a", "--release-root", "/tmp/b"]), /duplicate release option/u);
+});
+
+test("publishing atomically renames and reseals an immutable release root", async () => {
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "pi-web-publish-test-"));
+  const staged = join(temporaryRoot, "staged");
+  const published = join(temporaryRoot, "published");
+  try {
+    await mkdir(staged);
+    await chmod(staged, 0o555);
+    await releaseInternals.publishImmutableRelease(staged, published);
+    await assert.rejects(lstat(staged), /ENOENT/u);
+    assert.equal((await lstat(published)).mode & 0o777, 0o555);
+  } finally {
+    await releaseInternals.removeOwnedTree(temporaryRoot);
+  }
 });
 
 test("proxy packaging replaces an env shebang with the fixed Fedora interpreter", () => {
