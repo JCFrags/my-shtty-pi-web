@@ -19,7 +19,7 @@ pub struct WorkspaceDescriptor {
 impl WorkspaceDescriptor {
     pub fn discover() -> Result<Self, WorkspaceError> {
         let xdg = env::var_os("XDG_RUNTIME_DIR").ok_or(WorkspaceError::Unavailable)?;
-        let runtime = PathBuf::from(xdg).join("pi-web").join("workspace");
+        let runtime = workspace_runtime(PathBuf::from(xdg));
         Self::read_from(&runtime.join("workspace.json"), &runtime)
     }
 
@@ -57,6 +57,13 @@ impl WorkspaceDescriptor {
     }
 }
 
+fn workspace_runtime(xdg: PathBuf) -> PathBuf {
+    #[cfg(feature = "installed-qualification")]
+    { xdg.join("pi-web").join("qualification").join("workspace") }
+    #[cfg(not(feature = "installed-qualification"))]
+    { xdg.join("pi-web").join("workspace") }
+}
+
 fn process_start_ticks(pid: u32) -> Result<String, WorkspaceError> {
     let text = fs::read_to_string(format!("/proc/{pid}/stat")).map_err(|_| WorkspaceError::Descriptor)?;
     let end = text.rfind(')').ok_or(WorkspaceError::Descriptor)?;
@@ -88,6 +95,15 @@ mod tests {
         write!(file, "{{\"protocolVersion\":\"workspace.v2\",\"webxdRuntimeInstanceId\":\"abcdefghijklmnop\",\"pid\":{},\"processStartTicks\":\"{}\",\"socketPath\":\"{}\",\"bindingSecret\":\"{}\",\"startedAt\":\"2026-08-30T00:00:00.000Z\"}}", std::process::id(), ticks(), socket.display(), "s".repeat(43)).unwrap();
         fs::set_permissions(&descriptor, fs::Permissions::from_mode(0o600)).unwrap();
         (root, runtime, descriptor, listener)
+    }
+
+    #[test]
+    fn discovery_runtime_is_compile_time_fixed() {
+        let xdg = PathBuf::from("/run/user/1000");
+        #[cfg(feature = "installed-qualification")]
+        assert_eq!(workspace_runtime(xdg), PathBuf::from("/run/user/1000/pi-web/qualification/workspace"));
+        #[cfg(not(feature = "installed-qualification"))]
+        assert_eq!(workspace_runtime(xdg), PathBuf::from("/run/user/1000/pi-web/workspace"));
     }
 
     #[test]
