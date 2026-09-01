@@ -44,6 +44,13 @@ pub struct WorkspaceTab {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResourceStatus {
+    pub state: String,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceSession {
     pub browser_session_id: String,
     pub agent_label: String,
@@ -56,6 +63,7 @@ pub struct WorkspaceSession {
     pub selected_human_control_tab_id: Option<String>,
     pub lease_expiry: String,
     pub capture_readiness: String,
+    pub resource: Option<ResourceStatus>,
     pub persona_display_id: String,
     pub cursor: Cursor,
     pub tabs: Vec<WorkspaceTab>,

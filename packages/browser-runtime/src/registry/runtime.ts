@@ -9,6 +9,7 @@ import { ProfileManager } from "../chrome/profile-manager.js";
 import type { ControlLeaseProof } from "../control/session-control.js";
 import type { CoordinateAction, DirectHumanInputEvent } from "../motor/session-motor.js";
 import { canonicalOperationFingerprint, OperationRegistry, type OperationContext } from "../operations/registry.js";
+import { BrowserResourceSupervisor, DEFAULT_BROWSER_RESOURCE_LIMITS, type BrowserResourceLimits, type BrowserResourceReason, type BrowserResourceSupervisorOptions } from "../resources/supervisor.js";
 import { BrowserSession, type DomFallbackAction } from "./session.js";
 
 interface RuntimeSubscription { readonly actor: string; readonly connectionId: string; readonly subscriptionId: string; readonly address: TabAddress; readonly interest: "idle" | "selected"; readonly consumerKey: string }
@@ -58,11 +59,14 @@ export interface BrowserRuntimeOptions {
   egressConfigured?: boolean;
   egressBindingId?: string;
   requireEgressForSessions?: boolean;
+  resourceLimits?: BrowserResourceLimits;
+  resourceSupervisor?: BrowserResourceSupervisorOptions;
 }
 
 export class BrowserRuntime extends EventEmitter {
   readonly artifacts = new BrowserArtifactStore();
   readonly operations = new OperationRegistry();
+  readonly resources: BrowserResourceSupervisor;
   private readonly sessions = new Map<string, BrowserSession>();
   private readonly subscriptions = new Map<string, Map<string, RuntimeSubscription>>();
   private readonly workspaceSubscriptions = new Map<string, Map<string, WorkspaceSubscription>>();
@@ -109,6 +113,7 @@ export class BrowserRuntime extends EventEmitter {
     const proxy = options.chrome?.egressProxy;
     this.egressBindingId = options.egressBindingId ?? (proxy === undefined ? undefined : `forward-proxy://${proxy.host === "::1" ? "[::1]" : proxy.host}:${proxy.port}`);
     this.requireEgressForSessions = options.requireEgressForSessions ?? false;
+    this.resources = new BrowserResourceSupervisor(options.resourceLimits ?? DEFAULT_BROWSER_RESOURCE_LIMITS, options.resourceSupervisor);
   }
 
   get subscriptionCount(): number { let count = 0; for (const values of this.subscriptions.values()) count += values.size; for (const values of this.workspaceSubscriptions.values()) count += values.size; return count; }
@@ -127,6 +132,7 @@ export class BrowserRuntime extends EventEmitter {
         const descriptor = session.descriptor();
         const control = session.control.snapshot();
         const activeOperation = this.operations.workspaceSummary(descriptor.browserSessionId);
+        const resource = session.resourceStatus ?? { state: "normal" as const, reason: "none" as const };
         return {
           browserSessionId: descriptor.browserSessionId,
           agentSessionId: session.actor.agentSessionId,
@@ -139,6 +145,7 @@ export class BrowserRuntime extends EventEmitter {
           ...(control.selectedHumanControlTabId === undefined ? {} : { selectedHumanControlTabId: control.selectedHumanControlTabId }),
           leaseExpiry: control.leaseExpiry,
           captureReadiness: session.captureReadinessState,
+          resource: { state: resource.state, reason: resource.reason },
           personaId: descriptor.personaId,
           cursor: descriptor.cursor,
           tabs: descriptor.tabs.map((tab) => ({ tabId: tab.address.tabId, url: tab.url, title: tab.title.slice(0, 512), state: tab.state, captureReadiness: session.tabCaptureReadiness(tab.address.tabId), documentGeneration: tab.documentGeneration, viewportGeneration: tab.viewportGeneration, frameSequence: tab.frameSequence })),
@@ -163,6 +170,7 @@ export class BrowserRuntime extends EventEmitter {
     const session = this.sessions.get(browserSessionId);
     const tab = session?.descriptor().tabs.find((item) => item.address.tabId === tabId);
     if (session === undefined || tab === undefined || tab.state !== "ready") throw new BrowserProtocolError("TAB_NOT_FOUND", "Workspace tab not found.");
+    assertResourceAdmission(session);
     const subscription: WorkspaceSubscription = { connectionId, subscriptionId, browserSessionId, tabId, interest, consumerKey: `workspace\u0000${connectionId}\u0000${subscriptionId}`, controlEpoch: tab.address.controlEpoch };
     session.subscribeFrames(subscription.consumerKey, tab.address, interest);
     values.set(subscriptionId, subscription);
@@ -196,6 +204,7 @@ export class BrowserRuntime extends EventEmitter {
     const session = this.sessions.get(next.browserSessionId);
     const tab = session?.descriptor().tabs.find((item) => item.address.tabId === next.tabId);
     if (session === undefined || tab === undefined || tab.state !== "ready") throw new BrowserProtocolError("TAB_NOT_FOUND", "Workspace tab not found.");
+    assertResourceAdmission(session);
     const projectedConnectionCount = values.size - Number(priorSubscription !== undefined) + 1;
     const projectedGlobalCount = this.workspaceSubscriptionCount - Number(priorSubscription !== undefined) + 1;
     if (projectedConnectionCount > 16 || projectedGlobalCount > 32) throw new BrowserProtocolError("LIMIT_EXCEEDED", "Workspace subscription limit reached.", true);
@@ -252,6 +261,7 @@ export class BrowserRuntime extends EventEmitter {
   async workspaceAcquireControl(connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.control.acquire" }>): Promise<unknown> {
     return await this.executeWorkspaceControlOperation(connectionId, request, async () => {
       const session = this.requireWorkspaceSession(request.browserSessionId);
+      assertResourceAdmission(session);
       this.requireWorkspaceControlFrame(connectionId, request.browserSessionId, request.tabId, request.frame, 1_500);
       if (request.expectedControlEpoch !== request.frame.controlEpoch) throw new BrowserProtocolError("CONTROL_LEASE_CONFLICT", "Browser control frame epoch does not match the expected state.", true);
       const lease = await session.control.acquire({ connectionId, subscriptionId: request.frame.subscriptionId, tabId: request.tabId, expectedControlEpoch: request.expectedControlEpoch });
@@ -286,6 +296,7 @@ export class BrowserRuntime extends EventEmitter {
 
   async workspaceInputBatch(connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.input.batch" }>, signal?: AbortSignal): Promise<unknown> {
     const session = this.requireWorkspaceSession(request.browserSessionId);
+    assertResourceAdmission(session);
     const proof: ControlLeaseProof = {
       connectionId, leaseId: request.leaseId, browserSessionId: request.browserSessionId,
       tabId: request.tabId, controlEpoch: request.controlEpoch, inputTargetGeneration: request.inputTargetGeneration,
@@ -450,12 +461,24 @@ export class BrowserRuntime extends EventEmitter {
     signal.throwIfAborted();
   }
 
+  private async terminateResourceLimitedSession(browserSessionId: string, reason: Exclude<BrowserResourceReason, "none" | "sampling-unavailable">): Promise<void> {
+    const session = this.sessions.get(browserSessionId);
+    if (session === undefined) return;
+    session.setResourceStatus({ state: "closing", reason });
+    await session.close();
+    if (this.sessions.get(browserSessionId) !== session) return;
+    this.sessions.delete(browserSessionId);
+    this.removeSessionSubscriptions(browserSessionId);
+    this.workspaceChanged("session", browserSessionId);
+  }
+
   private async terminateControlFailedSession(browserSessionId: string): Promise<void> {
     const session = this.sessions.get(browserSessionId);
     if (session === undefined) return;
     try { await session.close(); } catch { /* The failed control session remains terminal and inaccessible. */ }
     if (this.sessions.get(browserSessionId) !== session) return;
     this.sessions.delete(browserSessionId);
+    this.resources.unregister(browserSessionId);
     this.removeSessionSubscriptions(browserSessionId);
     this.workspaceChanged("session", browserSessionId);
   }
@@ -520,7 +543,9 @@ export class BrowserRuntime extends EventEmitter {
       if (existing !== undefined) {
         if (request.kind !== "session.create") {
           const existingSessionId = request.kind === "session.close" || request.kind === "tab.create" || request.kind === "tab.list" ? request.browserSessionId : request.address.browserSessionId;
-          this.sessions.get(existingSessionId)?.control?.assertAgentAdmission();
+          const existingSession = this.sessions.get(existingSessionId);
+          if (request.kind !== "session.close") assertResourceAdmission(existingSession);
+          existingSession?.control?.assertAgentAdmission();
         }
         return await this.awaitExisting(actor, request.operationId, signal);
       }
@@ -552,6 +577,23 @@ export class BrowserRuntime extends EventEmitter {
           }, context.signal, () => context.markDispatched());
           if (context.signal.aborted) { await session.close(); throw context.signal.reason; }
           this.sessions.set(session.browserSessionId, session);
+          this.resources.register({
+            browserSessionId: session.browserSessionId,
+            processIdentity: session.processIdentity,
+            profileDirectory: session.profileDirectory,
+            controlState: () => session.control.state,
+            hasRunningWork: () => this.operations.hasPendingSession(session.actor, session.browserSessionId),
+            fence: (reason) => {
+              session.setResourceStatus({ state: "draining", reason });
+              this.removeSessionSubscriptions(session.browserSessionId);
+              this.workspaceChanged("runtime", session.browserSessionId);
+            },
+            cancelOperations: () => this.operations.limitSession(session.actor, session.browserSessionId),
+            awaitOperationSettlement: async (resourceSignal) => await this.operations.awaitSessionSettlement(session.actor, session.browserSessionId, resourceSignal),
+            returnHumanControl: async (resourceSignal) => await session.returnHumanControlForResourceLimit(resourceSignal),
+            close: async (reason) => await this.terminateResourceLimitedSession(session.browserSessionId, reason),
+            changed: (status) => { session.setResourceStatus(status); this.workspaceChanged("runtime", session.browserSessionId); },
+          });
           session.onFrame(this.onFrame);
           session.onCaptureReadiness(() => this.workspaceChanged("control", session.browserSessionId));
           session.targets.on("tabTerminal", ({ tabId }: { tabId: string }) => { this.removeTabSubscriptions(session.browserSessionId, tabId); this.workspaceChanged("tab", session.browserSessionId, tabId); });
@@ -567,9 +609,10 @@ export class BrowserRuntime extends EventEmitter {
     const motorLane = `motor:${actorKey(actor)}:${browserSessionId}`;
 
     if (request.kind === "tab.list") return { kind: "tabs", tabs: session.listTabs() };
+    if (request.kind !== "session.close") assertResourceAdmission(session);
     session.control?.assertAgentAdmission();
 
-    if (request.kind === "session.close") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); context.markDispatched(); await session.close(); this.sessions.delete(browserSessionId); this.removeSessionSubscriptions(browserSessionId); this.workspaceChanged("session", browserSessionId); return session.descriptor(); }, signal);
+    if (request.kind === "session.close") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); context.markDispatched(); await session.close(); this.sessions.delete(browserSessionId); this.resources.unregister(browserSessionId); this.removeSessionSubscriptions(browserSessionId); this.workspaceChanged("session", browserSessionId); return session.descriptor(); }, signal);
     if (request.kind === "tab.create") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const tab = await session.createTab(request.url, context.signal, () => context.markDispatched(), { operationId: request.operationId, ...(request.navigationAuthorization !== undefined ? { authorization: request.navigationAuthorization } : {}) }); this.workspaceChanged("tab", browserSessionId, tab.tabId); return session.listTabs().find((item) => item.address.tabId === tab.tabId); }, signal);
     if (request.kind === "tab.focus") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); await session.targets.focus(request.address, context.signal, () => context.markDispatched()); return session.listTabs().find((item) => item.address.tabId === request.address.tabId); }, signal);
     if (request.kind === "tab.close") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); const tab = session.resolve(request.address); if (session.motor.isActiveTab(tab.tabId)) await session.motor.releaseAll(tab); await session.targets.closeTab(request.address, context.signal, () => context.markDispatched()); this.removeTabSubscriptions(browserSessionId, request.address.tabId); this.workspaceChanged("tab", browserSessionId, request.address.tabId); return { kind: "ack", operationId: request.operationId }; }, signal);
@@ -609,6 +652,7 @@ export class BrowserRuntime extends EventEmitter {
 
   private async closeInternal(): Promise<void> {
     const failures: unknown[] = [];
+    try { await this.resources.close(); } catch (error) { failures.push(error); }
     this.subscriptions.clear();
     this.workspaceSubscriptions.clear();
     this.workspaceEventSubscribers.clear();
@@ -633,6 +677,7 @@ export class BrowserRuntime extends EventEmitter {
     const current = this.sessions.size + this.creatingSessions;
     const availableCapacity = Math.max(0, this.maxSessionsGlobal - current);
     const runtimeState = this.closeState === "open" ? "open" : this.closeState === "cleanup-failed" ? "cleanup-failed" : "closing";
+    const resourceSupervision = this.resources.summary();
     return {
       kind: "capabilities",
       available: executableAvailable && displayAvailable && profileRootUsable && this.egressConfigured && runtimeState === "open" && availableCapacity > 0,
@@ -647,6 +692,7 @@ export class BrowserRuntime extends EventEmitter {
       egressConfigured: this.egressConfigured,
       ...(this.egressBindingId === undefined ? {} : { egressBindingId: this.egressBindingId }),
       runtimeState,
+      resourceSupervision,
       sessionCapacity: { current, limit: this.maxSessionsGlobal, available: availableCapacity },
     };
   }
@@ -657,7 +703,11 @@ export class BrowserRuntime extends EventEmitter {
       ...(browserSessionId !== undefined ? { browserSessionId } : {}), ...("address" in request ? { tabId: request.address.tabId } : {}), ...(controlEpoch !== undefined ? { controlEpoch } : {}),
       ...(request.kind === "tab.close" ? { failOnTargetTermination: false } : {}),
     }, async (context) => {
-      if (browserSessionId !== undefined) this.getSession(actor, browserSessionId).control?.assertAgentAdmission();
+      if (browserSessionId !== undefined) {
+        const activeSession = this.getSession(actor, browserSessionId);
+        if (request.kind !== "session.close") assertResourceAdmission(activeSession);
+        activeSession.control?.assertAgentAdmission();
+      }
       return await task(context);
     });
     this.workspaceChanged("operation", browserSessionId, "address" in request ? request.address.tabId : undefined);
@@ -793,6 +843,7 @@ function requireConnectionId(connectionId: string | undefined): string { if (con
 function ensureRequestLive(request: BrowserRequest): void { if (Date.parse(request.deadline) <= Date.now()) throw new BrowserProtocolError("DEADLINE_EXCEEDED", "Request deadline has expired."); }
 function sameAddress(left: TabAddress, right: TabAddress): boolean { return left.browserSessionId === right.browserSessionId && left.tabId === right.tabId && left.targetId === right.targetId && left.controlEpoch === right.controlEpoch; }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function assertResourceAdmission(session: BrowserSession | undefined): void { (session as unknown as { assertResourceAdmission?: () => void } | undefined)?.assertResourceAdmission?.(); }
 function observationTtl(value: number, name: string): number {
   if (!Number.isSafeInteger(value) || value < MIN_OBSERVATION_TTL_MS || value > MAX_OBSERVATION_TTL_MS) throw new BrowserProtocolError("INVALID_REQUEST", `${name} must be an integer from ${MIN_OBSERVATION_TTL_MS} to ${MAX_OBSERVATION_TTL_MS} milliseconds.`);
   return value;

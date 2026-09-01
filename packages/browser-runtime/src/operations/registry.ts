@@ -90,6 +90,11 @@ export class OperationRegistry {
     return this.epochs.get(epochKey(actor, browserSessionId)) ?? 1;
   }
 
+  hasPendingSession(actor: ActorIdentity, browserSessionId: string): boolean {
+    const owner = actorKey(actor);
+    return [...this.operations.values()].some((operation) => operation.actor === owner && operation.browserSessionId === browserSessionId && !operation.physicallySettled);
+  }
+
   async awaitSessionSettlement(actor: ActorIdentity, browserSessionId: string, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
     const owner = actorKey(actor);
@@ -191,6 +196,14 @@ export class OperationRegistry {
     if (operation === undefined) throw new BrowserProtocolError("OPERATION_NOT_FOUND", "Operation not found.");
     if (!isTerminal(operation.state)) this.cancelMutable(operation, new BrowserProtocolError("OPERATION_CANCELLED", "The operation was cancelled."));
     return publicStatus(operation);
+  }
+
+  limitSession(actor: ActorIdentity, browserSessionId: string): void {
+    for (const operation of this.operations.values()) {
+      if (operation.actor === actorKey(actor) && operation.browserSessionId === browserSessionId && !isTerminal(operation.state)) {
+        this.failMutable(operation, new BrowserProtocolError("BROWSER_RESOURCE_LIMIT", "Browser session reached a resource limit.", false));
+      }
+    }
   }
 
   failSession(actor: ActorIdentity, browserSessionId: string, code: "BROWSER_EXITED" | "CDP_DISCONNECTED" = "BROWSER_EXITED"): void {

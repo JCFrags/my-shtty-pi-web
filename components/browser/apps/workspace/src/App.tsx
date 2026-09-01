@@ -253,6 +253,7 @@ function StatusPanel({ status, selected, metrics, now, droppedBeforeFrontend, hu
         ["Session", selected?.session.state ?? "—"],
         ["Tab", selected?.tab.state ?? "—"],
         ["Capture", selected ? `${selected.session.captureReadiness} / ${selected.tab.captureReadiness}` : "—"],
+        ["Resources", selected?.session.resource === undefined ? "—" : `${selected.session.resource.state} / ${selected.session.resource.reason}`],
       ]} />
       <StatusGroup title="Frame" rows={[
         ["Delivery", metadata ? String(metadata.deliveryId) : "—"],

@@ -11,11 +11,25 @@ import { BrowserProtocolError, type FrameEvent, type WorkspaceBrokerRequest, typ
 import { encodeWorkspaceRecord, parseWorkspaceServerHeader, WorkspaceRecordDecoder, type WorkspaceWireRecord } from "../../../packages/workspace-protocol/src/index.js";
 import { WorkspaceGateway } from "../src/workspace/gateway.js";
 import { readWorkspaceDescriptor } from "../src/workspace/descriptor.js";
+import { sanitizeWorkspaceSnapshot } from "../src/workspace/sanitizer.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { while (cleanups.length > 0) await cleanups.pop()?.().catch(() => undefined); });
 
 describe("private workspace gateway", () => {
+  it("sanitizes bounded resource status into the trusted workspace snapshot", () => {
+    const runtime = new FakeWorkspaceRuntime();
+    const snapshot: BrowserWorkspaceSnapshot = {
+      ...runtime.snapshot,
+      sessions: runtime.snapshot.sessions.map((session) => ({
+        ...session,
+        resource: { state: "warning", reason: "session-memory" },
+      })),
+    };
+    const sanitized = sanitizeWorkspaceSnapshot(snapshot, "runtime:one");
+    expect(sanitized.sessions[0]?.resource).toEqual({ state: "warning", reason: "session-memory" });
+  });
+
   it("publishes a private descriptor, authenticates framed clients, reports legacy unavailable, and cleans only its files", async () => {
     const root = await mkdtemp(join(tmpdir(), "webxd-workspace-legacy-"));
     const runtimeDirectory = join(root, "workspace");

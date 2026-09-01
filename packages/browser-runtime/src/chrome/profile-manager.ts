@@ -102,6 +102,7 @@ export class ProfileManager {
     await this.assertLease(lease);
     const manifest = await readProfileManifest(lease.directory);
     if (manifest.runtimeInstanceId !== this.runtimeInstanceId || manifest.launchId !== lease.launchId) throw new BrowserProtocolError("INTERNAL_ERROR", "Profile deletion identity did not match.");
+    if (await profileHasSameUidUser(lease.directory)) throw new BrowserProtocolError("OPERATION_CONFLICT", "Profile is still used by a live process.");
     await rm(lease.directory, { recursive: true, force: true, maxRetries: 3 });
     this.activeLeases.delete(lease.launchId);
   }
@@ -191,7 +192,10 @@ export class ProfileManager {
       return false;
     }
     const currentTicks = await this.readStartTicks(manifest.pid).catch(() => undefined);
-    if (currentTicks !== manifest.processStartTicks) { await safeRemoveProfile(this.baseRoot, directory, manifest); return true; }
+    if (currentTicks !== manifest.processStartTicks) {
+      try { await safeRemoveProfile(this.baseRoot, directory, manifest); return true; }
+      catch { this.diagnostic(manifest.launchId, "profile removal refused while a process may still use it"); return false; }
+    }
     if (manifest.state !== "running" || manifest.executable === undefined) {
       this.diagnostic(manifest.launchId, "live process identity is not fully described");
       return false;
@@ -217,8 +221,8 @@ export class ProfileManager {
       this.diagnostic(manifest.launchId, "verified browser process did not settle");
       return false;
     }
-    await safeRemoveProfile(this.baseRoot, directory, manifest);
-    return true;
+    try { await safeRemoveProfile(this.baseRoot, directory, manifest); return true; }
+    catch { this.diagnostic(manifest.launchId, "profile removal refused while a process may still use it"); return false; }
   }
 
   private async terminateExactProcess(manifest: ProfileManifest): Promise<void> {
@@ -312,8 +316,31 @@ async function safeRemoveProfile(baseRoot: string, directory: string, expected: 
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Profile is not a real directory.");
   const current = await readProfileManifest(absolute);
   if (current.runtimeInstanceId !== expected.runtimeInstanceId || current.launchId !== expected.launchId) throw new Error("Profile marker identity changed.");
+  if (await profileHasSameUidUser(absolute)) throw new Error("Profile is still used by a live process.");
   await rm(absolute, { recursive: true, force: true, maxRetries: 3 });
 }
+async function profileHasSameUidUser(profileDirectory: string): Promise<boolean> {
+  const uid = process.getuid?.();
+  if (uid === undefined) throw new Error("Current user identity is unavailable.");
+  const argument = `--user-data-dir=${profileDirectory}`;
+  let observed = 0;
+  for (const entry of await readdir("/proc", { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^[1-9][0-9]*$/u.test(entry.name)) continue;
+    observed++;
+    if (observed > 65_536) throw new Error("Process table is too large.");
+    const pid = Number(entry.name);
+    try {
+      const owner = /^Uid:\s+([0-9]+)\s+/mu.exec(await readFile(`/proc/${pid}/status`, "utf8"))?.[1];
+      if (owner === undefined || Number(owner) !== uid) continue;
+      const before = await readProcessStartTicks(pid);
+      const commandLine = (await readFile(`/proc/${pid}/cmdline`)).toString("utf8").split("\0").filter(Boolean);
+      const after = await readProcessStartTicks(pid);
+      if (before === after && commandLine.includes(argument)) return true;
+    } catch (error) { if (!isMissingProcessError(error)) throw error; }
+  }
+  return false;
+}
+function isMissingProcessError(error: unknown): boolean { return isRecord(error) && (error.code === "ENOENT" || error.code === "ESRCH"); }
 async function readPrivateJson(path: string): Promise<unknown> { const info = await lstat(path); if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o077) !== 0) throw new Error("Invalid private marker."); return JSON.parse(await readFile(path, "utf8")); }
 async function writeManifestAtomic(directory: string, value: ProfileManifest): Promise<void> { await atomicJson(join(directory, PROFILE_MARKER), value); }
 async function writeExclusiveJson(path: string, value: unknown): Promise<void> { const handle = await open(path, "wx", 0o600); try { await handle.writeFile(`${JSON.stringify(value)}\n`); await handle.sync(); } finally { await handle.close(); } }

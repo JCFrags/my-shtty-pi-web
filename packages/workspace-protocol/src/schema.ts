@@ -28,6 +28,10 @@ export const WorkspaceControlTransferSchema = Type.Union([
 export const WorkspaceLeaseExpirySchema = Type.Union([
   Type.Literal("none"), Type.Literal("healthy"), Type.Literal("expiring"), Type.Literal("grace"),
 ]);
+export const WorkspaceResourceStatusSchema = Type.Object({
+  state: Type.Union([Type.Literal("normal"), Type.Literal("warning"), Type.Literal("draining"), Type.Literal("resource-limited"), Type.Literal("closing"), Type.Literal("closed")]),
+  reason: Type.Union([Type.Literal("none"), Type.Literal("session-memory"), Type.Literal("profile-storage"), Type.Literal("global-memory"), Type.Literal("sampling-unavailable")]),
+}, strict);
 
 const cursor = Type.Object({
   x: Type.Number({ minimum: 0, maximum: 100_000 }),
@@ -75,6 +79,7 @@ export const WorkspaceSessionSchema = Type.Object({
   selectedHumanControlTabId: Type.Optional(WorkspaceIdSchema),
   leaseExpiry: WorkspaceLeaseExpirySchema,
   captureReadiness: WorkspaceCaptureReadinessSchema,
+  resource: Type.Optional(WorkspaceResourceStatusSchema),
   personaDisplayId: Type.String({ minLength: 1, maxLength: 32, pattern: "^[A-Za-z0-9_-]+$" }),
   cursor,
   tabs: Type.Array(WorkspaceTabSchema, { maxItems: 16 }),

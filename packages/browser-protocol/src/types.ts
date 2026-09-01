@@ -4,7 +4,7 @@ import type {
   WorkspaceBrokerBindRequestSchema, WorkspaceBrokerRequestSchema, WorkspaceFrameEventSchema,
   WorkspaceControlFrameBindingSchema, HumanInputEventSchema, WorkspaceControlStatusResultSchema,
   WorkspaceControlHeartbeatResultSchema, WorkspaceControlLeaseResultSchema, WorkspaceInputAckResultSchema,
-  WorkspaceSessionSnapshotSchema, WorkspaceSnapshotSchema, WorkspaceStateEventSchema,
+  WorkspaceSessionSnapshotSchema, WorkspaceSnapshotSchema, WorkspaceStateEventSchema, BrowserResourceStatusSchema,
   DispatchStateSchema, DomObservationSchema, ErrorCodeSchema, ErrorResponseSchema,
   FrameEventSchema, OperationStateSchema, OperationStatusSchema, ProtocolErrorSchema,
   ScreenshotObservationSchema, ServerMessageSchema, SessionDescriptorSchema,
@@ -18,6 +18,7 @@ export type WorkspaceBrokerBindRequest = Static<typeof WorkspaceBrokerBindReques
 export type WorkspaceBrokerRequest = Static<typeof WorkspaceBrokerRequestSchema>;
 export type WorkspaceSnapshot = Static<typeof WorkspaceSnapshotSchema>;
 export type WorkspaceSessionSnapshot = Static<typeof WorkspaceSessionSnapshotSchema>;
+export type BrowserResourceStatus = Static<typeof BrowserResourceStatusSchema>;
 export type WorkspaceStateEvent = Static<typeof WorkspaceStateEventSchema>;
 export type WorkspaceFrameEvent = Static<typeof WorkspaceFrameEventSchema>;
 export type WorkspaceControlFrameBinding = Static<typeof WorkspaceControlFrameBindingSchema>;

@@ -13,6 +13,7 @@ import { SessionMotor, bindMotorTab, type CoordinateAction, type DirectHumanInpu
 import { DomObservationStore, bindDomTab } from "../observations/dom-store.js";
 import { bindObservationTab, ObservationStore } from "../observations/store.js";
 import type { OperationContext, OperationRegistry } from "../operations/registry.js";
+import type { BrowserResourceStatus } from "../resources/supervisor.js";
 import { TargetRegistry, type TabRecord, type TerminalTabEvent } from "../targets/registry.js";
 
 export type DomFallbackAction =
@@ -34,6 +35,7 @@ export class BrowserSession extends EventEmitter {
   private closePromise: Promise<void> | undefined;
   private automaticWarmupAttempts = 0;
   private automaticWarmupTabId: string | undefined;
+  private resourceStatusValue: BrowserResourceStatus = { state: "normal", reason: "none" };
   readonly captureCoordinator: SessionCaptureCoordinator;
   readonly captureReadiness: SessionCaptureReadiness;
   readonly control: SessionControlAuthority;
@@ -117,10 +119,14 @@ export class BrowserSession extends EventEmitter {
   get controlEpoch(): number { return this.operations.currentEpoch(this.actor, this.browserSessionId); }
   get personaId(): string { return this.motor.personaId; }
   get captureReadinessState(): CaptureReadinessState { return this.captureReadiness.state; }
+  get resourceStatus(): BrowserResourceStatus { return this.resourceStatusValue; }
+  get processIdentity(): { readonly pid: number; readonly processStartTicks: string } { return this.host.processIdentity; }
+  get profileDirectory(): string { return this.host.profileDirectory; }
   tabCaptureReadiness(tabId: string): CaptureReadinessState { return this.captureReadiness.tabState(tabId); }
 
   descriptor(): SessionDescriptor {
-    return { kind: "session", browserSessionId: this.browserSessionId, controlEpoch: this.controlEpoch, state: this.closeState === "open" ? this.host.connected ? "ready" : "degraded" : "closed", personaId: this.personaId, cursor: this.motor.state, tabs: this.targets.list(this.controlEpoch) };
+    const healthy = this.host.connected && this.resourceStatusValue.state === "normal";
+    return { kind: "session", browserSessionId: this.browserSessionId, controlEpoch: this.controlEpoch, state: this.closeState === "open" ? healthy ? "ready" : "degraded" : "closed", personaId: this.personaId, cursor: this.motor.state, tabs: this.targets.list(this.controlEpoch) };
   }
 
   actorDescriptor(): SessionDescriptor {
@@ -193,6 +199,15 @@ export class BrowserSession extends EventEmitter {
 
   async typeText(address: TabAddress, text: string, replace: boolean, context: OperationContext): Promise<void> { await this.motor.typeText(this.resolve(address), text, replace, context); }
   async pressKey(address: TabAddress, key: string, context: OperationContext): Promise<void> { await this.motor.pressKey(this.resolve(address), key, context); }
+
+  setResourceStatus(status: BrowserResourceStatus): void { this.resourceStatusValue = status; }
+  assertResourceAdmission(): void {
+    if (this.resourceStatusValue.state === "draining" || this.resourceStatusValue.state === "resource-limited" || this.resourceStatusValue.state === "closing" || this.resourceStatusValue.state === "closed") {
+      const reason = this.resourceStatusValue.reason === "profile-storage" ? "profile-storage" : this.resourceStatusValue.reason === "global-memory" ? "global-memory" : "session-memory";
+      throw new BrowserProtocolError("BROWSER_RESOURCE_LIMIT", "Browser session reached a resource limit.", false, { reason });
+    }
+  }
+  async returnHumanControlForResourceLimit(signal: AbortSignal): Promise<void> { await this.control.returnForResourceLimit(signal); }
 
   async dispatchHumanInput(tabId: string, controlEpoch: number, events: readonly DirectHumanInputEvent[], beforeDispatch: () => void, signal?: AbortSignal): Promise<{ readonly result: DirectHumanInputResult; readonly coalescedPointerMoveCount: number }> {
     const tab = this.targets.getById(tabId);
@@ -326,6 +341,7 @@ export class BrowserSession extends EventEmitter {
   }
 
   private assertEpoch(address: TabAddress): void {
+    this.assertResourceAdmission();
     this.assertOpen();
     if (address.browserSessionId !== this.browserSessionId || address.controlEpoch !== this.controlEpoch) throw new BrowserProtocolError("CONTROL_EPOCH_STALE", "Control epoch is stale.");
   }

@@ -662,16 +662,28 @@ test("doctor emits fixed classified findings without secrets or absolute managed
     browser: async () => ({ product: "Chromium", version: "140.0.0.0" }),
     proxy: async () => "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\n\r\n",
     authority: async () => ({ apiVersion: "3.0.0", capabilities: [{ id: "search", enabled: true, healthy: true }, { id: "read", enabled: true, healthy: true }] }),
+    resources: async () => ({ state: "normal", supervisedSessions: 0, warningSessions: 0, limitedSessions: 0, terminalLimitEvents: 0, lastTerminalReason: "none" }),
   });
   assert.equal(candidate.findings.find((item) => item.category === "egress")?.status, "pass");
+  assert.equal(candidate.findings.find((item) => item.category === "resource")?.code, "RESOURCE_SUPERVISION_HEALTHY");
 
   const hostileBrowser = await doctorReport(paths, systemd.command, { ...environment, WAYLAND_DISPLAY: "wayland-0", DBUS_SESSION_BUS_ADDRESS: "unix:path=private" }, {
     browser: async () => ({ product: "SECRET_BROWSER_PRODUCT", version: "140.0.0.0-SECRET_BROWSER_VERSION" }),
     proxy: async () => "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\n\r\n",
     authority: async () => ({ apiVersion: "3.0.0", capabilities: [{ id: "search", enabled: true, healthy: true }, { id: "read", enabled: true, healthy: true }] }),
+    resources: async () => ({ state: "normal", supervisedSessions: 0, warningSessions: 0, limitedSessions: 0, terminalLimitEvents: 0, lastTerminalReason: "none" }),
   });
   assert.equal(hostileBrowser.findings.find((item) => item.category === "browser")?.code, "BROWSER_UNAVAILABLE");
   assert.doesNotMatch(JSON.stringify(hostileBrowser), /SECRET_BROWSER_PRODUCT|SECRET_BROWSER_VERSION/u);
+
+  const hostileResources = await doctorReport(paths, systemd.command, { ...environment, WAYLAND_DISPLAY: "wayland-0", DBUS_SESSION_BUS_ADDRESS: "unix:path=private" }, {
+    browser: async () => ({ product: "Chromium", version: "140.0.0.0" }),
+    proxy: async () => "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\n\r\n",
+    authority: async () => ({ apiVersion: "3.0.0", capabilities: [{ id: "search", enabled: true, healthy: true }, { id: "read", enabled: true, healthy: true }] }),
+    resources: async () => ({ state: "SECRET_RESOURCE_STATE", profilePath: "/tmp/SECRET_PROFILE", rawError: "SECRET_RESOURCE_ERROR" }),
+  });
+  assert.equal(hostileResources.findings.find((item) => item.category === "resource")?.code, "RESOURCE_SUPERVISION_UNAVAILABLE");
+  assert.doesNotMatch(JSON.stringify(hostileResources), /SECRET_RESOURCE_STATE|SECRET_PROFILE|SECRET_RESOURCE_ERROR|\/tmp\//u);
 });
 
 test("doctor converts corruption and missing display into controlled classifications", async () => {

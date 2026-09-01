@@ -3240,6 +3240,76 @@
                         }
                       ]
                     },
+                    "resourceSupervision": {
+                      "type": "object",
+                      "required": [
+                        "state",
+                        "supervisedSessions",
+                        "warningSessions",
+                        "limitedSessions",
+                        "terminalLimitEvents",
+                        "lastTerminalReason"
+                      ],
+                      "properties": {
+                        "state": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "normal"
+                            },
+                            {
+                              "type": "string",
+                              "const": "warning"
+                            },
+                            {
+                              "type": "string",
+                              "const": "resource-limited"
+                            }
+                          ]
+                        },
+                        "supervisedSessions": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 256
+                        },
+                        "warningSessions": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 256
+                        },
+                        "limitedSessions": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 256
+                        },
+                        "terminalLimitEvents": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 256
+                        },
+                        "lastTerminalReason": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "none"
+                            },
+                            {
+                              "type": "string",
+                              "const": "session-memory"
+                            },
+                            {
+                              "type": "string",
+                              "const": "profile-storage"
+                            },
+                            {
+                              "type": "string",
+                              "const": "global-memory"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
                     "sessionCapacity": {
                       "type": "object",
                       "required": [
@@ -4622,6 +4692,10 @@
                             {
                               "type": "string",
                               "const": "INPUT_UNSUPPORTED"
+                            },
+                            {
+                              "type": "string",
+                              "const": "BROWSER_RESOURCE_LIMIT"
                             }
                           ]
                         },
@@ -5033,6 +5107,68 @@
                                 "const": "unavailable"
                               }
                             ]
+                          },
+                          "resource": {
+                            "type": "object",
+                            "required": [
+                              "state",
+                              "reason"
+                            ],
+                            "properties": {
+                              "state": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "normal"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "warning"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "draining"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "resource-limited"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "closing"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "closed"
+                                  }
+                                ]
+                              },
+                              "reason": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "none"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "session-memory"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "profile-storage"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "global-memory"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "sampling-unavailable"
+                                  }
+                                ]
+                              }
+                            },
+                            "additionalProperties": false
                           },
                           "personaId": {
                             "type": "string",
@@ -5899,6 +6035,10 @@
                     {
                       "type": "string",
                       "const": "INPUT_UNSUPPORTED"
+                    },
+                    {
+                      "type": "string",
+                      "const": "BROWSER_RESOURCE_LIMIT"
                     }
                   ]
                 },

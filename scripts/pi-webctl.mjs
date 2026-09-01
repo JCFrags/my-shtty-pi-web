@@ -975,8 +975,9 @@ async function detectReviewedBrowser(selection = "auto") {
 /** @param {unknown} value @returns {{product: "Google Chrome" | "Chromium", version: string} | undefined} */
 function reviewedBrowserIdentity(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-  const product = value.product;
-  const version = value.version;
+  const identity = /** @type {Record<string, unknown>} */ (value);
+  const product = identity.product;
+  const version = identity.version;
   if ((product !== "Google Chrome" && product !== "Chromium") || typeof version !== "string" || !/^[0-9]{1,4}(?:\.[0-9]{1,6}){1,3}$/u.test(version)) return undefined;
   return { product, version };
 }
@@ -1198,6 +1199,54 @@ async function probeAuthority(socketPath) {
   } finally { clearTimeout(deadline); socket.destroy(); }
 }
 
+/** @param {string} runtimeDirectory */
+async function probeBrowserdResources(runtimeDirectory) {
+  const descriptorPath = join(runtimeDirectory, "browserd.json");
+  const descriptorInformation = await lstat(descriptorPath);
+  if (!descriptorInformation.isFile() || descriptorInformation.isSymbolicLink() || descriptorInformation.uid !== process.getuid?.() || (descriptorInformation.mode & 0o077) !== 0) fail("browserd descriptor is unsafe");
+  const descriptor = record(await readJson(descriptorPath), "browserd descriptor");
+  if (descriptor.protocolVersion !== "browser.v3" || typeof descriptor.bindingSecret !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(descriptor.bindingSecret) || typeof descriptor.socketPath !== "string" || resolve(descriptor.socketPath) !== descriptor.socketPath || dirname(descriptor.socketPath) !== runtimeDirectory) fail("browserd descriptor is invalid");
+  const socketInformation = await lstat(descriptor.socketPath);
+  if (!socketInformation.isSocket() || socketInformation.isSymbolicLink() || socketInformation.uid !== process.getuid?.() || (socketInformation.mode & 0o077) !== 0) fail("browserd socket is unsafe");
+  const socket = createConnection({ path: descriptor.socketPath });
+  let buffer = "";
+  /** @type {Error | undefined} */
+  let failure;
+  /** @type {{resolve: (value: string) => void, reject: (error: Error) => void} | undefined} */
+  let waiter;
+  const drain = () => {
+    if (waiter === undefined) return;
+    const newline = buffer.indexOf("\n");
+    if (newline >= 0) { const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1); const target = waiter; waiter = undefined; target.resolve(line); return; }
+    if (failure !== undefined) { const target = waiter; waiter = undefined; target.reject(failure); }
+  };
+  socket.on("data", (chunk) => { buffer += chunk.toString("utf8"); if (Buffer.byteLength(buffer) > 65_536) socket.destroy(new Error("bounded browser resource response exceeded")); drain(); });
+  socket.on("error", (error) => { failure = error; drain(); });
+  socket.on("close", () => { failure ??= new Error("browser resource connection closed"); drain(); });
+  const nextLine = () => new Promise((resolveLine, rejectLine) => { waiter = { resolve: resolveLine, reject: rejectLine }; drain(); });
+  const deadline = setTimeout(() => socket.destroy(new Error("bounded browser resource probe timed out")), 2_000);
+  try {
+    await new Promise((resolveConnect, rejectConnect) => { socket.once("connect", resolveConnect); socket.once("error", rejectConnect); });
+    socket.write(`${JSON.stringify({ protocolVersion: "browser.v3", kind: "bind", requestId: "request:doctor:bind", bindingSecret: descriptor.bindingSecret, actor: { principalId: "principal:pi-webctl-doctor", agentSessionId: "agent:pi-webctl-doctor" } })}\n`);
+    const bound = record(JSON.parse(await nextLine()), "browserd bind response");
+    if (bound.kind !== "bound") fail("browserd bind failed");
+    socket.write(`${JSON.stringify({ protocolVersion: "browser.v3", kind: "capabilities.get", requestId: "request:doctor:resource", operationId: "operation:doctor:resource", deadline: new Date(Date.now() + 2_000).toISOString() })}\n`);
+    const response = record(JSON.parse(await nextLine()), "browserd resource response");
+    if (response.ok !== true) fail("browserd resource capability failed");
+    const result = record(response.result, "browserd resource capability");
+    return reviewedResourceSummary(result.resourceSupervision);
+  } finally { clearTimeout(deadline); socket.destroy(); }
+}
+
+/** @param {unknown} value */
+function reviewedResourceSummary(value) {
+  const summary = record(value, "browser resource summary");
+  if (!new Set(["normal", "warning", "resource-limited"]).has(String(summary.state))) fail("browser resource state is invalid");
+  for (const name of ["supervisedSessions", "warningSessions", "limitedSessions", "terminalLimitEvents"]) if (!Number.isSafeInteger(summary[name]) || summary[name] < 0 || summary[name] > 256) fail("browser resource count is invalid");
+  if (!new Set(["none", "session-memory", "profile-storage", "global-memory"]).has(String(summary.lastTerminalReason))) fail("browser resource reason is invalid");
+  return Object.freeze({ state: summary.state, supervisedSessions: summary.supervisedSessions, warningSessions: summary.warningSessions, limitedSessions: summary.limitedSessions, terminalLimitEvents: summary.terminalLimitEvents, lastTerminalReason: summary.lastTerminalReason });
+}
+
 /** @param {string} host @param {number} port */
 async function probeProxy(host, port) {
   return await new Promise((resolveProbe, rejectProbe) => {
@@ -1228,7 +1277,7 @@ async function doctorFilesystem(paths) {
   }
 }
 
-/** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {NodeJS.ProcessEnv} environment @param {{authority?: (path: string) => Promise<Record<string, any>>, proxy?: (host: string, port: number) => Promise<string>, browser?: () => Promise<{product: string, version: string} | undefined>}} probes */
+/** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {NodeJS.ProcessEnv} environment @param {{authority?: (path: string) => Promise<Record<string, any>>, proxy?: (host: string, port: number) => Promise<string>, browser?: () => Promise<{product: string, version: string} | undefined>, resources?: (runtimeDirectory: string) => Promise<Record<string, any>>}} probes */
 export async function doctorReport(paths, command, environment = process.env, probes = {}) {
   /** @type {Array<{category: string, status: DoctorStatus, code: string, summary: string}>} */
   const findings = [];
@@ -1300,7 +1349,18 @@ export async function doctorReport(paths, command, environment = process.env, pr
     findings.push(doctorFinding("authority", "pass", "AUTHORITY_HEALTHY", "Trusted WebX authority and required search/read capabilities are healthy."));
   } catch { findings.push(doctorFinding("authority", "unavailable", "AUTHORITY_UNAVAILABLE", "Trusted WebX authority or a required capability is unavailable.")); }
 
-  findings.push(doctorFinding("resource", config === undefined ? "error" : "not-tested", config === undefined ? "RESOURCE_CONFIG_INVALID" : "RESOURCE_ENFORCEMENT_NOT_TESTED", config === undefined ? "Resource configuration is unavailable." : "Resource limits are configured; live enforcement is not tested by doctor."));
+  if (config === undefined) findings.push(doctorFinding("resource", "error", "RESOURCE_CONFIG_INVALID", "Resource configuration is unavailable."));
+  else if (config.backend !== "agentcursor") findings.push(doctorFinding("resource", "not-tested", "RESOURCE_CANDIDATE_NOT_SELECTED", "Candidate resource supervision is configured but not selected."));
+  else {
+    try {
+      const summary = await (probes.resources ?? probeBrowserdResources)(join(paths.runtimeRoot, "pi-browserd"));
+      const state = summary.state;
+      if (state === "normal") findings.push(doctorFinding("resource", "pass", "RESOURCE_SUPERVISION_HEALTHY", "Browser resource supervision is active and within configured limits."));
+      else if (state === "warning") findings.push(doctorFinding("resource", "warning", "RESOURCE_SUPERVISION_WARNING", "Browser resource supervision reports a bounded warning."));
+      else if (state === "resource-limited") findings.push(doctorFinding("resource", "warning", "RESOURCE_LIMIT_ACTIVE", "Browser resource supervision is closing an affected session."));
+      else throw new Error("resource state unavailable");
+    } catch { findings.push(doctorFinding("resource", "unavailable", "RESOURCE_SUPERVISION_UNAVAILABLE", "Browser resource supervision status is unavailable.")); }
+  }
   const workspacePresent = verified !== undefined && await exists(join(verified.releaseRoot, "bin/pi-browser-workspace"));
   findings.push(doctorFinding("workspace", workspacePresent ? "not-tested" : "error", workspacePresent ? "WORKSPACE_LIVE_NOT_TESTED" : "WORKSPACE_INVALID", workspacePresent ? "The workspace bundle is verified; live GUI readiness is not tested by doctor." : "The installed workspace bundle is missing or invalid."));
 

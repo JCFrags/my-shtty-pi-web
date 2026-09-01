@@ -235,7 +235,7 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal("CONTROL_NOT_READY"), Type.Literal("CONTROL_TRANSFER_PENDING"), Type.Literal("CONTROL_HELD_BY_HUMAN"),
   Type.Literal("CONTROL_LEASE_REQUIRED"), Type.Literal("CONTROL_LEASE_EXPIRED"), Type.Literal("CONTROL_LEASE_CONFLICT"),
   Type.Literal("INPUT_SEQUENCE_STALE"), Type.Literal("INPUT_FRAME_STALE"), Type.Literal("INPUT_RATE_LIMITED"),
-  Type.Literal("INPUT_UNSUPPORTED"),
+  Type.Literal("INPUT_UNSUPPORTED"), Type.Literal("BROWSER_RESOURCE_LIMIT"),
 ]);
 
 export const ProtocolErrorSchema = Type.Object({
@@ -286,6 +286,11 @@ export const WorkspaceOperationSummarySchema = Type.Object({
   cancellable: Type.Boolean(),
 }, strict);
 
+export const BrowserResourceStatusSchema = Type.Object({
+  state: Type.Union([Type.Literal("normal"), Type.Literal("warning"), Type.Literal("draining"), Type.Literal("resource-limited"), Type.Literal("closing"), Type.Literal("closed")]),
+  reason: Type.Union([Type.Literal("none"), Type.Literal("session-memory"), Type.Literal("profile-storage"), Type.Literal("global-memory"), Type.Literal("sampling-unavailable")]),
+}, strict);
+
 export const WorkspaceSessionSnapshotSchema = Type.Object({
   browserSessionId: IdSchema,
   agentSessionId: IdSchema,
@@ -298,6 +303,7 @@ export const WorkspaceSessionSnapshotSchema = Type.Object({
   selectedHumanControlTabId: Type.Optional(IdSchema),
   leaseExpiry: ControlLeaseExpirySchema,
   captureReadiness: CaptureReadinessSchema,
+  resource: Type.Optional(BrowserResourceStatusSchema),
   personaId: OpaqueIdSchema,
   cursor,
   tabs: Type.Array(Type.Object({
@@ -439,6 +445,14 @@ const capabilityResult = Type.Object({
   egressConfigured: Type.Boolean(),
   egressBindingId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
   runtimeState: Type.Union([Type.Literal("open"), Type.Literal("closing"), Type.Literal("cleanup-failed")]),
+  resourceSupervision: Type.Optional(Type.Object({
+    state: Type.Union([Type.Literal("normal"), Type.Literal("warning"), Type.Literal("resource-limited")]),
+    supervisedSessions: Type.Integer({ minimum: 0, maximum: 256 }),
+    warningSessions: Type.Integer({ minimum: 0, maximum: 256 }),
+    limitedSessions: Type.Integer({ minimum: 0, maximum: 256 }),
+    terminalLimitEvents: Type.Integer({ minimum: 0, maximum: 256 }),
+    lastTerminalReason: Type.Union([Type.Literal("none"), Type.Literal("session-memory"), Type.Literal("profile-storage"), Type.Literal("global-memory")]),
+  }, strict)),
   sessionCapacity: Type.Object({ current: Type.Integer({ minimum: 0, maximum: 256 }), limit: Type.Integer({ minimum: 1, maximum: 256 }), available: Type.Integer({ minimum: 0, maximum: 256 }) }, strict),
 }, strict);
 const sessionsResult = Type.Object({ kind: Type.Literal("sessions"), sessions: Type.Array(SessionDescriptorSchema, { maxItems: 32 }) }, strict);

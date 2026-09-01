@@ -5,7 +5,8 @@ export interface OperationState { kind: string; state: "queued" | "running" | "c
 export type CaptureReadiness = "starting" | "warming" | "ready" | "degraded" | "unavailable";
 export interface WorkspaceTab { tabId: string; url: string; title: string; state: "attaching" | "ready" | "crashed" | "closed"; captureReadiness: CaptureReadiness }
 export type ControlState = "agent" | "takeover-pending" | "human" | "human-disconnected" | "return-pending";
-export interface WorkspaceSession { browserSessionId: string; agentLabel: string; actorDisplayId: string; pathId: "agentcursor/chrome"; state: "starting" | "ready" | "degraded" | "closed"; controlState: ControlState; captureReadiness: CaptureReadiness; personaDisplayId: string; cursor: CursorState; tabs: WorkspaceTab[]; activeOperation?: OperationState; lastActivityAt?: string }
+export interface ResourceStatus { state: "normal" | "warning" | "draining" | "resource-limited" | "closing" | "closed"; reason: "none" | "session-memory" | "profile-storage" | "global-memory" | "sampling-unavailable" }
+export interface WorkspaceSession { browserSessionId: string; agentLabel: string; actorDisplayId: string; pathId: "agentcursor/chrome"; state: "starting" | "ready" | "degraded" | "closed"; controlState: ControlState; captureReadiness: CaptureReadiness; resource?: ResourceStatus; personaDisplayId: string; cursor: CursorState; tabs: WorkspaceTab[]; activeOperation?: OperationState; lastActivityAt?: string }
 export interface WorkspaceSnapshot { generatedAt: string; browserdState: "ready" | "unavailable" | "replaced"; sessions: WorkspaceSession[] }
 export interface WorkspaceStatus { connection: "connecting" | "ready" | "reconnecting" | "unavailable" | "closed"; browserd: "ready" | "unavailable" | "replaced"; message?: string }
 export interface SelectedTab { browserSessionId: string; tabId: string }

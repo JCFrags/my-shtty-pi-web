@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, type ChildProcess } from "node:child_process";
 import { afterEach, describe, it } from "vitest";
-import { ChromeHost } from "../src/chrome/host.js";
+import { ChromeHost, closedProfileRemovalSafe } from "../src/chrome/host.js";
 import { acquireOwnershipSocket } from "../src/os/ownership-socket.js";
 import { ProfileManager, readProcessStartTicks, type ProfileManifest } from "../src/chrome/profile-manager.js";
 
@@ -35,6 +35,19 @@ function keeper(profile: string, includeProfileArgument: boolean): ChildProcess 
 }
 
 describe("runtime-owned profile lifecycle", () => {
+  it("retains profiles when normal-close tree or process identity is uncertain", () => {
+    const settled = { processTreeObserved: true, finalIdentity: "gone" as const, descendantStates: ["gone" as const], profileUsers: [], sessionMembers: [] };
+    assert.equal(closedProfileRemovalSafe(settled), true);
+    assert.equal(closedProfileRemovalSafe({ ...settled, processTreeObserved: false }), false);
+    assert.equal(closedProfileRemovalSafe({ ...settled, finalIdentity: "identity-changed" }), false);
+    assert.equal(closedProfileRemovalSafe({ ...settled, descendantStates: ["identity-changed"] }), false);
+    assert.equal(closedProfileRemovalSafe({ ...settled, descendantStates: undefined }), false);
+    assert.equal(closedProfileRemovalSafe({ ...settled, profileUsers: undefined }), false);
+    assert.equal(closedProfileRemovalSafe({ ...settled, profileUsers: [{ pid: 1, processStartTicks: "1" }] }), false);
+    assert.equal(closedProfileRemovalSafe({ ...settled, sessionMembers: undefined }), false);
+    assert.equal(closedProfileRemovalSafe({ ...settled, sessionMembers: [{ pid: 2, processStartTicks: "2" }] }), false);
+  });
+
   it("allocates many unique profiles safely and does not serialize their startup transitions", async () => {
     const base = await root();
     const manager = new ProfileManager(base);
@@ -123,6 +136,21 @@ describe("runtime-owned profile lifecycle", () => {
     } finally { child.kill("SIGKILL"); await childExit(child); }
   });
 
+  it("retains a dead-root profile while another same-UID process names its user-data directory", async () => {
+    const base = await root();
+    const orphan = await deadRuntime(base, "runtime_profile_user_survives");
+    const child = keeper(orphan.profile, true);
+    if (child.pid === undefined) throw new Error("keeper has no pid");
+    try {
+      await writeOrphanManifest(orphan.profile, { runtimeInstanceId: "runtime_profile_user_survives", launchId: "launch_profile_user_survives", state: "running", pid: 999_999_999, processStartTicks: "1", executable: process.execPath });
+      const manager = new ProfileManager(base);
+      await manager.initialize();
+      assert.equal((await lstat(orphan.profile)).isDirectory(), true);
+      assert.deepEqual(manager.cleanupDiagnostics, ["launch_profile_user_survives: profile removal refused while a process may still use it"]);
+      await manager.close();
+    } finally { child.kill("SIGKILL"); await childExit(child); }
+  });
+
   it("does not signal a reused PID with mismatching process-start ticks", async () => {
     const base = await root();
     const orphan = await deadRuntime(base, "runtime_reused_pid");
@@ -170,9 +198,13 @@ describe("runtime-owned profile lifecycle", () => {
     assert.equal((await readdir(manager.instanceRoot)).filter((name) => name.startsWith("session-")).length, 0);
   });
 
-  it("cleans its profile after a browser startup failure", async () => {
-    const manager = new ProfileManager(await root());
-    await assert.rejects(() => ChromeHost.launch({ hostId: "host:startup-failure", executable: "/bin/true", profileManager: manager, startupTimeoutMs: 100 }), (error) => error instanceof Error);
+  it("settles an exact failed-launch process tree before removing its profile", async () => {
+    const base = await root();
+    const executable = join(base, "failed-browser");
+    await writeFile(executable, "#!/bin/sh\nsleep 30\n", { mode: 0o700 });
+    await chmod(executable, 0o700);
+    const manager = new ProfileManager(base);
+    await assert.rejects(() => ChromeHost.launch({ hostId: "host:startup-failure", executable, profileManager: manager, startupTimeoutMs: 100 }), (error) => error instanceof Error);
     assert.equal((await readdir(manager.instanceRoot)).filter((name) => name.startsWith("session-")).length, 0);
   });
 

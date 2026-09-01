@@ -108,6 +108,10 @@ impl AcceptanceDiagnostics {
             "controlState": bounded_text(&session.control_state, 32),
             "controlEpoch": session.control_epoch,
             "captureReadiness": bounded_text(&session.capture_readiness, 32),
+            "resource": session.resource.as_ref().map(|resource| json!({
+                "state": bounded_text(&resource.state, 32),
+                "reason": bounded_text(&resource.reason, 32),
+            })),
             "cursor": {
                 "x": session.cursor.x,
                 "y": session.cursor.y,

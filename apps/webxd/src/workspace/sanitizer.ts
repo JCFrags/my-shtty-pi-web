@@ -25,6 +25,7 @@ export function sanitizeWorkspaceSnapshot(snapshot: BrowserWorkspaceSnapshot, br
       ...(session.selectedHumanControlTabId === undefined ? {} : { selectedHumanControlTabId: session.selectedHumanControlTabId }),
       leaseExpiry: session.leaseExpiry,
       captureReadiness: session.captureReadiness,
+      resource: session.resource === undefined ? { state: "normal", reason: "none" } : { state: session.resource.state, reason: session.resource.reason },
       personaDisplayId: personaDisplayId(session.personaId, browserdRuntimeInstanceId),
       cursor: session.controlState === "agent" ? {
         x: session.cursor.x,

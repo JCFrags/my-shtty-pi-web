@@ -1,8 +1,17 @@
 import { resolve, sep } from "node:path";
 import type { BrowserdServerOptions } from "./server.js";
 
+const MIB = 1024 * 1024;
+const RESOURCE_VARIABLES = new Set([
+  "PI_WEB_RESOURCE_PER_SESSION_SOFT_PSS_MIB", "PI_WEB_RESOURCE_PER_SESSION_HARD_PSS_MIB",
+  "PI_WEB_RESOURCE_GLOBAL_CHROME_PSS_MIB", "PI_WEB_RESOURCE_PROFILE_SOFT_MIB",
+  "PI_WEB_RESOURCE_PROFILE_HARD_MIB", "PI_WEB_RESOURCE_SAMPLING_INTERVAL_MS",
+  "PI_WEB_RESOURCE_DRAIN_TIMEOUT_MS", "PI_WEB_RESOURCE_EMERGENCY_TIMEOUT_MS",
+]);
+
 /** Parse only fixed, bounded installed-service environment variables. */
 export function installedBrowserdOptions(environment: NodeJS.ProcessEnv): BrowserdServerOptions {
+  for (const name of Object.keys(environment)) if (name.startsWith("PI_WEB_RESOURCE_") && !RESOURCE_VARIABLES.has(name)) throw new Error("Unknown browser resource configuration variable");
   const xdgRuntimeDirectory = environment.XDG_RUNTIME_DIR;
   if (xdgRuntimeDirectory === undefined || resolve(xdgRuntimeDirectory) !== xdgRuntimeDirectory) throw new Error("XDG_RUNTIME_DIR must be an absolute normalized path for browserd");
 
@@ -17,12 +26,34 @@ export function installedBrowserdOptions(environment: NodeJS.ProcessEnv): Browse
   if (!(idleIntervalMs >= selectedIntervalMs && selectedIntervalMs >= burstIntervalMs)) throw new Error("browserd frame intervals must satisfy idle >= selected >= burst");
   const maxSessionsGlobal = parseInteger(environment.BROWSERD_MAX_SESSIONS_GLOBAL, "BROWSERD_MAX_SESSIONS_GLOBAL", 16, 1, 16);
   const executable = parseBrowserExecutable(environment.BROWSERD_CHROME_BIN);
+  const perSessionSoftPssMiB = parseInteger(environment.PI_WEB_RESOURCE_PER_SESSION_SOFT_PSS_MIB, "PI_WEB_RESOURCE_PER_SESSION_SOFT_PSS_MIB", 1024, 128, 8192);
+  const perSessionHardPssMiB = parseInteger(environment.PI_WEB_RESOURCE_PER_SESSION_HARD_PSS_MIB, "PI_WEB_RESOURCE_PER_SESSION_HARD_PSS_MIB", 1280, 256, 16_384);
+  const globalChromePssMiB = parseInteger(environment.PI_WEB_RESOURCE_GLOBAL_CHROME_PSS_MIB, "PI_WEB_RESOURCE_GLOBAL_CHROME_PSS_MIB", 4096, 512, 32_768);
+  const profileSoftMiB = parseInteger(environment.PI_WEB_RESOURCE_PROFILE_SOFT_MIB, "PI_WEB_RESOURCE_PROFILE_SOFT_MIB", 512, 64, 4096);
+  const profileHardMiB = parseInteger(environment.PI_WEB_RESOURCE_PROFILE_HARD_MIB, "PI_WEB_RESOURCE_PROFILE_HARD_MIB", 1024, 128, 8192);
+  const samplingIntervalMs = parseInteger(environment.PI_WEB_RESOURCE_SAMPLING_INTERVAL_MS, "PI_WEB_RESOURCE_SAMPLING_INTERVAL_MS", 5000, 1000, 60_000);
+  const drainTimeoutMs = parseInteger(environment.PI_WEB_RESOURCE_DRAIN_TIMEOUT_MS, "PI_WEB_RESOURCE_DRAIN_TIMEOUT_MS", 30_000, 1000, 120_000);
+  const emergencyTimeoutMs = parseInteger(environment.PI_WEB_RESOURCE_EMERGENCY_TIMEOUT_MS, "PI_WEB_RESOURCE_EMERGENCY_TIMEOUT_MS", 15_000, 1000, 60_000);
+  if (perSessionSoftPssMiB >= perSessionHardPssMiB) throw new Error("browserd per-session PSS limits must satisfy soft < hard");
+  if (profileSoftMiB >= profileHardMiB) throw new Error("browserd profile limits must satisfy soft < hard");
+  if (globalChromePssMiB < perSessionHardPssMiB) throw new Error("browserd global Chrome PSS limit must not be below the per-session hard limit");
+  if (emergencyTimeoutMs > drainTimeoutMs) throw new Error("browserd emergency timeout must not exceed the drain timeout");
 
   return {
     runtimeDirectory,
     screenshotObservationTtlMs,
     domObservationTtlMs,
     maxSessionsGlobal,
+    resourceLimits: {
+      perSessionSoftPssBytes: perSessionSoftPssMiB * MIB,
+      perSessionHardPssBytes: perSessionHardPssMiB * MIB,
+      globalChromePssBytes: globalChromePssMiB * MIB,
+      profileSoftBytes: profileSoftMiB * MIB,
+      profileHardBytes: profileHardMiB * MIB,
+      samplingIntervalMs,
+      drainTimeoutMs,
+      emergencyTimeoutMs,
+    },
     frameScheduler: { idleIntervalMs, selectedIntervalMs, burstIntervalMs },
     chrome: {
       profileRoot,

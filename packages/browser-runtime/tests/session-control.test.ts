@@ -150,6 +150,16 @@ describe("browserd session control authority", () => {
     assert.equal(item.epoch(), 3);
   });
 
+  it("returns human authority at a new epoch for resource-limit shutdown", async () => {
+    const item = harness();
+    await item.authority.acquire(acquire("connection:resource", 1));
+    item.setHeld(2);
+    await item.authority.returnForResourceLimit(new AbortController().signal);
+    assert.equal(item.authority.state, "agent");
+    assert.equal(item.epoch(), 3);
+    assert.deepEqual(item.terminalReasons, []);
+  });
+
   it("keeps both controllers blocked and requests terminal cleanup when held input cannot settle", async () => {
     let epoch = 1;
     let held = 1;

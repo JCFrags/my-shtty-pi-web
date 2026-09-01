@@ -1261,6 +1261,68 @@
                                   }
                                 ]
                               },
+                              "resource": {
+                                "type": "object",
+                                "required": [
+                                  "state",
+                                  "reason"
+                                ],
+                                "properties": {
+                                  "state": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "normal"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "warning"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "draining"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "resource-limited"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "closing"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "closed"
+                                      }
+                                    ]
+                                  },
+                                  "reason": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "none"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "session-memory"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "profile-storage"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "global-memory"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "sampling-unavailable"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
                               "personaDisplayId": {
                                 "type": "string",
                                 "minLength": 1,
@@ -2194,6 +2256,68 @@
                             "const": "unavailable"
                           }
                         ]
+                      },
+                      "resource": {
+                        "type": "object",
+                        "required": [
+                          "state",
+                          "reason"
+                        ],
+                        "properties": {
+                          "state": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "normal"
+                              },
+                              {
+                                "type": "string",
+                                "const": "warning"
+                              },
+                              {
+                                "type": "string",
+                                "const": "draining"
+                              },
+                              {
+                                "type": "string",
+                                "const": "resource-limited"
+                              },
+                              {
+                                "type": "string",
+                                "const": "closing"
+                              },
+                              {
+                                "type": "string",
+                                "const": "closed"
+                              }
+                            ]
+                          },
+                          "reason": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "none"
+                              },
+                              {
+                                "type": "string",
+                                "const": "session-memory"
+                              },
+                              {
+                                "type": "string",
+                                "const": "profile-storage"
+                              },
+                              {
+                                "type": "string",
+                                "const": "global-memory"
+                              },
+                              {
+                                "type": "string",
+                                "const": "sampling-unavailable"
+                              }
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
                       },
                       "personaDisplayId": {
                         "type": "string",

@@ -253,6 +253,37 @@ export class SessionControlAuthority {
     return await this.returnToAgent(lease, "explicit-return");
   }
 
+  async returnForResourceLimit(signal: AbortSignal): Promise<void> {
+    if (this.closed || this.stateValue === "agent") return;
+    const transition = this.beginTransition("return", "return-pending");
+    this.clearTimers();
+    this.hooks.stopHumanInput();
+    try {
+      signal.throwIfAborted();
+      await this.hooks.awaitHumanInputSettlement(signal);
+      this.assertTransition(transition);
+      await this.hooks.releaseHeldInput(signal);
+      this.assertTransition(transition);
+      if (this.hooks.heldInputCount() !== 0) throw new SessionControlError("CONTROL_TRANSFER_PENDING", "Input cleanup did not settle.", true);
+      this.lease = undefined;
+      this.disconnectedDeadlineMs = undefined;
+      this.inputTargetGeneration = increment(this.inputTargetGeneration, "input target generation");
+      const agentEpoch = this.advanceEpoch();
+      this.hooks.invalidateHumanAuthority(agentEpoch);
+      await this.hooks.establishAgentFrameStream(agentEpoch, signal);
+      this.assertTransition(transition);
+      this.transition = undefined;
+      this.stateValue = "agent";
+      this.publish();
+    } catch (error) {
+      this.stateValue = "return-pending";
+      this.publish();
+      this.hooks.terminalCleanupRequired("resource-limit-return-failed");
+      if (error instanceof SessionControlError || error instanceof BrowserProtocolError) throw error;
+      throw new SessionControlError("CONTROL_TRANSFER_PENDING", "Browser control return could not settle safely.", true);
+    }
+  }
+
   workspaceDisconnected(connectionId: string): void {
     if (this.closed) return;
     const lease = this.lease;
