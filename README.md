@@ -65,13 +65,13 @@ pi-web audit list --limit 20
 pi-web audit show RECORD_ID
 ```
 
-To remove installed code and services while preserving user data:
+To remove only the immutable Phase 4A candidate while preserving the legacy browser and its exact preinstall service bytes:
 
 ```bash
-./uninstall-fedora.sh
+~/.local/bin/pi-webctl uninstall
 ```
 
-Review `~/.config/pi-web`, `~/.local/share/pi-web`, `~/.cache/pi-web`, and `~/.local/state/pi-web` before deleting retained user data.
+`./uninstall-fedora.sh` is the destructive legacy/full-stack removal command. It is not the candidate uninstaller and refuses to run while Phase 4A data remains managed. If you later intend to remove the legacy/full stack too, review the retained candidate data and run `~/.local/bin/pi-webctl uninstall --purge` before that script. Review `~/.config/pi-web`, `~/.local/share/pi-web`, `~/.cache/pi-web`, and `~/.local/state/pi-web` before deleting retained user data.
 
 ## Pi tools
 

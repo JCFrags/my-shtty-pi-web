@@ -99,7 +99,7 @@ If verification fails, use the exact run ID from the apply result:
 pi-web doctor --json
 ```
 
-Rollback restores the recorded paths and service state. It stops only units that are active in the current profile before it restores paths. This permits rollback from a reduced profile when optional unit files are absent. Failure to stop an active unit still blocks all path restoration. Rollback does not uninstall Pi Web Tools or delete historical data. Use `uninstall-fedora.sh` only when you intend to remove the installed code and service registration.
+Rollback restores the recorded paths and service state. It stops only units that are active in the current profile before it restores paths. This permits rollback from a reduced profile when optional unit files are absent. Failure to stop an active unit still blocks all path restoration. Rollback does not uninstall Pi Web Tools or delete historical data. Use `~/.local/bin/pi-webctl uninstall` for the Phase 4A candidate so the legacy browser and preinstall service bytes remain intact. `uninstall-fedora.sh` is only for intentional destructive removal of the legacy/full stack and refuses to run while Phase 4A data remains managed. Before intentional legacy/full-stack removal, review retained candidate data and run `~/.local/bin/pi-webctl uninstall --purge`.
 
 ## 7. Verify optional-worker isolation
 

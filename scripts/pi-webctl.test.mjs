@@ -139,6 +139,7 @@ async function activationSnapshot(paths, currentReleaseId, previousReleaseId) {
   return {
     currentReleaseId, previousReleaseId,
     config: await savedPath(paths.configPath),
+    deployment: await savedPath(paths.deploymentPath),
     managed: Object.fromEntries(await Promise.all(managedPaths.map(async (path) => [path, await savedPath(path)]))),
     services: Object.fromEntries(unitNames.map((name) => [name, { active: true, enabled: true }])),
   };
@@ -317,6 +318,20 @@ test("upgrade, release rollback, failed activation rollback, and reinstall are d
   assert.equal(reinstalled.backend, "legacy");
 });
 
+test("post-callback failure restores deployment metadata with the activation", async () => {
+  const { paths, systemd, releases } = await fixture();
+  const first = await syntheticRelease(releases, "d");
+  const second = await syntheticRelease(releases, "e");
+  await installRelease(paths, systemd.command, first.root);
+  const deploymentBefore = await readFile(paths.deploymentPath, "utf8");
+  const unsafeSelector = join(paths.selectorsRoot, `selector-${"f".repeat(24)}`);
+  await mkdir(unsafeSelector, { mode: 0o755 });
+  await assert.rejects(installRelease(paths, systemd.command, second.root), /obsolete release selector is unsafe/u);
+  assert.equal(await readlink(paths.currentLink), `../../releases/${first.releaseId}`);
+  assert.equal(await readFile(paths.deploymentPath, "utf8"), deploymentBefore);
+  await assert.rejects(lstat(paths.transactionPath), /ENOENT/u);
+});
+
 test("existing same-SHA release cannot bypass the requested manifest digest", async () => {
   const { temporary, paths, systemd, releases } = await fixture();
   const first = await syntheticRelease(releases, "e");
@@ -361,6 +376,32 @@ test("closed release documents reject unknown fields, unsafe paths, and wrong ex
   checksums.files[0].path = "bin//unsafe";
   await chmod(checksumsPath, 0o644); await writeFile(checksumsPath, `${JSON.stringify(checksums)}\n`); await chmod(checksumsPath, 0o444);
   await assert.rejects(verifyInstallRelease(release.root), /checksum record 0 path is unsafe/u);
+});
+
+test("release verification enforces exact metadata and directory modes", async () => {
+  const { temporary, releases } = await fixture();
+  const directoryRelease = await syntheticRelease(releases, "0");
+  await chmod(join(directoryRelease.root, "share/deploy"), 0o777);
+  await assert.rejects(verifyInstallRelease(directoryRelease.root), /release directory mode or ownership is invalid/u);
+
+  const checksumsRelease = await syntheticRelease(releases, "1");
+  await chmod(join(checksumsRelease.root, "checksums.json"), 0o666);
+  await assert.rejects(verifyInstallRelease(checksumsRelease.root), /checksum metadata mode or ownership is invalid/u);
+
+  const manifestRelease = await syntheticRelease(releases, "2");
+  const manifestDigest = digest(await readFile(join(manifestRelease.root, "manifest.json")));
+  const checksumsPath = join(manifestRelease.root, "checksums.json");
+  const checksums = JSON.parse(await readFile(checksumsPath, "utf8"));
+  checksums.files.find((item) => item.path === "manifest.json").mode = 0o555;
+  await chmod(checksumsPath, 0o644);
+  await writeFile(checksumsPath, `${JSON.stringify(checksums, null, 2)}\n`);
+  await chmod(checksumsPath, 0o444);
+  await chmod(join(manifestRelease.root, "manifest.json"), 0o555);
+  await assert.rejects(verifyInstallRelease(manifestRelease.root, manifestRelease.gitSha, manifestDigest), /release file mode or ownership is invalid/u);
+
+  const linkPath = join(temporary, "release-link");
+  await symlink(manifestRelease.root, linkPath);
+  await assert.rejects(verifyInstallRelease(linkPath), /direct immutable directory/u);
 });
 
 test("unmarked nonempty managed roots are never adopted or modified", async () => {
@@ -413,13 +454,12 @@ test("post-commit uninstall cleanup never restores a pointer to removed bytes", 
   const { paths, systemd, releases } = await fixture();
   const release = await syntheticRelease(releases, "4");
   await installRelease(paths, systemd.command, release.root);
-  await rm(paths.deploymentPath);
-  await mkdir(paths.deploymentPath);
+  await mkdir(paths.failurePath);
   await assert.rejects(uninstallCandidate(paths, systemd.command), /EISDIR|directory/u);
   await assert.rejects(lstat(paths.currentLink), /ENOENT/u);
   await assert.rejects(lstat(join(paths.releasesRoot, release.releaseId)), /ENOENT/u);
   await assert.rejects(lstat(paths.transactionPath), /ENOENT/u, "the reversible uninstall committed before destructive cleanup");
-  await rm(paths.deploymentPath, { recursive: true });
+  await rm(paths.failurePath, { recursive: true });
   assert.equal((await uninstallCandidate(paths, systemd.command)).legacyPreserved, true, "cleanup failure is retryable");
 });
 
@@ -457,6 +497,41 @@ test("preflight rejects a checksum-corrupt installed candidate", async () => {
   assert.equal(report.ok, false);
   assert.equal(report.findings.find((item) => item.category === "existing")?.code, "EXISTING_INSTALL_INVALID");
   assert.doesNotMatch(JSON.stringify(report), /corrupt installed manifest|\/tmp\//u);
+});
+
+test("CLI output rejects malformed private configuration without reflection", async () => {
+  const { paths, systemd, releases, environment } = await fixture();
+  const release = await syntheticRelease(releases, "5");
+  await installRelease(paths, systemd.command, release.root);
+  const script = join(sourceRoot, "scripts/pi-webctl.mjs");
+  const invoke = () => spawnSync(process.execPath, [script, "backend", "show", "--json"], { encoding: "utf8", env: { ...process.env, ...environment } });
+
+  await writeFile(paths.configPath, '{"backend":"SECRET_PRIVATE_BACKEND_MARKER"}\n');
+  await chmod(paths.configPath, 0o600);
+  const semantic = invoke();
+  assert.equal(semantic.status, 1);
+  assert.match(semantic.stderr, /installed configuration is invalid/u);
+  assert.doesNotMatch(semantic.stdout + semantic.stderr, /SECRET_PRIVATE_BACKEND_MARKER|\/tmp\//u);
+
+  await writeFile(paths.configPath, '{"backend":"legacy","token":S3CR3T}\n');
+  await chmod(paths.configPath, 0o600);
+  const syntax = invoke();
+  assert.equal(syntax.status, 1);
+  assert.match(syntax.stderr, /installed configuration is invalid/u);
+  assert.doesNotMatch(syntax.stdout + syntax.stderr, /S3CR3T|token|\/tmp\//u);
+});
+
+test("legacy full-stack uninstaller is fenced while a candidate is managed", async () => {
+  const { paths, systemd, releases, environment } = await fixture();
+  const release = await syntheticRelease(releases, "5");
+  await mkdir(paths.unitRoot, { recursive: true });
+  const legacyUnit = join(paths.unitRoot, "pi-browserd.service");
+  await writeFile(legacyUnit, "legacy-browser-unit\n");
+  await installRelease(paths, systemd.command, release.root);
+  const result = spawnSync("/usr/bin/bash", [join(sourceRoot, "uninstall-fedora.sh")], { encoding: "utf8", env: { ...process.env, ...environment } });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Refusing destructive legacy\/full-stack removal/u);
+  assert.equal(await readFile(legacyUnit, "utf8"), "legacy-browser-unit\n");
 });
 
 test("doctor emits fixed classified findings without secrets or absolute managed paths", async () => {

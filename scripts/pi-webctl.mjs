@@ -48,8 +48,9 @@ function record(value, name) {
 /** @param {string} path */
 async function readJson(path) {
   const information = await lstat(path);
-  if (!information.isFile() || information.isSymbolicLink() || information.size > MAX_JSON_BYTES) fail(`unsafe JSON file: ${path}`);
-  return JSON.parse(await readFile(path, "utf8"));
+  if (!information.isFile() || information.isSymbolicLink() || information.size > MAX_JSON_BYTES) fail("JSON document is unsafe");
+  try { return JSON.parse(await readFile(path, "utf8")); }
+  catch { fail("JSON document is invalid"); }
 }
 /** @param {string} path */
 async function exists(path) {
@@ -66,6 +67,8 @@ async function regularFiles(root) {
   while (pending.length > 0) {
     const directory = pending.pop();
     if (directory === undefined) fail("release traversal lost its directory");
+    const information = await lstat(directory);
+    if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || (information.mode & 0o777) !== 0o555) fail("release directory mode or ownership is invalid");
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
       if (entry.isDirectory()) pending.push(path);
@@ -84,23 +87,30 @@ async function regularFiles(root) {
  */
 export async function verifyInstallRelease(releaseRootValue, expectedSha = undefined, expectedManifestSha256 = undefined) {
   if (!isAbsolute(releaseRootValue)) fail("release root must be absolute");
+  const suppliedInformation = await lstat(releaseRootValue);
+  if (!suppliedInformation.isDirectory() || suppliedInformation.isSymbolicLink()) fail("release root must be a direct immutable directory");
   const releaseRoot = await realpath(releaseRootValue);
   const rootInformation = await lstat(releaseRoot);
-  if (!rootInformation.isDirectory() || rootInformation.isSymbolicLink() || rootInformation.uid !== process.getuid?.() || (rootInformation.mode & 0o222) !== 0) fail("release root must be an owner-controlled immutable regular directory");
+  if (releaseRoot !== resolve(releaseRootValue) || !rootInformation.isDirectory() || rootInformation.isSymbolicLink() || rootInformation.uid !== process.getuid?.() || (rootInformation.mode & 0o777) !== 0o555) fail("release root must be an owner-controlled immutable regular directory");
+  const actualFiles = await regularFiles(releaseRoot);
   const manifest = validateReleaseManifest(await readJson(join(releaseRoot, "manifest.json")));
   if (basename(releaseRoot) !== manifest.releaseId) fail("release directory does not match manifest identity");
   if (expectedSha !== undefined && manifest.gitSha !== expectedSha) fail("release Git SHA does not match the requested SHA");
-  const checksums = validateReleaseChecksums(await readJson(join(releaseRoot, "checksums.json")));
+  const checksumsPath = join(releaseRoot, "checksums.json");
+  const checksumsInformation = await lstat(checksumsPath);
+  if (!checksumsInformation.isFile() || checksumsInformation.isSymbolicLink() || checksumsInformation.nlink !== 1 || checksumsInformation.uid !== process.getuid?.() || (checksumsInformation.mode & 0o777) !== 0o444) fail("release checksum metadata mode or ownership is invalid");
+  const checksums = validateReleaseChecksums(await readJson(checksumsPath));
   const listed = new Set();
   for (const item of checksums.files) {
     listed.add(item.path);
     const path = join(releaseRoot, item.path);
     const information = await lstat(path);
-    if (!information.isFile() || information.isSymbolicLink() || information.nlink !== 1 || information.uid !== process.getuid?.() || (information.mode & 0o777) !== item.mode || (information.mode & 0o222) !== 0) fail(`release file mode or ownership is invalid: ${item.path}`);
+    const expectedMode = item.path.startsWith("bin/") ? 0o555 : 0o444;
+    if (item.mode !== expectedMode || !information.isFile() || information.isSymbolicLink() || information.nlink !== 1 || information.uid !== process.getuid?.() || (information.mode & 0o777) !== expectedMode) fail(`release file mode or ownership is invalid: ${item.path}`);
     const bytes = await readFile(path);
     if (bytes.byteLength !== item.bytes || sha256(bytes) !== item.sha256) fail(`release checksum failed: ${item.path}`);
   }
-  const actual = (await regularFiles(releaseRoot)).map((path) => relative(releaseRoot, path).replaceAll(sep, "/")).filter((path) => path !== "checksums.json");
+  const actual = actualFiles.map((path) => relative(releaseRoot, path).replaceAll(sep, "/")).filter((path) => path !== "checksums.json");
   if (JSON.stringify([...listed].sort()) !== JSON.stringify(actual.sort())) fail("release checksum inventory is incomplete");
   for (const required of [
     "bin/pi-web-browserd.mjs",
@@ -291,7 +301,9 @@ function desktopArgument(value) {
 async function prepareInstallation(paths, releaseRoot, config) {
   const modulePath = join(releaseRoot, "share/deploy/phase4a-config.mjs");
   const installedConfig = /** @type {any} */ (await import(`${pathToFileURL(modulePath).href}?release=${encodeURIComponent(basename(releaseRoot))}`));
-  const parsed = installedConfig.parseInstalledConfig(config);
+  let parsed;
+  try { parsed = installedConfig.parseInstalledConfig(config); }
+  catch { fail("installed configuration is invalid"); }
   const environment = installedConfig.serializeEnvironmentFile(installedConfig.serviceEnvironment(parsed, { releaseRoot: paths.currentLink, runtimeRoot: paths.runtimeRoot }));
   if (Buffer.byteLength(environment) > 65_536 || /[\0\r]/u.test(environment)) fail("prospective service environment is invalid");
   /** @type {Record<string, string>} */
@@ -412,6 +424,7 @@ async function captureActivation(paths, command) {
   return {
     ...(await releasePointers(paths)),
     config: await snapshotPath(paths.configPath),
+    deployment: await snapshotPath(paths.deploymentPath),
     managed: Object.fromEntries(await Promise.all(managedPaths(paths).map(async (path) => [path, await snapshotPath(path)]))),
     services: serviceStates(command),
   };
@@ -420,6 +433,7 @@ async function captureActivation(paths, command) {
 async function restoreActivation(paths, command, snapshot) {
   await setReleasePointers(paths, typeof snapshot.currentReleaseId === "string" ? snapshot.currentReleaseId : undefined, typeof snapshot.previousReleaseId === "string" ? snapshot.previousReleaseId : undefined);
   await restorePath(paths.configPath, record(snapshot.config, "config snapshot"));
+  await restorePath(paths.deploymentPath, record(snapshot.deployment, "deployment snapshot"));
   const managed = record(snapshot.managed, "managed path snapshots");
   if (JSON.stringify(Object.keys(managed).sort()) !== JSON.stringify(managedPaths(paths).sort())) fail("managed path snapshot set is invalid");
   for (const [path, value] of Object.entries(managed)) await restorePath(path, record(value, "managed path snapshot"));
@@ -430,10 +444,27 @@ async function restoreActivation(paths, command, snapshot) {
 /** @param {ReturnType<typeof installedPaths>} paths */
 async function readInstalledConfig(paths) {
   if (!(await exists(paths.configPath))) return undefined;
-  return record(await readJson(paths.configPath), "installed configuration");
+  const information = await lstat(paths.configPath);
+  if (!information.isFile() || information.isSymbolicLink() || information.uid !== process.getuid?.() || information.nlink !== 1 || (information.mode & 0o777) !== 0o600) fail("installed configuration is invalid");
+  try { return record(await readJson(paths.configPath), "installed configuration"); }
+  catch { fail("installed configuration is invalid"); }
 }
 /** @param {ReturnType<typeof installedPaths>} paths @param {Record<string, any>} config */
 async function writeInstalledConfig(paths, config) { await atomicJson(paths.configPath, config); }
+
+/** @param {ReturnType<typeof installedPaths>} paths */
+async function readValidatedInstalledConfig(paths) {
+  const releaseId = await currentReleaseId(paths);
+  if (releaseId === undefined) fail("no current Phase 4A release is installed");
+  const verified = await verifyInstallRelease(join(paths.releasesRoot, releaseId));
+  const config = await readInstalledConfig(paths);
+  if (config === undefined) fail("installed configuration is missing");
+  try {
+    const modulePath = join(verified.releaseRoot, "share/deploy/phase4a-config.mjs");
+    const configModule = /** @type {any} */ (await import(`${pathToFileURL(modulePath).href}?read=${encodeURIComponent(releaseId)}`));
+    return configModule.parseInstalledConfig(config);
+  } catch { fail("installed configuration is invalid"); }
+}
 
 /** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {string} releaseSource @param {string | undefined} expectedSha @param {string | undefined} expectedManifestSha256 */
 async function installReleaseUnlocked(paths, command, releaseSource, expectedSha = undefined, expectedManifestSha256 = undefined) {
@@ -863,7 +894,9 @@ export async function installationPreflight(paths, command, releaseSource, expec
   const verified = await verifyInstallRelease(releaseSource, expectedSha, expectedManifestSha256);
   const configModule = /** @type {any} */ (await import(`${pathToFileURL(join(verified.releaseRoot, "share/deploy/phase4a-config.mjs")).href}?preflight=${encodeURIComponent(verified.releaseId)}`));
   const installedConfig = await readInstalledConfig(paths);
-  const prospectiveConfig = configModule.parseInstalledConfig(installedConfig ?? await readJson(join(verified.releaseRoot, "share/deploy/config/default.json")));
+  let prospectiveConfig;
+  try { prospectiveConfig = configModule.parseInstalledConfig(installedConfig ?? await readJson(join(verified.releaseRoot, "share/deploy/config/default.json"))); }
+  catch { fail("installed configuration is invalid"); }
   /** @type {Array<{category: string, status: PreflightStatus, code: string, summary: string}>} */
   const findings = [preflightFinding("release", "pass", "RELEASE_VERIFIED", "The immutable release identity and complete checksum inventory are verified.")];
 
@@ -1174,12 +1207,18 @@ function renderPreflightHuman(report) {
 /** @param {ReturnType<typeof installedPaths>} paths @param {string} command */
 async function status(paths, command) {
   const releaseId = await currentReleaseId(paths);
-  const config = await readInstalledConfig(paths);
+  const config = releaseId === undefined ? undefined : await readValidatedInstalledConfig(paths);
+  let previousReleaseId = null;
+  if (await exists(paths.deploymentPath)) {
+    const deployment = record(await readJson(paths.deploymentPath), "deployment state");
+    if (deployment.previousReleaseId !== undefined && (typeof deployment.previousReleaseId !== "string" || !/^phase4a-[0-9a-f]{40}$/u.test(deployment.previousReleaseId))) fail("deployment state is invalid");
+    previousReleaseId = deployment.previousReleaseId ?? null;
+  }
   return {
     ok: releaseId !== undefined,
     releaseId: releaseId ?? null,
     backend: config?.backend ?? null,
-    previousReleaseId: await exists(paths.deploymentPath) ? (await readJson(paths.deploymentPath)).previousReleaseId ?? null : null,
+    previousReleaseId,
     services: serviceStates(command),
   };
 }
@@ -1206,7 +1245,7 @@ async function main() {
     }
     result = await installRelease(paths, systemctlCommand, releaseSource, options["expected-sha"], options["manifest-sha256"]);
   } else if (operation === "backend" && subcommand === "show") {
-    assertOptionSet(options, ["json"]); const config = await readInstalledConfig(paths); if (config === undefined) fail("installed configuration is missing"); result = { ok: true, backend: config.backend };
+    assertOptionSet(options, ["json"]); const config = await readValidatedInstalledConfig(paths); result = { ok: true, backend: config.backend };
   } else if (operation === "backend" && (subcommand === "legacy" || subcommand === "agentcursor")) { assertOptionSet(options, ["json"]); result = await setBackend(paths, systemctlCommand, subcommand); }
   else if (operation === "rollback" && subcommand === undefined) { assertOptionSet(options, ["json"]); result = await rollbackRelease(paths, systemctlCommand); }
   else if (operation === "uninstall" && subcommand === undefined) { assertOptionSet(options, ["json", "purge"]); result = await uninstallCandidate(paths, systemctlCommand, options.purge === true); }
