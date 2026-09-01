@@ -1,0 +1,39 @@
+[Unit]
+Description=Pi Web immutable qualification authority
+After=pi-web-qualification-browserd.service
+Wants=pi-web-qualification-browserd.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node @CURRENT_RELEASE@/bin/pi-web-webxd.mjs
+EnvironmentFile=%t/pi-web/qualification/service.env
+WorkingDirectory=@STATE_HOME@/pi-web
+UMask=0077
+Restart=on-failure
+RestartSec=2s
+TimeoutStartSec=@START_TIMEOUT_SEC@s
+TimeoutStopSec=@STOP_TIMEOUT_SEC@s
+KillMode=control-group
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@CACHE_HOME@/pi-web @STATE_HOME@/pi-web %t/pi-web/qualification %t/pi-web/workspace
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+MemoryAccounting=yes
+TasksAccounting=yes
+
+# Browser failure remains a capability failure, not a hard service dependency.
+# This disabled qualification-only unit has no Install section.

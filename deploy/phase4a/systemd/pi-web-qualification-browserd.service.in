@@ -1,0 +1,36 @@
+[Unit]
+Description=Pi Web immutable qualification browser runtime
+After=pi-web-qualification-egress-proxy.service
+Wants=pi-web-qualification-egress-proxy.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node @CURRENT_RELEASE@/bin/pi-web-browserd.mjs
+EnvironmentFile=%t/pi-web/qualification/service.env
+UMask=0077
+Restart=on-failure
+RestartSec=2s
+TimeoutStartSec=@START_TIMEOUT_SEC@s
+TimeoutStopSec=@STOP_TIMEOUT_SEC@s
+KillMode=mixed
+SendSIGKILL=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+MemoryAccounting=yes
+TasksAccounting=yes
+
+# Chromium keeps its reviewed sandbox and graphical-session access.
+# This disabled qualification-only unit has no Install section.

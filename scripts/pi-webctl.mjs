@@ -31,6 +31,14 @@ const UNITS = Object.freeze([
   "pi-web-agentcursor-browserd.service",
   "webxd.service",
 ]);
+const QUALIFICATION_UNITS = Object.freeze([
+  "pi-web-qualification-egress-proxy.service",
+  "pi-web-qualification-browserd.service",
+  "pi-web-qualification-webxd.service",
+]);
+const MANAGED_UNITS = Object.freeze([...UNITS, ...QUALIFICATION_UNITS]);
+const QUALIFICATION_PROXY_PORT = 18_877;
+const QUALIFICATION_LOCAL_SERVICE_PORT = 18_878;
 const MARKER_NAME = ".pi-web-managed-v1";
 const MARKER_VALUE = "pi-web-managed-root-v1\n";
 const MAX_JSON_BYTES = 4 * 1024 * 1024;
@@ -119,12 +127,16 @@ export async function verifyInstallRelease(releaseRootValue, expectedSha = undef
     "bin/pi-web-browserd.mjs",
     "bin/pi-web-webxd.mjs",
     "bin/pi-web-egress-proxy",
+    "bin/pi-web-qualification-proxy",
     "bin/pi-browser-workspace",
+    "bin/pi-browser-workspace-qualification",
+    "bin/pi-web-qualification-runner.mjs",
+    "bin/pi-web-qualification-atspi.py",
     "bin/phase4a-release-format.mjs",
     "share/pi-webx/extension.mjs",
     "share/deploy/phase4a-config.mjs",
     "share/deploy/config/default.json",
-    ...UNITS.map((name) => `share/deploy/systemd/${name}.in`),
+    ...MANAGED_UNITS.map((name) => `share/deploy/systemd/${name}.in`),
   ]) if (!listed.has(required)) fail(`release is missing required installed file: ${required}`);
   for (const artifact of Object.values(manifest.artifacts)) if (typeof artifact !== "string" || !listed.has(artifact)) fail("release manifest artifact is missing from the checksum inventory");
   const immutableFiles = [];
@@ -244,7 +256,7 @@ async function restorePath(path, snapshot) {
 /** @param {ReturnType<typeof installedPaths>} paths */
 function managedPaths(paths) {
   return [
-    ...UNITS.map((name) => join(paths.unitRoot, name)),
+    ...MANAGED_UNITS.map((name) => join(paths.unitRoot, name)),
     paths.environmentPath,
     paths.desktopPath,
     paths.extensionPath,
@@ -317,6 +329,36 @@ function deactivateService(command, unit) {
   if (exactServiceState(command, "is-enabled", unit) !== "disabled") fail(`candidate service is not disabled: ${unit}`);
   if (exactServiceState(command, "is-active", unit) !== "inactive") fail(`candidate service is not inactive: ${unit}`);
 }
+/** @param {string} command */
+function stopQualificationServices(command) {
+  let failed = false;
+  for (const unit of [...QUALIFICATION_UNITS].reverse()) {
+    systemctl(command, ["stop", unit], false);
+    systemctl(command, ["reset-failed", unit], false);
+    if (exactServiceState(command, "is-active", unit) !== "inactive") failed = true;
+  }
+  if (failed) fail("one or more qualification services could not be stopped");
+}
+/** @param {string} command */
+function stopOrdinaryServices(command) {
+  let failed = false;
+  for (const unit of [...UNITS].reverse()) {
+    systemctl(command, ["stop", unit], false);
+    systemctl(command, ["reset-failed", unit], false);
+    if (exactServiceState(command, "is-active", unit) !== "inactive") failed = true;
+  }
+  if (failed) fail("one or more ordinary services could not be stopped for qualification");
+}
+/** @param {string} command */
+function startQualificationServices(command) {
+  for (const unit of QUALIFICATION_UNITS) {
+    const enabled = systemctl(command, ["is-enabled", unit], false).stdout.trim();
+    if (enabled !== "disabled" && enabled !== "static") fail(`qualification unit has an unsafe enablement state: ${unit}`);
+    systemctl(command, ["reset-failed", unit], false);
+    systemctl(command, ["start", unit]);
+    if (exactServiceState(command, "is-active", unit) !== "active") fail(`qualification service is not active: ${unit}`);
+  }
+}
 
 /** @param {string} value */
 function desktopArgument(value) {
@@ -341,7 +383,7 @@ async function prepareInstallation(paths, releaseRoot, config) {
   if (Buffer.byteLength(environment) > 65_536 || /[\0\r]/u.test(environment)) fail("prospective service environment is invalid");
   /** @type {Record<string, string>} */
   const units = {};
-  for (const name of UNITS) {
+  for (const name of MANAGED_UNITS) {
     const template = await readFile(join(releaseRoot, `share/deploy/systemd/${name}.in`), "utf8");
     const rendered = installedConfig.renderUnitTemplate(template, {
       currentRelease: paths.currentLink,
@@ -363,7 +405,7 @@ async function prepareInstallation(paths, releaseRoot, config) {
 /** @param {ReturnType<typeof installedPaths>} paths @param {Awaited<ReturnType<typeof prepareInstallation>>} prepared */
 async function applyInstallation(paths, prepared) {
   await atomicWrite(paths.environmentPath, prepared.environment, 0o600);
-  for (const name of UNITS) await atomicWrite(join(paths.unitRoot, name), prepared.units[name], 0o644);
+  for (const name of MANAGED_UNITS) await atomicWrite(join(paths.unitRoot, name), prepared.units[name], 0o644);
   await atomicLink(paths.extensionPath, join(paths.currentLink, "share/pi-webx"));
   await atomicLink(paths.controlLink, join(paths.currentLink, "bin/pi-webctl.mjs"));
   await atomicLink(paths.workspaceLink, join(paths.currentLink, "bin/pi-browser-workspace"));
@@ -664,6 +706,8 @@ async function prepareCandidateRemoval(paths, purge) {
 /** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {boolean} purge */
 async function uninstallCandidateUnlocked(paths, command, purge = false) {
   if (await currentReleaseId(paths) === undefined) return { ok: true, purged: purge, legacyPreserved: true };
+  stopQualificationServices(command);
+  await removeOwnedTree(paths.qualificationRoot);
   for (const unit of UNITS) deactivateService(command, unit);
   if (await exists(paths.preinstallBackupPath)) {
     const backup = record(await readJson(paths.preinstallBackupPath), "preinstall backup");
@@ -800,7 +844,11 @@ async function acquireMutationLock(paths) {
 async function recoverInterruptedActivation(paths, command) {
   if (!(await exists(paths.transactionPath))) return false;
   const transaction = record(await readJson(paths.transactionPath), "activation transaction");
-  if (JSON.stringify(Object.keys(transaction).sort()) !== JSON.stringify(["operation", "schemaVersion", "snapshot"]) || transaction.schemaVersion !== 1 || !["install", "backend", "rollback", "uninstall"].includes(transaction.operation)) fail("activation transaction is invalid");
+  if (JSON.stringify(Object.keys(transaction).sort()) !== JSON.stringify(["operation", "schemaVersion", "snapshot"]) || transaction.schemaVersion !== 1 || !["install", "backend", "rollback", "uninstall", "qualify"].includes(transaction.operation)) fail("activation transaction is invalid");
+  if (transaction.operation === "qualify") {
+    stopQualificationServices(command);
+    await removeOwnedTree(paths.qualificationRoot);
+  }
   await restoreActivation(paths, command, record(transaction.snapshot, "activation transaction snapshot"));
   await atomicJson(paths.recoveryPath, { schemaVersion: 1, operation: transaction.operation, recovered: true });
   await rm(paths.transactionPath);
@@ -821,6 +869,9 @@ async function withMutation(paths, command, operation, callback, beforeSystemctl
   const releaseLock = await acquireMutationLock(paths);
   try {
     await recoverInterruptedActivation(paths, command);
+    // Qualification units are disabled implementation details. Fence stale or
+    // manually started instances before any selector, unit, or release preparation.
+    stopQualificationServices(command);
     await beforeSystemctl();
     const snapshot = await captureActivation(paths, command);
     await atomicJson(paths.transactionPath, { schemaVersion: 1, operation, snapshot });
@@ -831,8 +882,14 @@ async function withMutation(paths, command, operation, callback, beforeSystemctl
       await rm(paths.transactionPath, { force: true });
     } catch (error) {
       let restored = false;
-      try { await restoreActivation(paths, command, snapshot); restored = true; }
-      finally { if (restored) await rm(paths.transactionPath, { force: true }); }
+      try {
+        if (operation === "qualify") {
+          stopQualificationServices(command);
+          await removeOwnedTree(paths.qualificationRoot);
+        }
+        await restoreActivation(paths, command, snapshot);
+        restored = true;
+      } finally { if (restored) await rm(paths.transactionPath, { force: true }); }
       throw error;
     }
     await afterCommit();
@@ -888,6 +945,188 @@ export async function uninstallCandidate(paths, command, purge = false) {
   return await withMutation(paths, command, "uninstall", async () => await uninstallCandidateUnlocked(paths, command, purge), prepare, cleanup);
 }
 
+/** @param {ReturnType<typeof installedPaths>} paths */
+async function assertNoInstalledWorkspaceProcess(paths) {
+  const releaseExecutable = /^phase4a-[0-9a-f]{40}\/bin\/pi-browser-workspace(?:-qualification)?$/u;
+  for (const name of await readdir("/proc")) {
+    if (!/^[0-9]+$/u.test(name)) continue;
+    let executable;
+    try { executable = await readlink(`/proc/${name}/exe`); }
+    catch (error) {
+      if (error instanceof Error && "code" in error && ["ENOENT", "EACCES"].includes(String(error.code))) continue;
+      throw error;
+    }
+    if (releaseExecutable.test(relative(paths.releasesRoot, executable))) fail("an installed Pi Web workspace is already running");
+  }
+}
+
+/** @param {number} port */
+async function assertQualificationPortFree(port) {
+  const server = createServer((socket) => socket.destroy());
+  await new Promise((resolvePromise, rejectPromise) => {
+    /** @param {unknown} error */
+    const onError = (error) => { server.off("listening", onListening); rejectPromise(error); };
+    const onListening = () => { server.off("error", onError); resolvePromise(undefined); };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port, "127.0.0.1");
+  }).catch(() => fail("a fixed qualification port is unavailable"));
+  await new Promise((resolvePromise) => server.close(() => resolvePromise(undefined)));
+}
+
+/** @param {unknown} value @param {number} depth */
+function boundedQualificationSummary(value, depth = 0) {
+  if (depth > 4 || typeof value !== "object" || value === null || Array.isArray(value)) fail("qualification summary is invalid");
+  const input = /** @type {Record<string, unknown>} */ (value);
+  const keys = Object.keys(input);
+  if (keys.length === 0 || keys.length > 128 || keys.some((key) => !/^[a-z][A-Za-z0-9]{0,63}$/u.test(key))) fail("qualification summary is invalid");
+  /** @type {Record<string, unknown>} */
+  const output = {};
+  for (const [key, item] of Object.entries(input)) {
+    if (typeof item === "boolean" || item === null) output[key] = item;
+    else if (typeof item === "number" && Number.isFinite(item) && Math.abs(item) <= Number.MAX_SAFE_INTEGER) output[key] = item;
+    else if (typeof item === "object" && item !== null && !Array.isArray(item)) output[key] = boundedQualificationSummary(item, depth + 1);
+    else fail("qualification summary contains an unsafe value");
+  }
+  return Object.freeze(output);
+}
+
+/** @param {unknown} value @param {"acceptance" | "soak"} mode @param {Awaited<ReturnType<typeof verifyInstallRelease>>} verified */
+function validateQualificationReport(value, mode, verified) {
+  const report = record(value, "qualification report");
+  const requiredKeys = ["durationSeconds", "gitSha", "manifestSha256", "mode", "ok", "releaseId", "schemaVersion", "summary"];
+  if (JSON.stringify(Object.keys(report).sort()) !== JSON.stringify(requiredKeys) || report.schemaVersion !== 1 || report.ok !== true || report.mode !== mode || report.releaseId !== verified.releaseId || report.gitSha !== verified.gitSha || report.manifestSha256 !== verified.manifestSha256 || typeof report.durationSeconds !== "number" || !Number.isFinite(report.durationSeconds) || report.durationSeconds < 0 || report.durationSeconds > 18_000 || (mode === "soak" && report.durationSeconds < 14_400)) fail("qualification report is invalid");
+  return Object.freeze({ schemaVersion: 1, ok: true, mode, releaseId: verified.releaseId, gitSha: verified.gitSha, manifestSha256: verified.manifestSha256, durationSeconds: report.durationSeconds, summary: boundedQualificationSummary(report.summary) });
+}
+
+/** @param {NodeJS.ProcessEnv} source @param {Record<string, string>} qualification */
+function qualificationChildEnvironment(source, qualification) {
+  /** @type {NodeJS.ProcessEnv} */
+  const environment = { ...qualification, PATH: "/usr/bin:/bin", LANG: source.LANG ?? "C.UTF-8" };
+  for (const name of ["HOME", "XDG_RUNTIME_DIR", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS", "XDG_SESSION_TYPE", "AT_SPI_BUS_ADDRESS"]) {
+    const value = source[name];
+    if (typeof value === "string" && value !== "" && !/[\0\r\n]/u.test(value)) environment[name] = value;
+  }
+  return environment;
+}
+
+/** @param {ReturnType<typeof installedPaths>} paths @param {Awaited<ReturnType<typeof verifyInstallRelease>>} verified */
+async function prepareQualificationRuntime(paths, verified) {
+  await removeOwnedTree(paths.qualificationRoot);
+  for (const directory of [paths.qualificationRoot, join(paths.qualificationRoot, "browserd"), join(paths.qualificationRoot, "profiles"), join(paths.qualificationRoot, "workspace"), join(paths.qualificationRoot, "cache/responses"), join(paths.qualificationRoot, "cache/content")]) {
+    await ensureOwnedDirectory(directory, 0o700);
+    await chmod(directory, 0o700);
+  }
+  const installedConfig = record(await readValidatedInstalledConfig(paths), "installed configuration");
+  const qualificationConfig = structuredClone(installedConfig);
+  qualificationConfig.backend = "agentcursor";
+  qualificationConfig.proxy = { host: "127.0.0.1", port: QUALIFICATION_PROXY_PORT };
+  const modulePath = join(verified.releaseRoot, "share/deploy/phase4a-config.mjs");
+  const configModule = /** @type {any} */ (await import(`${pathToFileURL(modulePath).href}?qualification=${encodeURIComponent(verified.releaseId)}`));
+  let parsed;
+  try { parsed = configModule.parseInstalledConfig(qualificationConfig); }
+  catch { fail("qualification configuration is invalid"); }
+  const qualification = {
+    ...configModule.serviceEnvironment(parsed, { releaseRoot: verified.releaseRoot, runtimeRoot: paths.runtimeRoot }),
+    WEBX_BROWSER_BACKEND: "agentcursor",
+    WEBX_EGRESS_PROXY: `http://127.0.0.1:${QUALIFICATION_PROXY_PORT}/`,
+    BROWSERD_EGRESS_PROXY: `http://127.0.0.1:${QUALIFICATION_PROXY_PORT}/`,
+    PI_WEB_EGRESS_HOST: "127.0.0.1",
+    PI_WEB_EGRESS_PORT: String(QUALIFICATION_PROXY_PORT),
+    BROWSERD_RUNTIME_DIR: join(paths.qualificationRoot, "browserd"),
+    BROWSERD_PROFILE_ROOT: join(paths.qualificationRoot, "profiles"),
+    BROWSERD_DESCRIPTOR: join(paths.qualificationRoot, "browserd/browserd.json"),
+    BROWSERD_SOCKET: join(paths.qualificationRoot, "legacy-browserd.sock"),
+    WEBXD_SOCKET: join(paths.qualificationRoot, "webxd.sock"),
+    WEBXD_WORKSPACE_RUNTIME_DIR: join(paths.qualificationRoot, "workspace"),
+    WEBX_CACHE_DIR: join(paths.qualificationRoot, "cache/responses"),
+    WEBX_CONTENT_DIR: join(paths.qualificationRoot, "cache/content"),
+    WEBX_SEARX_URL: `http://127.0.0.1:${QUALIFICATION_LOCAL_SERVICE_PORT}`,
+    WEBX_READER_URL: `http://127.0.0.1:${QUALIFICATION_LOCAL_SERVICE_PORT}`,
+    PI_WEB_WORKSPACE_BIN: join(verified.releaseRoot, "bin/pi-browser-workspace-qualification"),
+  };
+  const serialized = configModule.serializeEnvironmentFile(qualification);
+  if (Buffer.byteLength(serialized) > 65_536 || /[\0\r]/u.test(serialized)) fail("qualification service environment is invalid");
+  await atomicWrite(paths.qualificationEnvironmentPath, serialized, 0o600);
+  await atomicJson(paths.qualificationLeasePath, { schemaVersion: 1, releaseId: verified.releaseId, gitSha: verified.gitSha, manifestSha256: verified.manifestSha256 });
+  return /** @type {Record<string, string>} */ (qualification);
+}
+
+/** @param {Record<string, string>} environment @param {Awaited<ReturnType<typeof verifyInstallRelease>>} verified @param {"acceptance" | "soak"} mode */
+function runQualification(environment, verified, mode) {
+  const result = spawnSync("/usr/bin/node", [join(verified.releaseRoot, "bin/pi-web-qualification-runner.mjs"), mode], {
+    cwd: verified.releaseRoot,
+    encoding: "utf8",
+    env: environment,
+    timeout: mode === "soak" ? 15_300_000 : 1_800_000,
+    maxBuffer: 1024 * 1024,
+  });
+  if (result.status !== 0 || typeof result.stdout !== "string" || Buffer.byteLength(result.stdout) > 1024 * 1024) fail("installed qualification workload failed");
+  let report;
+  try { report = JSON.parse(result.stdout); }
+  catch { fail("installed qualification workload returned invalid data"); }
+  return validateQualificationReport(report, mode, verified);
+}
+
+/**
+ * Execute a fixed installed qualification transaction. The caller supplies
+ * only the immutable release identity and one reviewed workload mode.
+ * @param {ReturnType<typeof installedPaths>} paths
+ * @param {string} command
+ * @param {"acceptance" | "soak"} mode
+ * @param {string} expectedSha
+ * @param {string} expectedManifestSha256
+ * @param {NodeJS.ProcessEnv} environment
+ * @param {{ports?: () => Promise<void>, proxy?: () => Promise<string>, workload?: (environment: Record<string, string>, verified: Awaited<ReturnType<typeof verifyInstallRelease>>, mode: "acceptance" | "soak") => Promise<unknown> | unknown, closeWorkspace?: (environment: NodeJS.ProcessEnv, executable: string) => void}} probes
+ */
+export async function qualifyInstalled(paths, command, mode, expectedSha, expectedManifestSha256, environment = process.env, probes = {}) {
+  /** @type {Awaited<ReturnType<typeof verifyInstallRelease>> | undefined} */
+  let verified;
+  const prepare = async () => {
+    const releaseId = await currentReleaseId(paths);
+    if (releaseId === undefined) fail("no current Phase 4A release is installed");
+    verified = await verifyInstallRelease(join(paths.releasesRoot, releaseId), expectedSha, expectedManifestSha256);
+    const config = await readValidatedInstalledConfig(paths);
+    if (config.backend !== "agentcursor") fail("installed qualification requires the explicit AgentCursor backend");
+    await assertNoInstalledWorkspaceProcess(paths);
+    if (probes.ports === undefined) {
+      await assertQualificationPortFree(QUALIFICATION_PROXY_PORT);
+      await assertQualificationPortFree(QUALIFICATION_LOCAL_SERVICE_PORT);
+    } else await probes.ports();
+    stopQualificationServices(command);
+  };
+  return await withMutation(paths, command, "qualify", async () => {
+    if (verified === undefined) fail("qualification release verification was not completed");
+    const ordinaryStates = snapshotServiceStates(command);
+    let qualification;
+    try {
+      stopOrdinaryServices(command);
+      qualification = await prepareQualificationRuntime(paths, verified);
+      startQualificationServices(command);
+      const health = await (probes.proxy ?? (() => probeProxy("127.0.0.1", QUALIFICATION_PROXY_PORT)))();
+      if (!health.startsWith("HTTP/1.1 204 No Content\r\n") || !health.includes("\r\nWebX-Egress-Proxy: secure-egress/1\r\n")) fail("qualification proxy is unavailable");
+      const childEnvironment = qualificationChildEnvironment(environment, {
+        ...qualification,
+        PI_WEB_QUALIFICATION_RELEASE_ID: verified.releaseId,
+        PI_WEB_QUALIFICATION_GIT_SHA: verified.gitSha,
+        PI_WEB_QUALIFICATION_MANIFEST_SHA256: verified.manifestSha256,
+      });
+      if (probes.workload === undefined) return runQualification(/** @type {Record<string, string>} */ (childEnvironment), verified, mode);
+      return validateQualificationReport(await probes.workload(/** @type {Record<string, string>} */ (childEnvironment), verified, mode), mode, verified);
+    } finally {
+      if (qualification !== undefined) {
+        const executable = join(verified.releaseRoot, "bin/pi-browser-workspace-qualification");
+        const closeEnvironment = qualificationChildEnvironment(environment, qualification);
+        if (probes.closeWorkspace === undefined) spawnSync(executable, ["--qualification-close"], { env: closeEnvironment, timeout: 15_000, stdio: "ignore" });
+        else probes.closeWorkspace(closeEnvironment, executable);
+      }
+      stopQualificationServices(command);
+      await removeOwnedTree(paths.qualificationRoot);
+      restoreServiceStates(command, ordinaryStates);
+    }
+  }, prepare);
+}
+
 /** @param {NodeJS.ProcessEnv} environment */
 export function installedPaths(environment = process.env) {
   const home = environment.HOME ?? homedir();
@@ -932,6 +1171,10 @@ export function installedPaths(environment = process.env) {
     mutationLockKeyPath: join(runtimeRoot, "mutation-lock.key"),
     transactionPath: join(stateRoot, "activation-transaction.json"),
     recoveryPath: join(stateRoot, "last-interrupted-recovery.json"),
+    qualificationRoot: join(runtimeRoot, "pi-web/qualification"),
+    qualificationEnvironmentPath: join(runtimeRoot, "pi-web/qualification/service.env"),
+    qualificationLeasePath: join(runtimeRoot, "pi-web/qualification/lease.json"),
+    qualificationDiagnosticsPath: join(runtimeRoot, "pi-web/qualification/tauri.jsonl"),
     desktopPath: join(dataHome, "applications/pi-web-workspace.desktop"),
     extensionPath: join(home, ".pi/agent/extensions/pi-web"),
     controlLink: join(binRoot, "pi-webctl"),
@@ -1103,7 +1346,7 @@ export async function installationPreflight(paths, command, releaseSource, expec
   }
   const portReady = portState === "free" || portState === "reviewed";
   let serviceConflict = probes.serviceConflict;
-  if (serviceConflict === undefined) serviceConflict = UNITS.some((unit) => systemctl(command, ["is-enabled", unit], false).stdout.trim() === "masked");
+  if (serviceConflict === undefined) serviceConflict = MANAGED_UNITS.some((unit) => systemctl(command, ["is-enabled", unit], false).stdout.trim() === "masked");
   let destinationConflict = probes.destinationConflict;
   if (destinationConflict === undefined) {
     const managed = await exists(join(paths.dataRoot, MARKER_NAME));
@@ -1142,8 +1385,9 @@ export async function installationPreflight(paths, command, releaseSource, expec
 /** @param {string[]} arguments_ */
 function parseCli(arguments_) {
   const [command, ...tail] = arguments_;
-  const subcommand = command === "backend" ? tail[0] : undefined;
-  const rest = command === "backend" ? tail.slice(1) : tail;
+  const hasSubcommand = command === "backend" || command === "qualify";
+  const subcommand = hasSubcommand ? tail[0] : undefined;
+  const rest = hasSubcommand ? tail.slice(1) : tail;
   const allowed = new Set(["--release", "--expected-sha", "--manifest-sha256", "--json", "--purge"]);
   /** @type {Record<string, string | boolean>} */
   const options = {};
@@ -1267,7 +1511,7 @@ async function doctorFilesystem(paths) {
   for (const root of [paths.dataRoot, paths.configRoot, paths.cacheRoot, paths.stateRoot]) await verifyManagedRoot(root);
   const runtimeInformation = await lstat(paths.runtimeRoot);
   if (!runtimeInformation.isDirectory() || runtimeInformation.isSymbolicLink() || runtimeInformation.uid !== process.getuid?.() || runtimeInformation.gid !== process.getgid?.() || (runtimeInformation.mode & 0o077) !== 0) fail("runtime root is unsafe");
-  for (const path of [...UNITS.map((name) => join(paths.unitRoot, name)), paths.environmentPath, paths.desktopPath, paths.configPath]) {
+  for (const path of [...MANAGED_UNITS.map((name) => join(paths.unitRoot, name)), paths.environmentPath, paths.desktopPath, paths.configPath]) {
     const information = await lstat(path);
     if (!information.isFile() || information.isSymbolicLink() || information.uid !== process.getuid?.() || information.gid !== process.getgid?.() || information.nlink !== 1) fail("installed managed file is unsafe");
   }
@@ -1420,6 +1664,11 @@ async function main() {
   } else if (operation === "backend" && subcommand === "show") {
     assertOptionSet(options, ["json"]); const config = await readValidatedInstalledConfig(paths); result = { ok: true, backend: config.backend };
   } else if (operation === "backend" && (subcommand === "legacy" || subcommand === "agentcursor")) { assertOptionSet(options, ["json"]); result = await setBackend(paths, systemctlCommand, subcommand); }
+  else if (operation === "qualify" && (subcommand === "acceptance" || subcommand === "soak")) {
+    assertOptionSet(options, ["expected-sha", "manifest-sha256", "json"]);
+    if (typeof options["expected-sha"] !== "string" || !/^[0-9a-f]{40}$/u.test(options["expected-sha"]) || typeof options["manifest-sha256"] !== "string" || !/^[0-9a-f]{64}$/u.test(options["manifest-sha256"])) fail("qualify requires --expected-sha <40-lowercase-hex> --manifest-sha256 <64-lowercase-hex>");
+    result = await qualifyInstalled(paths, systemctlCommand, subcommand, options["expected-sha"], options["manifest-sha256"]);
+  }
   else if (operation === "rollback" && subcommand === undefined) { assertOptionSet(options, ["json"]); result = await rollbackRelease(paths, systemctlCommand); }
   else if (operation === "uninstall" && subcommand === undefined) { assertOptionSet(options, ["json", "purge"]); result = await uninstallCandidate(paths, systemctlCommand, options.purge === true); }
   else if (operation === "status" && subcommand === undefined) { assertOptionSet(options, ["json"]); result = await status(paths, systemctlCommand); }
@@ -1430,7 +1679,7 @@ async function main() {
     return;
   } else if (operation === "version" && subcommand === undefined) {
     assertOptionSet(options, ["json"]); const releaseId = await currentReleaseId(paths); if (releaseId === undefined) fail("no current Phase 4A release is installed"); const verified = await verifyInstallRelease(join(paths.releasesRoot, releaseId)); result = { ok: true, releaseId, gitSha: verified.gitSha, manifestSha256: verified.manifestSha256 };
-  } else fail("usage: pi-webctl {preflight|install} --release PATH --expected-sha SHA --manifest-sha256 DIGEST [--json] | doctor [--json] | status | version | backend show | backend legacy | backend agentcursor | rollback | uninstall [--purge]");
+  } else fail("usage: pi-webctl {preflight|install} --release PATH --expected-sha SHA --manifest-sha256 DIGEST [--json] | qualify {acceptance|soak} --expected-sha SHA --manifest-sha256 DIGEST [--json] | doctor [--json] | status | version | backend show | backend legacy | backend agentcursor | rollback | uninstall [--purge]");
   process.stdout.write(`${JSON.stringify(result, null, options.json ? 2 : 0)}\n`);
 }
 

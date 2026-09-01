@@ -41,6 +41,10 @@ async function syntheticRelease(forbiddenMarker) {
     writeFile(join(releaseRoot, "bin/pi-web-browserd.mjs"), `${forbiddenMarker === undefined ? "" : `// ${forbiddenMarker}\n`}export {};\n`),
     writeFile(join(releaseRoot, "bin/pi-web-webxd.mjs"), "export {};\n"),
     writeFile(join(releaseRoot, "bin/pi-web-egress-proxy"), "#!/usr/bin/python3\npass\n"),
+    writeFile(join(releaseRoot, "bin/pi-web-qualification-proxy"), "#!/usr/bin/python3\npass\n"),
+    writeFile(join(releaseRoot, "bin/pi-web-qualification-atspi.py"), "#!/usr/bin/python3\npass\n"),
+    writeFile(join(releaseRoot, "bin/pi-web-qualification-runner.mjs"), "export {};\n"),
+    writeFile(join(releaseRoot, "bin/pi-web-qualification-pi-worker.mjs"), "export {};\n"),
     writeFile(join(releaseRoot, "bin/pi-browser-workspace"), "workspace fixture\n"),
     writeFile(join(releaseRoot, "bin/pi-browser-workspace-qualification"), "workspace qualification fixture\n"),
     writeFile(join(releaseRoot, "share/artifacts/pi-browser-workspace.rpm"), "rpm fixture\n"),
@@ -50,7 +54,7 @@ async function syntheticRelease(forbiddenMarker) {
     writeFile(join(releaseRoot, "share/icons/pi-web-workspace.png"), "png fixture\n"),
     copyFile(join(sourceRoot, "scripts/phase4a-config.mjs"), join(releaseRoot, "share/deploy/phase4a-config.mjs")),
     copyFile(join(sourceRoot, "deploy/phase4a/config/default.json"), join(releaseRoot, "share/deploy/config/default.json")),
-    ...["pi-web-agentcursor-egress-proxy.service", "pi-web-agentcursor-browserd.service", "webxd.service"].map(async (name) => await copyFile(join(sourceRoot, `deploy/phase4a/systemd/${name}.in`), join(releaseRoot, `share/deploy/systemd/${name}.in`))),
+    ...["pi-web-agentcursor-egress-proxy.service", "pi-web-agentcursor-browserd.service", "webxd.service", "pi-web-qualification-egress-proxy.service", "pi-web-qualification-browserd.service", "pi-web-qualification-webxd.service"].map(async (name) => await copyFile(join(sourceRoot, `deploy/phase4a/systemd/${name}.in`), join(releaseRoot, `share/deploy/systemd/${name}.in`))),
   ]);
   const immutableFiles = await releaseInternals.immutablePayloadDigests(releaseRoot);
   await writeFile(join(releaseRoot, "manifest.json"), `${JSON.stringify(completeManifest(`phase4a-${gitSha}`, gitSha, immutableFiles), null, 2)}\n`);
@@ -196,4 +200,29 @@ test("detached verification rejects incomplete checksum inventories", async () =
   } finally {
     await releaseInternals.removeOwnedTree(temporaryRoot);
   }
+});
+
+test("qualification units are static and execute exact production bundles", async () => {
+  const units = {
+    "pi-web-qualification-egress-proxy.service.in": "ExecStart=/usr/bin/python3 @CURRENT_RELEASE@/bin/pi-web-qualification-proxy",
+    "pi-web-qualification-browserd.service.in": "ExecStart=/usr/bin/node @CURRENT_RELEASE@/bin/pi-web-browserd.mjs",
+    "pi-web-qualification-webxd.service.in": "ExecStart=/usr/bin/node @CURRENT_RELEASE@/bin/pi-web-webxd.mjs",
+  };
+  for (const [name, expectedExecStart] of Object.entries(units)) {
+    const source = await readFile(join(sourceRoot, "deploy/phase4a/systemd", name), "utf8");
+    assert.match(source, new RegExp(`^${expectedExecStart.replaceAll("/", "\\/")}\\s*$`, "mu"));
+    assert.doesNotMatch(source, /^\[Install\]$/mu);
+    assert.doesNotMatch(source, /(?:tsx|node_modules|target\/|scripts\/phase4a)/u);
+  }
+  const webxd = await readFile(join(sourceRoot, "deploy/phase4a/systemd/pi-web-qualification-webxd.service.in"), "utf8");
+  assert.doesNotMatch(webxd, /pi-web-(?:reader|searxng)\.service/u);
+});
+
+test("qualification proxy is lease-bound, closed, and deterministic", () => {
+  execFileSync("/usr/bin/python3", ["scripts/phase4a-qualification-proxy.test.py"], {
+    cwd: sourceRoot,
+    env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" },
+    stdio: "pipe",
+    timeout: 30_000,
+  });
 });

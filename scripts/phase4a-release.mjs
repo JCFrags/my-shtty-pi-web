@@ -321,11 +321,13 @@ async function buildNodeBundles(releaseRoot) {
   const entries = [
     { input: "apps/browserd/src/main.ts", output: "bin/pi-web-browserd.mjs", external: [] },
     { input: "apps/webxd/src/main.ts", output: "bin/pi-web-webxd.mjs", external: [] },
+    { input: "scripts/phase4a-qualification-runner.ts", output: "bin/pi-web-qualification-runner.mjs", external: [] },
+    { input: "scripts/phase4a-qualification-pi-worker.ts", output: "bin/pi-web-qualification-pi-worker.mjs", external: [], alias: { "@earendil-works/pi-ai": join(sourceRoot, "scripts/phase4a-qualification-pi-ai-shim.ts"), "@earendil-works/pi-tui": join(sourceRoot, "scripts/phase4a-qualification-pi-tui-shim.ts") } },
     { input: "apps/pi-webx/src/index.ts", output: "share/pi-webx/extension.mjs", external: ["@earendil-works/*", "typebox"] },
   ];
   const metafiles = [];
   for (const entry of entries) {
-    const result = await esbuild({ absWorkingDir: sourceRoot, entryPoints: [entry.input], outfile: join(releaseRoot, entry.output), bundle: true, platform: "node", format: "esm", target: "node24", packages: "bundle", external: entry.external, sourcemap: false, legalComments: "none", metafile: true, logLevel: "warning", charset: "utf8" });
+    const result = await esbuild({ absWorkingDir: sourceRoot, entryPoints: [entry.input], outfile: join(releaseRoot, entry.output), bundle: true, platform: "node", format: "esm", target: "node24", packages: "bundle", external: entry.external, alias: entry.alias ?? {}, sourcemap: false, legalComments: "none", metafile: true, logLevel: "warning", charset: "utf8" });
     metafiles.push(result.metafile);
   }
   const normalized = metafiles.map((metafile, index) => ({ entry: entries[index].input, output: entries[index].output, inputs: Object.entries(metafile.inputs).map(([path, value]) => ({ path, bytes: value.bytes })).sort((a, b) => a.path.localeCompare(b.path)) }));
@@ -468,7 +470,11 @@ async function buildRelease(options) {
     const metafiles = await buildNodeBundles(releaseRoot);
     await writeBundledLicenses(releaseRoot, metafiles);
     const proxySource = await readFile(join(sourceRoot, "components/browser/scripts/secure_egress_proxy.py"), "utf8");
+    const qualificationProxySource = await readFile(join(sourceRoot, "scripts/phase4a-qualification-proxy.py"), "utf8");
+    const qualificationAtspiSource = await readFile(join(sourceRoot, "apps/webxd/tests/workspace-atspi.py"), "utf8");
     await writeFile(join(releaseRoot, "bin/pi-web-egress-proxy"), withFixedPythonInterpreter(proxySource));
+    await writeFile(join(releaseRoot, "bin/pi-web-qualification-proxy"), withFixedPythonInterpreter(qualificationProxySource));
+    await writeFile(join(releaseRoot, "bin/pi-web-qualification-atspi.py"), withFixedPythonInterpreter(qualificationAtspiSource));
     await Promise.all([
       copyFile(join(sourceRoot, "packages/browser-protocol/schema/browser-protocol.schema.json"), join(releaseRoot, "share/schemas/browser-protocol.schema.json")),
       copyFile(join(sourceRoot, "packages/workspace-protocol/schema/workspace-protocol.schema.json"), join(releaseRoot, "share/schemas/workspace-protocol.schema.json")),
@@ -553,11 +559,13 @@ async function verifyRelease(releaseRootValue, expectedSha, forbiddenPaths = [so
     if (bytes.byteLength !== record.bytes || sha256(bytes) !== record.sha256) fail(`release checksum failed: ${record.path}`);
   }
   assert.deepEqual([...listed].sort(), actual.sort(), "release checksum inventory is incomplete");
-  for (const required of ["bin/pi-webctl.mjs", "bin/phase4a-release-format.mjs", "share/deploy/phase4a-config.mjs", "share/deploy/config/default.json"]) if (!listed.has(required)) fail(`release is missing required installed file: ${required}`);
+  for (const required of ["bin/pi-webctl.mjs", "bin/phase4a-release-format.mjs", "bin/pi-web-qualification-proxy", "bin/pi-web-qualification-atspi.py", "bin/pi-web-qualification-runner.mjs", "bin/pi-web-qualification-pi-worker.mjs", "share/deploy/phase4a-config.mjs", "share/deploy/config/default.json"]) if (!listed.has(required)) fail(`release is missing required installed file: ${required}`);
   for (const artifact of Object.values(manifest.artifacts)) if (!listed.has(artifact)) fail("release manifest artifact is missing from the checksum inventory");
   assert.deepEqual(manifest.immutableFiles, await immutablePayloadDigests(releaseRoot), "release manifest payload digest inventory is invalid");
   command(process.execPath, ["--check", join(releaseRoot, "bin/pi-web-browserd.mjs")], { cwd: tmpdir() });
   command(process.execPath, ["--check", join(releaseRoot, "bin/pi-web-webxd.mjs")], { cwd: tmpdir() });
+  command(process.execPath, ["--check", join(releaseRoot, "bin/pi-web-qualification-runner.mjs")], { cwd: tmpdir() });
+  command(process.execPath, ["--check", join(releaseRoot, "bin/pi-web-qualification-pi-worker.mjs")], { cwd: tmpdir() });
   command(process.execPath, ["--check", join(releaseRoot, "share/pi-webx/extension.mjs")], { cwd: tmpdir() });
   command(process.execPath, ["--check", join(releaseRoot, "share/deploy/phase4a-config.mjs")], { cwd: tmpdir() });
   command(process.execPath, ["--check", join(releaseRoot, "bin/pi-webctl.mjs")], { cwd: tmpdir() });
@@ -565,7 +573,7 @@ async function verifyRelease(releaseRootValue, expectedSha, forbiddenPaths = [so
   parseInstalledConfig(JSON.parse(await readFile(join(releaseRoot, "share/deploy/config/default.json"), "utf8")));
   /** @type {Map<string, string>} */
   const deployUnits = new Map();
-  for (const name of ["pi-web-agentcursor-egress-proxy.service", "pi-web-agentcursor-browserd.service", "webxd.service"]) deployUnits.set(name, await readFile(join(releaseRoot, `share/deploy/systemd/${name}.in`), "utf8"));
+  for (const name of ["pi-web-agentcursor-egress-proxy.service", "pi-web-agentcursor-browserd.service", "webxd.service", "pi-web-qualification-egress-proxy.service", "pi-web-qualification-browserd.service", "pi-web-qualification-webxd.service"]) deployUnits.set(name, await readFile(join(releaseRoot, `share/deploy/systemd/${name}.in`), "utf8"));
   if (!deployUnits.get("pi-web-agentcursor-browserd.service")?.includes("Wants=pi-web-agentcursor-egress-proxy.service") || deployUnits.get("pi-web-agentcursor-browserd.service")?.includes("Requires=")) fail("release browserd unit dependency policy is invalid");
   if (!deployUnits.get("webxd.service")?.includes("Wants=pi-web-reader.service pi-web-searxng.service @BROWSERD_UNIT@") || deployUnits.get("webxd.service")?.includes("Requires=")) fail("release webxd unit dependency policy is invalid");
   for (const [name, unit] of deployUnits) {
@@ -576,9 +584,11 @@ async function verifyRelease(releaseRootValue, expectedSha, forbiddenPaths = [so
     const marker = Buffer.from(forbiddenPath);
     for (const path of await regularFiles(releaseRoot)) if ((await readFile(path)).includes(marker)) fail(`release contains an absolute build path in ${relative(releaseRoot, path)}`);
   }
-  const proxy = await readFile(join(releaseRoot, "bin/pi-web-egress-proxy"), "utf8");
-  if (!proxy.startsWith("#!/usr/bin/python3\n")) fail("release proxy interpreter is not fixed");
-  command("/usr/bin/python3", ["-c", "import pathlib,sys; compile(pathlib.Path(sys.argv[1]).read_text(), sys.argv[1], 'exec')", join(releaseRoot, "bin/pi-web-egress-proxy")], { cwd: tmpdir() });
+  for (const name of ["pi-web-egress-proxy", "pi-web-qualification-proxy", "pi-web-qualification-atspi.py"]) {
+    const proxy = await readFile(join(releaseRoot, `bin/${name}`), "utf8");
+    if (!proxy.startsWith("#!/usr/bin/python3\n")) fail(`release proxy interpreter is not fixed: ${name}`);
+    command("/usr/bin/python3", ["-c", "import pathlib,sys; compile(pathlib.Path(sys.argv[1]).read_text(), sys.argv[1], 'exec')", join(releaseRoot, `bin/${name}`)], { cwd: tmpdir() });
+  }
   return { manifest, manifestSha256: sha256(manifestBytes) };
 }
 /**

@@ -12,6 +12,7 @@ import {
   installationPreflight,
   installRelease,
   installedPaths,
+  qualifyInstalled,
   rollbackRelease,
   setBackend,
   uninstallCandidate,
@@ -19,7 +20,8 @@ import {
 } from "./pi-webctl.mjs";
 
 const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const unitNames = ["pi-web-agentcursor-egress-proxy.service", "pi-web-agentcursor-browserd.service", "webxd.service"];
+const ordinaryUnitNames = ["pi-web-agentcursor-egress-proxy.service", "pi-web-agentcursor-browserd.service", "webxd.service"];
+const unitNames = [...ordinaryUnitNames, "pi-web-qualification-egress-proxy.service", "pi-web-qualification-browserd.service", "pi-web-qualification-webxd.service"];
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 
 /** @param {string} releaseId @param {string} sha @param {Array<{path: string, sha256: string, bytes: number}>} immutableFiles */
@@ -81,6 +83,10 @@ async function syntheticRelease(parent, character, mutate = undefined) {
     writeFile(join(root, "bin/pi-web-browserd.mjs"), "export {};\n"),
     writeFile(join(root, "bin/pi-web-webxd.mjs"), "export {};\n"),
     writeFile(join(root, "bin/pi-web-egress-proxy"), "#!/usr/bin/python3\npass\n"),
+    writeFile(join(root, "bin/pi-web-qualification-proxy"), "#!/usr/bin/python3\npass\n"),
+    writeFile(join(root, "bin/pi-web-qualification-atspi.py"), "#!/usr/bin/python3\npass\n"),
+    writeFile(join(root, "bin/pi-web-qualification-runner.mjs"), "export {};\n"),
+    writeFile(join(root, "bin/pi-web-qualification-pi-worker.mjs"), "export {};\n"),
     writeFile(join(root, "bin/pi-browser-workspace"), "workspace fixture\n"),
     writeFile(join(root, "bin/pi-browser-workspace-qualification"), "workspace qualification fixture\n"),
     copyFile(join(sourceRoot, "scripts/pi-webctl.mjs"), join(root, "bin/pi-webctl.mjs")),
@@ -119,6 +125,7 @@ async function fakeSystemctl(temporary) {
   const operationFailure = join(temporary, "fail-systemctl-operation");
   const deactivateOnRestart = join(temporary, "deactivate-webxd-on-restart");
   const staticOnFailedOperation = join(temporary, "static-on-failed-operation");
+  const qualificationFenceProbe = join(temporary, "qualification-fence-probe");
   const state = join(temporary, "systemctl-state");
   await mkdir(state);
   await Promise.all([writeFile(join(state, "webxd.service.active"), ""), writeFile(join(state, "webxd.service.enabled"), "")]);
@@ -138,14 +145,14 @@ case "$operation" in
   enable) now=0; [[ "$1" == '--now' ]] && { now=1; shift; }; unit="$1"; touch "${state}/$unit.enabled"; [[ "$now" == 0 ]] || touch "${state}/$unit.active" ;;
   disable) now=0; [[ "$1" == '--now' ]] && { now=1; shift; }; unit="$1"; rm -f "${state}/$unit.enabled"; [[ "$now" == 0 ]] || rm -f "${state}/$unit.active" ;;
   start) unit="$1"; touch "${state}/$unit.active" ;;
-  stop) unit="$1"; rm -f "${state}/$unit.active" ;;
+  stop) unit="$1"; if [[ "$unit" == pi-web-qualification-* ]] && [[ -f "${qualificationFenceProbe}" ]]; then probe="$(cat "${qualificationFenceProbe}")"; if [[ -e "$probe" || -L "$probe" ]]; then printf 'qualification-fence-after-preparation %s\\n' "$unit" >> "${log}"; else printf 'qualification-fence-before-preparation %s\\n' "$unit" >> "${log}"; fi; fi; rm -f "${state}/$unit.active" ;;
   restart) unit="$1"; touch "${state}/$unit.active" ;;
-  daemon-reload|show-environment) exit 0 ;;
+  daemon-reload|show-environment|reset-failed) exit 0 ;;
   *) exit 1 ;;
 esac
 `);
   await chmod(command, 0o755);
-  return { command, log, failure, operationFailure, deactivateOnRestart, staticOnFailedOperation, state };
+  return { command, log, failure, operationFailure, deactivateOnRestart, staticOnFailedOperation, qualificationFenceProbe, state };
 }
 
 /** @param {string} path */
@@ -168,7 +175,7 @@ async function activationSnapshot(paths, currentReleaseId, previousReleaseId) {
     config: await savedPath(paths.configPath),
     deployment: await savedPath(paths.deploymentPath),
     managed: Object.fromEntries(await Promise.all(managedPaths.map(async (path) => [path, await savedPath(path)]))),
-    services: Object.fromEntries(unitNames.map((name) => [name, { active: "active", enabled: "enabled" }])),
+    services: Object.fromEntries(ordinaryUnitNames.map((name) => [name, { active: "active", enabled: "enabled" }])),
   };
 }
 
@@ -233,6 +240,9 @@ test("production CLI requires exact identity, rejects option channels, and class
   for (const failure of [
     invoke(["install", "--release", releases]),
     invoke(["preflight", "--release", releases, "--release", releases]),
+    invoke(["qualify", "acceptance", "--duration", "1", "--expected-sha", "a".repeat(40), "--manifest-sha256", "b".repeat(64)]),
+    invoke(["qualify", "soak", "--output", releases, "--expected-sha", "a".repeat(40), "--manifest-sha256", "b".repeat(64)]),
+    invoke(["qualify", "custom", "--expected-sha", "a".repeat(40), "--manifest-sha256", "b".repeat(64)]),
     invoke(["status", "--systemctl", systemd.command]),
   ]) {
     assert.equal(failure.status, 1);
@@ -258,7 +268,7 @@ test("production CLI requires exact identity, rejects option channels, and class
   assert.doesNotMatch(human.stdout + human.stderr, /\/tmp\/|bindingSecret|socketPath|profile/u);
 });
 
-test("prospective render failure occurs before selector or systemctl changes", async () => {
+test("prospective render failure occurs after fencing but before selector or ordinary service changes", async () => {
   const { paths, systemd, releases } = await fixture();
   const current = await syntheticRelease(releases, "8");
   await installRelease(paths, systemd.command, current.root);
@@ -271,7 +281,13 @@ test("prospective render failure occurs before selector or systemctl changes", a
   await assert.rejects(installRelease(paths, systemd.command, broken.root), /unit template contains an unknown placeholder/u);
   assert.equal(await readlink(paths.activeSelectorLink), selectorBefore);
   assert.equal(await readlink(paths.currentLink), `../../releases/${current.releaseId}`);
-  assert.equal(await readFile(systemd.log, "utf8"), logBefore, "systemctl is not invoked for an invalid prospective render");
+  const systemctlDelta = (await readFile(systemd.log, "utf8")).slice(logBefore.length).trim().split("\n");
+  const expectedFence = [...unitNames.filter((name) => name.startsWith("pi-web-qualification-"))].reverse().flatMap((unit) => [
+    `--user stop ${unit}`,
+    `--user reset-failed ${unit}`,
+    `--user is-active ${unit}`,
+  ]);
+  assert.deepEqual(systemctlDelta, expectedFence, "an invalid prospective render performs only the mandatory qualification fence");
   assert.equal((await readdir(paths.selectorsRoot)).filter((name) => /^selector-/u.test(name)).length, 1);
 });
 
@@ -393,7 +409,7 @@ test("existing same-SHA release cannot bypass the requested manifest digest", as
   assert.equal(await readlink(paths.currentLink), `../../releases/${first.releaseId}`);
 });
 
-test("checksum corruption is refused before activation", async () => {
+test("checksum corruption and a missing qualification helper are refused before activation", async () => {
   const { paths, systemd, releases } = await fixture();
   const release = await syntheticRelease(releases, "e");
   const browserd = join(release.root, "bin/pi-web-browserd.mjs");
@@ -401,6 +417,9 @@ test("checksum corruption is refused before activation", async () => {
   await assert.rejects(verifyInstallRelease(release.root), /release checksum failed/u);
   await assert.rejects(installRelease(paths, systemd.command, release.root), /release checksum failed/u);
   await assert.rejects(lstat(paths.currentLink), /ENOENT/u);
+
+  const missingAtspi = await syntheticRelease(releases, "d", async (root) => await rm(join(root, "bin/pi-web-qualification-atspi.py")));
+  await assert.rejects(verifyInstallRelease(missingAtspi.root), /missing required installed file: bin\/pi-web-qualification-atspi\.py/u);
 });
 
 test("closed release documents reject unknown fields, unsafe paths, and wrong expected identity", async () => {
@@ -501,6 +520,25 @@ test("sealed interrupted release staging resumes without publishing mutable fina
   assert.equal((await lstat(join(paths.releasesRoot, source.releaseId))).mode & 0o777, 0o555);
 });
 
+test("every installed mutation fences stale qualification services before preparation", async () => {
+  const { paths, systemd, releases } = await fixture();
+  const release = await syntheticRelease(releases, "b");
+  const qualificationUnits = unitNames.filter((name) => name.startsWith("pi-web-qualification-"));
+  for (const unit of qualificationUnits) await writeFile(join(systemd.state, `${unit}.active`), "");
+  const preparationProbe = join(paths.unitRoot, ordinaryUnitNames[0]);
+  await writeFile(systemd.qualificationFenceProbe, preparationProbe);
+  await assert.rejects(lstat(preparationProbe), /ENOENT/u);
+  await installRelease(paths, systemd.command, release.root);
+  assert.equal((await lstat(preparationProbe)).isFile(), true, "installation preparation eventually creates the probe unit");
+  for (const unit of qualificationUnits) await assert.rejects(lstat(join(systemd.state, `${unit}.active`)), /ENOENT/u);
+  const log = await readFile(systemd.log, "utf8");
+  for (const unit of qualificationUnits) {
+    assert.match(log, new RegExp(`--user stop ${unit.replaceAll(".", "\\.")}`, "u"));
+    assert.match(log, new RegExp(`qualification-fence-before-preparation ${unit.replaceAll(".", "\\.")}`, "u"));
+  }
+  assert.doesNotMatch(log, /qualification-fence-after-preparation/u);
+});
+
 test("service activation accepts idempotent nonzero results only when exact probes match", async () => {
   const { paths, systemd, releases } = await fixture();
   const release = await syntheticRelease(releases, "2");
@@ -552,7 +590,8 @@ test("post-commit uninstall cleanup never restores a pointer to removed bytes", 
   const retryLogStart = (await readFile(systemd.log, "utf8")).length;
   assert.equal((await uninstallCandidate(paths, systemd.command)).legacyPreserved, true, "cleanup failure is retryable");
   await assert.rejects(lstat(partialResidue), /ENOENT/u, "retry removes only allowlisted owner-controlled post-commit residue");
-  assert.doesNotMatch((await readFile(systemd.log, "utf8")).slice(retryLogStart), /disable --now|\b(?:start|stop|restart|enable|disable)\b/u, "cleanup retry does not mutate restored legacy services");
+  const retryMutations = (await readFile(systemd.log, "utf8")).slice(retryLogStart).split("\n").filter((line) => line !== "" && !line.includes("pi-web-qualification-"));
+  assert.doesNotMatch(retryMutations.join("\n"), /disable --now|\b(?:start|stop|restart|enable|disable)\b/u, "cleanup retry does not mutate restored legacy services");
 });
 
 test("stale lock recovery restores the complete prior activation before new work", async () => {
@@ -699,6 +738,92 @@ test("doctor converts corruption and missing display into controlled classificat
   assert.equal(report.findings.find((item) => item.category === "display")?.status, "unavailable");
   assert.equal(report.findings.find((item) => item.category === "authority")?.code, "AUTHORITY_UNAVAILABLE");
   assert.doesNotMatch(JSON.stringify(report), /CORRUPT_PRIVATE_MARKER|SECRET_AUTHORITY_MARKER|\/tmp\//u);
+});
+
+test("installed qualification is exact, private, static, and restores ordinary services", async () => {
+  const { paths, systemd, releases, environment } = await fixture();
+  const release = await syntheticRelease(releases, "2");
+  await installRelease(paths, systemd.command, release.root);
+  const manifestSha256 = digest(await readFile(join(release.root, "manifest.json")));
+  await assert.rejects(
+    qualifyInstalled(paths, systemd.command, "acceptance", release.gitSha, manifestSha256, environment, { ports: async () => undefined }),
+    /explicit AgentCursor backend/u,
+  );
+  await setBackend(paths, systemd.command, "agentcursor");
+  const interruptedSnapshot = await activationSnapshot(paths, release.releaseId, undefined);
+  await mkdir(paths.qualificationRoot, { recursive: true, mode: 0o700 });
+  await writeFile(join(paths.qualificationRoot, "interrupted-private-state"), "discard\n", { mode: 0o600 });
+  await writeFile(paths.transactionPath, `${JSON.stringify({ schemaVersion: 1, operation: "qualify", snapshot: interruptedSnapshot })}\n`, { mode: 0o600 });
+
+  let workloadCalls = 0;
+  let closeCalls = 0;
+  const result = await qualifyInstalled(paths, systemd.command, "acceptance", release.gitSha, manifestSha256, { ...environment, WAYLAND_DISPLAY: "wayland-0", DBUS_SESSION_BUS_ADDRESS: "unix:path=private", SECRET_QUALIFICATION_MARKER: "must-not-cross" }, {
+    ports: async () => undefined,
+    proxy: async () => "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\n\r\n",
+    workload: async (childEnvironment, verified, mode) => {
+      workloadCalls += 1;
+      assert.equal(mode, "acceptance");
+      assert.equal(verified.gitSha, release.gitSha);
+      assert.equal(childEnvironment.PI_WEB_QUALIFICATION_RELEASE_ID, release.releaseId);
+      assert.equal(childEnvironment.PI_WEB_QUALIFICATION_GIT_SHA, release.gitSha);
+      assert.equal(childEnvironment.PI_WEB_QUALIFICATION_MANIFEST_SHA256, manifestSha256);
+      assert.equal(childEnvironment.WEBX_BROWSER_BACKEND, "agentcursor");
+      assert.equal(childEnvironment.WEBX_SEARX_URL, "http://127.0.0.1:18878");
+      assert.equal(childEnvironment.WEBX_READER_URL, "http://127.0.0.1:18878");
+      assert.equal(childEnvironment.SECRET_QUALIFICATION_MARKER, undefined);
+      const leaseInformation = await lstat(paths.qualificationLeasePath);
+      const environmentInformation = await lstat(paths.qualificationEnvironmentPath);
+      assert.equal(leaseInformation.mode & 0o777, 0o600);
+      assert.equal(environmentInformation.mode & 0o777, 0o600);
+      assert.equal(leaseInformation.nlink, 1);
+      const lease = JSON.parse(await readFile(paths.qualificationLeasePath, "utf8"));
+      assert.deepEqual(lease, { schemaVersion: 1, releaseId: release.releaseId, gitSha: release.gitSha, manifestSha256 });
+      return { schemaVersion: 1, ok: true, mode, releaseId: release.releaseId, gitSha: release.gitSha, manifestSha256, durationSeconds: 1, summary: { checks: { installed: true, private: true }, actors: 2 } };
+    },
+    closeWorkspace: (childEnvironment, executable) => {
+      closeCalls += 1;
+      assert.equal(childEnvironment.SECRET_QUALIFICATION_MARKER, undefined);
+      assert.equal(executable, join(paths.releasesRoot, release.releaseId, "bin/pi-browser-workspace-qualification"));
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(workloadCalls, 1);
+  assert.equal(closeCalls, 1);
+  await assert.rejects(lstat(paths.qualificationRoot), /ENOENT/u);
+  await assert.rejects(lstat(paths.transactionPath), /ENOENT/u);
+  assert.deepEqual(JSON.parse(await readFile(paths.recoveryPath, "utf8")), { schemaVersion: 1, operation: "qualify", recovered: true });
+  for (const unit of ordinaryUnitNames) {
+    assert.equal(await readFile(join(systemd.state, `${unit}.active`), "utf8"), "");
+    assert.equal(await readFile(join(systemd.state, `${unit}.enabled`), "utf8"), "");
+  }
+  for (const unit of unitNames.slice(ordinaryUnitNames.length)) {
+    await assert.rejects(lstat(join(systemd.state, `${unit}.active`)), /ENOENT/u);
+    await assert.rejects(lstat(join(systemd.state, `${unit}.enabled`)), /ENOENT/u);
+  }
+  const systemctlLog = await readFile(systemd.log, "utf8");
+  assert.match(systemctlLog, /--user start pi-web-qualification-egress-proxy\.service/u);
+  assert.doesNotMatch(systemctlLog, /--user enable(?: --now)? pi-web-qualification/u);
+});
+
+test("qualification failure removes private runtime and restores the exact activation", async () => {
+  const { paths, systemd, releases, environment } = await fixture();
+  const release = await syntheticRelease(releases, "1");
+  await installRelease(paths, systemd.command, release.root);
+  await setBackend(paths, systemd.command, "agentcursor");
+  const manifestSha256 = digest(await readFile(join(release.root, "manifest.json")));
+  await assert.rejects(qualifyInstalled(paths, systemd.command, "acceptance", release.gitSha, manifestSha256, environment, {
+    ports: async () => undefined,
+    proxy: async () => "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\n\r\n",
+    workload: async () => { throw new Error("PRIVATE_WORKLOAD_FAILURE"); },
+    closeWorkspace: () => undefined,
+  }), /PRIVATE_WORKLOAD_FAILURE/u);
+  await assert.rejects(lstat(paths.qualificationRoot), /ENOENT/u);
+  await assert.rejects(lstat(paths.transactionPath), /ENOENT/u);
+  for (const unit of ordinaryUnitNames) {
+    assert.equal(await lstat(join(systemd.state, `${unit}.active`)).then(() => true), true);
+    assert.equal(await lstat(join(systemd.state, `${unit}.enabled`)).then(() => true), true);
+  }
+  for (const unit of unitNames.slice(ordinaryUnitNames.length)) await assert.rejects(lstat(join(systemd.state, `${unit}.active`)), /ENOENT/u);
 });
 
 test("live mutation locks reject concurrent control and purge stays allowlisted", async () => {
