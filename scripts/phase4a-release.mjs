@@ -41,6 +41,10 @@ function fail(message) { throw new Error(message); }
  * @returns {string}
  */
 function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
+/** @param {string} source */
+function withFixedPythonInterpreter(source) {
+  return `#!/usr/bin/python3\n${source.replace(/^#![^\r\n]*(?:\r?\n|$)/u, "")}`;
+}
 /**
  * @param {string} file
  * @param {string[]} args
@@ -425,7 +429,7 @@ async function buildRelease(options) {
     const metafiles = await buildNodeBundles(releaseRoot);
     await writeBundledLicenses(releaseRoot, metafiles);
     const proxySource = await readFile(join(sourceRoot, "components/browser/scripts/secure_egress_proxy.py"), "utf8");
-    await writeFile(join(releaseRoot, "bin/pi-web-egress-proxy"), proxySource.replace(/^#!.*$/u, "#!/usr/bin/python3"));
+    await writeFile(join(releaseRoot, "bin/pi-web-egress-proxy"), withFixedPythonInterpreter(proxySource));
     await Promise.all([
       copyFile(join(sourceRoot, "packages/browser-protocol/schema/browser-protocol.schema.json"), join(releaseRoot, "share/schemas/browser-protocol.schema.json")),
       copyFile(join(sourceRoot, "packages/workspace-protocol/schema/workspace-protocol.schema.json"), join(releaseRoot, "share/schemas/workspace-protocol.schema.json")),
@@ -567,7 +571,7 @@ async function reproducibility(options) {
   process.stdout.write(`${JSON.stringify({ ok: true, report: reportPath }, null, 2)}\n`);
 }
 
-export const releaseInternals = { assertAbsoluteOutsideSource, buildNodeBundles, buildRelease, deterministicTreeDigest, immutablePayloadDigests, normalizedRelease, parse, removeOwnedTree, resolvedOutsideSource, setImmutableModes, validateBuildIdentity, verifyRelease, writeBundledLicenses, writeChecksums, writeRustLicenses };
+export const releaseInternals = { assertAbsoluteOutsideSource, buildNodeBundles, buildRelease, deterministicTreeDigest, immutablePayloadDigests, normalizedRelease, parse, removeOwnedTree, resolvedOutsideSource, setImmutableModes, validateBuildIdentity, verifyRelease, withFixedPythonInterpreter, writeBundledLicenses, writeChecksums, writeRustLicenses };
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === releaseFile) {
   const { operation, options } = parse(process.argv.slice(2));

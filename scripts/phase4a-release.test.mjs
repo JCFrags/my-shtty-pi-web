@@ -37,6 +37,14 @@ test("release CLI rejects unknown and duplicate options", () => {
   assert.throws(() => releaseInternals.parse(["verify", "--release-root", "/tmp/a", "--release-root", "/tmp/b"]), /duplicate release option/u);
 });
 
+test("proxy packaging replaces an env shebang with the fixed Fedora interpreter", () => {
+  assert.equal(
+    releaseInternals.withFixedPythonInterpreter("#!/usr/bin/env python3\nprint('ok')\n"),
+    "#!/usr/bin/python3\nprint('ok')\n",
+  );
+  assert.equal(releaseInternals.withFixedPythonInterpreter("print('ok')\n"), "#!/usr/bin/python3\nprint('ok')\n");
+});
+
 test("build identity refuses dirty, missing, and mismatched Git identities", () => {
   assert.throws(() => releaseInternals.validateBuildIdentity("bad", gitSha, ""), /forty lowercase/u);
   assert.throws(() => releaseInternals.validateBuildIdentity(gitSha, "b".repeat(40), ""), /does not match HEAD/u);
