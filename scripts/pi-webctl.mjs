@@ -21,7 +21,7 @@ import {
 } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { homedir } from "node:os";
-import { createConnection } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { validateReleaseChecksums, validateReleaseManifest } from "./phase4a-release-format.mjs";
@@ -70,7 +70,7 @@ async function regularFiles(root) {
     const directory = pending.pop();
     if (directory === undefined) fail("release traversal lost its directory");
     const information = await lstat(directory);
-    if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || (information.mode & 0o777) !== 0o555) fail("release directory mode or ownership is invalid");
+    if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || information.gid !== process.getgid?.() || (information.mode & 0o777) !== 0o555) fail("release directory mode or ownership is invalid");
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
       if (entry.isDirectory()) pending.push(path);
@@ -86,21 +86,22 @@ async function regularFiles(root) {
  * @param {string} releaseRootValue
  * @param {string | undefined} expectedSha
  * @param {string | undefined} expectedManifestSha256
+ * @param {string | undefined} stagedReleaseId
  */
-export async function verifyInstallRelease(releaseRootValue, expectedSha = undefined, expectedManifestSha256 = undefined) {
+export async function verifyInstallRelease(releaseRootValue, expectedSha = undefined, expectedManifestSha256 = undefined, stagedReleaseId = undefined) {
   if (!isAbsolute(releaseRootValue)) fail("release root must be absolute");
   const suppliedInformation = await lstat(releaseRootValue);
   if (!suppliedInformation.isDirectory() || suppliedInformation.isSymbolicLink()) fail("release root must be a direct immutable directory");
   const releaseRoot = await realpath(releaseRootValue);
   const rootInformation = await lstat(releaseRoot);
-  if (releaseRoot !== resolve(releaseRootValue) || !rootInformation.isDirectory() || rootInformation.isSymbolicLink() || rootInformation.uid !== process.getuid?.() || (rootInformation.mode & 0o777) !== 0o555) fail("release root must be an owner-controlled immutable regular directory");
+  if (releaseRoot !== resolve(releaseRootValue) || !rootInformation.isDirectory() || rootInformation.isSymbolicLink() || rootInformation.uid !== process.getuid?.() || rootInformation.gid !== process.getgid?.() || (rootInformation.mode & 0o777) !== 0o555) fail("release root must be an owner-controlled immutable regular directory");
   const actualFiles = await regularFiles(releaseRoot);
   const manifest = validateReleaseManifest(await readJson(join(releaseRoot, "manifest.json")));
-  if (basename(releaseRoot) !== manifest.releaseId) fail("release directory does not match manifest identity");
+  if (basename(releaseRoot) !== manifest.releaseId && stagedReleaseId !== manifest.releaseId) fail("release directory does not match manifest identity");
   if (expectedSha !== undefined && manifest.gitSha !== expectedSha) fail("release Git SHA does not match the requested SHA");
   const checksumsPath = join(releaseRoot, "checksums.json");
   const checksumsInformation = await lstat(checksumsPath);
-  if (!checksumsInformation.isFile() || checksumsInformation.isSymbolicLink() || checksumsInformation.nlink !== 1 || checksumsInformation.uid !== process.getuid?.() || (checksumsInformation.mode & 0o777) !== 0o444) fail("release checksum metadata mode or ownership is invalid");
+  if (!checksumsInformation.isFile() || checksumsInformation.isSymbolicLink() || checksumsInformation.nlink !== 1 || checksumsInformation.uid !== process.getuid?.() || checksumsInformation.gid !== process.getgid?.() || (checksumsInformation.mode & 0o777) !== 0o444) fail("release checksum metadata mode or ownership is invalid");
   const checksums = validateReleaseChecksums(await readJson(checksumsPath));
   const listed = new Set();
   for (const item of checksums.files) {
@@ -108,7 +109,7 @@ export async function verifyInstallRelease(releaseRootValue, expectedSha = undef
     const path = join(releaseRoot, item.path);
     const information = await lstat(path);
     const expectedMode = item.path.startsWith("bin/") ? 0o555 : 0o444;
-    if (item.mode !== expectedMode || !information.isFile() || information.isSymbolicLink() || information.nlink !== 1 || information.uid !== process.getuid?.() || (information.mode & 0o777) !== expectedMode) fail(`release file mode or ownership is invalid: ${item.path}`);
+    if (item.mode !== expectedMode || !information.isFile() || information.isSymbolicLink() || information.nlink !== 1 || information.uid !== process.getuid?.() || information.gid !== process.getgid?.() || (information.mode & 0o777) !== expectedMode) fail(`release file mode or ownership is invalid: ${item.path}`);
     const bytes = await readFile(path);
     if (bytes.byteLength !== item.bytes || sha256(bytes) !== item.sha256) fail(`release checksum failed: ${item.path}`);
   }
@@ -171,7 +172,7 @@ async function copyReleaseTree(source, destination) {
 async function ensureOwnedDirectory(path, mode) {
   await mkdir(path, { recursive: true, mode });
   const information = await lstat(path);
-  if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || await realpath(path) !== resolve(path) || (information.mode & 0o022) !== 0) fail(`owner-controlled directory is unsafe: ${path}`);
+  if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || information.gid !== process.getgid?.() || await realpath(path) !== resolve(path) || (information.mode & 0o022) !== 0) fail(`owner-controlled directory is unsafe: ${path}`);
 }
 
 /** @param {ReturnType<typeof installedPaths>} paths */
@@ -180,7 +181,7 @@ async function ensureManagedRoots(paths) {
     const existed = await exists(root);
     if (existed) {
       const before = await lstat(root);
-      if (!before.isDirectory() || before.isSymbolicLink() || before.uid !== process.getuid?.() || await realpath(root) !== resolve(root) || (before.mode & 0o022) !== 0) fail(`managed root is unsafe: ${root}`);
+      if (!before.isDirectory() || before.isSymbolicLink() || before.uid !== process.getuid?.() || before.gid !== process.getgid?.() || await realpath(root) !== resolve(root) || (before.mode & 0o022) !== 0) fail(`managed root is unsafe: ${root}`);
       const marker = join(root, MARKER_NAME);
       if (!(await exists(marker)) && (await readdir(root)).length > 0) fail(`refusing to adopt a nonempty unmarked managed root: ${root}`);
     }
@@ -189,9 +190,10 @@ async function ensureManagedRoots(paths) {
     const marker = join(root, MARKER_NAME);
     if (await exists(marker)) {
       const markerInformation = await lstat(marker);
-      if (!markerInformation.isFile() || markerInformation.isSymbolicLink() || markerInformation.uid !== process.getuid?.() || markerInformation.nlink !== 1 || (markerInformation.mode & 0o777) !== 0o600 || await readFile(marker, "utf8") !== MARKER_VALUE) fail(`managed root marker is invalid: ${root}`);
+      if (!markerInformation.isFile() || markerInformation.isSymbolicLink() || markerInformation.uid !== process.getuid?.() || markerInformation.gid !== process.getgid?.() || markerInformation.nlink !== 1 || (markerInformation.mode & 0o777) !== 0o600 || await readFile(marker, "utf8") !== MARKER_VALUE) fail(`managed root marker is invalid: ${root}`);
     } else await atomicWrite(marker, MARKER_VALUE, 0o600);
   }
+  await ensureOwnedDirectory(paths.runtimeRoot, 0o700);
   await ensureOwnedDirectory(paths.releasesRoot, 0o700);
   await ensureOwnedDirectory(paths.selectorsRoot, 0o700);
   await ensureOwnedDirectory(paths.unitRoot, 0o700);
@@ -266,11 +268,26 @@ function systemctl(command, arguments_, check = true) {
   if (check && result.status !== 0) fail(`user service operation failed: ${arguments_[0] ?? "unknown"}`);
   return result;
 }
+/** @param {string} command @param {"is-active" | "is-enabled"} operation @param {string} unit */
+function exactServiceState(command, operation, unit) {
+  const result = systemctl(command, [operation, unit], false);
+  const state = result.stdout.trim();
+  const allowed = operation === "is-active" ? ["active", "inactive"] : ["enabled", "disabled", "not-found"];
+  if (!allowed.includes(state)) fail(`candidate service has an unsupported ${operation === "is-active" ? "activity" : "enablement"} state: ${unit}`);
+  return state;
+}
 /** @param {string} command */
 function serviceStates(command) {
   return Object.fromEntries(UNITS.map((unit) => [unit, {
-    active: systemctl(command, ["is-active", "--quiet", unit], false).status === 0,
-    enabled: systemctl(command, ["is-enabled", "--quiet", unit], false).status === 0,
+    active: exactServiceState(command, "is-active", unit) === "active",
+    enabled: exactServiceState(command, "is-enabled", unit) === "enabled",
+  }]));
+}
+/** @param {string} command */
+function snapshotServiceStates(command) {
+  return Object.fromEntries(UNITS.map((unit) => [unit, {
+    active: exactServiceState(command, "is-active", unit),
+    enabled: exactServiceState(command, "is-enabled", unit),
   }]));
 }
 /** @param {string} command @param {Record<string, any>} states */
@@ -279,10 +296,11 @@ function restoreServiceStates(command, states) {
   let failed = false;
   for (const [unit, stateValue] of Object.entries(states)) {
     const state = record(stateValue, "service state");
-    systemctl(command, [state.enabled ? "enable" : "disable", unit], false);
-    if ((systemctl(command, ["is-enabled", "--quiet", unit], false).status === 0) !== state.enabled) failed = true;
-    systemctl(command, [state.active ? "start" : "stop", unit], false);
-    if ((systemctl(command, ["is-active", "--quiet", unit], false).status === 0) !== state.active) failed = true;
+    if (![["active", "inactive"], ["enabled", "disabled", "not-found"]].every((values, index) => values.includes(index === 0 ? state.active : state.enabled))) fail("service snapshot state is invalid");
+    if (state.enabled !== "not-found") systemctl(command, [state.enabled === "enabled" ? "enable" : "disable", unit], false);
+    if (exactServiceState(command, "is-enabled", unit) !== state.enabled) failed = true;
+    systemctl(command, [state.active === "active" ? "start" : "stop", unit], false);
+    if (exactServiceState(command, "is-active", unit) !== state.active) failed = true;
   }
   if (failed) fail("one or more prior service states could not be restored");
 }
@@ -290,14 +308,14 @@ function restoreServiceStates(command, states) {
 function activateService(command, unit) {
   systemctl(command, ["enable", unit], false);
   systemctl(command, ["restart", unit], false);
-  if (systemctl(command, ["is-enabled", "--quiet", unit], false).status !== 0) fail(`candidate service is not enabled: ${unit}`);
-  if (systemctl(command, ["is-active", "--quiet", unit], false).status !== 0) fail(`candidate service is not active: ${unit}`);
+  if (exactServiceState(command, "is-enabled", unit) !== "enabled") fail(`candidate service is not enabled: ${unit}`);
+  if (exactServiceState(command, "is-active", unit) !== "active") fail(`candidate service is not active: ${unit}`);
 }
 /** @param {string} command @param {string} unit */
 function deactivateService(command, unit) {
   systemctl(command, ["disable", "--now", unit], false);
-  if (systemctl(command, ["is-enabled", "--quiet", unit], false).status === 0) fail(`candidate service is not disabled: ${unit}`);
-  if (systemctl(command, ["is-active", "--quiet", unit], false).status === 0) fail(`candidate service is not inactive: ${unit}`);
+  if (exactServiceState(command, "is-enabled", unit) !== "disabled") fail(`candidate service is not disabled: ${unit}`);
+  if (exactServiceState(command, "is-active", unit) !== "inactive") fail(`candidate service is not inactive: ${unit}`);
 }
 
 /** @param {string} value */
@@ -361,15 +379,18 @@ async function stageRelease(paths, releaseSource, expectedSha = undefined, expec
     if (installed.releaseId !== verified.releaseId) fail("installed release identity conflicts with staged release");
     return installed;
   }
-  const stageParent = join(paths.releasesRoot, `.stage-${process.pid}-${randomBytes(6).toString("hex")}`);
-  const temporary = join(stageParent, verified.releaseId);
-  await mkdir(stageParent, { mode: 0o700 });
+  const interruptedPattern = new RegExp(`^\\.stage-${verified.releaseId}-[0-9a-f]{12}$`, "u");
+  for (const name of (await readdir(paths.releasesRoot)).filter((entry) => interruptedPattern.test(entry)).sort()) {
+    const interrupted = join(paths.releasesRoot, name);
+    await verifyInstallRelease(interrupted, verified.gitSha, verified.manifestSha256, verified.releaseId);
+    if (!(await exists(destination))) await rename(interrupted, destination);
+    else await removeOwnedTree(interrupted);
+  }
+  if (await exists(destination)) return await verifyInstallRelease(destination, verified.gitSha, verified.manifestSha256);
+  const temporary = join(paths.releasesRoot, `.stage-${verified.releaseId}-${randomBytes(6).toString("hex")}`);
   await copyReleaseTree(verified.releaseRoot, temporary);
-  await verifyInstallRelease(temporary, verified.gitSha, verified.manifestSha256).catch(async (error) => { await removeOwnedTree(stageParent); throw error; });
-  await chmod(temporary, 0o755);
+  await verifyInstallRelease(temporary, verified.gitSha, verified.manifestSha256, verified.releaseId).catch(async (error) => { await removeOwnedTree(temporary); throw error; });
   await rename(temporary, destination);
-  await chmod(destination, 0o555);
-  await rm(stageParent, { recursive: true, force: true });
   return await verifyInstallRelease(destination, verified.gitSha, verified.manifestSha256);
 }
 
@@ -383,7 +404,7 @@ async function releasePointers(paths) {
     if (!selectorMatch) fail("active release selector target is invalid");
     const selectorRoot = join(paths.selectorsRoot, selectorMatch[1]);
     const selectorInformation = await lstat(selectorRoot);
-    if (!selectorInformation.isDirectory() || selectorInformation.isSymbolicLink() || selectorInformation.uid !== process.getuid?.() || (selectorInformation.mode & 0o077) !== 0) fail("active release selector is unsafe");
+    if (!selectorInformation.isDirectory() || selectorInformation.isSymbolicLink() || selectorInformation.uid !== process.getuid?.() || selectorInformation.gid !== process.getgid?.() || (selectorInformation.mode & 0o077) !== 0) fail("active release selector is unsafe");
     /** @param {string} path @param {string} name */
     const readPointer = async (path, name) => {
       try {
@@ -429,7 +450,7 @@ async function pruneReleaseSelectors(paths) {
     if (name === match[1] || !/^(?:selector-[0-9a-f]{24}|\.stage-selector-[0-9a-f]{24})$/u.test(name)) continue;
     const root = join(paths.selectorsRoot, name);
     const information = await lstat(root);
-    if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || (information.mode & 0o077) !== 0) fail("obsolete release selector is unsafe");
+    if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || information.gid !== process.getgid?.() || (information.mode & 0o077) !== 0) fail("obsolete release selector is unsafe");
     await removeOwnedTree(root);
   }
 }
@@ -441,7 +462,7 @@ async function captureActivation(paths, command) {
     config: await snapshotPath(paths.configPath),
     deployment: await snapshotPath(paths.deploymentPath),
     managed: Object.fromEntries(await Promise.all(managedPaths(paths).map(async (path) => [path, await snapshotPath(path)]))),
-    services: serviceStates(command),
+    services: snapshotServiceStates(command),
   };
 }
 /** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {Record<string, any>} snapshot */
@@ -460,7 +481,7 @@ async function restoreActivation(paths, command, snapshot) {
 async function readInstalledConfig(paths) {
   if (!(await exists(paths.configPath))) return undefined;
   const information = await lstat(paths.configPath);
-  if (!information.isFile() || information.isSymbolicLink() || information.uid !== process.getuid?.() || information.nlink !== 1 || (information.mode & 0o777) !== 0o600) fail("installed configuration is invalid");
+  if (!information.isFile() || information.isSymbolicLink() || information.uid !== process.getuid?.() || information.gid !== process.getgid?.() || information.nlink !== 1 || (information.mode & 0o777) !== 0o600) fail("installed configuration is invalid");
   try { return record(await readJson(paths.configPath), "installed configuration"); }
   catch { fail("installed configuration is invalid"); }
 }
@@ -607,10 +628,10 @@ async function rollbackReleaseUnlocked(paths, command) {
 async function verifyManagedRoot(root) {
   if (!isAbsolute(root)) fail("managed root must be absolute");
   const information = await lstat(root);
-  if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || await realpath(root) !== resolve(root) || (information.mode & 0o077) !== 0) fail(`managed root is unsafe: ${root}`);
+  if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || information.gid !== process.getgid?.() || await realpath(root) !== resolve(root) || (information.mode & 0o077) !== 0) fail(`managed root is unsafe: ${root}`);
   const marker = join(root, MARKER_NAME);
   const markerInformation = await lstat(marker);
-  if (!markerInformation.isFile() || markerInformation.isSymbolicLink() || markerInformation.uid !== process.getuid?.() || markerInformation.nlink !== 1 || (markerInformation.mode & 0o777) !== 0o600 || await readFile(marker, "utf8") !== MARKER_VALUE) fail(`managed root ownership marker is invalid: ${root}`);
+  if (!markerInformation.isFile() || markerInformation.isSymbolicLink() || markerInformation.uid !== process.getuid?.() || markerInformation.gid !== process.getgid?.() || markerInformation.nlink !== 1 || (markerInformation.mode & 0o777) !== 0o600 || await readFile(marker, "utf8") !== MARKER_VALUE) fail(`managed root ownership marker is invalid: ${root}`);
 }
 /** @param {ReturnType<typeof installedPaths>} paths */
 async function isCommittedCandidateCleanup(paths) {
@@ -626,7 +647,7 @@ async function verifiedCandidateReleases(paths, allowPartialCleanup = false) {
     const release = join(paths.releasesRoot, name);
     if (allowPartialCleanup) {
       const information = await lstat(release);
-      if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || await realpath(release) !== resolve(release) || ![0o555, 0o700].includes(information.mode & 0o777)) fail("partial candidate cleanup residue is unsafe");
+      if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || information.gid !== process.getgid?.() || await realpath(release) !== resolve(release) || ![0o555, 0o700].includes(information.mode & 0o777)) fail("partial candidate cleanup residue is unsafe");
     } else await verifyInstallRelease(release);
     releases.push(release);
   }
@@ -688,7 +709,41 @@ async function processStartTicks(pid) {
 }
 
 /** @param {ReturnType<typeof installedPaths>} paths */
+async function mutationSocketName(paths) {
+  const stage = join(paths.runtimeRoot, `.mutation-lock-key-stage-${process.pid}-${randomBytes(12).toString("hex")}`);
+  await writeFile(stage, `${randomBytes(32).toString("hex")}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+  try { await link(stage, paths.mutationLockKeyPath); }
+  catch (error) { if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error; }
+  finally { await rm(stage, { force: true }); }
+  const information = await lstat(paths.mutationLockKeyPath);
+  const key = await readFile(paths.mutationLockKeyPath, "utf8");
+  if (!information.isFile() || information.isSymbolicLink() || information.uid !== process.getuid?.() || information.gid !== process.getgid?.() || information.nlink < 1 || information.nlink > 2 || (information.mode & 0o777) !== 0o600 || !/^[0-9a-f]{64}\n$/u.test(key)) fail("controller mutation lock key is unsafe");
+  return `\0pi-webctl-${sha256(key)}`;
+}
+
+/** @param {ReturnType<typeof installedPaths>} paths */
+async function acquireMutationSocket(paths) {
+  const server = createServer((socket) => socket.destroy());
+  const socketName = await mutationSocketName(paths);
+  await new Promise((resolvePromise, rejectPromise) => {
+    /** @param {unknown} error */
+    const onError = (error) => { server.off("listening", onListening); rejectPromise(error); };
+    const onListening = () => { server.off("error", onError); resolvePromise(undefined); };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(socketName);
+  }).catch((/** @type {unknown} */ error) => {
+    if (error instanceof Error && "code" in error && error.code === "EADDRINUSE") fail("another pi-webctl mutation is in progress");
+    throw error;
+  });
+  return server;
+}
+
+/** @param {ReturnType<typeof installedPaths>} paths */
 async function acquireMutationLock(paths) {
+  const server = await acquireMutationSocket(paths);
+  /** @type {import("node:fs").Stats | undefined} */
+  let identity;
   const create = async () => {
     const startTicks = await processStartTicks(process.pid);
     if (startTicks === undefined) fail("cannot establish controller process identity");
@@ -696,31 +751,49 @@ async function acquireMutationLock(paths) {
     await atomicJson(stage, { schemaVersion: 1, pid: process.pid, startTicks });
     try { await link(stage, paths.mutationLockPath); }
     finally { await rm(stage, { force: true }); }
+    identity = await lstat(paths.mutationLockPath);
   };
-  try { await create(); }
-  catch (error) {
-    if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
-    const information = await lstat(paths.mutationLockPath);
-    let owner;
-    if (information.isFile() && !information.isSymbolicLink() && information.uid === process.getuid?.() && (information.mode & 0o777) === 0o600 && information.nlink >= 1 && information.nlink <= 2) {
-      owner = record(await readJson(paths.mutationLockPath), "controller lock owner");
-    } else if (information.isDirectory() && !information.isSymbolicLink() && information.uid === process.getuid?.() && (information.mode & 0o077) === 0) {
-      try { owner = record(await readJson(join(paths.mutationLockPath, "owner.json")), "controller lock owner"); }
-      catch (ownerError) {
-        if (!(ownerError instanceof Error) || !("code" in ownerError) || ownerError.code !== "ENOENT") throw ownerError;
-        if (Date.now() - information.mtimeMs < LOCK_PUBLICATION_GRACE_MS) fail("controller mutation lock identity is not yet available");
+  try {
+    try { await create(); }
+    catch (error) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
+      const information = await lstat(paths.mutationLockPath);
+      let owner;
+      if (information.isFile() && !information.isSymbolicLink() && information.uid === process.getuid?.() && information.gid === process.getgid?.() && (information.mode & 0o777) === 0o600 && information.nlink >= 1 && information.nlink <= 2) {
+        owner = record(await readJson(paths.mutationLockPath), "controller lock owner");
+      } else if (information.isDirectory() && !information.isSymbolicLink() && information.uid === process.getuid?.() && information.gid === process.getgid?.() && (information.mode & 0o077) === 0) {
+        try { owner = record(await readJson(join(paths.mutationLockPath, "owner.json")), "controller lock owner"); }
+        catch (ownerError) {
+          if (!(ownerError instanceof Error) || !("code" in ownerError) || ownerError.code !== "ENOENT") throw ownerError;
+          if (Date.now() - information.mtimeMs < LOCK_PUBLICATION_GRACE_MS) fail("controller mutation lock identity is not yet available");
+        }
+      } else fail("controller mutation lock is unsafe");
+      if (owner !== undefined) {
+        if (JSON.stringify(Object.keys(owner).sort()) !== JSON.stringify(["pid", "schemaVersion", "startTicks"]) || owner.schemaVersion !== 1 || !Number.isSafeInteger(owner.pid) || typeof owner.startTicks !== "string" || !/^[0-9]+$/u.test(owner.startTicks)) fail("controller mutation lock owner is invalid");
+        if (await processStartTicks(owner.pid) === owner.startTicks) fail("another pi-webctl mutation is in progress");
       }
-    } else fail("controller mutation lock is unsafe");
-    if (owner !== undefined) {
-      if (JSON.stringify(Object.keys(owner).sort()) !== JSON.stringify(["pid", "schemaVersion", "startTicks"]) || owner.schemaVersion !== 1 || !Number.isSafeInteger(owner.pid) || typeof owner.startTicks !== "string" || !/^[0-9]+$/u.test(owner.startTicks)) fail("controller mutation lock owner is invalid");
-      if (await processStartTicks(owner.pid) === owner.startTicks) fail("another pi-webctl mutation is in progress");
+      const quarantine = join(paths.stateRoot, `.stale-mutation-lock-${randomBytes(12).toString("hex")}`);
+      await rename(paths.mutationLockPath, quarantine);
+      await removeOwnedTree(quarantine);
+      await create();
     }
-    const quarantine = join(paths.stateRoot, `.stale-mutation-lock-${randomBytes(12).toString("hex")}`);
-    await rename(paths.mutationLockPath, quarantine);
-    await removeOwnedTree(quarantine);
-    await create();
+  } catch (error) {
+    await new Promise((resolvePromise) => server.close(() => resolvePromise(undefined)));
+    throw error;
   }
-  return async () => await removeOwnedTree(paths.mutationLockPath);
+  return async () => {
+    let releaseError;
+    try {
+      const current = await lstat(paths.mutationLockPath);
+      if (identity === undefined || current.dev !== identity.dev || current.ino !== identity.ino) fail("controller mutation lock ownership changed unexpectedly");
+      await rm(paths.mutationLockPath);
+    } catch (error) {
+      const purgedWithSocketHeld = error instanceof Error && "code" in error && error.code === "ENOENT" && !(await exists(paths.stateRoot));
+      if (!purgedWithSocketHeld) releaseError = error;
+    }
+    await new Promise((resolvePromise) => server.close(() => resolvePromise(undefined)));
+    if (releaseError !== undefined) throw releaseError;
+  };
 }
 
 /** @param {ReturnType<typeof installedPaths>} paths @param {string} command */
@@ -856,6 +929,7 @@ export function installedPaths(environment = process.env) {
     failurePath: join(stateRoot, "last-activation-failure.json"),
     preinstallBackupPath: join(stateRoot, "preinstall-backup.json"),
     mutationLockPath: join(stateRoot, "mutation.lock"),
+    mutationLockKeyPath: join(runtimeRoot, "mutation-lock.key"),
     transactionPath: join(stateRoot, "activation-transaction.json"),
     recoveryPath: join(stateRoot, "last-interrupted-recovery.json"),
     desktopPath: join(dataHome, "applications/pi-web-workspace.desktop"),
@@ -874,7 +948,7 @@ async function nearestWritableDirectory(target) {
     candidate = parent;
   }
   const information = await lstat(candidate);
-  if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || await realpath(candidate) !== resolve(candidate)) fail("an installation root has an unsafe ancestor");
+  if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || information.gid !== process.getgid?.() || await realpath(candidate) !== resolve(candidate)) fail("an installation root has an unsafe ancestor");
   await access(candidate, fsConstants.W_OK | fsConstants.X_OK);
   return candidate;
 }
@@ -945,7 +1019,7 @@ export async function installationPreflight(paths, command, releaseSource, expec
   let dataAncestor = paths.home;
   try {
     const runtimeInformation = await lstat(paths.runtimeRoot);
-    if (!runtimeInformation.isDirectory() || runtimeInformation.isSymbolicLink() || runtimeInformation.uid !== process.getuid?.() || await realpath(paths.runtimeRoot) !== resolve(paths.runtimeRoot) || (runtimeInformation.mode & 0o077) !== 0) throw new Error("unsafe runtime root");
+    if (!runtimeInformation.isDirectory() || runtimeInformation.isSymbolicLink() || runtimeInformation.uid !== process.getuid?.() || runtimeInformation.gid !== process.getgid?.() || await realpath(paths.runtimeRoot) !== resolve(paths.runtimeRoot) || (runtimeInformation.mode & 0o077) !== 0) throw new Error("unsafe runtime root");
     await access(paths.runtimeRoot, fsConstants.W_OK | fsConstants.X_OK);
     for (const target of [paths.dataHome, paths.configHome, paths.cacheHome, paths.stateHome, paths.binRoot]) {
       const ancestor = await nearestWritableDirectory(target);
@@ -954,14 +1028,14 @@ export async function installationPreflight(paths, command, releaseSource, expec
     for (const root of [paths.dataRoot, paths.configRoot, paths.cacheRoot, paths.stateRoot]) {
       if (!(await exists(root))) continue;
       const information = await lstat(root);
-      if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || await realpath(root) !== resolve(root) || (information.mode & 0o022) !== 0) throw new Error("unsafe managed root");
+      if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || information.gid !== process.getgid?.() || await realpath(root) !== resolve(root) || (information.mode & 0o022) !== 0) throw new Error("unsafe managed root");
       const marker = join(root, MARKER_NAME);
       if (!(await exists(marker))) {
         if ((await readdir(root)).length > 0) throw new Error("unmanaged nonempty root");
         continue;
       }
       const markerInformation = await lstat(marker);
-      if (!markerInformation.isFile() || markerInformation.isSymbolicLink() || markerInformation.uid !== process.getuid?.() || markerInformation.nlink !== 1 || (markerInformation.mode & 0o777) !== 0o600 || await readFile(marker, "utf8") !== MARKER_VALUE) throw new Error("invalid managed root marker");
+      if (!markerInformation.isFile() || markerInformation.isSymbolicLink() || markerInformation.uid !== process.getuid?.() || markerInformation.gid !== process.getgid?.() || markerInformation.nlink !== 1 || (markerInformation.mode & 0o777) !== 0o600 || await readFile(marker, "utf8") !== MARKER_VALUE) throw new Error("invalid managed root marker");
     }
   } catch { pathReady = false; }
   findings.push(preflightFinding("filesystem", pathReady ? "pass" : "error", pathReady ? "INSTALL_ROOTS_WRITABLE" : "INSTALL_ROOTS_UNSAFE", pathReady ? "Installation and runtime roots are owner-controlled and writable." : "An installation or runtime root is missing, unsafe, or not writable."));
@@ -1134,10 +1208,10 @@ async function probeProxy(host, port) {
 async function doctorFilesystem(paths) {
   for (const root of [paths.dataRoot, paths.configRoot, paths.cacheRoot, paths.stateRoot]) await verifyManagedRoot(root);
   const runtimeInformation = await lstat(paths.runtimeRoot);
-  if (!runtimeInformation.isDirectory() || runtimeInformation.isSymbolicLink() || runtimeInformation.uid !== process.getuid?.() || (runtimeInformation.mode & 0o077) !== 0) fail("runtime root is unsafe");
+  if (!runtimeInformation.isDirectory() || runtimeInformation.isSymbolicLink() || runtimeInformation.uid !== process.getuid?.() || runtimeInformation.gid !== process.getgid?.() || (runtimeInformation.mode & 0o077) !== 0) fail("runtime root is unsafe");
   for (const path of [...UNITS.map((name) => join(paths.unitRoot, name)), paths.environmentPath, paths.desktopPath, paths.configPath]) {
     const information = await lstat(path);
-    if (!information.isFile() || information.isSymbolicLink() || information.uid !== process.getuid?.() || information.nlink !== 1) fail("installed managed file is unsafe");
+    if (!information.isFile() || information.isSymbolicLink() || information.uid !== process.getuid?.() || information.gid !== process.getgid?.() || information.nlink !== 1) fail("installed managed file is unsafe");
   }
   for (const [path, target] of [[paths.extensionPath, join(paths.currentLink, "share/pi-webx")], [paths.controlLink, join(paths.currentLink, "bin/pi-webctl.mjs")], [paths.workspaceLink, join(paths.currentLink, "bin/pi-browser-workspace")]]) {
     const information = await lstat(path);

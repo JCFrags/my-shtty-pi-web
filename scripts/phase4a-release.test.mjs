@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, chown, copyFile, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -147,6 +147,18 @@ test("detached verification accepts a complete immutable inventory and detects t
     await writeFile(browserd, "export const tampered = true;\n");
     await chmod(browserd, 0o555);
     await assert.rejects(releaseInternals.verifyRelease(releaseRoot, gitSha), /release checksum failed/u);
+  } finally {
+    await releaseInternals.removeOwnedTree(temporaryRoot);
+  }
+});
+
+test("detached verification rejects non-primary release groups", async (context) => {
+  const alternateGroup = process.getgroups?.().find((group) => group !== process.getgid?.());
+  if (alternateGroup === undefined) { context.skip("no supplementary group is available"); return; }
+  const { temporaryRoot, releaseRoot } = await syntheticRelease();
+  try {
+    await chown(join(releaseRoot, "bin/pi-web-browserd.mjs"), process.getuid?.() ?? -1, alternateGroup);
+    await assert.rejects(releaseInternals.verifyRelease(releaseRoot, gitSha), /release file mode or ownership is invalid/u);
   } finally {
     await releaseInternals.removeOwnedTree(temporaryRoot);
   }

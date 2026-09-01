@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmod, copyFile, link, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { chmod, chown, copyFile, link, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createServer } from "node:net";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -116,6 +117,7 @@ async function fakeSystemctl(temporary) {
   const failure = join(temporary, "fail-webxd-active");
   const operationFailure = join(temporary, "fail-systemctl-operation");
   const deactivateOnRestart = join(temporary, "deactivate-webxd-on-restart");
+  const staticOnFailedOperation = join(temporary, "static-on-failed-operation");
   const state = join(temporary, "systemctl-state");
   await mkdir(state);
   await Promise.all([writeFile(join(state, "webxd.service.active"), ""), writeFile(join(state, "webxd.service.enabled"), "")]);
@@ -123,12 +125,15 @@ async function fakeSystemctl(temporary) {
 raw="$*"
 printf '%s\\n' "$raw" >> "${log}"
 if [[ -f "${deactivateOnRestart}" ]] && [[ "$raw" == '--user restart webxd.service' ]]; then rm -f "${state}/webxd.service.active"; touch "${failure}"; exit 1; fi
-if [[ -f "${operationFailure}" ]] && [[ "$raw" == "$(cat "${operationFailure}")" ]]; then exit 1; fi
+if [[ -f "${operationFailure}" ]] && [[ "$raw" == "$(cat "${operationFailure}")" ]]; then
+  if [[ -f "${staticOnFailedOperation}" ]]; then unit="\${raw##* }"; touch "${state}/$unit.static"; fi
+  exit 1
+fi
 [[ "$1" == '--user' ]] && shift
 operation="$1"; shift || true
 case "$operation" in
-  is-active) [[ "$1" == '--quiet' ]] && shift; unit="$1"; [[ "$unit" != 'webxd.service' || ! -f "${failure}" ]] && [[ -f "${state}/$unit.active" ]] ;;
-  is-enabled) [[ "$1" == '--quiet' ]] && shift; unit="$1"; [[ -f "${state}/$unit.enabled" ]] ;;
+  is-active) unit="$1"; if [[ "$unit" != 'webxd.service' || ! -f "${failure}" ]] && [[ -f "${state}/$unit.active" ]]; then printf 'active\\n'; exit 0; else printf 'inactive\\n'; exit 3; fi ;;
+  is-enabled) unit="$1"; if [[ -f "${state}/$unit.static" ]]; then printf 'static\\n'; exit 0; elif [[ -f "${state}/$unit.enabled" ]]; then printf 'enabled\\n'; exit 0; else printf 'disabled\\n'; exit 1; fi ;;
   enable) now=0; [[ "$1" == '--now' ]] && { now=1; shift; }; unit="$1"; touch "${state}/$unit.enabled"; [[ "$now" == 0 ]] || touch "${state}/$unit.active" ;;
   disable) now=0; [[ "$1" == '--now' ]] && { now=1; shift; }; unit="$1"; rm -f "${state}/$unit.enabled"; [[ "$now" == 0 ]] || rm -f "${state}/$unit.active" ;;
   start) unit="$1"; touch "${state}/$unit.active" ;;
@@ -139,7 +144,7 @@ case "$operation" in
 esac
 `);
   await chmod(command, 0o755);
-  return { command, log, failure, operationFailure, deactivateOnRestart, state };
+  return { command, log, failure, operationFailure, deactivateOnRestart, staticOnFailedOperation, state };
 }
 
 /** @param {string} path */
@@ -162,7 +167,7 @@ async function activationSnapshot(paths, currentReleaseId, previousReleaseId) {
     config: await savedPath(paths.configPath),
     deployment: await savedPath(paths.deploymentPath),
     managed: Object.fromEntries(await Promise.all(managedPaths.map(async (path) => [path, await savedPath(path)]))),
-    services: Object.fromEntries(unitNames.map((name) => [name, { active: true, enabled: true }])),
+    services: Object.fromEntries(unitNames.map((name) => [name, { active: "active", enabled: "enabled" }])),
   };
 }
 
@@ -403,6 +408,16 @@ test("closed release documents reject unknown fields, unsafe paths, and wrong ex
   await assert.rejects(verifyInstallRelease(release.root), /checksum record 0 path is unsafe/u);
 });
 
+test("release verification enforces the primary group identity", async (context) => {
+  const alternateGroup = process.getgroups?.().find((group) => group !== process.getgid?.());
+  if (alternateGroup === undefined) { context.skip("no supplementary group is available"); return; }
+  const { releases } = await fixture();
+  const release = await syntheticRelease(releases, "9");
+  const payload = join(release.root, "bin/pi-web-browserd.mjs");
+  await chown(payload, process.getuid?.() ?? -1, alternateGroup);
+  await assert.rejects(verifyInstallRelease(release.root), /release file mode or ownership is invalid/u);
+});
+
 test("release verification enforces exact metadata and directory modes", async () => {
   const { temporary, releases } = await fixture();
   const directoryRelease = await syntheticRelease(releases, "0");
@@ -458,6 +473,20 @@ test("hard-linked release payloads and symlinked managed roots fail closed", asy
   await assert.rejects(installRelease(second.paths, second.systemd.command, clean.root), /owner-controlled directory is unsafe/u);
 });
 
+test("sealed interrupted release staging resumes without publishing mutable final bytes", async () => {
+  const { paths, systemd, releases } = await fixture();
+  const source = await syntheticRelease(releases, "8");
+  await uninstallCandidate(paths, systemd.command);
+  await mkdir(paths.releasesRoot, { recursive: true });
+  const stagedSource = await syntheticRelease(paths.releasesRoot, "8");
+  const interrupted = join(paths.releasesRoot, `.stage-${source.releaseId}-abcdef123456`);
+  await rename(stagedSource.root, interrupted);
+  assert.equal((await lstat(interrupted)).mode & 0o777, 0o555);
+  await installRelease(paths, systemd.command, source.root);
+  await assert.rejects(lstat(interrupted), /ENOENT/u);
+  assert.equal((await lstat(join(paths.releasesRoot, source.releaseId))).mode & 0o777, 0o555);
+});
+
 test("service activation accepts idempotent nonzero results only when exact probes match", async () => {
   const { paths, systemd, releases } = await fixture();
   const release = await syntheticRelease(releases, "2");
@@ -467,6 +496,12 @@ test("service activation accepts idempotent nonzero results only when exact prob
   await writeFile(systemd.operationFailure, "--user enable pi-web-agentcursor-egress-proxy.service\n");
   await assert.rejects(setBackend(paths, systemd.command, "agentcursor"), /candidate service is not enabled: pi-web-agentcursor-egress-proxy\.service/u);
   assert.equal(JSON.parse(await readFile(paths.configPath, "utf8")).backend, "legacy");
+
+  const unsupported = await fixture();
+  const unsupportedRelease = await syntheticRelease(unsupported.releases, "7");
+  await writeFile(unsupported.systemd.operationFailure, "--user enable webxd.service\n");
+  await writeFile(unsupported.systemd.staticOnFailedOperation, "static\n");
+  await assert.rejects(installRelease(unsupported.paths, unsupported.systemd.command, unsupportedRelease.root), /unsupported enablement state: webxd\.service/u);
 });
 
 test("service restore failures keep the transaction recoverable", async () => {
@@ -634,6 +669,18 @@ test("live mutation locks reject concurrent control and purge stays allowlisted"
   const { paths, systemd, releases } = await fixture();
   const release = await syntheticRelease(releases, "3");
   await installRelease(paths, systemd.command, release.root);
+  const keyInformation = await lstat(paths.mutationLockKeyPath);
+  assert.equal(keyInformation.mode & 0o777, 0o600);
+  assert.equal(keyInformation.uid, process.getuid?.());
+  assert.equal(keyInformation.gid, process.getgid?.());
+  const authority = createServer();
+  const authorityName = `\0pi-webctl-${digest(await readFile(paths.mutationLockKeyPath))}`;
+  await new Promise((resolvePromise, rejectPromise) => {
+    authority.once("error", rejectPromise);
+    authority.listen(authorityName, () => resolvePromise(undefined));
+  });
+  await assert.rejects(setBackend(paths, systemd.command, "agentcursor"), /another pi-webctl mutation is in progress/u);
+  await new Promise((resolvePromise) => authority.close(resolvePromise));
   const stat = await readFile(`/proc/${process.pid}/stat`, "utf8");
   const startTicks = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/u)[19];
   await mkdir(paths.mutationLockPath, { mode: 0o700 });

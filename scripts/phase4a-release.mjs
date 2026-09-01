@@ -145,7 +145,7 @@ async function regularFiles(root, requireImmutableDirectories = false) {
     if (directory === undefined) fail("release traversal lost its directory");
     if (requireImmutableDirectories) {
       const stats = await lstat(directory);
-      if (!stats.isDirectory() || stats.isSymbolicLink() || stats.uid !== process.getuid?.() || (stats.mode & 0o777) !== 0o555) fail(`release directory mode or ownership is invalid: ${relative(root, directory) || "."}`);
+      if (!stats.isDirectory() || stats.isSymbolicLink() || stats.uid !== process.getuid?.() || stats.gid !== process.getgid?.() || (stats.mode & 0o777) !== 0o555) fail(`release directory mode or ownership is invalid: ${relative(root, directory) || "."}`);
     }
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
@@ -175,20 +175,14 @@ async function removeOwnedTree(path) {
   await rm(path, { recursive: true, force: true });
 }
 /**
- * Linux can reject renaming an owner-read-only directory. Keep the verified
- * payload immutable, briefly restore only the root's owner-write bit for the
- * atomic rename, then seal the published root again.
+ * Publish the already verified and sealed release with one atomic rename.
+ * Directory rename authority comes from the writable parent, so the release
+ * root never needs to become mutable under its final identity.
  * @param {string} releaseRoot
  * @param {string} finalRoot
  */
 async function publishImmutableRelease(releaseRoot, finalRoot) {
-  await chmod(releaseRoot, 0o755);
   await rename(releaseRoot, finalRoot);
-  try { await chmod(finalRoot, 0o555); }
-  catch (error) {
-    await removeOwnedTree(finalRoot).catch(() => undefined);
-    throw error;
-  }
 }
 
 /**
@@ -459,8 +453,8 @@ async function buildRelease(options) {
   await mkdir(outputRoot, { recursive: true });
   const finalRoot = join(outputRoot, releaseId);
   try { await lstat(finalRoot); fail(`release already exists: ${finalRoot}`); } catch (error) { if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error; }
-  const stageParent = await mkdtemp(join(outputRoot, ".phase4a-stage-"));
-  const releaseRoot = join(stageParent, releaseId);
+  const stageParent = await mkdtemp(join(outputRoot, ".phase4a-build-"));
+  const releaseRoot = await mkdtemp(join(outputRoot, `.phase4a-release-${releaseId}-`));
   const buildRoot = join(stageParent, "build");
   await Promise.all(["bin", "share/artifacts", "share/build", "share/deploy", "share/icons", "share/licenses", "share/pi-webx/skills", "share/schemas"].map(async (path) => await mkdir(join(releaseRoot, path), { recursive: true })));
   let published = false;
@@ -513,7 +507,7 @@ async function buildRelease(options) {
     await chmod(join(releaseRoot, "checksums.json"), 0o444);
     await chmod(releaseRoot, 0o555);
     const forbiddenBuildPaths = definedPaths([sourceRoot, stageParent, buildRoot, process.env.CARGO_HOME, process.env.RUSTUP_HOME, process.env.HOME]);
-    await verifyRelease(releaseRoot, expectedSha, forbiddenBuildPaths);
+    await verifyRelease(releaseRoot, expectedSha, forbiddenBuildPaths, releaseId);
     await publishImmutableRelease(releaseRoot, finalRoot);
     published = true;
     const result = await verifyRelease(finalRoot, expectedSha, forbiddenBuildPaths);
@@ -522,6 +516,7 @@ async function buildRelease(options) {
     return finalRoot;
   } catch (error) {
     await removeOwnedTree(stageParent).catch(() => undefined);
+    await removeOwnedTree(releaseRoot).catch(() => undefined);
     if (published) await removeOwnedTree(finalRoot).catch(() => undefined);
     throw error;
   }
@@ -530,18 +525,19 @@ async function buildRelease(options) {
  * @param {string} releaseRootValue
  * @param {string} [expectedSha]
  * @param {string[]} [forbiddenPaths]
+ * @param {string} [stagedReleaseId]
  */
-async function verifyRelease(releaseRootValue, expectedSha, forbiddenPaths = [sourceRoot]) {
+async function verifyRelease(releaseRootValue, expectedSha, forbiddenPaths = [sourceRoot], stagedReleaseId = undefined) {
   const releaseRoot = await resolvedOutsideSource(releaseRootValue, "release root");
   const rootStats = await lstat(releaseRoot);
-  if (!rootStats.isDirectory() || rootStats.isSymbolicLink() || rootStats.uid !== process.getuid?.() || (rootStats.mode & 0o777) !== 0o555) fail("release root is not an immutable directory");
+  if (!rootStats.isDirectory() || rootStats.isSymbolicLink() || rootStats.uid !== process.getuid?.() || rootStats.gid !== process.getgid?.() || (rootStats.mode & 0o777) !== 0o555) fail("release root is not an immutable directory");
   const actual = (await regularFiles(releaseRoot, true)).map((path) => relative(releaseRoot, path).replaceAll(sep, "/")).filter((path) => path !== "checksums.json");
   const checksumStats = await lstat(join(releaseRoot, "checksums.json"));
-  if (!checksumStats.isFile() || checksumStats.isSymbolicLink() || checksumStats.nlink !== 1 || checksumStats.uid !== process.getuid?.() || (checksumStats.mode & 0o777) !== 0o444) fail("release checksum document mode is invalid");
+  if (!checksumStats.isFile() || checksumStats.isSymbolicLink() || checksumStats.nlink !== 1 || checksumStats.uid !== process.getuid?.() || checksumStats.gid !== process.getgid?.() || (checksumStats.mode & 0o777) !== 0o444) fail("release checksum document mode is invalid");
   const manifestBytes = await readFile(join(releaseRoot, "manifest.json"));
   const manifest = validateReleaseManifest(JSON.parse(manifestBytes.toString("utf8")));
   if (expectedSha !== undefined && (!/^[0-9a-f]{40}$/u.test(expectedSha) || manifest.gitSha !== expectedSha)) fail("release manifest does not match the expected Git SHA");
-  if (basename(releaseRoot) !== manifest.releaseId) fail("release directory does not match its Git identity");
+  if (basename(releaseRoot) !== manifest.releaseId && stagedReleaseId !== manifest.releaseId) fail("release directory does not match its Git identity");
   const checksums = validateReleaseChecksums(JSON.parse(await readFile(join(releaseRoot, "checksums.json"), "utf8")));
   const listed = new Set();
   for (const record of checksums.files) {
@@ -549,7 +545,7 @@ async function verifyRelease(releaseRootValue, expectedSha, forbiddenPaths = [so
     const path = join(releaseRoot, record.path);
     const stats = await lstat(path);
     const expectedMode = record.path.startsWith("bin/") ? 0o555 : 0o444;
-    if (record.mode !== expectedMode || !stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1 || stats.uid !== process.getuid?.() || (stats.mode & 0o777) !== expectedMode) fail(`release file mode or ownership is invalid: ${record.path}`);
+    if (record.mode !== expectedMode || !stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1 || stats.uid !== process.getuid?.() || stats.gid !== process.getgid?.() || (stats.mode & 0o777) !== expectedMode) fail(`release file mode or ownership is invalid: ${record.path}`);
     const bytes = await readFile(path);
     if (bytes.byteLength !== record.bytes || sha256(bytes) !== record.sha256) fail(`release checksum failed: ${record.path}`);
   }
