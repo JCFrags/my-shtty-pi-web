@@ -1,0 +1,115 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import test from "node:test";
+import { releaseInternals } from "./phase4a-release.mjs";
+
+const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const gitSha = "a".repeat(40);
+
+async function syntheticRelease() {
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "pi-web-release-test-"));
+  const releaseRoot = join(temporaryRoot, `phase4a-${gitSha}`);
+  await Promise.all([
+    mkdir(join(releaseRoot, "bin"), { recursive: true }),
+    mkdir(join(releaseRoot, "share/pi-webx"), { recursive: true }),
+  ]);
+  await Promise.all([
+    writeFile(join(releaseRoot, "bin/pi-web-browserd.mjs"), "export {};\n"),
+    writeFile(join(releaseRoot, "bin/pi-web-webxd.mjs"), "export {};\n"),
+    writeFile(join(releaseRoot, "bin/pi-web-egress-proxy"), "#!/usr/bin/python3\npass\n"),
+    writeFile(join(releaseRoot, "share/pi-webx/extension.mjs"), "export default function extension() {}\n"),
+  ]);
+  const immutableFiles = await releaseInternals.immutablePayloadDigests(releaseRoot);
+  await writeFile(join(releaseRoot, "manifest.json"), `${JSON.stringify({ schemaVersion: 1, releaseId: `phase4a-${gitSha}`, gitSha, dirtyTree: false, backendDefault: "legacy", immutableFiles }, null, 2)}\n`);
+  await releaseInternals.setImmutableModes(releaseRoot);
+  await releaseInternals.writeChecksums(releaseRoot);
+  await chmod(join(releaseRoot, "checksums.json"), 0o444);
+  await chmod(releaseRoot, 0o555);
+  return { temporaryRoot, releaseRoot };
+}
+
+test("release CLI rejects unknown and duplicate options", () => {
+  assert.throws(() => releaseInternals.parse(["build", "--output-root", "/tmp/out", "--bogus", "x"]), /unsupported build option/u);
+  assert.throws(() => releaseInternals.parse(["verify", "--release-root", "/tmp/a", "--release-root", "/tmp/b"]), /duplicate release option/u);
+});
+
+test("build identity refuses dirty, missing, and mismatched Git identities", () => {
+  assert.throws(() => releaseInternals.validateBuildIdentity("bad", gitSha, ""), /forty lowercase/u);
+  assert.throws(() => releaseInternals.validateBuildIdentity(gitSha, "b".repeat(40), ""), /does not match HEAD/u);
+  assert.throws(() => releaseInternals.validateBuildIdentity(gitSha, gitSha, " M package.json"), /clean Git tree/u);
+  releaseInternals.validateBuildIdentity(gitSha, gitSha, "");
+});
+
+test("output paths cannot enter the checkout lexically or through a symlink", async () => {
+  assert.throws(() => releaseInternals.assertAbsoluteOutsideSource("relative", "output root"), /must be absolute/u);
+  assert.throws(() => releaseInternals.assertAbsoluteOutsideSource(join(sourceRoot, "release"), "output root"), /outside the source checkout/u);
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "pi-web-release-link-test-"));
+  try {
+    const link = join(temporaryRoot, "checkout");
+    await symlink(sourceRoot, link, "dir");
+    await assert.rejects(releaseInternals.resolvedOutsideSource(join(link, "nested-output"), "output root"), /resolves into the source checkout/u);
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test("production Node bundles have a closed syntax-checked dependency and license set", async () => {
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "pi-web-bundle-test-"));
+  try {
+    await Promise.all([
+      mkdir(join(temporaryRoot, "bin"), { recursive: true }),
+      mkdir(join(temporaryRoot, "share/build"), { recursive: true }),
+      mkdir(join(temporaryRoot, "share/licenses"), { recursive: true }),
+      mkdir(join(temporaryRoot, "share/pi-webx"), { recursive: true }),
+    ]);
+    const metafiles = await releaseInternals.buildNodeBundles(temporaryRoot);
+    const licenses = await releaseInternals.writeBundledLicenses(temporaryRoot, metafiles);
+    assert.ok(licenses.length > 0, "bundled dependency licenses must not be empty");
+    for (const relativePath of ["bin/pi-web-browserd.mjs", "bin/pi-web-webxd.mjs", "share/pi-webx/extension.mjs"]) {
+      const path = join(temporaryRoot, relativePath);
+      execFileSync(process.execPath, ["--check", path], { cwd: tmpdir(), stdio: "pipe" });
+      assert.equal((await readFile(path)).includes(Buffer.from(sourceRoot)), false, `${relativePath} contains the source checkout path`);
+    }
+    const extension = await readFile(join(temporaryRoot, "share/pi-webx/extension.mjs"), "utf8");
+    assert.match(extension, /from "@earendil-works\/pi-ai"/u);
+    assert.match(extension, /from "@earendil-works\/pi-tui"/u);
+    assert.match(extension, /from "typebox"/u);
+  } finally {
+    await releaseInternals.removeOwnedTree(temporaryRoot);
+  }
+});
+
+test("detached verification accepts a complete immutable inventory and detects tampering", async () => {
+  const { temporaryRoot, releaseRoot } = await syntheticRelease();
+  try {
+    const result = await releaseInternals.verifyRelease(releaseRoot, gitSha);
+    assert.equal(result.manifest.gitSha, gitSha);
+    await assert.rejects(releaseInternals.verifyRelease(releaseRoot, "b".repeat(40)), /expected Git SHA/u);
+    assert.match(result.manifestSha256, /^[0-9a-f]{64}$/u);
+
+    const browserd = join(releaseRoot, "bin/pi-web-browserd.mjs");
+    await chmod(browserd, 0o755);
+    await writeFile(browserd, "export const tampered = true;\n");
+    await chmod(browserd, 0o555);
+    await assert.rejects(releaseInternals.verifyRelease(releaseRoot, gitSha), /release checksum failed/u);
+  } finally {
+    await releaseInternals.removeOwnedTree(temporaryRoot);
+  }
+});
+
+test("detached verification rejects incomplete checksum inventories", async () => {
+  const { temporaryRoot, releaseRoot } = await syntheticRelease();
+  try {
+    await chmod(releaseRoot, 0o755);
+    await writeFile(join(releaseRoot, "unlisted.txt"), "not checksummed\n");
+    await chmod(join(releaseRoot, "unlisted.txt"), 0o444);
+    await chmod(releaseRoot, 0o555);
+    await assert.rejects(releaseInternals.verifyRelease(releaseRoot, gitSha), /checksum inventory is incomplete/u);
+  } finally {
+    await releaseInternals.removeOwnedTree(temporaryRoot);
+  }
+});
