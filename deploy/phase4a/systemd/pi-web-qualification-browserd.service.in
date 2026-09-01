@@ -3,7 +3,7 @@ Description=Pi Web immutable qualification browser runtime
 After=pi-web-qualification-egress-proxy.service
 Wants=pi-web-qualification-egress-proxy.service
 StartLimitIntervalSec=60
-StartLimitBurst=3
+StartLimitBurst=4
 
 [Service]
 Type=simple
