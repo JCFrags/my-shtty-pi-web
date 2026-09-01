@@ -66,7 +66,7 @@ export class BrowserRuntime extends EventEmitter {
   private readonly workspaceSubscriptions = new Map<string, Map<string, WorkspaceSubscription>>();
   private readonly workspaceEventSubscribers = new Set<string>();
   private readonly workspaceFrameLedgers = new Map<string, WorkspaceFrameLedgerEntry[]>();
-  private readonly workspaceInputInFlight = new Map<string, { readonly inputBatchSequence: number; readonly operationId: string; readonly promise: Promise<unknown> }>();
+  private readonly workspaceInputInFlight = new Map<string, { readonly inputBatchSequence: number; readonly operationId: string; readonly semanticDigest: string; readonly promise: Promise<unknown> }>();
   private readonly workspaceControlOperations = new Map<string, { readonly fingerprint: string; readonly promise: Promise<unknown> }>();
   private workspaceRevision = 0;
   private readonly navigationAuthorization: NavigationAuthorization;
@@ -287,22 +287,23 @@ export class BrowserRuntime extends EventEmitter {
       tabId: request.tabId, controlEpoch: request.controlEpoch, inputTargetGeneration: request.inputTargetGeneration,
     };
     session.control.authorizeInputLease(proof);
-    const retained = session.humanInput.retainedAcknowledgement(request.inputBatchSequence, request.operationId);
+    const semanticDigest = session.humanInput.semanticFingerprint(request);
+    const retained = session.humanInput.retainedAcknowledgement(request.inputBatchSequence, request.operationId, semanticDigest);
     if (retained !== undefined) return retained;
     const active = this.workspaceInputInFlight.get(request.browserSessionId);
     if (active !== undefined) {
-      if (active.inputBatchSequence === request.inputBatchSequence && active.operationId === request.operationId) return await active.promise;
-      if (active.inputBatchSequence === request.inputBatchSequence) throw new BrowserProtocolError("INPUT_SEQUENCE_STALE", "Browser input sequence is stale.", false);
+      if (active.inputBatchSequence === request.inputBatchSequence && active.operationId === request.operationId && active.semanticDigest === semanticDigest) return await active.promise;
+      if (active.inputBatchSequence === request.inputBatchSequence || active.operationId === request.operationId) throw new BrowserProtocolError("CONTROL_LEASE_CONFLICT", "Browser input retry conflicts with an active batch.", false);
       throw new BrowserProtocolError("INPUT_RATE_LIMITED", "A browser input batch is already in flight.", true);
     }
-    const promise = this.dispatchWorkspaceInputBatch(session, connectionId, request, proof, signal);
-    const record = { inputBatchSequence: request.inputBatchSequence, operationId: request.operationId, promise };
+    const promise = this.dispatchWorkspaceInputBatch(session, connectionId, request, proof, semanticDigest, signal);
+    const record = { inputBatchSequence: request.inputBatchSequence, operationId: request.operationId, semanticDigest, promise };
     this.workspaceInputInFlight.set(request.browserSessionId, record);
     try { return await promise; }
     finally { if (this.workspaceInputInFlight.get(request.browserSessionId) === record) this.workspaceInputInFlight.delete(request.browserSessionId); }
   }
 
-  private async dispatchWorkspaceInputBatch(session: BrowserSession, connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.input.batch" }>, proof: ControlLeaseProof, signal?: AbortSignal): Promise<unknown> {
+  private async dispatchWorkspaceInputBatch(session: BrowserSession, connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.input.batch" }>, proof: ControlLeaseProof, semanticDigest: string, signal?: AbortSignal): Promise<unknown> {
     const releaseOnly = isHeldReleaseOnly(request.events, session.motor);
     const ledger = this.requireWorkspaceControlFrame(
       connectionId, request.browserSessionId, request.tabId, request.frame,
@@ -335,7 +336,7 @@ export class BrowserRuntime extends EventEmitter {
       coalescedPointerMoveCount: dispatched.coalescedPointerMoveCount,
       awaitingNewFrame,
     };
-    session.humanInput.retainAcknowledgement(request.operationId, acknowledgement);
+    session.humanInput.retainAcknowledgement(request.operationId, semanticDigest, acknowledgement);
     return acknowledgement;
   }
 
@@ -753,8 +754,8 @@ function mapHumanInputEvents(events: readonly HumanInputEvent[], frame: Workspac
     if (event.kind === "pointerMove") return { kind: event.kind, point: point(event.point) };
     if (event.kind === "pointerDown" || event.kind === "pointerUp") return { kind: event.kind, point: event.kind === "pointerUp" && staleReleasePoint !== undefined ? staleReleasePoint : point(event.point), button: event.button, clickCount: event.clickCount ?? 1 };
     if (event.kind === "wheel") return { kind: event.kind, point: point(event.point), deltaX: event.deltaX, deltaY: event.deltaY };
-    if (event.kind === "keyDown") return { kind: event.kind, key: event.key, ...(event.code === undefined ? {} : { code: event.code }), repeat: event.repeat ?? false };
-    if (event.kind === "keyUp") return { kind: event.kind, key: event.key, ...(event.code === undefined ? {} : { code: event.code }) };
+    if (event.kind === "keyDown") return { kind: event.kind, key: event.key, ...(event.code === undefined ? {} : { code: event.code }), location: event.location ?? 0, modifiers: event.modifiers ?? 0, repeat: event.repeat ?? false };
+    if (event.kind === "keyUp") return { kind: event.kind, key: event.key, ...(event.code === undefined ? {} : { code: event.code }), location: event.location ?? 0, modifiers: event.modifiers ?? 0 };
     return { kind: "text", text: event.text };
   });
 }

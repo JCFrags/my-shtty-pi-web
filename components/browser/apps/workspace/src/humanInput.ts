@@ -27,6 +27,7 @@ export interface HumanCanvasInput {
 }
 
 type Button = "left" | "middle" | "right";
+type HeldKey = { readonly key: string; readonly location: number; readonly modifiers: number };
 type ReturnControl = (cleanup: () => Promise<void>) => Promise<void>;
 
 export function useHumanCanvasInput(bridge: WorkspaceApi, canvasRef: RefObject<HTMLCanvasElement | null>, active: boolean, paintToken: number | undefined, returnControl: ReturnControl): HumanCanvasInput {
@@ -37,7 +38,7 @@ export function useHumanCanvasInput(bridge: WorkspaceApi, canvasRef: RefObject<H
   const returnRef = useRef(returnControl);
   const quiesceRef = useRef<() => Promise<void>>(async () => undefined);
   const heldButtons = useRef(new Set<Button>());
-  const heldKeys = useRef(new Map<string, string>());
+  const heldKeys = useRef(new Map<string, HeldKey>());
   const capturedPointers = useRef(new Set<number>());
   const releaseTail = useRef(Promise.resolve());
   const lastPoint = useRef({ imageX: 0, imageY: 0 });
@@ -89,7 +90,7 @@ export function useHumanCanvasInput(bridge: WorkspaceApi, canvasRef: RefObject<H
     pump.discardPending();
     const releases: HumanInputEvent[] = [];
     for (const button of heldButtons.current) releases.push({ kind: "pointerUp", point: lastPoint.current, button });
-    for (const [code, key] of heldKeys.current) releases.push({ kind: "keyUp", key, code });
+    for (const [code, held] of heldKeys.current) releases.push({ kind: "keyUp", key: held.key, code, location: held.location, modifiers: held.modifiers });
     if (!sendReleases) { heldButtons.current.clear(); heldKeys.current.clear(); return; }
     if (releases.length === 0) return;
     try {
@@ -215,12 +216,14 @@ export function useHumanCanvasInput(bridge: WorkspaceApi, canvasRef: RefObject<H
     if (!admissionOpen.current) return;
     if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) return;
     event.preventDefault(); const code = event.code || event.key;
-    heldKeys.current.set(code, event.key); enqueue({ kind: "keyDown", key: event.key, code, repeat: event.repeat });
+    const held = { key: event.key, location: event.location, modifiers: keyboardModifiers(event) };
+    heldKeys.current.set(code, held); enqueue({ kind: "keyDown", key: held.key, code, location: held.location, modifiers: held.modifiers, repeat: event.repeat });
   };
   const onKeyUp: KeyboardEventHandler<HTMLCanvasElement> = (event) => {
-    const code = event.code || event.key; const heldKey = heldKeys.current.get(code); if (!activeRef.current || heldKey === undefined) return;
+    const code = event.code || event.key; const held = heldKeys.current.get(code); if (!activeRef.current || held === undefined) return;
     event.preventDefault(); heldKeys.current.delete(code);
-    enqueueRelease({ kind: "keyUp", key: heldKey, code }, () => heldKeys.current.set(code, heldKey));
+    const release = { key: held.key, location: held.location, modifiers: keyboardModifiers(event) };
+    enqueueRelease({ kind: "keyUp", key: release.key, code, location: release.location, modifiers: release.modifiers }, () => heldKeys.current.set(code, held));
   };
   const dispatchAcceptanceText = useCallback((text: string): void => {
     if (!admissionOpen.current || text.length < 1 || text.length > 4_096) throw new Error("acceptance text input is not ready");
@@ -237,3 +240,6 @@ export function useHumanCanvasInput(bridge: WorkspaceApi, canvasRef: RefObject<H
 
 export function shouldReleasePointerCapture(heldButtonCount: number): boolean { return heldButtonCount === 0; }
 function pointerButton(value: number): Button | undefined { return value === 0 ? "left" : value === 1 ? "middle" : value === 2 ? "right" : undefined; }
+function keyboardModifiers(event: { readonly altKey: boolean; readonly ctrlKey: boolean; readonly metaKey: boolean; readonly shiftKey: boolean }): number {
+  return Number(event.altKey) | (Number(event.ctrlKey) << 1) | (Number(event.metaKey) << 2) | (Number(event.shiftKey) << 3);
+}

@@ -42,8 +42,8 @@ export type DirectHumanInputEvent =
   | { readonly kind: "pointerDown"; readonly point: Point; readonly button: MouseButton; readonly clickCount: number }
   | { readonly kind: "pointerUp"; readonly point: Point; readonly button: MouseButton; readonly clickCount: number }
   | { readonly kind: "wheel"; readonly point: Point; readonly deltaX: number; readonly deltaY: number }
-  | { readonly kind: "keyDown"; readonly key: string; readonly code?: string; readonly repeat: boolean }
-  | { readonly kind: "keyUp"; readonly key: string; readonly code?: string }
+  | { readonly kind: "keyDown"; readonly key: string; readonly code?: string; readonly location: number; readonly modifiers: number; readonly repeat: boolean }
+  | { readonly kind: "keyUp"; readonly key: string; readonly code?: string; readonly location: number; readonly modifiers: number }
   | { readonly kind: "text"; readonly text: string };
 
 export interface DirectHumanInputResult {
@@ -264,11 +264,11 @@ export class SessionMotor extends EventEmitter {
         const held = this.pressedKeys.has(code);
         if (held && !event.repeat) throw new BrowserProtocolError("INPUT_UNSUPPORTED", "Human key transition is not supported.", false);
         if (!held) this.pressedKeys.add(code);
-        await this.command(tab, "Input.dispatchKeyEvent", { type: "keyDown", key: event.key, code, autoRepeat: event.repeat }, signal);
+        await this.command(tab, "Input.dispatchKeyEvent", { type: "keyDown", key: event.key, code, location: event.location, modifiers: event.modifiers, autoRepeat: event.repeat }, signal);
       } else if (event.kind === "keyUp") {
         const code = normalizeHumanKeyCode(event.key, event.code);
         if (!this.pressedKeys.has(code)) throw new BrowserProtocolError("INPUT_UNSUPPORTED", "Human key transition is not supported.", false);
-        await this.command(tab, "Input.dispatchKeyEvent", { type: "keyUp", key: event.key, code }, signal);
+        await this.command(tab, "Input.dispatchKeyEvent", { type: "keyUp", key: event.key, code, location: event.location, modifiers: event.modifiers }, signal);
         this.pressedKeys.delete(code);
       } else {
         await this.command(tab, "Input.insertText", { text: event.text }, signal);

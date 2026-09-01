@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
-import { BrowserProtocolError } from "@webx/browser-protocol";
+import { BrowserProtocolError, type WorkspaceBrokerRequest } from "@webx/browser-protocol";
 import { HumanInputController } from "../src/control/human-input.js";
 import { bindMotorTab, SessionMotor, type DirectHumanInputEvent } from "../src/motor/session-motor.js";
 import type { TabRecord } from "../src/targets/registry.js";
@@ -60,9 +60,9 @@ describe("shared direct human input lane", () => {
     const motor = new SessionMotor(tab.browserSessionId, 19);
     const controller = new HumanInputController(motor);
     controller.start(tab.tabId, 2);
-    await controller.dispatch(tab, 2, [{ kind: "keyDown", key: "ArrowDown", repeat: false }, { kind: "keyDown", key: "ArrowDown", repeat: true }], () => undefined);
+    await controller.dispatch(tab, 2, [{ kind: "keyDown", key: "ArrowDown", location: 0, modifiers: 0, repeat: false }, { kind: "keyDown", key: "ArrowDown", location: 0, modifiers: 0, repeat: true }], () => undefined);
     assert.deepEqual(motor.heldInputState.keys, ["ArrowDown"]);
-    await assert.rejects(controller.dispatch(tab, 2, [{ kind: "keyDown", key: "ArrowDown", repeat: false }], () => undefined), code("INPUT_UNSUPPORTED"));
+    await assert.rejects(controller.dispatch(tab, 2, [{ kind: "keyDown", key: "ArrowDown", location: 0, modifiers: 0, repeat: false }], () => undefined), code("INPUT_UNSUPPORTED"));
     await motor.releaseAll(tab);
     assert.deepEqual(motor.heldInputState, { buttons: [], keys: [] });
     assert.equal(sent.filter((params) => params.type === "keyDown").length, 2);
@@ -125,6 +125,47 @@ describe("shared direct human input lane", () => {
     await assert.rejects(controller.dispatch(tab, 2, [{ kind: "pointerMove", point: { x: 61, y: 61 } }], () => undefined), code("INPUT_RATE_LIMITED"));
   });
 
+  it("binds retained retries to every normalized event semantic without a second side effect", () => {
+    type InputEvents = Extract<WorkspaceBrokerRequest, { readonly kind: "workspace.input.batch" }>["events"];
+    const secret = "phase4a-ledger-secret-DoNotRetain-雪";
+    const cases: Array<{ readonly original: InputEvents; readonly conflict: InputEvents }> = [
+      { original: [{ kind: "pointerMove", point: { imageX: 10, imageY: 20 } }], conflict: [{ kind: "pointerMove", point: { imageX: 11, imageY: 20 } }] },
+      { original: [{ kind: "pointerMove", point: { imageX: 10, imageY: 20 } }], conflict: [{ kind: "pointerMove", point: { imageX: 10, imageY: 21 } }] },
+      { original: [{ kind: "pointerDown", point: { imageX: 10, imageY: 20 }, button: "left", clickCount: 1 }], conflict: [{ kind: "pointerDown", point: { imageX: 10, imageY: 20 }, button: "right", clickCount: 1 }] },
+      { original: [{ kind: "pointerDown", point: { imageX: 10, imageY: 20 }, button: "left", clickCount: 1 }], conflict: [{ kind: "pointerDown", point: { imageX: 10, imageY: 20 }, button: "left", clickCount: 2 }] },
+      { original: [{ kind: "wheel", point: { imageX: 10, imageY: 20 }, deltaX: 1, deltaY: 2 }], conflict: [{ kind: "wheel", point: { imageX: 10, imageY: 20 }, deltaX: 2, deltaY: 2 }] },
+      { original: [{ kind: "wheel", point: { imageX: 10, imageY: 20 }, deltaX: 1, deltaY: 2 }], conflict: [{ kind: "wheel", point: { imageX: 10, imageY: 20 }, deltaX: 1, deltaY: 3 }] },
+      { original: [{ kind: "keyDown", key: "A", code: "KeyA", location: 0, modifiers: 0, repeat: false }], conflict: [{ kind: "keyDown", key: "A", code: "KeyB", location: 0, modifiers: 0, repeat: false }] },
+      { original: [{ kind: "keyDown", key: "A", code: "KeyA", location: 0, modifiers: 0, repeat: false }], conflict: [{ kind: "keyDown", key: "A", code: "KeyA", location: 1, modifiers: 0, repeat: false }] },
+      { original: [{ kind: "keyDown", key: "A", code: "KeyA", location: 0, modifiers: 0, repeat: false }], conflict: [{ kind: "keyDown", key: "A", code: "KeyA", location: 0, modifiers: 2, repeat: false }] },
+      { original: [{ kind: "keyDown", key: "A", code: "KeyA", location: 0, modifiers: 0, repeat: false }], conflict: [{ kind: "keyDown", key: "A", code: "KeyA", location: 0, modifiers: 0, repeat: true }] },
+      { original: [{ kind: "text", text: secret }], conflict: [{ kind: "text", text: "phase4a-ledger-secret-Different-Ω" }] },
+      { original: [{ kind: "pointerMove", point: { imageX: 10, imageY: 20 } }, { kind: "wheel", point: { imageX: 10, imageY: 20 }, deltaX: 1, deltaY: 2 }], conflict: [{ kind: "wheel", point: { imageX: 10, imageY: 20 }, deltaX: 1, deltaY: 2 }, { kind: "pointerMove", point: { imageX: 10, imageY: 20 } }] },
+      { original: [{ kind: "pointerDown", point: { imageX: 10, imageY: 20 }, button: "left", clickCount: 1 }, { kind: "pointerMove", point: { imageX: 20, imageY: 30 } }, { kind: "pointerUp", point: { imageX: 20, imageY: 30 }, button: "left", clickCount: 1 }], conflict: [{ kind: "pointerDown", point: { imageX: 10, imageY: 20 }, button: "left", clickCount: 1 }, { kind: "pointerMove", point: { imageX: 21, imageY: 30 } }, { kind: "pointerUp", point: { imageX: 20, imageY: 30 }, button: "left", clickCount: 1 }] },
+    ];
+    const motor = new SessionMotor("session:fingerprint", 30);
+    const controller = new HumanInputController(motor);
+    const acknowledgement = { kind: "workspaceInputAck" as const, inputBatchSequence: 1, acceptedEventCount: 1, coalescedPointerMoveCount: 0, awaitingNewFrame: true };
+    for (const [index, testCase] of cases.entries()) {
+      controller.start("tab:human-input", 2);
+      let sideEffects = 0;
+      const accept = (events: InputEvents): typeof acknowledgement => {
+        const digest = controller.semanticFingerprint(inputRequest(events));
+        const retained = controller.retainedAcknowledgement(1, `operation:case:${index}`, digest);
+        if (retained !== undefined) return retained;
+        sideEffects++;
+        controller.retainAcknowledgement(`operation:case:${index}`, digest, acknowledgement);
+        return acknowledgement;
+      };
+      assert.deepEqual(accept(testCase.original), acknowledgement);
+      assert.deepEqual(accept(testCase.original), acknowledgement);
+      assert.equal(sideEffects, 1);
+      assert.throws(() => accept(testCase.conflict), code("CONTROL_LEASE_CONFLICT"));
+      assert.equal(sideEffects, 1);
+      assert.equal(JSON.stringify(controller).includes(secret), false);
+    }
+  });
+
   it("retains only bounded sequence identity and sanitized acknowledgement, not human text", async () => {
     const tab = target();
     bindMotorTab(tab, { connected: true, async send<T>(method: string): Promise<T> {
@@ -137,10 +178,42 @@ describe("shared direct human input lane", () => {
     const secret = "phase3b-secret-DoNotRetain";
     await controller.dispatch(tab, 2, [{ kind: "text", text: secret }], () => undefined);
     const acknowledgement = { kind: "workspaceInputAck" as const, inputBatchSequence: 1, acceptedEventCount: 1, coalescedPointerMoveCount: 0, awaitingNewFrame: true };
-    controller.retainAcknowledgement("operation:human-text", acknowledgement);
-    assert.deepEqual(controller.retainedAcknowledgement(1, "operation:human-text"), acknowledgement);
-    assert.throws(() => controller.retainedAcknowledgement(1, "operation:conflict"), code("INPUT_SEQUENCE_STALE"));
+    const request = inputRequest([{ kind: "text", text: secret }]);
+    const digest = controller.semanticFingerprint(request);
+    controller.retainAcknowledgement("operation:human-text", digest, acknowledgement);
+    assert.deepEqual(controller.retainedAcknowledgement(1, "operation:human-text", digest), acknowledgement);
+    const conflictingDigest = controller.semanticFingerprint(inputRequest([{ kind: "text", text: "different-secret-same-shape" }]));
+    assert.throws(() => controller.retainedAcknowledgement(1, "operation:human-text", conflictingDigest), code("CONTROL_LEASE_CONFLICT"));
+    assert.throws(() => controller.retainedAcknowledgement(1, "operation:conflict", digest), code("CONTROL_LEASE_CONFLICT"));
+    assert.throws(() => controller.retainedAcknowledgement(2, "operation:human-text", digest), code("CONTROL_LEASE_CONFLICT"));
     assert.equal(JSON.stringify(controller).includes(secret), false);
     assert.equal(JSON.stringify(motor).includes(secret), false);
   });
 });
+
+function inputRequest(events: Extract<WorkspaceBrokerRequest, { readonly kind: "workspace.input.batch" }>["events"]): Extract<WorkspaceBrokerRequest, { readonly kind: "workspace.input.batch" }> {
+  return {
+    protocolVersion: "browser.v3",
+    kind: "workspace.input.batch",
+    requestId: "request:human-text",
+    operationId: "operation:human-text",
+    deadline: new Date(Date.now() + 10_000).toISOString(),
+    browserSessionId: "session:human-input",
+    tabId: "tab:human-input",
+    controlEpoch: 2,
+    leaseId: "lease_control_test_0001",
+    inputBatchSequence: 1,
+    inputTargetGeneration: 1,
+    frame: {
+      runtimeInstanceId: "runtime_human_input_test",
+      subscriptionId: "subscription_human_input_test",
+      controlEpoch: 2,
+      frameSequence: 1,
+      documentGeneration: 1,
+      viewportGeneration: 1,
+      imagePixelWidth: 1280,
+      imagePixelHeight: 720,
+    },
+    events,
+  };
+}

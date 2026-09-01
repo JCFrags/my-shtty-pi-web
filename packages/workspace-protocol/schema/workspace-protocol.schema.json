@@ -793,6 +793,16 @@
                         "minLength": 1,
                         "maxLength": 64
                       },
+                      "location": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 3
+                      },
+                      "modifiers": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 15
+                      },
                       "repeat": {
                         "type": "boolean"
                       }
@@ -819,6 +829,16 @@
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 64
+                      },
+                      "location": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 3
+                      },
+                      "modifiers": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 15
                       }
                     },
                     "additionalProperties": false

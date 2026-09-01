@@ -140,8 +140,8 @@ pub enum HumanInputEvent {
     PointerDown { point: HumanPoint, button: HumanButton, click_count: Option<u8> },
     PointerUp { point: HumanPoint, button: HumanButton, click_count: Option<u8> },
     Wheel { point: HumanPoint, delta_x: f64, delta_y: f64 },
-    KeyDown { key: String, code: Option<String>, repeat: Option<bool> },
-    KeyUp { key: String, code: Option<String> },
+    KeyDown { key: String, code: Option<String>, location: Option<u8>, modifiers: Option<u8>, repeat: Option<bool> },
+    KeyUp { key: String, code: Option<String>, location: Option<u8>, modifiers: Option<u8> },
     Text { text: String },
 }
 
@@ -388,7 +388,13 @@ fn validate_input_events(events: &[HumanInputEvent]) -> Result<(), WorkspaceErro
             HumanInputEvent::PointerMove { point } => validate_point(point)?,
             HumanInputEvent::PointerDown { point, click_count, .. } | HumanInputEvent::PointerUp { point, click_count, .. } => { validate_point(point)?; if click_count.is_some_and(|count| !(1..=2).contains(&count)) { return Err(WorkspaceError::Protocol); } }
             HumanInputEvent::Wheel { point, delta_x, delta_y } => { validate_point(point)?; if !finite_inclusive(*delta_x, -100_000.0, 100_000.0) || !finite_inclusive(*delta_y, -100_000.0, 100_000.0) { return Err(WorkspaceError::Protocol); } }
-            HumanInputEvent::KeyDown { key, code, .. } | HumanInputEvent::KeyUp { key, code } => { if !bounded_input_string(key, 64) || code.as_deref().is_some_and(|value| !bounded_input_string(value, 64)) { return Err(WorkspaceError::Protocol); } }
+            HumanInputEvent::KeyDown { key, code, location, modifiers, .. } | HumanInputEvent::KeyUp { key, code, location, modifiers } => {
+                if !bounded_input_string(key, 64)
+                    || code.as_deref().is_some_and(|value| !bounded_input_string(value, 64))
+                    || location.is_some_and(|value| value > 3)
+                    || modifiers.is_some_and(|value| value > 15)
+                { return Err(WorkspaceError::Protocol); }
+            }
             HumanInputEvent::Text { text } => { if text.is_empty() { return Err(WorkspaceError::Protocol); } text_bytes = text_bytes.saturating_add(text.as_bytes().len()); }
         }
     }

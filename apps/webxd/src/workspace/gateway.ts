@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, lstat } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import {
@@ -39,6 +39,12 @@ interface CachedControlResponse {
   readonly result: WorkspaceSuccessResult;
 }
 
+interface CachedInputResponse {
+  readonly requestId: string;
+  readonly semanticDigest: string;
+  readonly result: WorkspaceSuccessResult;
+}
+
 interface GatewayClient {
   readonly authorityId: string;
   readonly socket: Socket;
@@ -58,6 +64,7 @@ interface GatewayClient {
   droppedFrames: number;
   deliveredFrames: WorkspaceFrameHeader[];
   readonly controlResponses: Map<string, CachedControlResponse>;
+  readonly inputResponses: Map<number, CachedInputResponse>;
   control?: TrustedClientControl;
   bindTimer?: NodeJS.Timeout;
 }
@@ -94,6 +101,7 @@ export class WorkspaceGateway {
   readonly #maxOutboundBytes: number;
   readonly #heartbeatMs: number;
   readonly #desktopHeartbeatTimeoutMs: number;
+  readonly #inputFingerprintKey = randomBytes(32);
   readonly #broker?: BrowserdWorkspaceBrokerClient;
   #prepared?: PreparedWorkspaceDescriptor;
   #descriptor?: WorkspaceDescriptor;
@@ -175,13 +183,14 @@ export class WorkspaceGateway {
     if (this.#broker !== undefined) try { await this.#broker.close(); } catch (error) { failures.push(error); }
     const prepared = this.#prepared; this.#prepared = undefined; this.#descriptor = undefined;
     if (prepared !== undefined) try { await cleanupWorkspaceDescriptor(prepared.paths, prepared.descriptor, this.#socketIdentity, prepared.lease); } catch (error) { failures.push(error); }
+    this.#inputFingerprintKey.fill(0);
     this.#socketIdentity = undefined;
     if (failures.length > 0) throw new AggregateError(failures, "workspace gateway cleanup failed");
   }
 
   private accept(socket: Socket): void {
     if (this.#clients.size >= this.#maxClients) { socket.destroy(); return; }
-    const client: GatewayClient = { authorityId: randomBytes(18).toString("base64url"), socket, decoder: new WorkspaceRecordDecoder(), chain: Promise.resolve(), queued: 0, bound: false, closed: false, snapshotSubscribed: false, outboundBytes: 0, blocked: false, selectionReady: false, frameReadRunning: false, droppedFrames: 0, deliveredFrames: [], controlResponses: new Map() };
+    const client: GatewayClient = { authorityId: randomBytes(18).toString("base64url"), socket, decoder: new WorkspaceRecordDecoder(), chain: Promise.resolve(), queued: 0, bound: false, closed: false, snapshotSubscribed: false, outboundBytes: 0, blocked: false, selectionReady: false, frameReadRunning: false, droppedFrames: 0, deliveredFrames: [], controlResponses: new Map(), inputResponses: new Map() };
     this.#clients.add(client);
     client.bindTimer = setTimeout(() => { if (!client.bound) void this.closeClient(client); }, this.#bindTimeoutMs); client.bindTimer.unref?.();
     socket.on("data", (chunk) => {
@@ -245,6 +254,7 @@ export class WorkspaceGateway {
         throw new WorkspaceProtocolError("UNAVAILABLE", "Workspace connection closed during control transfer.", true);
       }
       client.controlResponses.clear();
+      client.inputResponses.clear();
       client.control = { browserSessionId: command.browserSessionId, tabId: command.tabId, leaseId: lease.leaseId, controlEpoch: lease.controlEpoch, inputTargetGeneration: lease.inputTargetGeneration, lastDesktopHeartbeatAt: Date.now() };
       const result = { kind: "controlAcquired" as const, browserSessionId: command.browserSessionId, selectedHumanControlTabId: command.tabId, controlState: "human" as const, controlEpoch: lease.controlEpoch, controlTransfer: "none" as const, captureReadiness: "ready" as const, leaseExpiry: "healthy" as const, leaseExpiresInMs: lease.leaseExpiresInMs, inputTargetGeneration: lease.inputTargetGeneration };
       this.rememberControlResponse(client, command.requestId, identity, result);
@@ -264,6 +274,7 @@ export class WorkspaceGateway {
       requireClientControl(client, command.browserSessionId, command.controlEpoch);
       const status = await this.releaseClientControl(client, brokerOperationId(client.authorityId, "release", command.requestId));
       client.controlResponses.clear();
+      client.inputResponses.clear();
       const result = { kind: "controlReleased" as const, browserSessionId: command.browserSessionId, controlState: "agent" as const, controlEpoch: status.controlEpoch, controlTransfer: "none" as const, leaseExpiry: "none" as const };
       this.rememberControlResponse(client, command.requestId, identity, result);
       this.sendSuccess(client, command.requestId, result);
@@ -274,16 +285,36 @@ export class WorkspaceGateway {
       this.sendSuccess(client, command.requestId, { kind: "controlStatus", browserSessionId: command.browserSessionId, controlState: status.controlState, controlEpoch: status.controlEpoch, controlTransfer: status.controlTransfer, ...(status.selectedHumanControlTabId === undefined ? {} : { selectedHumanControlTabId: status.selectedHumanControlTabId }), captureReadiness: status.captureReadiness, leaseExpiry: status.leaseExpiry });
       return;
     }
-    const inputIdentity = controlCommandIdentity(command);
-    if (this.replayControlResponse(client, command.requestId, inputIdentity)) return;
+    const inputDigest = inputSemanticDigest(this.#inputFingerprintKey, command);
+    if (this.replayInputResponse(client, command.requestId, command.inputBatchSequence, inputDigest)) return;
     const control = requireClientControl(client, command.browserSessionId, command.controlEpoch, command.tabId);
     if (command.inputTargetGeneration !== control.inputTargetGeneration) throw new WorkspaceProtocolError("CONTROL_LEASE_CONFLICT", "Browser input target changed.", false);
     const releaseOnly = command.events.length > 0 && command.events.every((event) => event.kind === "pointerUp" || event.kind === "keyUp");
     const frame = this.requireDeliveredFrame(client, command.frame, releaseOnly);
     const acknowledgement = await this.#broker.inputBatch({ browserSessionId: control.browserSessionId, tabId: control.tabId, controlEpoch: control.controlEpoch, leaseId: control.leaseId, inputBatchSequence: command.inputBatchSequence, inputTargetGeneration: control.inputTargetGeneration, frame: browserFrameBinding(frame), events: command.events as readonly HumanInputEvent[] }, brokerOperationId(client.authorityId, "input", command.requestId));
     const result = { kind: "inputAck" as const, inputBatchSequence: acknowledgement.inputBatchSequence, acceptedEventCount: acknowledgement.acceptedEventCount, coalescedPointerMoveCount: acknowledgement.coalescedPointerMoveCount, awaitingNewFrame: acknowledgement.awaitingNewFrame };
-    this.rememberControlResponse(client, command.requestId, inputIdentity, result);
+    this.rememberInputResponse(client, command.requestId, command.inputBatchSequence, inputDigest, result);
     this.sendSuccess(client, command.requestId, result);
+  }
+
+  private replayInputResponse(client: GatewayClient, requestIdValue: string, inputBatchSequence: number, semanticDigest: string): boolean {
+    const cached = client.inputResponses.get(inputBatchSequence);
+    if (cached !== undefined) {
+      if (cached.requestId !== requestIdValue || !secretMatches(cached.semanticDigest, semanticDigest)) throw inputRetryConflict();
+      this.sendSuccess(client, requestIdValue, cached.result);
+      return true;
+    }
+    for (const prior of client.inputResponses.values()) if (prior.requestId === requestIdValue) throw inputRetryConflict();
+    return false;
+  }
+
+  private rememberInputResponse(client: GatewayClient, requestIdValue: string, inputBatchSequence: number, semanticDigest: string, result: WorkspaceSuccessResult): void {
+    client.inputResponses.set(inputBatchSequence, { requestId: requestIdValue, semanticDigest, result });
+    while (client.inputResponses.size > 32) {
+      const first = client.inputResponses.keys().next().value as number | undefined;
+      if (first === undefined) break;
+      client.inputResponses.delete(first);
+    }
   }
 
   private replayControlResponse(client: GatewayClient, requestIdValue: string, identity: string): boolean {
@@ -307,6 +338,7 @@ export class WorkspaceGateway {
     if (this.#broker === undefined) throw new WorkspaceProtocolError("UNAVAILABLE", "AgentCursor browser workspace is not active.", true);
     const prior = client.selection;
     client.controlResponses.clear();
+    client.inputResponses.clear();
     const selection: Selection = { selectionId: command.selectionId, subscriptionId: randomBytes(18).toString("base64url"), browserSessionId: command.browserSessionId, tabId: command.tabId };
     client.selection = selection; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; client.deliveredFrames = [];
     try {
@@ -352,6 +384,7 @@ export class WorkspaceGateway {
   private async clearSelection(client: GatewayClient): Promise<void> {
     const prior = client.selection;
     client.controlResponses.clear();
+    client.inputResponses.clear();
     client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; client.deliveredFrames = [];
     if (prior !== undefined && this.#broker !== undefined) await this.#broker.unsubscribeFrames(prior.subscriptionId, prior.browserSessionId, prior.tabId);
   }
@@ -405,6 +438,7 @@ export class WorkspaceGateway {
       if (control === undefined || now - control.lastDesktopHeartbeatAt <= this.#desktopHeartbeatTimeoutMs) continue;
       client.control = undefined;
       client.controlResponses.clear();
+      client.inputResponses.clear();
       await this.#broker.releaseControl(control.browserSessionId, control.leaseId, brokerOperationId(client.authorityId, "release", `heartbeat-expired:${control.controlEpoch}`)).catch(async () => await this.#broker?.disconnectCurrent());
     }
   }
@@ -432,14 +466,14 @@ export class WorkspaceGateway {
       if (session !== undefined && session.controlEpoch < control.controlEpoch) continue;
       const stillAuthoritative = session !== undefined && session.controlState === "human" && session.controlEpoch === control.controlEpoch
         && session.selectedHumanControlTabId === control.tabId;
-      if (!stillAuthoritative) { client.control = undefined; client.controlResponses.clear(); }
+      if (!stillAuthoritative) { client.control = undefined; client.controlResponses.clear(); client.inputResponses.clear(); }
     }
   }
 
   private onBrowserRuntimeChanged(prior: string | undefined, current: string | undefined): void {
     if (prior !== undefined && prior !== current) {
       this.#snapshot = unavailableWorkspaceSnapshot("replaced", this.#lastBrowserRevision + 1); this.#lastBrowserRevision = 0;
-      for (const client of this.#clients) { client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; client.deliveredFrames = []; client.control = undefined; client.controlResponses.clear(); }
+      for (const client of this.#clients) { client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; client.deliveredFrames = []; client.control = undefined; client.controlResponses.clear(); client.inputResponses.clear(); }
       this.broadcastSnapshot(); this.broadcastStatus({ connection: "reconnecting", browserd: "replaced", message: "Browser service was replaced." });
     }
   }
@@ -447,7 +481,7 @@ export class WorkspaceGateway {
   private onBrowserConnectionChanged(ready: boolean): void {
     if (ready) { this.broadcastStatus(this.currentStatus()); return; }
     if (this.#snapshot.browserdState !== "replaced") this.#snapshot = unavailableWorkspaceSnapshot("unavailable", this.#lastBrowserRevision);
-    for (const client of this.#clients) { client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; client.deliveredFrames = []; client.control = undefined; client.controlResponses.clear(); }
+    for (const client of this.#clients) { client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; client.deliveredFrames = []; client.control = undefined; client.controlResponses.clear(); client.inputResponses.clear(); }
     this.broadcastSnapshot(); this.broadcastStatus(this.currentStatus());
   }
 
@@ -506,7 +540,7 @@ export class WorkspaceGateway {
     this.#clients.delete(client);
     const control = client.control; client.control = undefined;
     if (control !== undefined && this.#broker !== undefined) await this.#broker.releaseControl(control.browserSessionId, control.leaseId, brokerOperationId(client.authorityId, "release", `disconnect:${randomBytes(18).toString("base64url")}`)).catch(async () => await this.#broker?.disconnectCurrent());
-    const selection = client.selection; client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; client.deliveredFrames = []; client.controlResponses.clear();
+    const selection = client.selection; client.selection = undefined; client.selectionReady = false; client.pendingFrame = undefined; client.pendingBrokerFrame = undefined; client.deliveredFrames = []; client.controlResponses.clear(); client.inputResponses.clear();
     if (selection !== undefined && this.#broker !== undefined) await this.#broker.unsubscribeFrames(selection.subscriptionId, selection.browserSessionId, selection.tabId).catch(() => undefined);
     if (graceful) client.socket.end(); else client.socket.destroy();
   }
@@ -540,17 +574,55 @@ function browserFrameBinding(frame: WorkspaceFrameHeader): WorkspaceControlFrame
 function brokerOperationId(authorityId: string, kind: "acquire" | "release" | "input", requestIdValue: string): string {
   return `workspaceControl:${kind}:${createHash("sha256").update(`${authorityId}\u0000${requestIdValue}`).digest("base64url")}`;
 }
-function controlCommandIdentity(command: Extract<WorkspaceClientCommand, { kind: "control.acquire" | "control.release" | "input.batch" }>): string {
+function controlCommandIdentity(command: Extract<WorkspaceClientCommand, { kind: "control.acquire" | "control.release" }>): string {
   const common = { kind: command.kind, browserSessionId: command.browserSessionId };
-  let safe: Record<string, unknown>;
-  if (command.kind === "control.release") safe = { ...common, controlEpoch: command.controlEpoch };
-  else if (command.kind === "control.acquire") safe = { ...common, tabId: command.tabId, expectedControlEpoch: command.expectedControlEpoch, frame: command.frame };
-  else {
-    const eventCounts: Record<string, number> = {};
-    for (const event of command.events) eventCounts[event.kind] = (eventCounts[event.kind] ?? 0) + 1;
-    safe = { ...common, tabId: command.tabId, controlEpoch: command.controlEpoch, inputBatchSequence: command.inputBatchSequence, inputTargetGeneration: command.inputTargetGeneration, frame: command.frame, eventCounts };
-  }
+  const safe = command.kind === "control.release"
+    ? { ...common, controlEpoch: command.controlEpoch }
+    : { ...common, tabId: command.tabId, expectedControlEpoch: command.expectedControlEpoch, frame: command.frame };
   return createHash("sha256").update(JSON.stringify(safe)).digest("base64url");
+}
+function inputSemanticDigest(key: Buffer, command: Extract<WorkspaceClientCommand, { kind: "input.batch" }>): string {
+  try {
+    return createHmac("sha256", key).update(JSON.stringify({
+      version: 1,
+      browserSessionId: command.browserSessionId,
+      tabId: command.tabId,
+      controlEpoch: command.controlEpoch,
+      inputTargetGeneration: command.inputTargetGeneration,
+      frame: {
+        selectionId: command.frame.selectionId,
+        browserdRuntimeInstanceId: command.frame.browserdRuntimeInstanceId,
+        browserSessionId: command.frame.browserSessionId,
+        tabId: command.frame.tabId,
+        subscriptionId: command.frame.subscriptionId,
+        controlEpoch: command.frame.controlEpoch,
+        frameSequence: command.frame.frameSequence,
+        documentGeneration: command.frame.documentGeneration,
+        viewportGeneration: command.frame.viewportGeneration,
+        imagePixelWidth: command.frame.imagePixelWidth,
+        imagePixelHeight: command.frame.imagePixelHeight,
+        cssViewportWidth: command.frame.cssViewportWidth,
+        cssViewportHeight: command.frame.cssViewportHeight,
+        devicePixelRatio: command.frame.devicePixelRatio,
+        paintedAt: command.frame.paintedAt,
+      },
+      inputBatchSequence: command.inputBatchSequence,
+      events: command.events.map(canonicalWorkspaceInputEvent),
+    })).digest("base64url");
+  } catch {
+    throw new WorkspaceProtocolError("CONTROL_LEASE_CONFLICT", "Workspace input fingerprint could not be computed.", false);
+  }
+}
+function canonicalWorkspaceInputEvent(event: Extract<WorkspaceClientCommand, { kind: "input.batch" }>["events"][number]): Record<string, unknown> {
+  if (event.kind === "pointerMove") return { kind: event.kind, imageX: event.point.imageX, imageY: event.point.imageY };
+  if (event.kind === "pointerDown" || event.kind === "pointerUp") return { kind: event.kind, imageX: event.point.imageX, imageY: event.point.imageY, button: event.button, clickCount: event.clickCount ?? 1 };
+  if (event.kind === "wheel") return { kind: event.kind, imageX: event.point.imageX, imageY: event.point.imageY, deltaX: event.deltaX, deltaY: event.deltaY };
+  if (event.kind === "keyDown") return { kind: event.kind, key: event.key, code: event.code ?? null, location: event.location ?? 0, modifiers: event.modifiers ?? 0, repeat: event.repeat ?? false };
+  if (event.kind === "keyUp") return { kind: event.kind, key: event.key, code: event.code ?? null, location: event.location ?? 0, modifiers: event.modifiers ?? 0 };
+  return { kind: "text", text: event.text };
+}
+function inputRetryConflict(): WorkspaceProtocolError {
+  return new WorkspaceProtocolError("CONTROL_LEASE_CONFLICT", "Workspace input retry conflicts with an earlier batch.", false);
 }
 function bounded(value: number, minimum: number, maximum: number, name: string): number { if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw new Error(`${name} bound is invalid`); return value; }
 function secretMatches(actual: string, expected: string): boolean { const a = Buffer.from(actual); const b = Buffer.from(expected); return a.byteLength === b.byteLength && timingSafeEqual(a, b); }

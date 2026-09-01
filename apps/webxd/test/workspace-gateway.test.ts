@@ -200,17 +200,56 @@ describe("private workspace gateway", () => {
     runtime.publishFrame();
     const humanFrame = (await nextMatching(client, (header) => header.kind === "frame" && header.controlEpoch === 2)).header as Record<string, unknown>;
     const humanBinding = paintedBinding(humanFrame, new Date().toISOString());
-    const secretText = "phase3b-secret-NeverRetain-42";
-    client.send({ protocolVersion: "workspace.v2", kind: "input.batch", requestId: "request:input", browserSessionId: "session:one", tabId: "tab:one", controlEpoch: 2, inputBatchSequence: 1, inputTargetGeneration: 1, frame: humanBinding, events: [{ kind: "pointerMove", point: { imageX: 100, imageY: 50 } }, { kind: "text", text: secretText }] });
+    const secretText = "phase4a-secret-NeverRetain-Ω-42";
+    const baseEvents = [
+      { kind: "pointerMove", point: { imageX: 100, imageY: 50 } },
+      { kind: "pointerDown", point: { imageX: 100, imageY: 50 }, button: "left", clickCount: 1 },
+      { kind: "pointerMove", point: { imageX: 120, imageY: 70 } },
+      { kind: "pointerUp", point: { imageX: 120, imageY: 70 }, button: "left", clickCount: 1 },
+      { kind: "wheel", point: { imageX: 120, imageY: 70 }, deltaX: 1, deltaY: 2 },
+      { kind: "keyDown", key: "A", code: "KeyA", location: 0, modifiers: 0, repeat: false },
+      { kind: "text", text: secretText },
+    ] as const;
+    const sendInput = (events: readonly unknown[]): void => client.send({ protocolVersion: "workspace.v2", kind: "input.batch", requestId: "request:input", browserSessionId: "session:one", tabId: "tab:one", controlEpoch: 2, inputBatchSequence: 1, inputTargetGeneration: 1, frame: humanBinding, events });
+    sendInput(baseEvents);
     const input = (await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:input")).header;
-    expect(input).toMatchObject({ ok: true, result: { kind: "inputAck", inputBatchSequence: 1, acceptedEventCount: 2 } });
-    expect(runtime.inputEventCounts).toEqual({ pointerMove: 1, text: 1 });
+    expect(input).toMatchObject({ ok: true, result: { kind: "inputAck", inputBatchSequence: 1, acceptedEventCount: baseEvents.length } });
+    expect(runtime.inputEventCounts).toEqual({ pointerMove: 2, pointerDown: 1, pointerUp: 1, wheel: 1, keyDown: 1, text: 1 });
     expect(runtime.inputBatchCount).toBe(1);
     expect(JSON.stringify(input)).not.toContain(secretText);
-    client.send({ protocolVersion: "workspace.v2", kind: "input.batch", requestId: "request:input", browserSessionId: "session:one", tabId: "tab:one", controlEpoch: 2, inputBatchSequence: 1, inputTargetGeneration: 1, frame: humanBinding, events: [{ kind: "pointerMove", point: { imageX: 101, imageY: 51 } }, { kind: "text", text: "different-secret-same-shape-99" }] });
+
+    sendInput(baseEvents);
     expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:input")).header).toMatchObject({ ok: true, result: { kind: "inputAck", inputBatchSequence: 1 } });
     expect(runtime.inputBatchCount).toBe(1);
+
+    const conflictingEvents = [
+      baseEvents.map((event, index) => index === 0 ? { ...event, point: { imageX: 101, imageY: 50 } } : event),
+      baseEvents.map((event, index) => index === 0 ? { ...event, point: { imageX: 100, imageY: 51 } } : event),
+      baseEvents.map((event, index) => index === 1 ? { ...event, button: "right" } : event),
+      baseEvents.map((event, index) => index === 1 ? { ...event, clickCount: 2 } : event),
+      baseEvents.map((event, index) => index === 4 ? { ...event, deltaX: 2 } : event),
+      baseEvents.map((event, index) => index === 4 ? { ...event, deltaY: 3 } : event),
+      baseEvents.map((event, index) => index === 5 ? { ...event, code: "KeyB" } : event),
+      baseEvents.map((event, index) => index === 5 ? { ...event, location: 1 } : event),
+      baseEvents.map((event, index) => index === 5 ? { ...event, modifiers: 2 } : event),
+      baseEvents.map((event, index) => index === 5 ? { ...event, repeat: true } : event),
+      baseEvents.map((event, index) => index === 6 ? { ...event, text: "phase4a-secret-Different-雪-99" } : event),
+      [baseEvents[1], baseEvents[0], ...baseEvents.slice(2)],
+      baseEvents.map((event, index) => index === 2 ? { ...event, point: { imageX: 121, imageY: 70 } } : event),
+    ];
+    for (const events of conflictingEvents) {
+      sendInput(events);
+      expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:input")).header).toMatchObject({ ok: false, error: { code: "CONTROL_LEASE_CONFLICT", retryable: false } });
+      expect(runtime.inputBatchCount).toBe(1);
+    }
+    client.send({ protocolVersion: "workspace.v2", kind: "input.batch", requestId: "request:input", browserSessionId: "session:one", tabId: "tab:one", controlEpoch: 2, inputBatchSequence: 2, inputTargetGeneration: 1, frame: humanBinding, events: baseEvents });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:input")).header).toMatchObject({ ok: false, error: { code: "CONTROL_LEASE_CONFLICT" } });
+    client.send({ protocolVersion: "workspace.v2", kind: "input.batch", requestId: "request:input-other", browserSessionId: "session:one", tabId: "tab:one", controlEpoch: 2, inputBatchSequence: 1, inputTargetGeneration: 1, frame: humanBinding, events: baseEvents });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:input-other")).header).toMatchObject({ ok: false, error: { code: "CONTROL_LEASE_CONFLICT" } });
+    expect(runtime.inputBatchCount).toBe(1);
     expect(client.receivedText).not.toContain(runtime.leaseId);
+    expect(client.receivedText).not.toContain(secretText);
+    expect(client.receivedText).not.toContain("phase4a-secret-Different-雪-99");
 
     client.send({ protocolVersion: "workspace.v2", kind: "control.heartbeat", requestId: "request:heartbeat", browserSessionId: "session:one", controlEpoch: 2 });
     expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:heartbeat")).header).toMatchObject({ ok: true, result: { kind: "controlHeartbeat", controlState: "human", controlEpoch: 2 } });

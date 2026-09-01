@@ -1,4 +1,5 @@
-import { BrowserProtocolError } from "@webx/browser-protocol";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { BrowserProtocolError, type WorkspaceBrokerRequest } from "@webx/browser-protocol";
 import type { DirectHumanInputEvent, DirectHumanInputResult, SessionMotor } from "../motor/session-motor.js";
 import type { TabRecord } from "../targets/registry.js";
 
@@ -10,8 +11,11 @@ export interface HumanInputAcknowledgement {
   readonly awaitingNewFrame: boolean;
 }
 
+type WorkspaceInputBatchRequest = Extract<WorkspaceBrokerRequest, { readonly kind: "workspace.input.batch" }>;
+
 interface RetainedAcknowledgement {
   readonly operationId: string;
+  readonly semanticDigest: string;
   readonly acknowledgement: HumanInputAcknowledgement;
 }
 
@@ -34,6 +38,7 @@ export class HumanInputController {
   private active: Promise<DirectHumanInputResult> | undefined;
   private activeAbort: AbortController | undefined;
   private readonly acknowledgements = new Map<number, RetainedAcknowledgement>();
+  #inputFingerprintKey: Buffer | undefined;
   private pointerAdmission: number[] = [];
   private pointerDispatch: number[] = [];
   private wheelDispatch: number[] = [];
@@ -45,6 +50,8 @@ export class HumanInputController {
 
   start(tabId: string, controlEpoch: number): void {
     if (this.active !== undefined) throw new BrowserProtocolError("CONTROL_TRANSFER_PENDING", "Human input has not settled.", true);
+    this.destroyFingerprintKey();
+    this.#inputFingerprintKey = randomBytes(32);
     this.target = { tabId, controlEpoch };
     this.acknowledgements.clear();
     this.mutationFrameSequence = undefined;
@@ -53,6 +60,7 @@ export class HumanInputController {
 
   stop(): void {
     this.target = undefined;
+    this.destroyFingerprintKey();
     this.activeAbort?.abort(new BrowserProtocolError("CONTROL_TRANSFER_PENDING", "Human input was stopped.", true));
   }
 
@@ -62,15 +70,28 @@ export class HumanInputController {
     }
   }
 
-  retainedAcknowledgement(inputBatchSequence: number, operationId: string): HumanInputAcknowledgement | undefined {
-    const retained = this.acknowledgements.get(inputBatchSequence);
-    if (retained === undefined) return undefined;
-    if (retained.operationId !== operationId) throw new BrowserProtocolError("INPUT_SEQUENCE_STALE", "Browser input sequence is stale.", false);
-    return retained.acknowledgement;
+  semanticFingerprint(request: WorkspaceInputBatchRequest): string {
+    const key = this.#inputFingerprintKey;
+    if (key === undefined) throw new BrowserProtocolError("CONTROL_LEASE_CONFLICT", "Browser input fingerprint scope is unavailable.", false);
+    try {
+      return createHmac("sha256", key).update(canonicalInputBatch(request)).digest("base64url");
+    } catch {
+      throw new BrowserProtocolError("CONTROL_LEASE_CONFLICT", "Browser input fingerprint could not be computed.", false);
+    }
   }
 
-  retainAcknowledgement(operationId: string, acknowledgement: HumanInputAcknowledgement): void {
-    this.acknowledgements.set(acknowledgement.inputBatchSequence, { operationId, acknowledgement });
+  retainedAcknowledgement(inputBatchSequence: number, operationId: string, semanticDigest: string): HumanInputAcknowledgement | undefined {
+    const retained = this.acknowledgements.get(inputBatchSequence);
+    if (retained !== undefined) {
+      if (retained.operationId !== operationId || !sameDigest(retained.semanticDigest, semanticDigest)) throw inputRetryConflict();
+      return retained.acknowledgement;
+    }
+    for (const prior of this.acknowledgements.values()) if (prior.operationId === operationId) throw inputRetryConflict();
+    return undefined;
+  }
+
+  retainAcknowledgement(operationId: string, semanticDigest: string, acknowledgement: HumanInputAcknowledgement): void {
+    this.acknowledgements.set(acknowledgement.inputBatchSequence, { operationId, semanticDigest, acknowledgement });
     while (this.acknowledgements.size > MAX_RETAINED_ACKNOWLEDGEMENTS) {
       const first = this.acknowledgements.keys().next().value as number | undefined;
       if (first === undefined) break;
@@ -165,6 +186,11 @@ export class HumanInputController {
     this.keyTransitions = [];
     this.textBytes = [];
   }
+
+  private destroyFingerprintKey(): void {
+    this.#inputFingerprintKey?.fill(0);
+    this.#inputFingerprintKey = undefined;
+  }
 }
 
 function coalescePointerMoves(events: readonly DirectHumanInputEvent[]): { readonly events: DirectHumanInputEvent[]; readonly removed: number } {
@@ -199,4 +225,44 @@ function linkAbort(signal: AbortSignal | undefined, controller: AbortController)
   signal.addEventListener("abort", abort, { once: true });
   if (signal.aborted) abort();
   return () => signal.removeEventListener("abort", abort);
+}
+
+function canonicalInputBatch(request: WorkspaceInputBatchRequest): string {
+  return JSON.stringify({
+    version: 1,
+    browserSessionId: request.browserSessionId,
+    tabId: request.tabId,
+    controlEpoch: request.controlEpoch,
+    inputTargetGeneration: request.inputTargetGeneration,
+    frame: {
+      runtimeInstanceId: request.frame.runtimeInstanceId,
+      subscriptionId: request.frame.subscriptionId,
+      controlEpoch: request.frame.controlEpoch,
+      frameSequence: request.frame.frameSequence,
+      documentGeneration: request.frame.documentGeneration,
+      viewportGeneration: request.frame.viewportGeneration,
+      imagePixelWidth: request.frame.imagePixelWidth,
+      imagePixelHeight: request.frame.imagePixelHeight,
+    },
+    inputBatchSequence: request.inputBatchSequence,
+    events: request.events.map(canonicalInputEvent),
+  });
+}
+
+function canonicalInputEvent(event: WorkspaceInputBatchRequest["events"][number]): Record<string, unknown> {
+  if (event.kind === "pointerMove") return { kind: event.kind, imageX: event.point.imageX, imageY: event.point.imageY };
+  if (event.kind === "pointerDown" || event.kind === "pointerUp") return { kind: event.kind, imageX: event.point.imageX, imageY: event.point.imageY, button: event.button, clickCount: event.clickCount ?? 1 };
+  if (event.kind === "wheel") return { kind: event.kind, imageX: event.point.imageX, imageY: event.point.imageY, deltaX: event.deltaX, deltaY: event.deltaY };
+  if (event.kind === "keyDown") return { kind: event.kind, key: event.key, code: event.code ?? null, location: event.location ?? 0, modifiers: event.modifiers ?? 0, repeat: event.repeat ?? false };
+  if (event.kind === "keyUp") return { kind: event.kind, key: event.key, code: event.code ?? null, location: event.location ?? 0, modifiers: event.modifiers ?? 0 };
+  return { kind: "text", text: event.text };
+}
+
+function inputRetryConflict(): BrowserProtocolError {
+  return new BrowserProtocolError("CONTROL_LEASE_CONFLICT", "Browser input retry conflicts with an earlier batch.", false);
+}
+function sameDigest(left: string, right: string): boolean {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  return a.byteLength === b.byteLength && timingSafeEqual(a, b);
 }

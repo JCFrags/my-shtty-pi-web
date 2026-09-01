@@ -42,8 +42,8 @@ export type HumanInputEvent =
   | { kind: "pointerMove"; point: { imageX: number; imageY: number } }
   | { kind: "pointerDown" | "pointerUp"; point: { imageX: number; imageY: number }; button: "left" | "middle" | "right"; clickCount?: 1 | 2 }
   | { kind: "wheel"; point: { imageX: number; imageY: number }; deltaX: number; deltaY: number }
-  | { kind: "keyDown"; key: string; code?: string; repeat?: boolean }
-  | { kind: "keyUp"; key: string; code?: string }
+  | { kind: "keyDown"; key: string; code?: string; location?: number; modifiers?: number; repeat?: boolean }
+  | { kind: "keyUp"; key: string; code?: string; location?: number; modifiers?: number }
   | { kind: "text"; text: string };
 export interface InputAck { acceptedEventCount: number; coalescedPointerMoveCount: number; awaitingNewFrame: boolean; resumeAfterDeliveryId?: number }
 

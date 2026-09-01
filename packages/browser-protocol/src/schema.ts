@@ -173,8 +173,8 @@ export const HumanInputEventSchema = Type.Union([
   Type.Object({ kind: Type.Literal("pointerDown"), point: humanPoint, button: humanButton, clickCount: Type.Optional(Type.Integer({ minimum: 1, maximum: 2 })) }, strict),
   Type.Object({ kind: Type.Literal("pointerUp"), point: humanPoint, button: humanButton, clickCount: Type.Optional(Type.Integer({ minimum: 1, maximum: 2 })) }, strict),
   Type.Object({ kind: Type.Literal("wheel"), point: humanPoint, deltaX: Type.Number({ minimum: -100_000, maximum: 100_000 }), deltaY: Type.Number({ minimum: -100_000, maximum: 100_000 }) }, strict),
-  Type.Object({ kind: Type.Literal("keyDown"), key: Type.String({ minLength: 1, maxLength: 64 }), code: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })), repeat: Type.Optional(Type.Boolean()) }, strict),
-  Type.Object({ kind: Type.Literal("keyUp"), key: Type.String({ minLength: 1, maxLength: 64 }), code: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })) }, strict),
+  Type.Object({ kind: Type.Literal("keyDown"), key: Type.String({ minLength: 1, maxLength: 64 }), code: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })), location: Type.Optional(Type.Integer({ minimum: 0, maximum: 3 })), modifiers: Type.Optional(Type.Integer({ minimum: 0, maximum: 15 })), repeat: Type.Optional(Type.Boolean()) }, strict),
+  Type.Object({ kind: Type.Literal("keyUp"), key: Type.String({ minLength: 1, maxLength: 64 }), code: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })), location: Type.Optional(Type.Integer({ minimum: 0, maximum: 3 })), modifiers: Type.Optional(Type.Integer({ minimum: 0, maximum: 15 })) }, strict),
   Type.Object({ kind: Type.Literal("text"), text: Type.String({ minLength: 1, maxLength: MAX_HUMAN_INPUT_TEXT_BYTES }) }, strict),
 ]);
 
