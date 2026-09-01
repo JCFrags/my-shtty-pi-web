@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "backend": "legacy",
+  "release": {
+    "pointer": "current"
+  },
+  "browser": {
+    "product": "auto",
+    "screenshotObservationTtlMs": 60000,
+    "domObservationTtlMs": 60000,
+    "frames": {
+      "idleIntervalMs": 2000,
+      "selectedIntervalMs": 500,
+      "burstIntervalMs": 100
+    }
+  },
+  "proxy": {
+    "host": "127.0.0.1",
+    "port": 8877
+  },
+  "resources": {
+    "maxBrowserSessions": 4,
+    "perSessionSoftPssMiB": 1024,
+    "perSessionHardPssMiB": 1280,
+    "globalChromePssMiB": 4096,
+    "profileSoftMiB": 512,
+    "profileHardMiB": 1024,
+    "samplingIntervalMs": 5000,
+    "drainTimeoutMs": 30000,
+    "emergencyTimeoutMs": 15000
+  },
+  "workspace": {
+    "executable": "release",
+    "diagnosticMode": false
+  },
+  "logLevel": "info",
+  "services": {
+    "startTimeoutSec": 30,
+    "stopTimeoutSec": 30
+  }
+}

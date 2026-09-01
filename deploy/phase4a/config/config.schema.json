@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.pi-web.invalid/schemas/phase4a-installed-config-v1.json",
+  "title": "Pi Web Phase 4A installed configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "backend", "release", "browser", "proxy", "resources", "workspace", "logLevel", "services"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "backend": { "enum": ["legacy", "agentcursor"] },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pointer"],
+      "properties": { "pointer": { "const": "current" } }
+    },
+    "browser": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["product", "screenshotObservationTtlMs", "domObservationTtlMs", "frames"],
+      "properties": {
+        "product": { "enum": ["auto", "google-chrome-stable", "chromium"] },
+        "screenshotObservationTtlMs": { "type": "integer", "minimum": 10000, "maximum": 120000 },
+        "domObservationTtlMs": { "type": "integer", "minimum": 10000, "maximum": 120000 },
+        "frames": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["idleIntervalMs", "selectedIntervalMs", "burstIntervalMs"],
+          "properties": {
+            "idleIntervalMs": { "type": "integer", "minimum": 500, "maximum": 10000 },
+            "selectedIntervalMs": { "type": "integer", "minimum": 100, "maximum": 2000 },
+            "burstIntervalMs": { "type": "integer", "minimum": 50, "maximum": 1000 }
+          }
+        }
+      }
+    },
+    "proxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "port"],
+      "properties": {
+        "host": { "const": "127.0.0.1" },
+        "port": { "type": "integer", "minimum": 1024, "maximum": 65535 }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxBrowserSessions", "perSessionSoftPssMiB", "perSessionHardPssMiB", "globalChromePssMiB", "profileSoftMiB", "profileHardMiB", "samplingIntervalMs", "drainTimeoutMs", "emergencyTimeoutMs"],
+      "properties": {
+        "maxBrowserSessions": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "perSessionSoftPssMiB": { "type": "integer", "minimum": 512, "maximum": 8192 },
+        "perSessionHardPssMiB": { "type": "integer", "minimum": 768, "maximum": 12288 },
+        "globalChromePssMiB": { "type": "integer", "minimum": 768, "maximum": 32768 },
+        "profileSoftMiB": { "type": "integer", "minimum": 128, "maximum": 8192 },
+        "profileHardMiB": { "type": "integer", "minimum": 256, "maximum": 16384 },
+        "samplingIntervalMs": { "type": "integer", "minimum": 1000, "maximum": 60000 },
+        "drainTimeoutMs": { "type": "integer", "minimum": 5000, "maximum": 120000 },
+        "emergencyTimeoutMs": { "type": "integer", "minimum": 5000, "maximum": 120000 }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executable", "diagnosticMode"],
+      "properties": {
+        "executable": { "const": "release" },
+        "diagnosticMode": { "type": "boolean" }
+      }
+    },
+    "logLevel": { "enum": ["error", "warn", "info", "debug"] },
+    "services": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startTimeoutSec", "stopTimeoutSec"],
+      "properties": {
+        "startTimeoutSec": { "type": "integer", "minimum": 5, "maximum": 120 },
+        "stopTimeoutSec": { "type": "integer", "minimum": 5, "maximum": 120 }
+      }
+    }
+  }
+}

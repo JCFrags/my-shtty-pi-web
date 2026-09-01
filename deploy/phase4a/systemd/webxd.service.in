@@ -1,0 +1,44 @@
+[Unit]
+Description=Pi Web authority
+After=pi-web-reader.service pi-web-searxng.service pi-web-agentcursor-browserd.service
+Wants=pi-web-reader.service pi-web-searxng.service pi-web-agentcursor-browserd.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node @CURRENT_RELEASE@/bin/pi-web-webxd.mjs
+EnvironmentFile=@CONFIG_HOME@/pi-web/service.env
+WorkingDirectory=@STATE_HOME@/pi-web
+RuntimeDirectory=pi-web
+RuntimeDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=2s
+TimeoutStartSec=@START_TIMEOUT_SEC@s
+TimeoutStopSec=@STOP_TIMEOUT_SEC@s
+KillMode=control-group
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@CACHE_HOME@/pi-web @STATE_HOME@/pi-web
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+MemoryAccounting=yes
+TasksAccounting=yes
+
+# Browser failure is a capability failure, not a webxd service dependency.
+# This unit intentionally has no hard dependency on browserd or the proxy.
+
+[Install]
+WantedBy=default.target

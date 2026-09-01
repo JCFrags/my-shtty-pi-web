@@ -5,11 +5,12 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
-PROFILE_IDS = ("web-core", "documents", "render", "browser", "full")
+PROFILE_IDS = ("web-core", "documents", "render", "browser", "browser-agentcursor", "full")
 DEFAULT_PROFILE = "web-core"
 LIST_FIELDS = (
     "capabilities", "fedoraPackages", "commands", "nodeFilters", "pythonPackages",
     "playwrightBrowsers", "npmPackages", "cargoPackages", "units",
+    "runtimeFedoraPackages", "buildFedoraPackages", "releaseComponents",
 )
 
 
@@ -22,7 +23,11 @@ def load_profiles(source: Path) -> dict[str, dict[str, Any]]:
     for profile_id in PROFILE_IDS:
         path = manifest_root(source) / f"{profile_id}.json"
         value = json.loads(path.read_text(encoding="utf-8"))
-        if value.get("schemaVersion") != 1 or value.get("id") != profile_id:
+        allowed = {"schemaVersion", "id", "description", "includes", *LIST_FIELDS, "resourceLimits"}
+        unknown = sorted(set(value) - allowed)
+        if unknown:
+            raise ValueError(f"profile {profile_id} has unknown fields: {', '.join(unknown)}")
+        if value.get("schemaVersion") != 1 or value.get("id") != profile_id or not isinstance(value.get("description"), str):
             raise ValueError(f"invalid profile manifest: {path}")
         value.setdefault("resourceLimits", {})
         if not isinstance(value["resourceLimits"], dict):
@@ -46,6 +51,8 @@ def resolve_profiles(source: Path, requested: Iterable[str] | None = None) -> di
         raise ValueError(f"unknown profile: {', '.join(unknown)}")
     if "full" in selected and len(set(selected)) != 1:
         raise ValueError("full cannot be combined with another profile")
+    if "browser-agentcursor" in selected and ("browser" in selected or "full" in selected):
+        raise ValueError("browser-agentcursor cannot be combined with the legacy browser profile")
 
     ordered: list[str] = []
     visiting: set[str] = set()

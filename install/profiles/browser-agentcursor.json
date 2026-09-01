@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "browser-agentcursor",
+  "description": "Explicit Phase 4A AgentCursor release candidate. Legacy remains the installed default until pi-webctl opt-in.",
+  "includes": ["web-core"],
+  "capabilities": ["browser-agentcursor", "workspace"],
+  "fedoraPackages": ["chromium", "webkit2gtk4.1", "libappindicator-gtk3", "librsvg2", "gtk3"],
+  "runtimeFedoraPackages": ["chromium", "webkit2gtk4.1", "libappindicator-gtk3", "librsvg2", "gtk3"],
+  "buildFedoraPackages": [],
+  "commands": ["node", "python3", "chromium-browser", "systemctl"],
+  "nodeFilters": [],
+  "pythonPackages": [],
+  "playwrightBrowsers": [],
+  "npmPackages": [],
+  "cargoPackages": [],
+  "units": ["pi-web-agentcursor-egress-proxy.service", "pi-web-agentcursor-browserd.service"],
+  "releaseComponents": ["secure-egress-proxy", "browserd", "webxd", "pi-webx", "workspace", "desktop-entry", "protocols", "systemd-units", "pi-webctl", "doctor", "agentcursor-attribution"]
+}

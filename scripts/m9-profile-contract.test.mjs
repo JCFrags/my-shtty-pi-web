@@ -42,6 +42,32 @@ test("optional profiles compose and full preserves explicit compatibility behavi
   assert(full.units.includes("pi-browserd.service"));
 });
 
+test("AgentCursor is an explicit prebuilt candidate and never mutates the legacy profiles", () => {
+  const candidate = run(profileCommand, ["--profile", "browser-agentcursor"]);
+  assert.deepEqual(candidate.requestedProfiles, ["browser-agentcursor"]);
+  assert.deepEqual(candidate.resolvedProfiles, ["web-core", "browser-agentcursor"]);
+  assert.equal(candidate.defaultProfile, "web-core");
+  assert.deepEqual(candidate.runtimeFedoraPackages, ["chromium", "webkit2gtk4.1", "libappindicator-gtk3", "librsvg2", "gtk3"]);
+  assert.deepEqual(candidate.buildFedoraPackages, []);
+  assert.deepEqual(candidate.npmPackages, []);
+  assert.deepEqual(candidate.cargoPackages, []);
+  assert.deepEqual(candidate.playwrightBrowsers, []);
+  assert(candidate.units.includes("webxd.service"));
+  assert(candidate.units.includes("pi-web-agentcursor-egress-proxy.service"));
+  assert(candidate.units.includes("pi-web-agentcursor-browserd.service"));
+  assert(candidate.releaseComponents.includes("agentcursor-attribution"));
+  assert.equal(candidate.units.includes("pi-browserd.service"), false);
+  assert.equal(candidate.npmPackages.some((item) => item.startsWith("agent-browser@")), false);
+
+  const legacy = run(profileCommand, ["--profile", "browser"]);
+  assert.deepEqual(legacy.resolvedProfiles, ["web-core", "browser"]);
+  assert.deepEqual(legacy.npmPackages, ["agent-browser@0.33.1"]);
+  assert(legacy.units.includes("pi-browserd.service"));
+  assert.equal(legacy.units.some((item) => item.includes("agentcursor")), false);
+  const full = run(profileCommand, ["--profile", "full"]);
+  assert.equal(full.resolvedProfiles.includes("browser-agentcursor"), false);
+});
+
 test("core staging uses selected package installs and never uv all-packages", async () => {
   const stage = await readFile(stageCommand, "utf8");
   assert.doesNotMatch(stage, /uv[^\n]*sync[^\n]*--all-packages/);

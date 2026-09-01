@@ -4,6 +4,7 @@ import { BrowserProtocolError, PROTOCOL_VERSION, type ActorIdentity, type Browse
 import { actorKey, DenyNavigationAuthorization, type NavigationAuthorization } from "../actor/identity.js";
 import { BrowserArtifactStore } from "../artifacts/store.js";
 import { findChromeExecutable, type ChromeHostOptions } from "../chrome/host.js";
+import type { FrameSchedulerOptions } from "../frames/scheduler.js";
 import { ProfileManager } from "../chrome/profile-manager.js";
 import type { ControlLeaseProof } from "../control/session-control.js";
 import type { CoordinateAction, DirectHumanInputEvent } from "../motor/session-motor.js";
@@ -51,6 +52,7 @@ export interface BrowserRuntimeOptions {
   motorMinimumPathMsForTest?: number;
   screenshotObservationTtlMs?: number;
   domObservationTtlMs?: number;
+  frameScheduler?: Pick<FrameSchedulerOptions, "idleIntervalMs" | "selectedIntervalMs" | "burstIntervalMs">;
   /** @deprecated Use screenshotObservationTtlMs. */
   observationFreshnessMsForTest?: number;
   egressConfigured?: boolean;
@@ -83,6 +85,7 @@ export class BrowserRuntime extends EventEmitter {
   private readonly motorMinimumPathMsForTest: number;
   private readonly screenshotObservationTtlMs: number;
   private readonly domObservationTtlMs: number;
+  private readonly frameScheduler: Pick<FrameSchedulerOptions, "idleIntervalMs" | "selectedIntervalMs" | "burstIntervalMs"> | undefined;
   private readonly egressConfigured: boolean;
   private readonly egressBindingId: string | undefined;
   private readonly requireEgressForSessions: boolean;
@@ -101,6 +104,7 @@ export class BrowserRuntime extends EventEmitter {
     this.motorMinimumPathMsForTest = options.motorMinimumPathMsForTest ?? 0;
     this.screenshotObservationTtlMs = observationTtl(options.screenshotObservationTtlMs ?? options.observationFreshnessMsForTest ?? DEFAULT_SCREENSHOT_OBSERVATION_TTL_MS, "Screenshot observation TTL");
     this.domObservationTtlMs = observationTtl(options.domObservationTtlMs ?? DEFAULT_DOM_OBSERVATION_TTL_MS, "DOM observation TTL");
+    this.frameScheduler = options.frameScheduler;
     this.egressConfigured = options.egressConfigured ?? options.chrome?.egressProxy !== undefined;
     const proxy = options.chrome?.egressProxy;
     this.egressBindingId = options.egressBindingId ?? (proxy === undefined ? undefined : `forward-proxy://${proxy.host === "::1" ? "[::1]" : proxy.host}:${proxy.port}`);
@@ -537,6 +541,7 @@ export class BrowserRuntime extends EventEmitter {
             motorMinimumPathMs: this.motorMinimumPathMsForTest,
             screenshotObservationTtlMs: this.screenshotObservationTtlMs,
             domObservationTtlMs: this.domObservationTtlMs,
+            ...(this.frameScheduler === undefined ? {} : { frameScheduler: this.frameScheduler }),
             controlIntegration: {
               authorityFenced: (browserSessionId, nextEpoch) => this.fenceSessionAuthority(browserSessionId, nextEpoch),
               establishHumanFrameStream: async (connectionId, subscriptionId, browserSessionId, tabId, epoch, signal) => await this.establishHumanWorkspaceFrameStream(connectionId, subscriptionId, browserSessionId, tabId, epoch, signal),

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,12 +17,17 @@ async function syntheticRelease(forbiddenMarker) {
   await Promise.all([
     mkdir(join(releaseRoot, "bin"), { recursive: true }),
     mkdir(join(releaseRoot, "share/pi-webx"), { recursive: true }),
+    mkdir(join(releaseRoot, "share/deploy/config"), { recursive: true }),
+    mkdir(join(releaseRoot, "share/deploy/systemd"), { recursive: true }),
   ]);
   await Promise.all([
     writeFile(join(releaseRoot, "bin/pi-web-browserd.mjs"), `${forbiddenMarker === undefined ? "" : `// ${forbiddenMarker}\n`}export {};\n`),
     writeFile(join(releaseRoot, "bin/pi-web-webxd.mjs"), "export {};\n"),
     writeFile(join(releaseRoot, "bin/pi-web-egress-proxy"), "#!/usr/bin/python3\npass\n"),
     writeFile(join(releaseRoot, "share/pi-webx/extension.mjs"), "export default function extension() {}\n"),
+    copyFile(join(sourceRoot, "scripts/phase4a-config.mjs"), join(releaseRoot, "share/deploy/phase4a-config.mjs")),
+    copyFile(join(sourceRoot, "deploy/phase4a/config/default.json"), join(releaseRoot, "share/deploy/config/default.json")),
+    ...["pi-web-agentcursor-egress-proxy.service", "pi-web-agentcursor-browserd.service", "webxd.service"].map(async (name) => await copyFile(join(sourceRoot, `deploy/phase4a/systemd/${name}.in`), join(releaseRoot, `share/deploy/systemd/${name}.in`))),
   ]);
   const immutableFiles = await releaseInternals.immutablePayloadDigests(releaseRoot);
   await writeFile(join(releaseRoot, "manifest.json"), `${JSON.stringify({ schemaVersion: 1, releaseId: `phase4a-${gitSha}`, gitSha, dirtyTree: false, backendDefault: "legacy", immutableFiles }, null, 2)}\n`);

@@ -1,0 +1,41 @@
+[Unit]
+Description=Pi Web AgentCursor browser runtime
+After=pi-web-agentcursor-egress-proxy.service
+Wants=pi-web-agentcursor-egress-proxy.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node @CURRENT_RELEASE@/bin/pi-web-browserd.mjs
+EnvironmentFile=@CONFIG_HOME@/pi-web/service.env
+RuntimeDirectory=pi-browserd pi-web-agentcursor
+RuntimeDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=2s
+TimeoutStartSec=@START_TIMEOUT_SEC@s
+TimeoutStopSec=@STOP_TIMEOUT_SEC@s
+KillMode=mixed
+SendSIGKILL=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+MemoryAccounting=yes
+TasksAccounting=yes
+
+# NoNewPrivileges and namespace restrictions are deliberately omitted here.
+# Fedora Chromium must retain its reviewed sandbox and graphical-session access.
+
+[Install]
+WantedBy=default.target

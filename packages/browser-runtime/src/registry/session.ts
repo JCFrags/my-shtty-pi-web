@@ -8,7 +8,7 @@ import { captureProofIdentity, SessionCaptureReadiness, type CaptureReadinessSta
 import { ChromeHost, type ChromeHostOptions } from "../chrome/host.js";
 import { HumanInputController } from "../control/human-input.js";
 import { SessionControlAuthority, SessionControlError, type SanitizedSessionControl } from "../control/session-control.js";
-import { bindFrameTab, FrameScheduler, type FrameCaptureOutcome } from "../frames/scheduler.js";
+import { bindFrameTab, FrameScheduler, type FrameCaptureOutcome, type FrameSchedulerOptions } from "../frames/scheduler.js";
 import { SessionMotor, bindMotorTab, type CoordinateAction, type DirectHumanInputEvent, type DirectHumanInputResult, type MouseButton } from "../motor/session-motor.js";
 import { DomObservationStore, bindDomTab } from "../observations/dom-store.js";
 import { bindObservationTab, ObservationStore } from "../observations/store.js";
@@ -55,6 +55,7 @@ export class BrowserSession extends EventEmitter {
     motorMinimumPathMs: number,
     screenshotObservationTtlMs: number,
     domObservationTtlMs: number,
+    frameScheduler: Pick<FrameSchedulerOptions, "idleIntervalMs" | "selectedIntervalMs" | "burstIntervalMs"> | undefined,
     controlIntegration: BrowserSessionControlIntegration,
   ) {
     super();
@@ -64,7 +65,7 @@ export class BrowserSession extends EventEmitter {
     this.humanInput = new HumanInputController(this.motor);
     this.observations = new ObservationStore(actor, targets, artifacts, this.motor, { freshnessMs: screenshotObservationTtlMs, currentEpoch: () => this.controlEpoch, captureCoordinator: this.captureCoordinator });
     this.dom = new DomObservationStore(targets, { retentionMs: domObservationTtlMs });
-    this.frames = new FrameScheduler(actor, targets, artifacts, this.motor, () => this.controlEpoch, { captureCoordinator: this.captureCoordinator });
+    this.frames = new FrameScheduler(actor, targets, artifacts, this.motor, () => this.controlEpoch, { ...frameScheduler, captureCoordinator: this.captureCoordinator });
     this.control = new SessionControlAuthority({
       browserSessionId,
       currentEpoch: () => this.controlEpoch,
@@ -94,15 +95,15 @@ export class BrowserSession extends EventEmitter {
     targets.on("tabGenerationChanged", this.onTabGenerationChanged);
   }
 
-  static async create(actor: ActorIdentity, operations: OperationRegistry, artifacts: BrowserArtifactStore, navigationAuthorization: NavigationAuthorization, options: Omit<ChromeHostOptions, "hostId"> & { initialUrl?: string; initialNavigationContext?: NavigationAuthorizationContext; personaSeed?: number; motorMinimumPathMs?: number; screenshotObservationTtlMs?: number; domObservationTtlMs?: number; observationFreshnessMs?: number; controlIntegration?: BrowserSessionControlIntegration } = {}, signal?: AbortSignal, markProcessDispatched?: () => void): Promise<BrowserSession> {
+  static async create(actor: ActorIdentity, operations: OperationRegistry, artifacts: BrowserArtifactStore, navigationAuthorization: NavigationAuthorization, options: Omit<ChromeHostOptions, "hostId"> & { initialUrl?: string; initialNavigationContext?: NavigationAuthorizationContext; personaSeed?: number; motorMinimumPathMs?: number; screenshotObservationTtlMs?: number; domObservationTtlMs?: number; observationFreshnessMs?: number; frameScheduler?: Pick<FrameSchedulerOptions, "idleIntervalMs" | "selectedIntervalMs" | "burstIntervalMs">; controlIntegration?: BrowserSessionControlIntegration } = {}, signal?: AbortSignal, markProcessDispatched?: () => void): Promise<BrowserSession> {
     signal?.throwIfAborted();
     const browserSessionId = opaqueId("session");
-    const { initialUrl, initialNavigationContext, personaSeed, motorMinimumPathMs, screenshotObservationTtlMs, domObservationTtlMs, observationFreshnessMs, controlIntegration, ...hostOptions } = options;
+    const { initialUrl, initialNavigationContext, personaSeed, motorMinimumPathMs, screenshotObservationTtlMs, domObservationTtlMs, observationFreshnessMs, frameScheduler, controlIntegration, ...hostOptions } = options;
     const host = await ChromeHost.launch({ hostId: browserSessionId, ...hostOptions }, signal, markProcessDispatched);
     try {
       signal?.throwIfAborted();
       const targets = await TargetRegistry.create(browserSessionId, host);
-      const session = new BrowserSession(actor, browserSessionId, host, targets, operations, artifacts, navigationAuthorization, personaSeed ?? randomBytes(4).readUInt32BE(), motorMinimumPathMs ?? 0, screenshotObservationTtlMs ?? observationFreshnessMs ?? 60_000, domObservationTtlMs ?? 60_000, controlIntegration ?? NOOP_CONTROL_INTEGRATION);
+      const session = new BrowserSession(actor, browserSessionId, host, targets, operations, artifacts, navigationAuthorization, personaSeed ?? randomBytes(4).readUInt32BE(), motorMinimumPathMs ?? 0, screenshotObservationTtlMs ?? observationFreshnessMs ?? 60_000, domObservationTtlMs ?? 60_000, frameScheduler, controlIntegration ?? NOOP_CONTROL_INTEGRATION);
       const tab = await session.createTab(undefined, signal, undefined, { operationId: "session.create" }, false);
       if (initialUrl !== undefined) await session.navigate(session.address(tab), initialUrl, signal ?? new AbortController().signal, undefined, initialNavigationContext ?? { operationId: "session.create" });
       session.startCaptureWarmup(tab, true);
