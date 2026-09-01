@@ -148,6 +148,8 @@ jobs:
       - name: Install Git for identity-preserving checkout
         run: dnf install -y git
       - uses: actions/checkout@v4
+      - name: Trust the container workspace checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Install Fedora release-build prerequisites
         run: >-
           dnf install -y
