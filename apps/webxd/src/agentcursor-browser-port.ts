@@ -203,11 +203,21 @@ export class AgentCursorBrowserPort implements BrowserDaemonPort {
   async setControl(): Promise<BrowserControlResult> { throw new BrowserPortError("unsupported", "human takeover is not supported by agentcursor/chrome", 400); }
 
   private async owned(actor: AuthorityActor, sessionId: string, signal?: AbortSignal): Promise<SessionBinding> {
-    if (this.#replacedSessionIds.has(sessionId)) throw new BrowserPortError("BROWSER_INSTANCE_REPLACED", "browser service restarted; open a new browser session", 409, true);
+    if (this.#replacedSessionIds.has(sessionId)) throw instanceReplaced();
     let binding = this.#sessions.get(sessionId);
     if (binding !== undefined && !sameOwner(binding, actor)) throw notFound();
+    if (binding !== undefined) {
+      try { await this.refresh(actor, binding, signal); }
+      catch (error) {
+        if (this.#replacedSessionIds.has(sessionId)) throw instanceReplaced();
+        if (error instanceof BrowserPortError && error.status === 404) { this.#sessions.delete(sessionId); this.clearSessionObservations(sessionId); throw notFound(); }
+        throw error;
+      }
+      if (this.#replacedSessionIds.has(sessionId)) throw instanceReplaced();
+      return binding;
+    }
     await this.listSessions(actor, signal);
-    if (this.#replacedSessionIds.has(sessionId)) throw new BrowserPortError("BROWSER_INSTANCE_REPLACED", "browser service restarted; open a new browser session", 409, true);
+    if (this.#replacedSessionIds.has(sessionId)) throw instanceReplaced();
     binding = this.#sessions.get(sessionId);
     if (binding === undefined || !sameOwner(binding, actor)) throw notFound();
     return binding;
@@ -340,6 +350,7 @@ function operationId(prefix: string): string { return `${prefix}:${randomBytes(1
 function healthActor(): AuthorityActor { return { principalId: "webxd.health", agentId: "webxd.health", scopes: new Set(["browser.read"]) }; }
 function sameOwner(binding: Pick<SessionBinding, "principalId" | "agentId">, actor: AuthorityActor): boolean { return binding.principalId === actor.principalId && binding.agentId === actor.agentId; }
 function notFound(): BrowserPortError { return new BrowserPortError("not-found", "browser session or tab was not found", 404); }
+function instanceReplaced(): BrowserPortError { return new BrowserPortError("BROWSER_INSTANCE_REPLACED", "browser service restarted; open a new browser session", 409, true); }
 function invalid(): BrowserPortError { return new BrowserPortError("backend-failure", "browser service returned an invalid result", 502); }
 function mapClientError(error: unknown): BrowserPortError { if (error instanceof BrowserPortError) return error; if (error instanceof BrowserdClientError) { const status = error.code === "INVALID_REQUEST" ? 400 : error.code.includes("NOT_FOUND") || error.code === "ARTIFACT_NOT_FOUND" ? 404 : error.code.includes("STALE") || error.code === "OPERATION_CONFLICT" || error.code === "DOCUMENT_CHANGED" || error.code === "VIEWPORT_CHANGED" || error.code === "CONTROL_EPOCH_STALE" || error.code === "BROWSER_INSTANCE_REPLACED" ? 409 : error.code === "OPERATION_CANCELLED" ? 499 : error.code === "CAPABILITY_UNAVAILABLE" || error.code === "LIMIT_EXCEEDED" ? 503 : 502; return new BrowserPortError(error.code, error.message, status, error.retryable); } if (error instanceof DOMException && error.name === "AbortError") return new BrowserPortError("cancelled", "browser operation was cancelled", 499); return new BrowserPortError("backend-failure", "browser service request failed", 502, true); }
 function capacityOnlyUnavailable(value: Record<string, unknown>): boolean {

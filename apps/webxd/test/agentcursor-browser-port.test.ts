@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PROTOCOL_VERSION, verifyNavigationAuthorization, type SessionDescriptor, type TabDescriptor } from "../../../packages/browser-protocol/src/index.js";
 import { AgentCursorBrowserPort } from "../src/agentcursor-browser-port.js";
 import { browserBackendSelection } from "../src/browser-backend-selection.js";
-import type { BrowserdClientPool, BrowserdDescriptor, BrowserdRequestFields } from "../src/browserd-client.js";
+import { BrowserdClientError, type BrowserdClientPool, type BrowserdDescriptor, type BrowserdRequestFields } from "../src/browserd-client.js";
 import type { BrowserDestinationAuthority } from "../src/destination-authority.js";
 import type { AuthorityActor } from "../src/ports.js";
 
@@ -60,6 +60,7 @@ class FakeClient {
   sessionCapacity = { current: 0, limit: 8, available: 8 };
   artifactBase64 = bytes.toString("base64");
   dynamicObservations = false;
+  tabListError: BrowserdClientError | undefined;
   readonly dynamicArtifacts = new Map<string, Buffer>();
 
   descriptor = vi.fn(async () => this.currentDescriptor);
@@ -85,7 +86,10 @@ class FakeClient {
     };
     if (fields.kind === "session.create") return session(this.currentTabs);
     if (fields.kind === "session.list") return { kind: "sessions", sessions: [session(this.currentTabs)] };
-    if (fields.kind === "tab.list") return { kind: "tabs", tabs: [...this.currentTabs] };
+    if (fields.kind === "tab.list") {
+      if (this.tabListError !== undefined) throw this.tabListError;
+      return { kind: "tabs", tabs: [...this.currentTabs] };
+    }
     if (fields.kind === "tab.create") {
       this.currentTabs.push(tab("tab-b", "target_identifier_b"));
       return tab("tab-b", "target_identifier_b");
@@ -387,6 +391,23 @@ describe("AgentCursorBrowserPort", () => {
     value.client.currentDescriptor = { ...descriptor, runtimeInstanceId: "runtime_fixture_b" };
     await expect(value.port.getSession(owner, "session-a")).rejects.toMatchObject({ status: 409, code: "BROWSER_INSTANCE_REPLACED", retryable: true });
     expect(value.client.calls.filter((call) => call.fields.kind === "session.create")).toHaveLength(1);
+  });
+
+  it("preserves same-owner resource-limit classification without disclosing the binding cross-owner", async () => {
+    const value = port();
+    await opened(value);
+    value.client.tabListError = new BrowserdClientError("BROWSER_RESOURCE_LIMIT", "Browser session reached a resource limit.", false, descriptor.runtimeInstanceId);
+    const beforeForeign = value.client.calls.length;
+    await expect(value.port.observe(other, "session-a", "screenshot", 200, "foreign-observe", undefined, "tab-a")).rejects.toMatchObject({ status: 404, code: "not-found" });
+    expect(value.client.calls).toHaveLength(beforeForeign);
+    await expect(value.port.observe(owner, "session-a", "screenshot", 200, "limited-observe", undefined, "tab-a")).rejects.toMatchObject({ status: 502, code: "BROWSER_RESOURCE_LIMIT", retryable: false });
+  });
+
+  it("keeps ordinary terminal sessions generically not found", async () => {
+    const value = port();
+    await opened(value);
+    value.client.tabListError = new BrowserdClientError("SESSION_NOT_FOUND", "Browser session not found.", false, descriptor.runtimeInstanceId);
+    await expect(value.port.observe(owner, "session-a", "screenshot", 200, "missing-observe", undefined, "tab-a")).rejects.toMatchObject({ status: 404, code: "not-found" });
   });
 
   it("forwards cancellation and settles shutdown without closing browser sessions", async () => {

@@ -176,6 +176,7 @@ class Workspace {
   }
   async index(): Promise<number> { return (await this.records()).length; }
   async select(identity: BrowserIdentity): Promise<number> {
+    await this.waitFor((record) => snapshotHasIdentity(record, identity), 0, 20_000);
     const from = await this.index(); const started = performance.now();
     const result = spawnSync(workspaceBinary, ["--raise", `--select-session=${identity.browserSessionId}`, `--select-tab=${identity.tabId}`], { env: workspaceEnvironment(), stdio: "ignore", timeout: 15_000 });
     if (result.status !== 0) fail("qualification workspace selection failed");
@@ -293,7 +294,7 @@ async function main(): Promise<void> {
         if (iterations % 5 === 0) workspaceLatency.push(await workspace.select(identity));
         if (iterations > 0 && iterations % 5 === 0) { await workspace.control(identity); controlCycles += 1; }
         if (iterations === 5) { restartUnit("pi-web-qualification-egress-proxy.service"); proxyRestarts += 1; }
-        if (iterations === 10) { restartUnit("pi-web-qualification-webxd.service"); webxdRestarts += 1; await Promise.all([piA.stop(), piB.stop()]); await Promise.all([piA.start(), piB.start()]); piReconnects += 2; }
+        if (iterations === 10) { restartUnit("pi-web-qualification-webxd.service"); webxdRestarts += 1; await waitForWebxdReady(); await Promise.all([piA.stop(), piB.stop()]); await Promise.all([piA.start(), piB.start()]); piReconnects += 2; }
         if (iterations === 15) { await setUnitRunning("pi-web-qualification-browserd.service", false); await exerciseSearchRead(piA); searchReadChecks += 1; await expectToolFailure(() => piA.execute("browser_observe", identityA), "CAPABILITY_UNAVAILABLE", 503); browserOutageDenials += 1; await setUnitRunning("pi-web-qualification-browserd.service", true); browserdReplacements += 1; await Promise.all([piA.stop(), piB.stop()]); await Promise.all([piA.start(), piB.start()]); piReconnects += 2; [identityA, identityB] = await openActors(piA, piB); }
         sampleMemory(memorySamples, unitMemory(), (performance.now() - startedAt) / 1000);
         iterations += 1;
@@ -507,6 +508,7 @@ function unitMemory(): number {
 }
 function systemdEnvironment(): NodeJS.ProcessEnv { return { HOME: process.env.HOME, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS, PATH: "/usr/bin:/bin", LANG: "C.UTF-8" }; }
 function workspaceEnvironment(): NodeJS.ProcessEnv { return { ...process.env, GDK_BACKEND: "x11", WEBKIT_DISABLE_DMABUF_RENDERER: "1" }; }
+function snapshotHasIdentity(record: Diagnostic, identity: BrowserIdentity): boolean { if (record.kind !== "snapshot" || !Array.isArray(record.sessions)) return false; const session = record.sessions.filter(isRecord).find((item) => item.browserSessionId === identity.browserSessionId); return session !== undefined && Array.isArray(session.tabs) && session.tabs.some((item) => isRecord(item) && item.tabId === identity.tabId); }
 function snapshotControl(record: Diagnostic, sessionId: string): unknown { if (record.kind !== "snapshot" || !Array.isArray(record.sessions)) return undefined; return record.sessions.filter(isRecord).find((item) => item.browserSessionId === sessionId)?.controlState; }
 function snapshotResource(record: Diagnostic, sessionId: string): Record<string, unknown> | undefined { if (record.kind !== "snapshot" || !Array.isArray(record.sessions)) return undefined; const resource = record.sessions.filter(isRecord).find((item) => item.browserSessionId === sessionId)?.resource; return isRecord(resource) ? resource : undefined; }
 function browserIdentity(value: ToolPresentation): BrowserIdentity { const text = textOf(value); const browserSessionId = /"browserSessionId":\s*"([^"]+)"/u.exec(text)?.[1]; const tabId = /"tabId":\s*"([^"]+)"/u.exec(text)?.[1]; if (browserSessionId === undefined || tabId === undefined) fail("qualification browser identity is missing"); return { browserSessionId, tabId }; }
