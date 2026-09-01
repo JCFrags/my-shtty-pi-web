@@ -98,6 +98,8 @@ These decisions apply to the replacement browser runtime. They supersede conflic
 
 **Consequence:** Do not weaken one-process-per-session isolation to improve the metric. A recycling design must preserve explicit session identity, operation dispatch truth, cleanup, and visible recovery. Resource limits remain a production gate, not a Phase 2 development blocker.
 
+**Phase 4A status:** Commit `02b6c78` supplies the tested hard containment mechanism defined by ADR-027. It fences and explicitly closes only the affected session; it never recycles or remaps that session ID. ADR-012 remains open until the exact installed immutable candidate also passes representative installed-service acceptance and the uninterrupted four-hour soak. AgentCursor remains non-default.
+
 ## ADR-013: Public screenshot-first contract
 
 **Decision:** Move the bundled SDK, webxd, and native Pi extension together to public API major 3. Use `agentcursor/chrome` for the new route. Make screenshot observation the default, deliver one real Pi image item, use the real browserd observation ID, default coordinates to image pixels, and keep DOM fallback explicit.
@@ -165,3 +167,11 @@ Phase 2B.1 confirms barrier-reproduced same-session overlap, one session capture
 **Reason:** Workspace selection and received frames do not prove authority or what the user saw. Model work, stale desktop instances, reconnects, response loss, and input cleanup must all fail closed across an agent-user-agent ABA sequence. Return cannot depend on an ordinary queue that may be full or waiting for a fresh frame.
 
 **Consequence:** Private protocols are `browser.v3` and `workspace.v2`; public WebX remains `3.0.0`. React receives no raw lease, epoch, internal identity, secret, descriptor, socket path, or retained input. Human control is absent from model tools. Tauri still connects only to webxd. Production routing remains `legacy` by default, the legacy runtime remains selectable, and ADR-012 remains unresolved. See `ADR-021-BROWSERD-HUMAN-CONTROL-AUTHORITY.md`, `ADR-022-PAINTED-FRAME-PRIVATE-INPUT.md`, `ADR-023-FAIL-SAFE-RETURN-AND-USER-ENTRY.md`, and `PHASE3B-RESULTS.md`.
+
+## ADR-027: Browser resource supervision
+
+**Decision:** Supervise every Chrome process tree and disposable profile from browserd. Use process-start identity, PSS, private dirty, process and renderer counts, and symlink-safe profile bytes. Warn at soft limits. At a hard or global limit, fence new authority, settle operations and human control within bounded deadlines, close only the affected session, and require the actor to open a new session.
+
+**Reason:** Earlier long evidence did not prove a Chrome plateau. Production containment must be deterministic without weakening one-process-per-session isolation or hiding browser loss behind an old session ID.
+
+**Consequence:** Candidate defaults are 1,024/1,280 MiB per-session soft/hard PSS, 4,096 MiB global Chrome PSS, 512/1,024 MiB profile soft/hard, a 5-second sample interval, a 30-second drain budget, and a 15-second emergency close wait. Cleanup uses an isolated POSIX process session plus exact PID-start identities. Uncertain cleanup retains the profile. Private status is bounded and sanitized. This mechanism completes the deterministic half of ADR-012; installed four-hour evidence remains required. See `ADR-027-BROWSER-RESOURCE-SUPERVISION.md`.

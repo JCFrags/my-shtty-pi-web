@@ -173,6 +173,10 @@ Each phase has one acceptance gate. Keep the old browser production path until t
 
 **Goal:** ship the runtime reliably on the supported Fedora desktop.
 
+**Status:** in progress on `rebuild/screenshot-first-browser`. Commit `02b6c78` implements and accepts the deterministic BrowserResourceSupervisor half of ADR-012. Installed acceptance and the exact-release four-hour soak remain open. AgentCursor remains opt-in and `legacy` remains the default.
+
+**Resource supervision delivered:** strict installed limits; exact `/proc` process-start identity; process-tree PSS/private dirty and profile-byte sampling; soft warnings; typed hard fencing; bounded operation and human-return drain; deterministic global victim order; one retryable close attempt; isolated Chrome process sessions; exact profile retention on cleanup uncertainty; bounded private workspace and doctor status. See ADR-027.
+
 **Files/modules:** `install/profiles/browser.json`; `install/profiles/full.json`; installer/uninstaller; systemd user units; doctor; operations documents; CI.
 
 **Tasks:**

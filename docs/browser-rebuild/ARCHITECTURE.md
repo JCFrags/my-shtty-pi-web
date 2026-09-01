@@ -48,7 +48,8 @@ Webxd detects daemon replacement. It purges old session and observation metadata
 - operation lanes, deadlines, cancellation, and control epochs;
 - virtual-mouse motors;
 - screenshot observations, workspace frames, DOM handles, and artifacts;
-- failure settlement and deterministic cleanup.
+- failure settlement and deterministic cleanup;
+- per-session and global Chrome resource supervision.
 
 A browser or CDP failure cannot crash healthy `webxd` search and read work.
 
@@ -172,7 +173,7 @@ Artifacts have random IDs, private storage, owner-scoped reads, SHA-256 integrit
 
 ## Recovery and cleanup
 
-Session creation is transactional. Failure closes CDP, stops Chrome, and removes the owned profile. Normal shutdown sends `Browser.close`, then uses TERM and KILL only if needed. The runtime waits for process settlement before profile deletion.
+Session creation is transactional. Failure closes CDP, stops Chrome, and removes the owned profile only after exact cleanup succeeds. Each Chrome launch creates a unique POSIX process session and records its PID, process-start ticks, and process-session ID. Normal shutdown sends `Browser.close`, then uses exact-identity TERM and KILL only if needed. Profile removal requires the original root and every remembered descendant to be gone, no same-UID process to name the exact user-data directory, and two empty final process-session scans. A late descendant, PID reuse, identity change, or unreadable scan retains the profile and reports cleanup failure.
 
 One runtime-owned profile manager allocates under a unique runtime-instance root. Allocation transitions from allocating to starting to running under an atomic cross-process lock where required. Lock acquisition publishes a complete nonce-bearing owner record through an atomic no-replace primitive. Release verifies the current nonce, PID, and process-start identity. Young malformed state receives a bounded grace period. Manifests bind runtime ID, launch ID, PID, and process-start ticks. Startup orphan cleanup runs once and removes only a verified dead runtime-owned root. Profile deletion verifies the real owned directory, marker, runtime identity, launch identity, and process identity. Symlinks, foreign directories, live owners, and paths outside the root are rejected. The manager tracks active leases and refuses close while one remains. Normal runtime shutdown closes the manager and removes only its own empty marker and runtime-instance root.
 
@@ -196,7 +197,11 @@ The executable comes only from reviewed service configuration. Prefer Google Chr
 
 Linux resource evidence uses `/proc/<pid>/smaps_rollup` PSS as the primary memory metric. Summed RSS can double-count shared pages and is not the production decision metric. Keep one Chrome process per browser session until PSS evidence and a separate architecture decision justify a change.
 
-The Phase 1.2 two-hour mixed run did not prove a memory plateau. Total PSS slopes were +41,613 KiB/hour over the full run, +61,198 KiB/hour in the final hour, and +29,914 KiB/hour in the final 30 minutes. Browserd, bounded stores, process counts, and one Chrome session were nearly flat late in the run. Most final-hour growth was in the other Chrome tree. The Phase 2A, Phase 2B, and final-code Phase 2B.1 30-minute routed soaks are development-route gates only. The Phase 2B.1 evidence explicitly sets `chromePlateauClaimedResolved` to false. Production-default routing still requires either credible longer plateau evidence or a tested bounded Chrome session recycling and recovery policy.
+The Phase 1.2 two-hour mixed run did not prove a memory plateau. Total PSS slopes were +41,613 KiB/hour over the full run, +61,198 KiB/hour in the final hour, and +29,914 KiB/hour in the final 30 minutes. Browserd, bounded stores, process counts, and one Chrome session were nearly flat late in the run. Most final-hour growth was in the other Chrome tree. The Phase 2A, Phase 2B, and final-code Phase 2B.1 30-minute routed soaks are development-route gates only. The Phase 2B.1 evidence explicitly sets `chromePlateauClaimedResolved` to false.
+
+Phase 4A adds one `BrowserResourceSupervisor` in browserd. It samples exact Chrome process trees and symlink-safe profile bytes every five seconds. Candidate defaults are 1,024/1,280 MiB per-session soft/hard PSS, 4,096 MiB global Chrome PSS, and 512/1,024 MiB profile soft/hard. Soft limits report a bounded private warning. Hard limits fence observations, mutations, subscriptions, takeover, and input with `BROWSER_RESOURCE_LIMIT`; settle operations and human return within 30 seconds; and close only that session with one shared close attempt. Global victim order prefers idle non-human sessions and is stable by registration order. It never replaces a browser under the old session ID.
+
+This tested containment mechanism is the deterministic half of ADR-012. ADR-012 remains open until the exact immutable installed candidate passes representative installed-service acceptance and the uninterrupted four-hour soak. The backend default remains `legacy`. See `ADR-027-BROWSER-RESOURCE-SUPERVISION.md`.
 
 ## Phase 3A viewer and Phase 3B human control
 
