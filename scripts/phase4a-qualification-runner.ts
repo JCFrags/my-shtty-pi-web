@@ -1,6 +1,7 @@
 import { fork, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createConnection } from "node:net";
 import { open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -264,6 +265,7 @@ async function main(): Promise<void> {
 
     if (mode === "acceptance") {
       restartUnit("pi-web-qualification-egress-proxy.service"); proxyRestarts += 1;
+      await waitForProxyReady();
       restartUnit("pi-web-qualification-webxd.service"); webxdRestarts += 1;
       await waitForWebxdReady();
       await Promise.all([piA.stop(), piB.stop()]); await Promise.all([piA.start(), piB.start()]); piReconnects += 2;
@@ -293,7 +295,7 @@ async function main(): Promise<void> {
         if (iterations % 2 === 0) await exerciseDom(actor, identity, actionLatency, observationLatency);
         if (iterations % 5 === 0) workspaceLatency.push(await workspace.select(identity));
         if (iterations > 0 && iterations % 5 === 0) { await workspace.control(identity); controlCycles += 1; }
-        if (iterations === 5) { restartUnit("pi-web-qualification-egress-proxy.service"); proxyRestarts += 1; }
+        if (iterations === 5) { restartUnit("pi-web-qualification-egress-proxy.service"); proxyRestarts += 1; await waitForProxyReady(); }
         if (iterations === 10) { restartUnit("pi-web-qualification-webxd.service"); webxdRestarts += 1; await waitForWebxdReady(); await Promise.all([piA.stop(), piB.stop()]); await Promise.all([piA.start(), piB.start()]); piReconnects += 2; }
         if (iterations === 15) { await setUnitRunning("pi-web-qualification-browserd.service", false); await exerciseSearchRead(piA); searchReadChecks += 1; await expectToolFailure(() => piA.execute("browser_observe", identityA), "CAPABILITY_UNAVAILABLE", 503); browserOutageDenials += 1; await setUnitRunning("pi-web-qualification-browserd.service", true); browserdReplacements += 1; await Promise.all([piA.stop(), piB.stop()]); await Promise.all([piA.start(), piB.start()]); piReconnects += 2; [identityA, identityB] = await openActors(piA, piB); }
         sampleMemory(memorySamples, unitMemory(), (performance.now() - startedAt) / 1000);
@@ -471,6 +473,30 @@ async function setUnitRunning(unit: "pi-web-qualification-browserd.service", run
   const probe = spawnSync("/usr/bin/systemctl", ["--user", "is-active", unit], { env: systemdEnvironment(), encoding: "utf8", timeout: 10_000, maxBuffer: 4_096 });
   if (running ? probe.status !== 0 || probe.stdout.trim() !== "active" : probe.status === 0 || probe.stdout.trim() !== "inactive") fail("qualification fixed browser service state is invalid");
   if (running) await waitForBrowserdReady();
+}
+
+async function waitForProxyReady(): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      const response = await probeProxy();
+      if (response.startsWith("HTTP/1.1 204 No Content\r\n") && response.includes("\r\nWebX-Egress-Proxy: secure-egress/1\r\n")) return;
+    } catch { /* The fixed branded proxy endpoint is not ready yet. */ }
+    await sleep(50);
+  }
+  fail("qualification proxy service readiness timed out");
+}
+
+async function probeProxy(): Promise<string> {
+  return await new Promise((resolveProbe, rejectProbe) => {
+    const socket = createConnection({ host: LOCAL_SERVICE_HOST, port: 18_877 });
+    let bytes = Buffer.alloc(0); let settled = false;
+    const deadline = setTimeout(() => finish(new Error("qualification proxy probe timed out")), 250);
+    const finish = (error?: Error, value?: string) => { if (settled) return; settled = true; clearTimeout(deadline); socket.destroy(); if (error !== undefined) rejectProbe(error); else resolveProbe(value ?? ""); };
+    socket.once("connect", () => socket.write("GET http://webx-egress.invalid/.well-known/webx-egress-health HTTP/1.1\r\nHost: webx-egress.invalid\r\nConnection: close\r\n\r\n"));
+    socket.on("data", (chunk) => { bytes = Buffer.concat([bytes, chunk]); if (bytes.byteLength > 4_096) finish(new Error("qualification proxy probe response exceeded its bound")); });
+    socket.once("error", (error) => finish(error));
+    socket.once("end", () => finish(undefined, bytes.toString("ascii")));
+  });
 }
 
 async function waitForWebxdReady(): Promise<void> {
