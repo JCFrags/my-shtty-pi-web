@@ -82,6 +82,17 @@ describe("resource-limit terminal classification", () => {
     await expectCode(value.dispatch(otherOwner, tabList("session:limited", "other-owner")), "SESSION_NOT_FOUND");
   });
 
+  it("classifies a live closing session before tab listing can expose terminal state as not found", async () => {
+    const value = runtime();
+    const state = internal(value);
+    const limited = fakeSession(owner) as FakeSession & { assertResourceAdmission(): void };
+    limited.assertResourceAdmission = () => { throw new BrowserProtocolError("BROWSER_RESOURCE_LIMIT", "Browser session reached a resource limit.", false, { reason: "profile-storage" }); };
+    state.sessions.set("session:closing", limited);
+
+    await expectCode(value.dispatch(owner, tabList("session:closing", "closing")), "BROWSER_RESOURCE_LIMIT", "profile-storage");
+    state.sessions.delete("session:closing");
+  });
+
   it("evicts the oldest terminal at 64 entries and expires retained classifications after 60 seconds", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));

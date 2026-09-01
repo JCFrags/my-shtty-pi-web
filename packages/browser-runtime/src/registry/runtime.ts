@@ -641,8 +641,8 @@ export class BrowserRuntime extends EventEmitter {
     const controlEpoch = request.kind === "session.close" || request.kind === "tab.create" || request.kind === "tab.list" ? request.controlEpoch : request.address.controlEpoch;
     const motorLane = `motor:${actorKey(actor)}:${browserSessionId}`;
 
-    if (request.kind === "tab.list") return { kind: "tabs", tabs: session.listTabs() };
     if (request.kind !== "session.close") assertResourceAdmission(session);
+    if (request.kind === "tab.list") return { kind: "tabs", tabs: session.listTabs() };
     session.control?.assertAgentAdmission();
 
     if (request.kind === "session.close") return await this.execute(actor, request, motorLane, browserSessionId, controlEpoch, async (context) => { context.checkpoint(); context.markDispatched(); await session.close(); this.sessions.delete(browserSessionId); this.resources.unregister(browserSessionId); this.removeSessionSubscriptions(browserSessionId); this.workspaceChanged("session", browserSessionId); return session.descriptor(); }, signal);
