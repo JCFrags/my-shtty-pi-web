@@ -460,7 +460,10 @@ test("post-commit uninstall cleanup never restores a pointer to removed bytes", 
   await assert.rejects(lstat(join(paths.releasesRoot, release.releaseId)), /ENOENT/u);
   await assert.rejects(lstat(paths.transactionPath), /ENOENT/u, "the reversible uninstall committed before destructive cleanup");
   await rm(paths.failurePath, { recursive: true });
+  await writeFile(systemd.operationFailure, "--user disable --now pi-web-agentcursor-egress-proxy.service\n");
+  const retryLogStart = (await readFile(systemd.log, "utf8")).length;
   assert.equal((await uninstallCandidate(paths, systemd.command)).legacyPreserved, true, "cleanup failure is retryable");
+  assert.doesNotMatch((await readFile(systemd.log, "utf8")).slice(retryLogStart), /disable --now|\b(?:start|stop|restart|enable|disable)\b/u, "cleanup retry does not mutate restored legacy services");
 });
 
 test("stale lock recovery restores the complete prior activation before new work", async () => {

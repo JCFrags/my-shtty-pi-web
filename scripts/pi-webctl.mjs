@@ -626,6 +626,7 @@ async function prepareCandidateRemoval(paths, purge) {
 
 /** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {boolean} purge */
 async function uninstallCandidateUnlocked(paths, command, purge = false) {
+  if (await currentReleaseId(paths) === undefined) return { ok: true, purged: purge, legacyPreserved: true };
   for (const unit of UNITS) systemctl(command, ["disable", "--now", unit]);
   if (await exists(paths.preinstallBackupPath)) {
     const backup = record(await readJson(paths.preinstallBackupPath), "preinstall backup");
