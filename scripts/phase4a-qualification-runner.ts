@@ -501,11 +501,42 @@ async function probeProxy(): Promise<string> {
 
 async function waitForWebxdReady(): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
-    try { if ((await stat(webxPath)).isSocket()) return; }
-    catch { /* The fixed webxd socket is not ready yet. */ }
+    try {
+      if ((await stat(webxPath)).isSocket()) { await probeWebxdCapabilities(); return; }
+    } catch { /* The fixed webxd socket and required capability catalog are not ready yet. */ }
     await sleep(50);
   }
   fail("qualification webxd service readiness timed out");
+}
+
+async function probeWebxdCapabilities(): Promise<void> {
+  const socket = createConnection({ path: webxPath });
+  let buffer = ""; let failure: Error | undefined; let waiter: { resolve(value: string): void; reject(error: Error): void } | undefined;
+  const drain = () => {
+    if (waiter === undefined) return;
+    const newline = buffer.indexOf("\n");
+    if (newline >= 0) { const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1); const target = waiter; waiter = undefined; target.resolve(line); return; }
+    if (failure !== undefined) { const target = waiter; waiter = undefined; target.reject(failure); }
+  };
+  socket.on("data", (chunk) => { buffer += chunk.toString("utf8"); if (Buffer.byteLength(buffer) > 65_536) socket.destroy(new Error("qualification authority response exceeded its bound")); drain(); });
+  socket.on("error", (error) => { failure = error; drain(); });
+  socket.on("close", () => { failure ??= new Error("qualification authority connection closed"); drain(); });
+  const nextLine = () => new Promise<string>((resolveLine, rejectLine) => { waiter = { resolve: resolveLine, reject: rejectLine }; drain(); });
+  const deadline = setTimeout(() => socket.destroy(new Error("qualification authority probe timed out")), 500);
+  try {
+    await new Promise<void>((resolveConnect, rejectConnect) => { socket.once("connect", () => resolveConnect()); socket.once("error", rejectConnect); });
+    socket.write(`${JSON.stringify({ bind: { ownerId: "pi-web-qualification-readiness" } })}\n`);
+    const binding = asRecord(JSON.parse(await nextLine()));
+    if (typeof binding.bindingId !== "string" || typeof binding.bindingSecret !== "string") fail("qualification authority binding is invalid");
+    socket.write(`${JSON.stringify({ binding: { bindingId: binding.bindingId, bindingSecret: binding.bindingSecret }, request: { method: "GET", path: "/v1/capabilities", maxResponseBytes: 65_536 } })}\n`);
+    const response = asRecord(JSON.parse(await nextLine()));
+    const catalog = asRecord(response.body);
+    if (response.status !== 200 || !Array.isArray(catalog.capabilities)) fail("qualification authority capability catalog is invalid");
+    for (const required of ["search", "read"]) {
+      const capability = catalog.capabilities.find((item) => isRecord(item) && item.id === required);
+      if (!isRecord(capability) || capability.enabled !== true || capability.healthy !== true) fail("qualification authority capability is not ready");
+    }
+  } finally { clearTimeout(deadline); socket.destroy(); }
 }
 
 async function waitForBrowserdReady(): Promise<void> {
