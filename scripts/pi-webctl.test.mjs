@@ -199,20 +199,34 @@ async function fixture() {
   return { temporary, environment, paths, systemd, releases };
 }
 
-test("preflight is non-mutating, closed, and reports one reviewed package command", async () => {
+test("preflight is non-mutating, legacy-isolated, closed, and reports one reviewed package command", async () => {
   const { paths, systemd, releases, environment } = await fixture();
+  const legacyRoots = [environment.XDG_DATA_HOME, environment.XDG_CONFIG_HOME, environment.XDG_CACHE_HOME, environment.XDG_STATE_HOME].map((root) => join(root, "pi-web"));
+  for (const root of legacyRoots) { await mkdir(root, { recursive: true }); await writeFile(join(root, "legacy-state"), "preserve\n"); }
+  assert.deepEqual([paths.dataRoot, paths.configRoot, paths.cacheRoot, paths.stateRoot], [
+    join(environment.XDG_DATA_HOME, "pi-web-phase4a"),
+    join(environment.XDG_CONFIG_HOME, "pi-web-phase4a"),
+    join(environment.XDG_CACHE_HOME, "pi-web-phase4a"),
+    join(environment.XDG_STATE_HOME, "pi-web-phase4a"),
+  ]);
   const release = await syntheticRelease(releases, "7");
   const manifestDigest = digest(await readFile(join(release.root, "manifest.json")));
-  const ready = await installationPreflight(paths, systemd.command, release.root, release.gitSha, manifestDigest, { ...environment, WAYLAND_DISPLAY: "wayland-0", DBUS_SESSION_BUS_ADDRESS: "unix:path=private" }, {
+  const readyProbes = {
     osRelease: "ID=fedora\nVERSION_ID=44\n", architecture: "x64", systemdAvailable: true,
     diskAvailableBytes: 2_000_000_000, runtimeAvailableBytes: 4_000_000_000, nodeVersion: "24.18.0", pythonVersion: "Python 3.14.7",
     missingPackages: [], browser: { product: "Chromium", version: "151.0.0.0" }, portState: "free", serviceConflict: false, destinationConflict: false, runtimeState: "clean",
-  });
+  };
+  const ready = await installationPreflight(paths, systemd.command, release.root, release.gitSha, manifestDigest, { ...environment, WAYLAND_DISPLAY: "wayland-0", DBUS_SESSION_BUS_ADDRESS: "unix:path=private" }, readyProbes);
   assert.equal(ready.ok, true);
   assert.deepEqual(ready.findings.map((item) => item.category), ["release", "platform", "systemd", "session", "filesystem", "disk", "node", "python", "packages", "browser", "conflicts", "runtime", "existing"]);
   assert.equal(ready.installCommand, null);
   await assert.rejects(lstat(paths.dataRoot), /ENOENT/u, "preflight does not create managed roots");
+  for (const root of legacyRoots) assert.equal(await readFile(join(root, "legacy-state"), "utf8"), "preserve\n");
   assert.equal(await readFile(systemd.log, "utf8").catch(() => ""), "", "injected preflight does not invoke systemctl");
+
+  const missingNode = await installationPreflight(paths, systemd.command, release.root, release.gitSha, manifestDigest, { ...environment, WAYLAND_DISPLAY: "wayland-0", DBUS_SESSION_BUS_ADDRESS: "unix:path=private" }, { ...readyProbes, missingPackages: ["nodejs24"] });
+  assert.deepEqual(missingNode.missingPackages, ["nodejs24"]);
+  assert.equal(missingNode.installCommand, "/usr/bin/sudo /usr/bin/dnf install -- nodejs24");
 
   const hostileBrowser = await installationPreflight(paths, systemd.command, release.root, release.gitSha, manifestDigest, { ...environment, WAYLAND_DISPLAY: "wayland-0", DBUS_SESSION_BUS_ADDRESS: "unix:path=private" }, {
     osRelease: "ID=fedora\nVERSION_ID=44\n", architecture: "x64", systemdAvailable: true,

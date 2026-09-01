@@ -43,7 +43,7 @@ const MARKER_NAME = ".pi-web-managed-v1";
 const MARKER_VALUE = "pi-web-managed-root-v1\n";
 const MAX_JSON_BYTES = 4 * 1024 * 1024;
 const LOCK_PUBLICATION_GRACE_MS = 5_000;
-const PREFLIGHT_PACKAGES = Object.freeze(["chromium", "desktop-file-utils", "gtk3", "libappindicator-gtk3", "librsvg2", "nodejs", "python3", "systemd", "webkit2gtk4.1"]);
+const PREFLIGHT_PACKAGES = Object.freeze(["chromium", "desktop-file-utils", "gtk3", "libappindicator-gtk3", "librsvg2", "nodejs24", "python3", "systemd", "webkit2gtk4.1"]);
 const MINIMUM_INSTALL_FREE_BYTES = 512 * 1024 * 1024;
 
 /** @param {string} message @returns {never} */
@@ -1139,10 +1139,13 @@ export function installedPaths(environment = process.env) {
   const binRoot = join(home, ".local/bin");
   for (const [name, path] of Object.entries({ dataHome, configHome, cacheHome, stateHome, binRoot })) if (!isAbsolute(path) || /[\0\r\n]/u.test(path)) fail(`${name} must be a safe absolute path`);
   if (!runtimeRoot || !isAbsolute(runtimeRoot) || /[\0\r\n]/u.test(runtimeRoot)) fail("XDG_RUNTIME_DIR must be a safe absolute path");
-  const dataRoot = join(dataHome, "pi-web");
-  const configRoot = join(configHome, "pi-web");
-  const cacheRoot = join(cacheHome, "pi-web");
-  const stateRoot = join(stateHome, "pi-web");
+  // The legacy installation already owns the pi-web roots. Candidate release
+  // bytes and state stay in separate roots so rollback and purge cannot adopt
+  // or remove legacy data.
+  const dataRoot = join(dataHome, "pi-web-phase4a");
+  const configRoot = join(configHome, "pi-web-phase4a");
+  const cacheRoot = join(cacheHome, "pi-web-phase4a");
+  const stateRoot = join(stateHome, "pi-web-phase4a");
   return Object.freeze({
     home,
     dataHome,
