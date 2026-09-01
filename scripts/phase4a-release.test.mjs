@@ -17,6 +17,7 @@ async function syntheticRelease(forbiddenMarker) {
   await Promise.all([
     mkdir(join(releaseRoot, "bin"), { recursive: true }),
     mkdir(join(releaseRoot, "share/pi-webx"), { recursive: true }),
+    mkdir(join(releaseRoot, "share/icons"), { recursive: true }),
     mkdir(join(releaseRoot, "share/deploy/config"), { recursive: true }),
     mkdir(join(releaseRoot, "share/deploy/systemd"), { recursive: true }),
   ]);
@@ -24,13 +25,16 @@ async function syntheticRelease(forbiddenMarker) {
     writeFile(join(releaseRoot, "bin/pi-web-browserd.mjs"), `${forbiddenMarker === undefined ? "" : `// ${forbiddenMarker}\n`}export {};\n`),
     writeFile(join(releaseRoot, "bin/pi-web-webxd.mjs"), "export {};\n"),
     writeFile(join(releaseRoot, "bin/pi-web-egress-proxy"), "#!/usr/bin/python3\npass\n"),
+    writeFile(join(releaseRoot, "bin/pi-browser-workspace"), "workspace fixture\n"),
+    copyFile(join(sourceRoot, "scripts/pi-webctl.mjs"), join(releaseRoot, "bin/pi-webctl.mjs")),
     writeFile(join(releaseRoot, "share/pi-webx/extension.mjs"), "export default function extension() {}\n"),
+    writeFile(join(releaseRoot, "share/icons/pi-web-workspace.png"), "png fixture\n"),
     copyFile(join(sourceRoot, "scripts/phase4a-config.mjs"), join(releaseRoot, "share/deploy/phase4a-config.mjs")),
     copyFile(join(sourceRoot, "deploy/phase4a/config/default.json"), join(releaseRoot, "share/deploy/config/default.json")),
     ...["pi-web-agentcursor-egress-proxy.service", "pi-web-agentcursor-browserd.service", "webxd.service"].map(async (name) => await copyFile(join(sourceRoot, `deploy/phase4a/systemd/${name}.in`), join(releaseRoot, `share/deploy/systemd/${name}.in`))),
   ]);
   const immutableFiles = await releaseInternals.immutablePayloadDigests(releaseRoot);
-  await writeFile(join(releaseRoot, "manifest.json"), `${JSON.stringify({ schemaVersion: 1, releaseId: `phase4a-${gitSha}`, gitSha, dirtyTree: false, backendDefault: "legacy", immutableFiles }, null, 2)}\n`);
+  await writeFile(join(releaseRoot, "manifest.json"), `${JSON.stringify({ schemaVersion: 1, releaseId: `phase4a-${gitSha}`, gitSha, dirtyTree: false, backendDefault: "legacy", compatibility: { defaultBackend: "legacy", candidateBackend: "agentcursor" }, immutableFiles }, null, 2)}\n`);
   await releaseInternals.setImmutableModes(releaseRoot);
   await releaseInternals.writeChecksums(releaseRoot);
   await chmod(join(releaseRoot, "checksums.json"), 0o444);

@@ -87,6 +87,7 @@ test("candidate unit templates are fixed, independent, and render without source
       configHome: "/home/test/.config",
       cacheHome: "/home/test/.cache",
       stateHome: "/home/test/.local/state",
+      browserdUnit: "pi-web-agentcursor-browserd.service",
       startTimeoutSec: 30,
       stopTimeoutSec: 30,
     });
@@ -103,7 +104,18 @@ test("candidate unit templates are fixed, independent, and render without source
   assert.match(rendered.get("pi-web-agentcursor-browserd.service"), /Wants=pi-web-agentcursor-egress-proxy\.service/u);
   assert.doesNotMatch(rendered.get("pi-web-agentcursor-browserd.service"), /Requires=/u);
   assert.match(rendered.get("webxd.service"), /Wants=pi-web-reader\.service pi-web-searxng\.service pi-web-agentcursor-browserd\.service/u);
-  assert.doesNotMatch(rendered.get("webxd.service"), /Requires=/u);
+  assert.doesNotMatch(rendered.get("webxd.service"), /pi-browserd\.service|Requires=/u);
+  const legacyWebxd = renderUnitTemplate(await readFile(`${unitRoot}/webxd.service.in`, "utf8"), {
+    currentRelease: "/home/test/.local/share/pi-web/current",
+    configHome: "/home/test/.config",
+    cacheHome: "/home/test/.cache",
+    stateHome: "/home/test/.local/state",
+    browserdUnit: "pi-browserd.service",
+    startTimeoutSec: 30,
+    stopTimeoutSec: 30,
+  });
+  assert.match(legacyWebxd, /Wants=pi-web-reader\.service pi-web-searxng\.service pi-browserd\.service/u);
+  assert.doesNotMatch(legacyWebxd, /pi-web-agentcursor-browserd\.service|Requires=/u);
   assert.match(rendered.get("webxd.service"), /ExecStart=\/usr\/bin\/node \/home\/test\/\.local\/share\/pi-web\/current\/bin\/pi-web-webxd\.mjs/u);
   assert.equal(names.some((name) => /workspace/u.test(name)), false, "Tauri must remain on-demand");
 });

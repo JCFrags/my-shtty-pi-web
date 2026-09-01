@@ -68,6 +68,22 @@ test("AgentCursor is an explicit prebuilt candidate and never mutates the legacy
   assert.equal(full.resolvedProfiles.includes("browser-agentcursor"), false);
 });
 
+test("legacy cutover refuses the AgentCursor profile in favor of immutable pi-webctl", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "webx-m9-agentcursor-cutover-"));
+  const home = join(temporary, "home");
+  await mkdir(home);
+  const staged = run(stageCommand, ["--source", root, "--release-root", join(temporary, "releases"), "--test-no-build", "--profile", "browser-agentcursor"], { HOME: home });
+  const evidence = join(temporary, "evidence.json");
+  await writeFile(evidence, JSON.stringify({ ok: true, mode: "deterministic" }));
+  const result = spawnSync(cutoverCommand, ["--plan", "--candidate", staged.candidate, "--evidence", evidence, "--test-mode"], {
+    cwd: root,
+    env: { ...process.env, HOME: home, PI_WEB_PREFIX: join(home, ".local"), XDG_CONFIG_HOME: join(home, ".config"), XDG_STATE_HOME: join(home, ".state") },
+    encoding: "utf8",
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /browser-agentcursor requires the immutable Phase 4A pi-webctl installer/u);
+});
+
 test("core staging uses selected package installs and never uv all-packages", async () => {
   const stage = await readFile(stageCommand, "utf8");
   assert.doesNotMatch(stage, /uv[^\n]*sync[^\n]*--all-packages/);

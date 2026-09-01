@@ -456,7 +456,7 @@ async function buildRelease(options) {
   const stageParent = await mkdtemp(join(outputRoot, ".phase4a-stage-"));
   const releaseRoot = join(stageParent, releaseId);
   const buildRoot = join(stageParent, "build");
-  await Promise.all(["bin", "share/artifacts", "share/build", "share/deploy", "share/licenses", "share/pi-webx/skills", "share/schemas"].map(async (path) => await mkdir(join(releaseRoot, path), { recursive: true })));
+  await Promise.all(["bin", "share/artifacts", "share/build", "share/deploy", "share/icons", "share/licenses", "share/pi-webx/skills", "share/schemas"].map(async (path) => await mkdir(join(releaseRoot, path), { recursive: true })));
   let published = false;
   try {
     const tools = await toolchain();
@@ -475,6 +475,8 @@ async function buildRelease(options) {
       copyTree(join(sourceRoot, "apps/pi-webx/skills"), join(releaseRoot, "share/pi-webx/skills")),
       copyTree(join(sourceRoot, "deploy/phase4a"), join(releaseRoot, "share/deploy")),
       copyFile(join(sourceRoot, "scripts/phase4a-config.mjs"), join(releaseRoot, "share/deploy/phase4a-config.mjs")),
+      copyFile(join(sourceRoot, "scripts/pi-webctl.mjs"), join(releaseRoot, "bin/pi-webctl.mjs")),
+      copyFile(join(sourceRoot, "components/browser/apps/workspace/src-tauri/icons/icon.png"), join(releaseRoot, "share/icons/pi-web-workspace.png")),
     ]);
     parseInstalledConfig(JSON.parse(await readFile(join(releaseRoot, "share/deploy/config/default.json"), "utf8")));
     await writeFile(join(releaseRoot, "share/pi-webx/package.json"), `${JSON.stringify({ name: "@webx/pi-webx-release", version: "0.1.0", private: true, type: "module", peerDependencies: { "@earendil-works/pi-ai": "*", "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-tui": "*", typebox: "*" }, pi: { extensions: ["./extension.mjs"], skills: ["./skills/webx"] } }, null, 2)}\n`);
@@ -554,12 +556,13 @@ async function verifyRelease(releaseRootValue, expectedSha, forbiddenPaths = [so
   command(process.execPath, ["--check", join(releaseRoot, "bin/pi-web-webxd.mjs")], { cwd: tmpdir() });
   command(process.execPath, ["--check", join(releaseRoot, "share/pi-webx/extension.mjs")], { cwd: tmpdir() });
   command(process.execPath, ["--check", join(releaseRoot, "share/deploy/phase4a-config.mjs")], { cwd: tmpdir() });
+  command(process.execPath, ["--check", join(releaseRoot, "bin/pi-webctl.mjs")], { cwd: tmpdir() });
   parseInstalledConfig(JSON.parse(await readFile(join(releaseRoot, "share/deploy/config/default.json"), "utf8")));
   /** @type {Map<string, string>} */
   const deployUnits = new Map();
   for (const name of ["pi-web-agentcursor-egress-proxy.service", "pi-web-agentcursor-browserd.service", "webxd.service"]) deployUnits.set(name, await readFile(join(releaseRoot, `share/deploy/systemd/${name}.in`), "utf8"));
   if (!deployUnits.get("pi-web-agentcursor-browserd.service")?.includes("Wants=pi-web-agentcursor-egress-proxy.service") || deployUnits.get("pi-web-agentcursor-browserd.service")?.includes("Requires=")) fail("release browserd unit dependency policy is invalid");
-  if (!deployUnits.get("webxd.service")?.includes("Wants=pi-web-reader.service pi-web-searxng.service pi-web-agentcursor-browserd.service") || deployUnits.get("webxd.service")?.includes("Requires=")) fail("release webxd unit dependency policy is invalid");
+  if (!deployUnits.get("webxd.service")?.includes("Wants=pi-web-reader.service pi-web-searxng.service @BROWSERD_UNIT@") || deployUnits.get("webxd.service")?.includes("Requires=")) fail("release webxd unit dependency policy is invalid");
   for (const [name, unit] of deployUnits) {
     if (!unit.includes("Restart=on-failure") || !unit.includes("UMask=0077") || /(?:\/bin\/(?:ba)?sh|node_modules|tsx|ts-node|vite|cargo\/target)/u.test(unit)) fail(`release unit template is unsafe: ${name}`);
   }

@@ -1,7 +1,7 @@
 [Unit]
 Description=Pi Web authority
-After=pi-web-reader.service pi-web-searxng.service pi-web-agentcursor-browserd.service
-Wants=pi-web-reader.service pi-web-searxng.service pi-web-agentcursor-browserd.service
+After=pi-web-reader.service pi-web-searxng.service @BROWSERD_UNIT@
+Wants=pi-web-reader.service pi-web-searxng.service @BROWSERD_UNIT@
 StartLimitIntervalSec=60
 StartLimitBurst=3
 

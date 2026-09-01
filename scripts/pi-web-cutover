@@ -325,6 +325,8 @@ def main() -> int:
     profile = manifest.get("profile")
     if not isinstance(profile, dict) or profile != resolve_profiles(candidate, profile.get("requestedProfiles") if isinstance(profile, dict) else None):
         fail("candidate profile does not match its reviewed manifests")
+    if "browser-agentcursor" in profile["resolvedProfiles"]:
+        fail("browser-agentcursor requires the immutable Phase 4A pi-webctl installer; legacy cutover is intentionally unavailable")
     desired = generated(prefix, config, candidate, profile)
     run_id = args.run_id or f"cutover-{int(time.time())}-{manifest['commit'][:12]}"
     if not RUN_ID.fullmatch(run_id):
