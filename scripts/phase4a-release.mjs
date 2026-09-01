@@ -360,12 +360,15 @@ async function buildTauri(releaseRoot, buildRoot, sourceDateEpoch, gitSha) {
   const binary = join(cargoTarget, "release/pi-browser-workspace");
   if (!(await lstat(binary)).isFile()) fail("Tauri release binary was not produced");
   await copyFile(binary, join(releaseRoot, "bin/pi-browser-workspace"));
+  command("cargo", ["build", "--locked", "--release", "--package", "pi-browser-workspace", "--bin", "pi-browser-workspace", "--features", "installed-qualification"], { cwd: browserSource, env: { CARGO_TARGET_DIR: cargoTarget, CARGO_ENCODED_RUSTFLAGS: encodedRustFlags, RUSTFLAGS: "", SOURCE_DATE_EPOCH: sourceDateEpoch } });
+  if (!(await lstat(binary)).isFile()) fail("Tauri qualification release binary was not produced");
+  await copyFile(binary, join(releaseRoot, "bin/pi-browser-workspace-qualification"));
   const rpmRoot = join(cargoTarget, "release/bundle/rpm");
   const rpms = (await regularFiles(rpmRoot)).filter((path) => path.endsWith(".rpm"));
   if (rpms.length !== 1) fail(`expected one Tauri RPM, found ${rpms.length}`);
   const rpmName = basename(rpms[0]);
   await copyFile(rpms[0], join(releaseRoot, `share/artifacts/${rpmName}`));
-  return { binary: "bin/pi-browser-workspace", rpm: `share/artifacts/${rpmName}` };
+  return { binary: "bin/pi-browser-workspace", qualificationBinary: "bin/pi-browser-workspace-qualification", rpm: `share/artifacts/${rpmName}` };
 }
 /** @param {string} releaseRoot */
 async function setImmutableModes(releaseRoot) {

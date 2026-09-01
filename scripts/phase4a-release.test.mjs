@@ -21,7 +21,7 @@ function completeManifest(releaseId, sha, immutableFiles) {
     packaging: { node: "fixture", proxy: "fixture", tauri: "fixture", checksumAlgorithm: "sha256", checksumScopeExcludes: ["checksums.json"] },
     immutableFiles,
     compatibility: { node: { minimumMajor: 24, maximumMajor: 24 }, rustBuild: "1.88.0", fedora: [44], webXApiMajor: 3, browserContractMajor: 3, browserPrivateProtocol: "browser.v3", workspacePrivateProtocol: "workspace.v2", defaultBackend: "legacy", candidateBackend: "agentcursor" },
-    artifacts: { binary: "bin/pi-browser-workspace", rpm: "share/artifacts/pi-browser-workspace.rpm" },
+    artifacts: { binary: "bin/pi-browser-workspace", qualificationBinary: "bin/pi-browser-workspace-qualification", rpm: "share/artifacts/pi-browser-workspace.rpm" },
   };
 }
 
@@ -42,6 +42,7 @@ async function syntheticRelease(forbiddenMarker) {
     writeFile(join(releaseRoot, "bin/pi-web-webxd.mjs"), "export {};\n"),
     writeFile(join(releaseRoot, "bin/pi-web-egress-proxy"), "#!/usr/bin/python3\npass\n"),
     writeFile(join(releaseRoot, "bin/pi-browser-workspace"), "workspace fixture\n"),
+    writeFile(join(releaseRoot, "bin/pi-browser-workspace-qualification"), "workspace qualification fixture\n"),
     writeFile(join(releaseRoot, "share/artifacts/pi-browser-workspace.rpm"), "rpm fixture\n"),
     copyFile(join(sourceRoot, "scripts/pi-webctl.mjs"), join(releaseRoot, "bin/pi-webctl.mjs")),
     copyFile(join(sourceRoot, "scripts/phase4a-release-format.mjs"), join(releaseRoot, "bin/phase4a-release-format.mjs")),

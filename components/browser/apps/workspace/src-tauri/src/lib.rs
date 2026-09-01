@@ -12,6 +12,8 @@ mod window;
 
 use capture::EvidenceCaptureService;
 use client::WorkspaceClientService;
+#[cfg(all(feature = "installed-qualification", not(debug_assertions), unix))]
+use acceptance::prepare_installed_qualification_output;
 use tauri::Manager;
 use window::{apply_launch_request, parse_launch_args};
 
@@ -68,7 +70,10 @@ pub fn run() {
         ])
         .setup(move |app| {
             if let Some(path) = initial.acceptance_output.as_deref() {
+                #[cfg(all(feature = "installed-qualification", not(debug_assertions), unix))]
+                prepare_installed_qualification_output(path).map_err(std::io::Error::other)?;
                 app.state::<WorkspaceClientService>().configure_acceptance(path).map_err(std::io::Error::other)?;
+                #[cfg(debug_assertions)]
                 app.state::<EvidenceCaptureService>().configure_from_acceptance_output(path).map_err(std::io::Error::other)?;
             }
             apply_launch_request(app.handle(), initial.clone(), false);

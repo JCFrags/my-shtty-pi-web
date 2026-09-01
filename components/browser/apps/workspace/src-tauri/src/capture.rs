@@ -1,5 +1,7 @@
 use serde::Deserialize;
-use std::{path::{Path, PathBuf}, sync::{Arc, Mutex}};
+use std::{path::PathBuf, sync::{Arc, Mutex}};
+#[cfg(debug_assertions)]
+use std::path::Path;
 use tauri::{Runtime, WebviewWindow};
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -47,8 +49,6 @@ impl EvidenceCaptureService {
         Ok(())
     }
 
-    #[cfg(not(debug_assertions))]
-    pub fn configure_from_acceptance_output(&self, _output: &Path) -> Result<(), String> { Err("evidence capture requires a development build".into()) }
 
     pub fn capture<R: Runtime>(&self, window: &WebviewWindow<R>, name: EvidenceCapture) -> Result<(), String> {
         #[cfg(all(debug_assertions, target_os = "linux"))]

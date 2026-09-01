@@ -8,9 +8,10 @@ use std::{
     path::Path,
     sync::{Arc, Mutex},
 };
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, feature = "installed-qualification"))]
 use std::{fs::OpenOptions, path::PathBuf};
 
+pub const INSTALLED_QUALIFICATION_DIAGNOSTICS_RELATIVE_PATH: &str = "pi-web/qualification/tauri.jsonl";
 const MAX_DIAGNOSTIC_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_DIAGNOSTIC_RECORDS: u64 = 100_000;
 const MAX_METRIC_MS: f64 = 86_400_000.0;
@@ -75,7 +76,7 @@ struct AcceptanceWriter {
 }
 
 impl AcceptanceDiagnostics {
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, feature = "installed-qualification"))]
     pub fn configure(&self, path: &Path) -> Result<(), String> {
         let validated = validate_output_path(path)?;
         let file = OpenOptions::new().create_new(true).write(true).open(&validated).map_err(|error| format!("create acceptance diagnostics: {error}"))?;
@@ -88,8 +89,8 @@ impl AcceptanceDiagnostics {
         Ok(())
     }
 
-    #[cfg(not(debug_assertions))]
-    pub fn configure(&self, _path: &Path) -> Result<(), String> { Err("acceptance diagnostics require a development build".into()) }
+    #[cfg(not(any(debug_assertions, feature = "installed-qualification")))]
+    pub fn configure(&self, _path: &Path) -> Result<(), String> { Err("acceptance diagnostics are unavailable in this build".into()) }
 
     pub fn enabled(&self) -> bool { self.0.lock().is_ok_and(|guard| guard.is_some()) }
     pub fn frontend_ready(&self) { self.record(json!({ "kind": "frontendReady" })); }
@@ -222,7 +223,7 @@ fn frame_record(kind: &str, delivery_id: u64, header: &FrameHeader, disposition:
     })
 }
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, feature = "installed-qualification"))]
 fn validate_output_path(path: &Path) -> Result<PathBuf, String> {
     if !path.is_absolute() || path.file_name().is_none() { return Err("acceptance output must be an absolute file path".into()); }
     if path.as_os_str().len() > 1024 || path.exists() { return Err("acceptance output path is invalid or already exists".into()); }
@@ -235,6 +236,32 @@ fn validate_output_path(path: &Path) -> Result<PathBuf, String> {
 }
 
 fn bounded_text(value: &str, maximum: usize) -> &str { value.get(..value.len().min(maximum)).unwrap_or("") }
+
+#[cfg(all(feature = "installed-qualification", not(debug_assertions), unix))]
+pub fn prepare_installed_qualification_output(path: &Path) -> Result<(), String> {
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR").ok_or_else(|| "XDG_RUNTIME_DIR is required for installed qualification".to_owned())?;
+    let runtime = std::fs::canonicalize(runtime).map_err(|error| format!("validate qualification runtime directory: {error}"))?;
+    if path != runtime.join(INSTALLED_QUALIFICATION_DIAGNOSTICS_RELATIVE_PATH) { return Err("installed qualification diagnostics path is invalid".into()); }
+    prepare_installed_qualification_output_under(&runtime, path)
+}
+
+#[cfg(all(feature = "installed-qualification", not(debug_assertions), unix))]
+fn prepare_installed_qualification_output_under(runtime: &Path, path: &Path) -> Result<(), String> {
+    use std::{fs::{create_dir, symlink_metadata}, os::unix::fs::PermissionsExt};
+    let pi_web = runtime.join("pi-web");
+    let qualification = pi_web.join("qualification");
+    if path.parent() != Some(qualification.as_path()) { return Err("installed qualification diagnostics parent is invalid".into()); }
+    for directory in [&pi_web, &qualification] {
+        match create_dir(directory) {
+            Ok(()) => std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700)).map_err(|error| format!("secure qualification runtime directory: {error}"))?,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(format!("create qualification runtime directory: {error}")),
+        }
+        let metadata = symlink_metadata(directory).map_err(|error| format!("validate qualification runtime directory: {error}"))?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() || metadata.permissions().mode() & 0o077 != 0 { return Err("qualification runtime directory is unsafe".into()); }
+    }
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
@@ -250,5 +277,19 @@ mod tests {
         assert!(!FrameDisposition { outcome: FrameOutcome::Painted, frontend_type: FrontendBinaryType::ArrayBuffer, reason: None, decode_ms: Some(1.0), paint_ms: Some(1.0), total_ms: None, decoded_at: Some("x".into()), painted_at: Some("x".into()), decoded_width: Some(800), decoded_height: Some(600), frontend_retained_frames: retained.0, frontend_image_bitmaps: retained.1, maximum_frontend_image_bitmaps: retained.2 }.validate());
         assert!(!FrameDisposition { outcome: FrameOutcome::Dropped, frontend_type: FrontendBinaryType::ArrayBuffer, reason: Some(FrameDropReason::Decode), decode_ms: Some(1.0), paint_ms: None, total_ms: None, decoded_at: None, painted_at: None, decoded_width: None, decoded_height: None, frontend_retained_frames: 0, frontend_image_bitmaps: 0, maximum_frontend_image_bitmaps: 0 }.validate());
         assert!(!FrameDisposition { outcome: FrameOutcome::Painted, frontend_type: FrontendBinaryType::ArrayBuffer, reason: None, decode_ms: Some(1.0), paint_ms: Some(1.0), total_ms: Some(2.0), decoded_at: Some("x".into()), painted_at: Some("x".into()), decoded_width: Some(800), decoded_height: Some(600), frontend_retained_frames: 2, frontend_image_bitmaps: 0, maximum_frontend_image_bitmaps: 1 }.validate());
+    }
+
+    #[cfg(all(feature = "installed-qualification", not(debug_assertions), unix))]
+    #[test]
+    fn prepares_only_the_fixed_private_installed_qualification_parent() {
+        use std::os::unix::fs::PermissionsExt;
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join(INSTALLED_QUALIFICATION_DIAGNOSTICS_RELATIVE_PATH);
+        prepare_installed_qualification_output_under(temporary.path(), &path).unwrap();
+        for directory in [temporary.path().join("pi-web"), temporary.path().join("pi-web/qualification")] {
+            assert!(directory.is_dir());
+            assert_eq!(std::fs::metadata(directory).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+        assert!(prepare_installed_qualification_output_under(temporary.path(), &temporary.path().join("other/tauri.jsonl")).is_err());
     }
 }

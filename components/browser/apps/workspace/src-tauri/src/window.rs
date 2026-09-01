@@ -1,4 +1,4 @@
-use crate::{capture::{EvidenceCapture, EvidenceCaptureService}, client::WorkspaceClientService, error::{PublicError, WorkspaceError}, protocol::valid_id};
+use crate::{acceptance::INSTALLED_QUALIFICATION_DIAGNOSTICS_RELATIVE_PATH, capture::{EvidenceCapture, EvidenceCaptureService}, client::WorkspaceClientService, error::{PublicError, WorkspaceError}, protocol::valid_id};
 use serde::Deserialize;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
@@ -22,10 +22,16 @@ pub struct LaunchRequest {
 
 pub fn parse_launch_args<I>(args: I) -> Result<LaunchRequest, String>
 where I: IntoIterator<Item = String> {
+    parse_launch_args_with_runtime(args, std::env::var_os("XDG_RUNTIME_DIR").as_deref().map(std::path::Path::new))
+}
+
+fn parse_launch_args_with_runtime<I>(args: I, runtime: Option<&std::path::Path>) -> Result<LaunchRequest, String>
+where I: IntoIterator<Item = String> {
     let values: Vec<String> = args.into_iter().collect();
     let maximum_arguments = if cfg!(debug_assertions) { 6 } else { 4 };
     if values.len() > maximum_arguments || values.iter().any(|value| value.len() > 1_024) { return Err("workspace launch arguments exceed their bound".into()); }
     let mut request = LaunchRequest::default();
+    let mut qualification_start = false;
     for arg in values {
         if arg == "--raise" { if request.raise { return Err("duplicate --raise".into()); } request.raise = true; }
         else if arg == "--hide" { if request.hide { return Err("duplicate --hide".into()); } request.hide = true; }
@@ -48,9 +54,20 @@ where I: IntoIterator<Item = String> {
             if request.acceptance_close { return Err("duplicate --acceptance-close".into()); }
             request.acceptance_close = true;
         }
+        else if cfg!(feature = "installed-qualification") && arg == "--qualification" {
+            if qualification_start || request.acceptance_output.is_some() { return Err("duplicate --qualification".into()); }
+            let runtime = runtime.ok_or_else(|| "XDG_RUNTIME_DIR is required for installed qualification".to_owned())?;
+            request.acceptance_output = Some(runtime.join(INSTALLED_QUALIFICATION_DIAGNOSTICS_RELATIVE_PATH));
+            qualification_start = true;
+        }
+        else if cfg!(feature = "installed-qualification") && arg == "--qualification-close" {
+            if request.acceptance_close { return Err("duplicate --qualification-close".into()); }
+            request.acceptance_close = true;
+        }
         else { return Err("unknown workspace launch argument".into()); }
     }
-    if request.acceptance_close && (request.raise || request.hide || request.take_control || request.return_control || request.browser_session_id.is_some() || request.tab_id.is_some() || request.acceptance_output.is_some() || request.evidence_capture.is_some()) { return Err("--acceptance-close must be used alone".into()); }
+    if qualification_start && (request.raise || request.hide || request.take_control || request.return_control || request.browser_session_id.is_some() || request.tab_id.is_some() || request.evidence_capture.is_some() || request.acceptance_close) { return Err("--qualification must be used alone".into()); }
+    if request.acceptance_close && (request.raise || request.hide || request.take_control || request.return_control || request.browser_session_id.is_some() || request.tab_id.is_some() || request.acceptance_output.is_some() || request.evidence_capture.is_some()) { return Err("qualification close must be used alone".into()); }
     if request.raise && request.hide { return Err("--raise and --hide conflict".into()); }
     if request.take_control && request.return_control { return Err("control transfer arguments conflict".into()); }
     if request.hide && (request.browser_session_id.is_some() || request.evidence_capture.is_some() || request.take_control || request.return_control) { return Err("--hide cannot select, capture, or transfer control".into()); }
@@ -139,5 +156,28 @@ mod tests {
         assert!(parse_launch_args(["--capture-evidence=../secret".into()]).is_err());
         #[cfg(not(debug_assertions))]
         assert!(parse_launch_args(["--acceptance-output=/run/user/1000/output.jsonl".into()]).is_err());
+    }
+
+    #[test]
+    fn installed_qualification_arguments_are_compile_time_gated() {
+        let runtime = std::path::Path::new("/run/user/1000");
+        #[cfg(feature = "installed-qualification")]
+        {
+            let start = parse_launch_args_with_runtime(["--qualification".into()], Some(runtime)).unwrap();
+            assert_eq!(start.acceptance_output, Some(runtime.join(INSTALLED_QUALIFICATION_DIAGNOSTICS_RELATIVE_PATH)));
+            assert!(parse_launch_args_with_runtime(["--qualification".into()], None).is_err());
+            assert!(parse_launch_args_with_runtime(["--qualification".into(), "--raise".into()], Some(runtime)).is_err());
+            assert!(parse_launch_args_with_runtime(["--qualification-close".into()], Some(runtime)).unwrap().acceptance_close);
+            assert!(parse_launch_args_with_runtime(["--qualification-close".into(), "--raise".into()], Some(runtime)).is_err());
+            #[cfg(debug_assertions)]
+            assert!(parse_launch_args_with_runtime(["--capture-evidence=agent-a".into()], Some(runtime)).is_ok_and(|request| request.evidence_capture == Some(EvidenceCapture::AgentA)));
+            #[cfg(not(debug_assertions))]
+            assert!(parse_launch_args_with_runtime(["--capture-evidence=agent-a".into()], Some(runtime)).is_err());
+        }
+        #[cfg(not(feature = "installed-qualification"))]
+        {
+            assert!(parse_launch_args_with_runtime(["--qualification".into()], Some(runtime)).is_err());
+            assert!(parse_launch_args_with_runtime(["--qualification-close".into()], Some(runtime)).is_err());
+        }
     }
 }

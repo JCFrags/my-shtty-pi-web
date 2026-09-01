@@ -9,6 +9,9 @@ rust-version.workspace = true
 name = "pi_browser_workspace_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+installed-qualification = []
+
 [build-dependencies]
 tauri-build = { version = "2.4.1", features = [] }
 

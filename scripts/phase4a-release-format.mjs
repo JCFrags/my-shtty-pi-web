@@ -91,8 +91,9 @@ export function validateReleaseManifest(value) {
   positiveInteger(compatibility.browserContractMajor, "browser contract major");
 
   const artifacts = object(manifest.artifacts, "release artifacts");
-  exactKeys(artifacts, ["binary", "rpm"], "release artifacts");
+  exactKeys(artifacts, ["binary", "qualificationBinary", "rpm"], "release artifacts");
   releasePath(artifacts.binary, "Tauri binary path");
+  releasePath(artifacts.qualificationBinary, "Tauri qualification binary path");
   releasePath(artifacts.rpm, "Tauri RPM path");
 
   if (!Array.isArray(manifest.immutableFiles)) fail("release immutable-file inventory is invalid");
@@ -102,7 +103,7 @@ export function validateReleaseManifest(value) {
     return { path: releasePath(item.path, `immutable file ${index} path`), sha256: sha256(item.sha256, `immutable file ${index} digest`), bytes: safeInteger(item.bytes, `immutable file ${index} bytes`) };
   });
   if (new Set(immutableFiles.map((item) => item.path)).size !== immutableFiles.length) fail("release immutable-file inventory contains duplicates");
-  return Object.freeze(/** @type {Record<string, unknown> & {releaseId: string, gitSha: string, immutableFiles: Array<{path: string, sha256: string, bytes: number}>, artifacts: {binary: string, rpm: string}}} */ ({ ...manifest, releaseId, gitSha, immutableFiles, artifacts: { binary: /** @type {string} */ (artifacts.binary), rpm: /** @type {string} */ (artifacts.rpm) } }));
+  return Object.freeze(/** @type {Record<string, unknown> & {releaseId: string, gitSha: string, immutableFiles: Array<{path: string, sha256: string, bytes: number}>, artifacts: {binary: string, qualificationBinary: string, rpm: string}}} */ ({ ...manifest, releaseId, gitSha, immutableFiles, artifacts: { binary: /** @type {string} */ (artifacts.binary), qualificationBinary: /** @type {string} */ (artifacts.qualificationBinary), rpm: /** @type {string} */ (artifacts.rpm) } }));
 }
 
 /**
