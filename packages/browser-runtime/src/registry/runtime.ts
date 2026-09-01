@@ -15,6 +15,11 @@ import { BrowserSession, type DomFallbackAction } from "./session.js";
 interface RuntimeSubscription { readonly actor: string; readonly connectionId: string; readonly subscriptionId: string; readonly address: TabAddress; readonly interest: "idle" | "selected"; readonly consumerKey: string }
 interface WorkspaceSubscription { readonly connectionId: string; readonly subscriptionId: string; readonly browserSessionId: string; readonly tabId: string; readonly interest: "idle" | "selected"; readonly consumerKey: string; controlEpoch: number }
 interface WorkspaceFrameSelection { readonly subscriptionId: string; readonly browserSessionId: string; readonly tabId: string }
+interface ResourceLimitTerminal {
+  readonly owner: string;
+  readonly reason: Exclude<BrowserResourceReason, "none" | "sampling-unavailable">;
+  readonly expiresAtMs: number;
+}
 interface WorkspaceFrameLedgerEntry {
   readonly runtimeInstanceId: string;
   readonly subscriptionId: string;
@@ -42,6 +47,9 @@ export const DEFAULT_DOM_OBSERVATION_TTL_MS = 60_000;
 export const MIN_OBSERVATION_TTL_MS = 10_000;
 export const MAX_OBSERVATION_TTL_MS = 120_000;
 
+const RESOURCE_LIMIT_TERMINAL_TTL_MS = 60_000;
+const MAX_RESOURCE_LIMIT_TERMINALS = 64;
+
 export interface BrowserRuntimeOptions {
   navigationAuthorization?: NavigationAuthorization;
   chrome?: Omit<ChromeHostOptions, "hostId" | "profileManager">;
@@ -68,6 +76,7 @@ export class BrowserRuntime extends EventEmitter {
   readonly operations = new OperationRegistry();
   readonly resources: BrowserResourceSupervisor;
   private readonly sessions = new Map<string, BrowserSession>();
+  private readonly resourceLimitTerminals = new Map<string, ResourceLimitTerminal>();
   private readonly subscriptions = new Map<string, Map<string, RuntimeSubscription>>();
   private readonly workspaceSubscriptions = new Map<string, Map<string, WorkspaceSubscription>>();
   private readonly workspaceEventSubscribers = new Set<string>();
@@ -468,6 +477,7 @@ export class BrowserRuntime extends EventEmitter {
     await session.close();
     if (this.sessions.get(browserSessionId) !== session) return;
     this.sessions.delete(browserSessionId);
+    this.rememberResourceLimitTerminal(session.actor, browserSessionId, reason);
     this.removeSessionSubscriptions(browserSessionId);
     this.workspaceChanged("session", browserSessionId);
   }
@@ -517,8 +527,30 @@ export class BrowserRuntime extends EventEmitter {
 
   private getSession(actor: ActorIdentity, browserSessionId: string): BrowserSession {
     const session = this.sessions.get(browserSessionId);
-    if (session === undefined || actorKey(session.actor) !== actorKey(actor)) throw new BrowserProtocolError("SESSION_NOT_FOUND", "Browser session not found.");
-    return session;
+    if (session !== undefined) {
+      if (actorKey(session.actor) !== actorKey(actor)) throw new BrowserProtocolError("SESSION_NOT_FOUND", "Browser session not found.");
+      return session;
+    }
+    this.pruneResourceLimitTerminals();
+    const terminal = this.resourceLimitTerminals.get(browserSessionId);
+    if (terminal?.owner === actorKey(actor)) throw new BrowserProtocolError("BROWSER_RESOURCE_LIMIT", "Browser session reached a resource limit.", false, { reason: terminal.reason });
+    throw new BrowserProtocolError("SESSION_NOT_FOUND", "Browser session not found.");
+  }
+
+  private rememberResourceLimitTerminal(actor: ActorIdentity, browserSessionId: string, reason: ResourceLimitTerminal["reason"]): void {
+    this.pruneResourceLimitTerminals();
+    this.resourceLimitTerminals.delete(browserSessionId);
+    this.resourceLimitTerminals.set(browserSessionId, { owner: actorKey(actor), reason, expiresAtMs: Date.now() + RESOURCE_LIMIT_TERMINAL_TTL_MS });
+    while (this.resourceLimitTerminals.size > MAX_RESOURCE_LIMIT_TERMINALS) {
+      const oldest = this.resourceLimitTerminals.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.resourceLimitTerminals.delete(oldest);
+    }
+  }
+
+  private pruneResourceLimitTerminals(): void {
+    const now = Date.now();
+    for (const [browserSessionId, terminal] of this.resourceLimitTerminals) if (terminal.expiresAtMs <= now) this.resourceLimitTerminals.delete(browserSessionId);
   }
 
   async dispatch(actor: ActorIdentity, request: BrowserRequest, signal?: AbortSignal, connectionId?: string): Promise<unknown> {
@@ -576,6 +608,7 @@ export class BrowserRuntime extends EventEmitter {
             },
           }, context.signal, () => context.markDispatched());
           if (context.signal.aborted) { await session.close(); throw context.signal.reason; }
+          this.resourceLimitTerminals.delete(session.browserSessionId);
           this.sessions.set(session.browserSessionId, session);
           this.resources.register({
             browserSessionId: session.browserSessionId,
@@ -659,6 +692,7 @@ export class BrowserRuntime extends EventEmitter {
     this.workspaceFrameLedgers.clear();
     this.workspaceControlOperations.clear();
     this.workspaceInputInFlight.clear();
+    this.resourceLimitTerminals.clear();
     for (const [id, session] of [...this.sessions]) {
       session.offFrame(this.onFrame);
       try { await session.close(); this.sessions.delete(id); }
