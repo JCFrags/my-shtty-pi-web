@@ -80,7 +80,7 @@ test("service environment contains only reviewed fixed choices and no secrets", 
 });
 
 test("candidate unit templates are fixed, independent, and render without source paths", async () => {
-  const names = ["pi-web-agentcursor-egress-proxy.service", "pi-web-agentcursor-browserd.service", "pi-web-qualification-webxd.service", "webxd.service"];
+  const names = ["pi-web-agentcursor-egress-proxy.service", "pi-web-agentcursor-browserd.service", "pi-web-qualification-egress-proxy.service", "pi-web-qualification-browserd.service", "pi-web-qualification-webxd.service", "webxd.service"];
   const rendered = new Map();
   for (const name of names) {
     const template = await readFile(`${unitRoot}/${name}.in`, "utf8");
@@ -123,9 +123,15 @@ test("candidate unit templates are fixed, independent, and render without source
   assert.match(rendered.get("webxd.service"), /WorkingDirectory=\/home\/test\/\.local\/state\/pi-web-phase4a/u);
   assert.match(rendered.get("webxd.service"), /ReadWritePaths=\/home\/test\/\.cache\/pi-web-phase4a \/home\/test\/\.local\/state\/pi-web-phase4a/u);
   assert.doesNotMatch(rendered.get("webxd.service"), /\/\.config\/pi-web\/|\/\.cache\/pi-web(?:\s|$)|\/\.local\/state\/pi-web(?:\s|$)/u);
+  const qualificationProxy = rendered.get("pi-web-qualification-egress-proxy.service");
+  assert.match(qualificationProxy, /^ProtectHome=read-only$/mu);
+  assert.doesNotMatch(qualificationProxy, /^ProtectHome=yes$/mu);
+  const qualificationBrowserd = rendered.get("pi-web-qualification-browserd.service");
+  assert.match(qualificationBrowserd, /^ReadWritePaths=%t\/pi-web\/qualification$/mu);
   const qualificationWebxd = rendered.get("pi-web-qualification-webxd.service");
   assert.match(qualificationWebxd, /^WorkingDirectory=%t\/pi-web\/qualification$/mu);
-  assert.match(qualificationWebxd, /^ReadWritePaths=%t\/pi-web\/qualification %t\/pi-web\/workspace$/mu);
+  assert.match(qualificationWebxd, /^ReadWritePaths=%t\/pi-web\/qualification$/mu);
+  assert.doesNotMatch(qualificationWebxd, /%t\/pi-web\/workspace/u);
   assert.ok(!qualificationWebxd.includes("/home/test/.config/pi-web-phase4a"));
   assert.ok(!qualificationWebxd.includes("/home/test/.cache/pi-web-phase4a"));
   assert.ok(!qualificationWebxd.includes("/home/test/.local/state/pi-web-phase4a"));

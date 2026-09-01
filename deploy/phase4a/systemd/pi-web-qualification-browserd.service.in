@@ -19,6 +19,7 @@ SendSIGKILL=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=read-only
+ReadWritePaths=%t/pi-web/qualification
 ProtectClock=yes
 ProtectControlGroups=yes
 ProtectKernelLogs=yes
