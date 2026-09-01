@@ -2,14 +2,29 @@ name: ci
 
 on:
   push:
+    branches:
+      - rebuild/screenshot-first-browser
+      - 'release/**'
+      - 'releases/**'
   pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: 'true'
+
 jobs:
-  web:
+  node-quality:
+    name: Node lint, types, and tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,12 +35,28 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
-      - name: Phase 1 browser protocol and runtime contracts
-        run: pnpm test:browser-core
+      - run: pnpm test:browser-core
       - run: pnpm test
 
-  browser-python:
+  protocol-schemas:
+    name: Generated protocol schemas
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: corepack prepare pnpm@10.13.1 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @webx/browser-protocol schema:check
+      - run: pnpm --filter @webx/workspace-protocol schema:check
+
+  browser-python:
+    name: Python reader, secure proxy, and extraction tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: components/browser
@@ -38,10 +69,19 @@ jobs:
           cache-dependency-glob: components/browser/uv.lock
       - run: uv python install 3.13
       - run: uv sync --all-packages --locked
-      - run: uv run pytest tests/reader tests/docling
+      - name: Secure egress proxy
+        run: uv run pytest tests/reader/test_secure_egress_proxy.py
+      - name: Reader and document extraction
+        run: uv run pytest tests/reader tests/docling benchmarks/extraction/tests
+      - name: Deterministic extraction fixtures
+        run: uv run python benchmarks/extraction/generate_fixtures.py --check
+      - name: Extraction benchmark contract
+        run: uv run python benchmarks/extraction/run.py
 
   extraction-contract:
+    name: Deterministic extraction contract
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -62,25 +102,11 @@ jobs:
         working-directory: components/browser
       - run: pnpm test:extraction
 
-  browser-rust:
+  rust-and-tauri:
+    name: Rust workspace and Tauri production checks
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: components/browser
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: '1.88.0'
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: components/browser
-      - run: cargo check --workspace --all-targets --exclude pi-browser-workspace
-      - run: cargo test --workspace --exclude pi-browser-workspace
-
-  browser-fedora-workspace:
-    runs-on: ubuntu-latest
-    container: fedora:43
+    container: fedora:44
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Install Fedora build prerequisites
@@ -93,12 +119,46 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Build the browser workspace shell
+      - name: Install pinned Rust and pnpm
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.88.0
-          export PATH="$HOME/.cargo/bin:$PATH"
           npm install --global pnpm@10.13.1
-          pnpm install --frozen-lockfile
-          pnpm --filter @pi-web/workspace build
-          cd components/browser
-          cargo check -p pi-browser-workspace
+      - name: Install locked Node dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build bundled Tauri frontend assets
+        run: pnpm --filter @pi-web/workspace build
+      - name: Check every Rust target, including Tauri
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo check --workspace --all-targets --locked
+        working-directory: components/browser
+      - name: Test the complete Rust workspace
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo test --workspace --locked
+        working-directory: components/browser
+
+  installer-profiles:
+    name: Installer and profile validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test scripts/install-contract.test.mjs scripts/m9-profile-contract.test.mjs
+
+  supply-chain:
+    name: Dependency licenses and vendored sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: corepack prepare pnpm@10.13.1 --activate
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm check:supply-chain

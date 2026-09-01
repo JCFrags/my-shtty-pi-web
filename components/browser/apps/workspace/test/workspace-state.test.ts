@@ -73,6 +73,12 @@ function publicState(overrides: Partial<PublicWorkspaceState> = {}): PublicWorks
   return { connection: "ready", snapshot, selected, droppedBeforeFrontend: 0, inflightFrame: false, ...overrides };
 }
 
+function firstTab(session: WorkspaceSession): WorkspaceTab {
+  const tab = session.tabs.at(0);
+  if (!tab) throw new Error("test session must contain one tab");
+  return tab;
+}
+
 describe("workspace state", () => {
   it("reduces multi-agent snapshots, selections, reconnects, and removal", () => {
     let state = reduceWorkspaceRecord(initialWorkspaceViewState, { kind: "snapshot", snapshot });
@@ -114,7 +120,7 @@ describe("workspace state", () => {
     const changed = (sessionChanges: Partial<WorkspaceSession>, tabChanges: Partial<WorkspaceTab> = {}) => publicState({
       snapshot: {
         ...snapshot,
-        sessions: [{ ...sessionA, ...sessionChanges, tabs: [{ ...sessionA.tabs[0]!, ...tabChanges }] }, sessionB],
+        sessions: [{ ...sessionA, ...sessionChanges, tabs: [{ ...firstTab(sessionA), ...tabChanges }] }, sessionB],
       },
     });
     expect(framePaintBindingKey(changed({ controlState: "human" }))).not.toBe(initialKey);
@@ -212,7 +218,7 @@ describe("workspace state", () => {
 
     const preparingSnapshot: WorkspaceSnapshot = {
       ...snapshot,
-      sessions: [{ ...sessionA, captureReadiness: "warming", tabs: [{ ...sessionA.tabs[0]!, captureReadiness: "warming" }] }, sessionB],
+      sessions: [{ ...sessionA, captureReadiness: "warming", tabs: [{ ...firstTab(sessionA), captureReadiness: "warming" }] }, sessionB],
     };
     const preparingState = reduceWorkspaceRecord(
       reduceWorkspaceRecord(initialWorkspaceViewState, { kind: "status", status: { connection: "ready", browserd: "ready" } }),

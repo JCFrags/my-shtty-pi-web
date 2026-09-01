@@ -18,8 +18,13 @@
     "test:browser-core": "pnpm --filter @webx/browser-protocol test && pnpm --filter @webx/browser-runtime test && pnpm --filter @webx/browserd test",
     "test:browser-live": "pnpm --filter @webx/browserd test:live",
     "test:browser-soak": "pnpm --filter @webx/browserd test:soak",
-    "check:rust": "cd components/browser && cargo check --workspace",
-    "test:rust": "cd components/browser && cargo test --workspace"
+    "check:schemas": "pnpm --filter @webx/browser-protocol schema:check && pnpm --filter @webx/workspace-protocol schema:check",
+    "test:install-profiles": "node --test scripts/install-contract.test.mjs scripts/m9-profile-contract.test.mjs",
+    "build:tauri-frontend": "pnpm --filter @pi-web/workspace build",
+    "check:tauri": "cd components/browser && cargo check -p pi-browser-workspace",
+    "check:supply-chain": "pnpm licenses list --prod --json | node scripts/release-supply-chain-check.mjs",
+    "check:rust": "cd components/browser && cargo check --workspace --locked",
+    "test:rust": "cd components/browser && cargo test --workspace --locked"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
