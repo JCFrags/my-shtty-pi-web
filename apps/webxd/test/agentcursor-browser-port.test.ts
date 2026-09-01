@@ -56,6 +56,8 @@ class FakeClient {
   currentDescriptor = descriptor;
   currentTabs: TabDescriptor[] = [tab()];
   available = true;
+  displayAvailable = true;
+  sessionCapacity = { current: 0, limit: 8, available: 8 };
   artifactBase64 = bytes.toString("base64");
   dynamicObservations = false;
   readonly dynamicArtifacts = new Map<string, Buffer>();
@@ -74,12 +76,12 @@ class FakeClient {
       virtualMouse: true,
       osMouse: false,
       executableAvailable: true,
-      displayAvailable: true,
+      displayAvailable: this.displayAvailable,
       profileRootUsable: true,
       egressConfigured: true,
       egressBindingId: "proxy-binding-a",
       runtimeState: "open",
-      sessionCapacity: { current: 0, limit: 8, available: 8 },
+      sessionCapacity: this.sessionCapacity,
     };
     if (fields.kind === "session.create") return session(this.currentTabs);
     if (fields.kind === "session.list") return { kind: "sessions", sessions: [session(this.currentTabs)] };
@@ -199,6 +201,18 @@ describe("AgentCursorBrowserPort", () => {
       expect.objectContaining({ pathId: "agentcursor/chrome", observations: ["screenshot", "dom"], visual: true, uploads: false, downloads: false }),
     ]);
     value.client.available = false;
+    await expect(value.port.capabilities()).resolves.toEqual([]);
+  });
+
+  it("keeps existing-session tools discoverable at exact full capacity but closes on other unavailability", async () => {
+    const value = port();
+    value.client.available = false;
+    value.client.sessionCapacity = { current: 2, limit: 2, available: 0 };
+    await expect(value.port.capabilities()).resolves.toEqual([expect.objectContaining({ pathId: "agentcursor/chrome" })]);
+    value.client.displayAvailable = false;
+    await expect(value.port.capabilities()).resolves.toEqual([]);
+    value.client.displayAvailable = true;
+    value.client.sessionCapacity = { current: 2, limit: 2, available: 1 };
     await expect(value.port.capabilities()).resolves.toEqual([]);
   });
 

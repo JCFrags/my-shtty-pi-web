@@ -65,7 +65,8 @@ export class AgentCursorBrowserPort implements BrowserDaemonPort {
       const result = record(await this.client.request(healthActor(), operationId("capabilities"), { kind: "capabilities.get" }, signal));
       await this.destinationAuthority.assertReady(signal);
       const expectedBinding = this.destinationAuthority.egressBindingId;
-      return result.available === true && expectedBinding !== undefined && result.egressBindingId === expectedBinding ? [PATH] : [];
+      const operational = result.available === true || capacityOnlyUnavailable(result);
+      return operational && expectedBinding !== undefined && result.egressBindingId === expectedBinding ? [PATH] : [];
     } catch (error) { if (signal?.aborted) throw error; return []; }
   }
 
@@ -341,6 +342,25 @@ function sameOwner(binding: Pick<SessionBinding, "principalId" | "agentId">, act
 function notFound(): BrowserPortError { return new BrowserPortError("not-found", "browser session or tab was not found", 404); }
 function invalid(): BrowserPortError { return new BrowserPortError("backend-failure", "browser service returned an invalid result", 502); }
 function mapClientError(error: unknown): BrowserPortError { if (error instanceof BrowserPortError) return error; if (error instanceof BrowserdClientError) { const status = error.code === "INVALID_REQUEST" ? 400 : error.code.includes("NOT_FOUND") || error.code === "ARTIFACT_NOT_FOUND" ? 404 : error.code.includes("STALE") || error.code === "OPERATION_CONFLICT" || error.code === "DOCUMENT_CHANGED" || error.code === "VIEWPORT_CHANGED" || error.code === "CONTROL_EPOCH_STALE" || error.code === "BROWSER_INSTANCE_REPLACED" ? 409 : error.code === "OPERATION_CANCELLED" ? 499 : error.code === "CAPABILITY_UNAVAILABLE" || error.code === "LIMIT_EXCEEDED" ? 503 : 502; return new BrowserPortError(error.code, error.message, status, error.retryable); } if (error instanceof DOMException && error.name === "AbortError") return new BrowserPortError("cancelled", "browser operation was cancelled", 499); return new BrowserPortError("backend-failure", "browser service request failed", 502, true); }
+function capacityOnlyUnavailable(value: Record<string, unknown>): boolean {
+  const capacity = value.sessionCapacity;
+  return value.available === false
+    && value.headed === true
+    && value.screenshotFirst === true
+    && value.domFallback === true
+    && value.virtualMouse === true
+    && value.osMouse === false
+    && value.executableAvailable === true
+    && value.displayAvailable === true
+    && value.profileRootUsable === true
+    && value.egressConfigured === true
+    && value.runtimeState === "open"
+    && isRecord(capacity)
+    && Number.isInteger(capacity.current)
+    && Number.isInteger(capacity.limit)
+    && capacity.current === capacity.limit
+    && capacity.available === 0;
+}
 function record(value: unknown): Record<string, unknown> { if (!isRecord(value)) throw invalid(); return value; }
 function array(value: unknown): readonly unknown[] { if (!Array.isArray(value)) throw invalid(); return value; }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
