@@ -76,8 +76,6 @@ jobs:
         run: uv run pytest tests/reader tests/docling benchmarks/extraction/tests
       - name: Deterministic extraction fixtures
         run: uv run python benchmarks/extraction/generate_fixtures.py --check
-      - name: Extraction benchmark contract
-        run: uv run python benchmarks/extraction/run.py
 
   extraction-contract:
     name: Deterministic extraction contract
@@ -145,11 +143,15 @@ jobs:
     container: fedora:44
     timeout-minutes: 60
     steps:
+      # Fedora's base container has no Git, so checkout would otherwise use a
+      # source archive without the .git identity required by the release gate.
+      - name: Install Git for identity-preserving checkout
+        run: dnf install -y git
       - uses: actions/checkout@v4
       - name: Install Fedora release-build prerequisites
         run: >-
           dnf install -y
-          gcc gcc-c++ make pkgconf-pkg-config git tar rpm-build rustup
+          gcc gcc-c++ make pkgconf-pkg-config tar rpm-build rustup
           openssl-devel webkit2gtk4.1-devel libappindicator-gtk3-devel
           librsvg2-devel libxdo-devel gtk3-devel glib2-devel cairo-devel
           pango-devel gdk-pixbuf2-devel
