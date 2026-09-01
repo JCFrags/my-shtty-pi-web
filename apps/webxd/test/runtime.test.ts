@@ -377,12 +377,17 @@ describe("actual WebX Unix runtime", () => {
       cleanupStageForTest: (stage, attempt) => { if (stage === "socket" && attempt === 1) throw new Error("injected socket cleanup failure"); },
     });
     await oldRuntime.start();
+    const ownerPath = `${webxPath}.owner`;
+    const firstOwner = await readFile(ownerPath, "utf8");
+    expect((await stat(ownerPath)).mode & 0o777).toBe(0o600);
     cleanup.push(async () => oldRuntime.stop().catch(() => undefined));
     await expect(oldRuntime.stop()).rejects.toBeInstanceOf(AggregateError);
     await expect(stat(webxPath)).rejects.toMatchObject({ code: "ENOENT" });
 
     const replacement = new WebxdRuntime({ socketPath: webxPath, browserSocketPath: join(directory, "unused-new-browserd.sock"), authenticateActor: sameUserPiActorAuthenticator });
     await replacement.start();
+    expect(await readFile(ownerPath, "utf8")).not.toBe(firstOwner);
+    expect((await stat(ownerPath)).mode & 0o777).toBe(0o600);
     cleanup.push(async () => replacement.stop().catch(() => undefined));
     const replacementIdentity = await stat(webxPath);
     await oldRuntime.stop();
@@ -393,6 +398,7 @@ describe("actual WebX Unix runtime", () => {
     client.destroy();
     await replacement.stop();
     await expect(stat(webxPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(ownerPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("refuses actual Unix browser URL requests before Browserd dispatch", async () => {

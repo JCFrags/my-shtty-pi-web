@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { chmod, lstat, unlink } from "node:fs/promises";
+import { chmod, lstat, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import process, { pid } from "node:process";
 import type { TransportRequest, TransportResponse } from "../../../packages/sdk/src/index.js";
@@ -82,6 +82,7 @@ export class WebxdRuntime {
   #stopPromise?: Promise<void>;
   #stopAttempt = 0;
   #socketIdentity?: SocketIdentity;
+  readonly #socketOwnerId = randomBytes(32).toString("base64url");
   #cleanupState: CleanupState = { clients: false, server: false, bindings: false, workspace: false, browser: false, socket: false };
   #testResponseDropped = false;
 
@@ -156,11 +157,13 @@ export class WebxdRuntime {
     this.#socketIdentity = { dev: info.dev, ino: info.ino };
     this.#cleanupState = { clients: false, server: false, bindings: false, workspace: false, browser: false, socket: false };
     this.#server = server;
-    try { await this.#workspace?.start(); }
-    catch (error) {
+    try {
+      await publishSocketOwner(this.options.socketPath, this.#socketOwnerId);
+      await this.#workspace?.start();
+    } catch (error) {
       await closeServer(server).catch(() => undefined);
       this.#server = undefined;
-      await unlinkOwnedSocket(this.options.socketPath, this.#socketIdentity).catch(() => undefined);
+      await unlinkOwnedSocket(this.options.socketPath, this.#socketIdentity, this.#socketOwnerId).catch(() => undefined);
       this.#socketIdentity = undefined;
       throw error;
     }
@@ -204,7 +207,7 @@ export class WebxdRuntime {
     await this.cleanupStage("bindings", attempt, async () => { this.#bindings.clear(); }, failures);
     await this.cleanupStage("workspace", attempt, async () => { await this.#workspace?.stop(); }, failures);
     await this.cleanupStage("browser", attempt, async () => { await this.#browser.shutdown(); }, failures);
-    await this.cleanupStage("socket", attempt, async () => { await unlinkOwnedSocket(this.options.socketPath, this.#socketIdentity); }, failures);
+    await this.cleanupStage("socket", attempt, async () => { await unlinkOwnedSocket(this.options.socketPath, this.#socketIdentity, this.#socketOwnerId); }, failures);
     if (failures.length > 0) throw new AggregateError(failures, "WebX runtime shutdown cleanup failed.");
   }
 
@@ -537,12 +540,29 @@ async function prepareSocket(path: string): Promise<void> {
   } catch (error) { if (!isMissing(error)) throw error; }
 }
 function closeServer(server: Server): Promise<void> { if (!server.listening) return Promise.resolve(); return new Promise((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error))); }
-async function unlinkOwnedSocket(path: string, expected: SocketIdentity | undefined): Promise<void> {
+async function publishSocketOwner(path: string, ownerId: string): Promise<void> {
+  const marker = `${path}.owner`;
+  const temporary = `${marker}.${pid}.${ownerId}`;
+  await writeFile(temporary, `${ownerId}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+  try { await rename(temporary, marker); }
+  catch (error) { await unlink(temporary).catch(() => undefined); throw error; }
+}
+async function readSocketOwner(path: string): Promise<string | undefined> {
+  try { return (await readFile(`${path}.owner`, "utf8")).trim(); }
+  catch (error) { if (isMissing(error)) return undefined; throw error; }
+}
+async function unlinkOwnedSocket(path: string, expected: SocketIdentity | undefined, ownerId: string): Promise<void> {
+  if (expected === undefined || await readSocketOwner(path) !== ownerId) return;
   const current = await lstat(path).catch((error: unknown) => { if (isMissing(error)) return undefined; throw error; });
-  if (current === undefined || expected === undefined) return;
+  if (current === undefined) {
+    if (await readSocketOwner(path) === ownerId) await unlink(`${path}.owner`).catch((error: unknown) => { if (!isMissing(error)) throw error; });
+    return;
+  }
   if (current.dev !== expected.dev || current.ino !== expected.ino) return;
   if (!current.isSocket()) throw new Error("Owned WebX endpoint changed type during cleanup");
+  if (await readSocketOwner(path) !== ownerId) return;
   await unlink(path).catch((error: unknown) => { if (!isMissing(error)) throw error; });
+  if (await readSocketOwner(path) === ownerId) await unlink(`${path}.owner`).catch((error: unknown) => { if (!isMissing(error)) throw error; });
 }
 function isMissing(error: unknown): boolean { return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "ENOENT"; }
 function boundedInteger(value: number, minimum: number, maximum: number, name: string): number { if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw new Error(`${name} bound is invalid`); return value; }
