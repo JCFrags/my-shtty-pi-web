@@ -7,7 +7,6 @@ import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, re
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { build as esbuild } from "esbuild";
 
 const releaseFile = fileURLToPath(import.meta.url);
 const sourceRoot = resolve(dirname(releaseFile), "..");
@@ -44,6 +43,13 @@ function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex")
 /** @param {string} source */
 function withFixedPythonInterpreter(source) {
   return `#!/usr/bin/python3\n${source.replace(/^#![^\r\n]*(?:\r?\n|$)/u, "")}`;
+}
+/**
+ * @param {Array<string | undefined>} values
+ * @returns {string[]}
+ */
+function definedPaths(values) {
+  return /** @type {string[]} */ (values.filter((path) => typeof path === "string" && path !== ""));
 }
 /**
  * @param {string} file
@@ -310,6 +316,7 @@ async function writeRustLicenses(releaseRoot) {
  * @returns {Promise<import("esbuild").Metafile[]>}
  */
 async function buildNodeBundles(releaseRoot) {
+  const { build: esbuild } = await import("esbuild");
   const entries = [
     { input: "apps/browserd/src/main.ts", output: "bin/pi-web-browserd.mjs", external: [] },
     { input: "apps/webxd/src/main.ts", output: "bin/pi-web-webxd.mjs", external: [] },
@@ -328,15 +335,27 @@ async function buildNodeBundles(releaseRoot) {
  * @param {string} releaseRoot
  * @param {string} buildRoot
  * @param {string} sourceDateEpoch
+ * @param {string} gitSha
  */
-async function buildTauri(releaseRoot, buildRoot, sourceDateEpoch) {
-  const frontend = join(buildRoot, "workspace-frontend");
+async function buildTauri(releaseRoot, buildRoot, sourceDateEpoch, gitSha) {
+  const sourceArchive = join(buildRoot, "browser-source.tar");
+  const sourceSnapshot = join(buildRoot, "source");
+  await mkdir(sourceSnapshot, { recursive: true });
+  command("git", ["archive", "--format=tar", `--output=${sourceArchive}`, gitSha, "components/browser"]);
+  command("tar", ["-xf", sourceArchive, "-C", sourceSnapshot], { cwd: tmpdir() });
+  await rm(sourceArchive);
+  const browserSource = join(sourceSnapshot, "components/browser");
+  const workspaceSource = join(browserSource, "apps/workspace");
+  const frontend = join(workspaceSource, "dist");
   const cargoTarget = join(buildRoot, "cargo-target");
   await mkdir(frontend, { recursive: true });
   command("pnpm", ["--filter", "@pi-web/workspace", "exec", "vite", "build", "--outDir", frontend, "--emptyOutDir"]);
   const override = join(buildRoot, "tauri-release.json");
-  await writeFile(override, `${JSON.stringify({ build: { beforeBuildCommand: "", frontendDist: frontend }, bundle: { active: true, targets: ["rpm"] } }, null, 2)}\n`);
-  command("pnpm", ["--filter", "@pi-web/workspace", "exec", "tauri", "build", "--config", override, "--bundles", "rpm"], { env: { CARGO_TARGET_DIR: cargoTarget, SOURCE_DATE_EPOCH: sourceDateEpoch } });
+  await writeFile(override, `${JSON.stringify({ build: { beforeBuildCommand: "" }, bundle: { active: true, targets: ["rpm"] } }, null, 2)}\n`);
+  const tauriCli = await realpath(join(sourceRoot, "components/browser/apps/workspace/node_modules/@tauri-apps/cli/tauri.js"));
+  const remapRoots = definedPaths([buildRoot, sourceRoot, process.env.CARGO_HOME, process.env.RUSTUP_HOME, process.env.HOME]);
+  const encodedRustFlags = [...new Set(remapRoots)].map((path, index) => `--remap-path-prefix=${path}=/usr/src/pi-web-${index}`).join("\x1f");
+  command(process.execPath, [tauriCli, "build", "--config", override, "--bundles", "rpm"], { cwd: workspaceSource, env: { CARGO_TARGET_DIR: cargoTarget, CARGO_ENCODED_RUSTFLAGS: encodedRustFlags, RUSTFLAGS: "", SOURCE_DATE_EPOCH: sourceDateEpoch } });
   const binary = join(cargoTarget, "release/pi-browser-workspace");
   if (!(await lstat(binary)).isFile()) fail("Tauri release binary was not produced");
   await copyFile(binary, join(releaseRoot, "bin/pi-browser-workspace"));
@@ -456,7 +475,7 @@ async function buildRelease(options) {
     ]);
     await writeFile(join(releaseRoot, "share/pi-webx/package.json"), `${JSON.stringify({ name: "@webx/pi-webx-release", version: "0.1.0", private: true, type: "module", peerDependencies: { "@earendil-works/pi-ai": "*", "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-tui": "*", typebox: "*" }, pi: { extensions: ["./extension.mjs"], skills: ["./skills/webx"] } }, null, 2)}\n`);
     await writeRustLicenses(releaseRoot);
-    const tauri = await buildTauri(releaseRoot, buildRoot, commitEpoch);
+    const tauri = await buildTauri(releaseRoot, buildRoot, commitEpoch, gitSha);
     const packageLockSha256 = sha256(await readFile(join(sourceRoot, "pnpm-lock.yaml")));
     if (packageLockSha256 !== initialLockSha256) fail("pnpm lockfile changed during release dependency resolution");
     const agentCursorSourceSha256 = /Vendored source SHA-256: `([0-9a-f]{64})`/u.exec(await readFile(join(sourceRoot, "packages/browser-runtime/third_party/agentcursor/UPSTREAM.md"), "utf8"))?.[1];
@@ -480,10 +499,11 @@ async function buildRelease(options) {
     await writeChecksums(releaseRoot);
     await chmod(join(releaseRoot, "checksums.json"), 0o444);
     await chmod(releaseRoot, 0o555);
-    await verifyRelease(releaseRoot, expectedSha);
+    const forbiddenBuildPaths = definedPaths([sourceRoot, stageParent, buildRoot, process.env.CARGO_HOME, process.env.RUSTUP_HOME, process.env.HOME]);
+    await verifyRelease(releaseRoot, expectedSha, forbiddenBuildPaths);
     await publishImmutableRelease(releaseRoot, finalRoot);
     published = true;
-    const result = await verifyRelease(finalRoot, expectedSha);
+    const result = await verifyRelease(finalRoot, expectedSha, forbiddenBuildPaths);
     await removeOwnedTree(stageParent);
     process.stdout.write(`${JSON.stringify({ ok: true, releaseRoot: finalRoot, releaseId, manifestSha256: result.manifestSha256 }, null, 2)}\n`);
     return finalRoot;
@@ -496,8 +516,9 @@ async function buildRelease(options) {
 /**
  * @param {string} releaseRootValue
  * @param {string} [expectedSha]
+ * @param {string[]} [forbiddenPaths]
  */
-async function verifyRelease(releaseRootValue, expectedSha) {
+async function verifyRelease(releaseRootValue, expectedSha, forbiddenPaths = [sourceRoot]) {
   const releaseRoot = await resolvedOutsideSource(releaseRootValue, "release root");
   const rootStats = await lstat(releaseRoot);
   if (!rootStats.isDirectory() || (rootStats.mode & 0o222) !== 0) fail("release root is not an immutable directory");
@@ -528,8 +549,11 @@ async function verifyRelease(releaseRootValue, expectedSha) {
   command(process.execPath, ["--check", join(releaseRoot, "bin/pi-web-browserd.mjs")], { cwd: tmpdir() });
   command(process.execPath, ["--check", join(releaseRoot, "bin/pi-web-webxd.mjs")], { cwd: tmpdir() });
   command(process.execPath, ["--check", join(releaseRoot, "share/pi-webx/extension.mjs")], { cwd: tmpdir() });
-  const sourceMarker = Buffer.from(sourceRoot);
-  for (const path of await regularFiles(releaseRoot)) if ((await readFile(path)).includes(sourceMarker)) fail(`release contains an absolute source-checkout path: ${relative(releaseRoot, path)}`);
+  for (const forbiddenPath of new Set(forbiddenPaths)) {
+    if (!isAbsolute(forbiddenPath)) fail("release forbidden-path marker must be absolute");
+    const marker = Buffer.from(forbiddenPath);
+    for (const path of await regularFiles(releaseRoot)) if ((await readFile(path)).includes(marker)) fail(`release contains an absolute build path in ${relative(releaseRoot, path)}`);
+  }
   const proxy = await readFile(join(releaseRoot, "bin/pi-web-egress-proxy"), "utf8");
   if (!proxy.startsWith("#!/usr/bin/python3\n")) fail("release proxy interpreter is not fixed");
   command("/usr/bin/python3", ["-c", "import pathlib,sys; compile(pathlib.Path(sys.argv[1]).read_text(), sys.argv[1], 'exec')", join(releaseRoot, "bin/pi-web-egress-proxy")], { cwd: tmpdir() });

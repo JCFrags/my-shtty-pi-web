@@ -10,7 +10,8 @@ import { releaseInternals } from "./phase4a-release.mjs";
 const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const gitSha = "a".repeat(40);
 
-async function syntheticRelease() {
+/** @param {string} [forbiddenMarker] */
+async function syntheticRelease(forbiddenMarker) {
   const temporaryRoot = await mkdtemp(join(tmpdir(), "pi-web-release-test-"));
   const releaseRoot = join(temporaryRoot, `phase4a-${gitSha}`);
   await Promise.all([
@@ -18,7 +19,7 @@ async function syntheticRelease() {
     mkdir(join(releaseRoot, "share/pi-webx"), { recursive: true }),
   ]);
   await Promise.all([
-    writeFile(join(releaseRoot, "bin/pi-web-browserd.mjs"), "export {};\n"),
+    writeFile(join(releaseRoot, "bin/pi-web-browserd.mjs"), `${forbiddenMarker === undefined ? "" : `// ${forbiddenMarker}\n`}export {};\n`),
     writeFile(join(releaseRoot, "bin/pi-web-webxd.mjs"), "export {};\n"),
     writeFile(join(releaseRoot, "bin/pi-web-egress-proxy"), "#!/usr/bin/python3\npass\n"),
     writeFile(join(releaseRoot, "share/pi-webx/extension.mjs"), "export default function extension() {}\n"),
@@ -119,6 +120,16 @@ test("detached verification accepts a complete immutable inventory and detects t
     await writeFile(browserd, "export const tampered = true;\n");
     await chmod(browserd, 0o555);
     await assert.rejects(releaseInternals.verifyRelease(releaseRoot, gitSha), /release checksum failed/u);
+  } finally {
+    await releaseInternals.removeOwnedTree(temporaryRoot);
+  }
+});
+
+test("release verification rejects an injected absolute build path", async () => {
+  const forbiddenMarker = "/private/build-machine/cargo-home";
+  const { temporaryRoot, releaseRoot } = await syntheticRelease(forbiddenMarker);
+  try {
+    await assert.rejects(releaseInternals.verifyRelease(releaseRoot, gitSha, [forbiddenMarker]), /absolute build path/u);
   } finally {
     await releaseInternals.removeOwnedTree(temporaryRoot);
   }
