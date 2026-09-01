@@ -29,6 +29,7 @@ test("the installed default is exact, closed, and remains legacy", async () => {
   assert.equal(parsed.backend, "legacy");
   assert.equal(parsed.release.pointer, "current");
   assert.equal(parsed.workspace.executable, "release");
+  assert.equal(parsed.resources.maxBrowserSessions, 2, "installed capacity must stay within the qualified two-session evidence");
   assert(Object.isFrozen(parsed));
   assert(Object.isFrozen(parsed.resources));
 });
@@ -55,11 +56,17 @@ test("service environment contains only reviewed fixed choices and no secrets", 
   const parsed = parseInstalledConfig(candidate((value) => {
     value.backend = "agentcursor";
     value.browser.product = "chromium";
+    value.proxy.port = 19_001;
     value.workspace.diagnosticMode = true;
   }));
   const values = serviceEnvironment(parsed, { releaseRoot: "/home/test/.local/share/pi-web/current", runtimeRoot: "/run/user/1000" });
   assert.equal(values.WEBX_BROWSER_BACKEND, "agentcursor");
   assert.equal(values.BROWSERD_CHROME_BIN, "/usr/bin/chromium-browser");
+  assert.equal(values.WEBX_EGRESS_PROXY, "http://127.0.0.1:19001/");
+  assert.equal(values.BROWSERD_EGRESS_PROXY, "http://127.0.0.1:19001/");
+  assert.equal(values.PI_WEB_EGRESS_HOST, "127.0.0.1");
+  assert.equal(values.PI_WEB_EGRESS_PORT, "19001");
+  assert.equal(values.PYTHONDONTWRITEBYTECODE, "1");
   assert.equal(values.BROWSERD_PROFILE_ROOT, "/run/user/1000/pi-web-agentcursor/profiles");
   assert.equal(values.PI_WEB_WORKSPACE_BIN, "/home/test/.local/share/pi-web/current/bin/pi-browser-workspace");
   assert.equal(values.PI_WEB_DIAGNOSTIC_MODE, "1");
@@ -91,6 +98,8 @@ test("candidate unit templates are fixed, independent, and render without source
     assert.match(unit, /TimeoutStartSec=30s/u);
     assert.match(unit, /TimeoutStopSec=30s/u);
   }
+  assert.match(rendered.get("pi-web-agentcursor-egress-proxy.service"), /ProtectHome=read-only/u);
+  assert.doesNotMatch(rendered.get("pi-web-agentcursor-egress-proxy.service"), /ProtectHome=yes/u);
   assert.match(rendered.get("pi-web-agentcursor-browserd.service"), /Wants=pi-web-agentcursor-egress-proxy\.service/u);
   assert.doesNotMatch(rendered.get("pi-web-agentcursor-browserd.service"), /Requires=/u);
   assert.match(rendered.get("webxd.service"), /Wants=pi-web-reader\.service pi-web-searxng\.service pi-web-agentcursor-browserd\.service/u);

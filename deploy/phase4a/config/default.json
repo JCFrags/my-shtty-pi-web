@@ -19,7 +19,7 @@
     "port": 8877
   },
   "resources": {
-    "maxBrowserSessions": 4,
+    "maxBrowserSessions": 2,
     "perSessionSoftPssMiB": 1024,
     "perSessionHardPssMiB": 1280,
     "globalChromePssMiB": 4096,

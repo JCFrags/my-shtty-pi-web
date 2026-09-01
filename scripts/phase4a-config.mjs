@@ -18,7 +18,7 @@ export const DEFAULT_INSTALLED_CONFIG = deepFreeze({
   },
   proxy: { host: "127.0.0.1", port: 8_877 },
   resources: {
-    maxBrowserSessions: 4,
+    maxBrowserSessions: 2,
     perSessionSoftPssMiB: 1_024,
     perSessionHardPssMiB: 1_280,
     globalChromePssMiB: 4_096,
@@ -110,6 +110,9 @@ export function serviceEnvironment(config, paths) {
     WEBX_BROWSER_BACKEND: config.backend,
     WEBX_EGRESS_PROXY: proxy,
     BROWSERD_EGRESS_PROXY: proxy,
+    PI_WEB_EGRESS_HOST: config.proxy.host,
+    PI_WEB_EGRESS_PORT: String(config.proxy.port),
+    PYTHONDONTWRITEBYTECODE: "1",
     BROWSERD_RUNTIME_DIR: `${paths.runtimeRoot}/pi-browserd`,
     BROWSERD_PROFILE_ROOT: `${paths.runtimeRoot}/pi-web-agentcursor/profiles`,
     BROWSERD_SCREENSHOT_OBSERVATION_TTL_MS: String(config.browser.screenshotObservationTtlMs),
