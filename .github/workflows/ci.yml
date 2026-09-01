@@ -139,6 +139,37 @@ jobs:
           cargo test --workspace --locked
         working-directory: components/browser
 
+  release-reproducibility:
+    name: Immutable Fedora release reproducibility
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Fedora release-build prerequisites
+        run: >-
+          dnf install -y
+          gcc gcc-c++ make pkgconf-pkg-config git tar rpm-build rustup
+          openssl-devel webkit2gtk4.1-devel libappindicator-gtk3-devel
+          librsvg2-devel libxdo-devel gtk3-devel glib2-devel cairo-devel
+          pango-devel gdk-pixbuf2-devel
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install pinned Rust and pnpm
+        run: |
+          rustup-init -y --no-modify-path --profile minimal --default-toolchain 1.88.0
+          npm install --global pnpm@10.13.1
+      - name: Install locked Node dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build and compare two immutable Fedora releases
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          pnpm release:reproducibility \
+            --work-root "$RUNNER_TEMP/pi-web-release-repro-$GITHUB_SHA" \
+            --expected-sha "$GITHUB_SHA" \
+            --tested-browser not-tested-in-ci
+
   installer-profiles:
     name: Installer and profile validation
     runs-on: ubuntu-latest
