@@ -216,8 +216,7 @@ def generated(prefix: Path, config: Path, candidate: Path, profile: dict[str, An
         "pi-web-egress-proxy.service": f"""[Unit]\nDescription=Pi Web connection-bound egress proxy\nAfter=network-online.target\n[Service]\nExecStart=/usr/bin/python3 {stable}/components/browser/scripts/secure_egress_proxy.py\nEnvironment=PI_WEB_EGRESS_HOST=127.0.0.1\nEnvironment=PI_WEB_EGRESS_PORT=8877\nEnvironment=PYTHONDONTWRITEBYTECODE=1\nRestart=on-failure\n[Install]\nWantedBy=default.target\n""",
     }
     workspace = f'exec "{stable}/bin/pi-browser-workspace" "$@"' if browser_enabled else "echo 'pi-web: workspace requires the browser profile' >&2; exit 3"
-    status_units = " ".join(unit.removesuffix(".service") for unit in profile["units"])
-    cli = f"""#!/usr/bin/env bash\nset -euo pipefail\ncase \"${{1:-}}\" in\n doctor) shift; PI_WEB_INSTALL_ROOT=\"{stable}\" exec /usr/bin/node \"{stable}/scripts/pi-web-doctor.mjs\" \"$@\" ;;\n workspace) shift; {workspace} ;;\n audit) shift; exec /usr/bin/node \"{stable}/scripts/pi-web-audit.mjs\" \"$@\" ;;\n status) exec systemctl --user status {status_units} ;;\n *) echo 'usage: pi-web {{doctor|workspace|audit|status}}' >&2; exit 2 ;;\nesac\n"""
+    cli = f"""#!/usr/bin/env bash\nset -euo pipefail\ncase \"${{1:-}}\" in\n doctor) shift; PI_WEB_INSTALL_ROOT=\"{stable}\" exec /usr/bin/node \"{stable}/scripts/pi-web-doctor.mjs\" \"$@\" ;;\n workspace) shift; {workspace} ;;\n audit) shift; exec /usr/bin/node \"{stable}/scripts/pi-web-audit.mjs\" \"$@\" ;;\n status) shift; PI_WEB_INSTALL_ROOT=\"{stable}\" exec /usr/bin/node \"{stable}/scripts/pi-web-doctor.mjs\" --status \"$@\" ;;\n *) echo 'usage: pi-web {{doctor|workspace|audit|status}}' >&2; exit 2 ;;\nesac\n"""
     values: dict[Path, dict[str, Any]] = {
         stable: {"kind": "symlink", "target": str(candidate)},
         Path.home() / ".pi/agent/extensions/pi-web": {"kind": "symlink", "target": str(stable / "apps/pi-webx")},

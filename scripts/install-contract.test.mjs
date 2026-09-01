@@ -24,7 +24,9 @@ test("Fedora installer stages a reviewed candidate before live cutover", async (
   assert.doesNotMatch(installer, /systemctl --user (?:enable|restart)/);
 });
 
-test("generated pi-web doctor routes to the WebX authority doctor", async () => {
+test("generated pi-web doctor and status use fixed classified diagnostics", async () => {
   const cutover = await readFile(new URL("./pi-web-cutover", import.meta.url), "utf8");
   assert.match(cutover, /doctor\) shift; PI_WEB_INSTALL_ROOT=.*pi-web-doctor\.mjs/);
+  assert.match(cutover, /status\) shift; PI_WEB_INSTALL_ROOT=.*pi-web-doctor\.mjs.*--status/);
+  assert.doesNotMatch(cutover, /status\) exec systemctl/u);
 });

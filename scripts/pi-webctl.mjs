@@ -542,7 +542,7 @@ async function installReleaseUnlocked(paths, command, releaseSource, expectedSha
     return { ok: true, releaseId: staged.releaseId, gitSha: staged.gitSha, backend: parsed.backend, previousReleaseId: nextPreviousReleaseId ?? null };
   } catch (error) {
     await restoreActivation(paths, command, before).catch(() => undefined);
-    await atomicJson(paths.failurePath, { schemaVersion: 1, failedReleaseId: staged.releaseId, error: error instanceof Error ? error.message.slice(0, 2_000) : "activation failed", releaseRetained: true });
+    await atomicJson(paths.failurePath, { schemaVersion: 1, failedReleaseId: staged.releaseId, code: "ACTIVATION_FAILED", summary: "Candidate activation failed before commit.", releaseRetained: true });
     throw error;
   }
 }
@@ -972,6 +972,15 @@ async function detectReviewedBrowser(selection = "auto") {
   return undefined;
 }
 
+/** @param {unknown} value @returns {{product: "Google Chrome" | "Chromium", version: string} | undefined} */
+function reviewedBrowserIdentity(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const product = value.product;
+  const version = value.version;
+  if ((product !== "Google Chrome" && product !== "Chromium") || typeof version !== "string" || !/^[0-9]{1,4}(?:\.[0-9]{1,6}){1,3}$/u.test(version)) return undefined;
+  return { product, version };
+}
+
 /** @param {string} text @param {string} name */
 function osReleaseValue(text, name) {
   const match = new RegExp(`^${name}=(?:"([^"]*)"|'([^']*)'|([^\\s#]+))$`, "mu").exec(text);
@@ -1081,7 +1090,7 @@ export async function installationPreflight(paths, command, releaseSource, expec
   missingPackages = [...missingPackages].sort();
   findings.push(preflightFinding("packages", missingPackages.length === 0 ? "pass" : "error", missingPackages.length === 0 ? "RUNTIME_PACKAGES_PRESENT" : "RUNTIME_PACKAGES_MISSING", missingPackages.length === 0 ? "All reviewed Fedora runtime packages are installed." : `Missing reviewed Fedora packages: ${missingPackages.join(", ")}.`));
 
-  const browser = probes.browser ?? await detectReviewedBrowser(prospectiveConfig.browser.product);
+  const browser = reviewedBrowserIdentity(probes.browser ?? await detectReviewedBrowser(prospectiveConfig.browser.product));
   findings.push(preflightFinding("browser", browser === undefined ? "error" : "pass", browser === undefined ? "BROWSER_UNAVAILABLE" : "BROWSER_REVIEWED", browser === undefined ? "Fedora Chromium or an already installed reviewed Google Chrome is required." : `${browser.product} ${browser.version} is available.`));
 
   let portState = probes.portState;
@@ -1266,8 +1275,9 @@ export async function doctorReport(paths, command, environment = process.env, pr
   try {
     let browser = await probes.browser?.();
     if (browser === undefined) browser = await detectReviewedBrowser(config?.browser?.product ?? "auto");
-    if (browser === undefined) throw new Error("browser unavailable");
-    findings.push(doctorFinding("browser", "pass", "BROWSER_REVIEWED", `${browser.product} ${browser.version} is the reviewed executable.`));
+    const reviewed = reviewedBrowserIdentity(browser);
+    if (reviewed === undefined) throw new Error("browser unavailable");
+    findings.push(doctorFinding("browser", "pass", "BROWSER_REVIEWED", `${reviewed.product} ${reviewed.version} is the reviewed executable.`));
   } catch { findings.push(doctorFinding("browser", "unavailable", "BROWSER_UNAVAILABLE", "No reviewed browser executable is available.")); }
 
   if (config?.backend !== "agentcursor") findings.push(doctorFinding("egress", "not-tested", "EGRESS_NOT_SELECTED", "Candidate egress is not selected by the legacy backend."));
@@ -1367,8 +1377,9 @@ async function main() {
 if (process.argv[1]) {
   let invoked;
   try { invoked = await realpath(process.argv[1]); } catch { invoked = undefined; }
-  if (invoked && import.meta.url === pathToFileURL(invoked).href) main().catch((error) => {
-    process.stderr.write(`pi-webctl: ${error instanceof Error ? error.message : String(error)}\n`);
+  if (invoked && import.meta.url === pathToFileURL(invoked).href) main().catch(() => {
+    if (process.argv.includes("--json")) process.stdout.write(`${JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "PI_WEBCTL_FAILED", summary: "The requested operation failed." } }, null, 2)}\n`);
+    else process.stderr.write("pi-webctl: PI_WEBCTL_FAILED: The requested operation failed.\n");
     process.exitCode = 1;
   });
 }

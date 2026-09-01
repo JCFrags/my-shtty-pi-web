@@ -3,6 +3,7 @@ import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import process from "node:process";
+import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { storagePolicyReport } from "../packages/policy/storage.mjs";
 
@@ -73,26 +74,42 @@ export async function probeWebx(socketPath, ownerId = `pi-web-doctor-${process.p
   }
 }
 
+const LEGACY_UNITS = Object.freeze(["webxd.service", "pi-web-reader.service", "pi-web-searxng.service", "pi-browserd.service", "pi-web-crawl.service", "pi-web-docling.service", "pi-web-egress-proxy.service"]);
+
+function finding(category, status, code, summary) { return Object.freeze({ category, status, code, summary }); }
+
 export function doctorReport(catalog, profile = undefined) {
   const capabilities = Array.isArray(catalog.capabilities) ? catalog.capabilities : [];
-  const check = (id, required) => {
+  const capabilityFinding = (id, required) => {
     const capability = capabilities.find((item) => item?.id === id);
     const ok = capability?.enabled === true && capability?.healthy === true;
-    return {
-      name: id,
-      required,
-      ok,
-      detail: ok ? "healthy" : typeof capability?.reason === "string" ? capability.reason : "not enabled or unhealthy",
-    };
+    return finding(id, ok ? "pass" : required ? "error" : "warning", ok ? `${id.toUpperCase()}_HEALTHY` : `${id.toUpperCase()}_UNAVAILABLE`, ok ? `The ${id} capability is healthy.` : `The ${id} capability is unavailable.`);
   };
-  const checks = [
-    { name: "webxd", required: true, ok: true, detail: `API ${String(catalog.apiVersion ?? "unknown")}` },
-    check("search", true),
-    check("read", true),
-    check("browser", profile?.resolvedProfiles?.includes("browser") === true),
+  const browserRequired = profile?.resolvedProfiles?.includes("browser") === true;
+  const findings = [
+    finding("authority", "pass", "AUTHORITY_HEALTHY", "The WebX authority returned a bounded capability catalog."),
+    capabilityFinding("search", true),
+    capabilityFinding("read", true),
+    capabilityFinding("browser", browserRequired),
   ];
-  if (profile !== undefined) checks.push(...profileDoctorChecks(profile));
-  return { ok: checks.filter((item) => item.required).every((item) => item.ok), apiVersion: catalog.apiVersion, policy: storagePolicyReport(), checks };
+  if (profile !== undefined) {
+    for (const check of profileDoctorChecks(profile)) findings.push(finding(check.name, check.ok ? "pass" : check.required ? "error" : "warning", check.ok ? "CHECK_PASSED" : check.required ? "CHECK_FAILED" : "CHECK_OPTIONAL_UNAVAILABLE", check.ok ? "The reviewed check passed." : check.required ? "A required reviewed check failed." : "An optional reviewed check is unavailable."));
+  }
+  return { schemaVersion: 1, ok: findings.every((item) => item.status !== "error" && item.status !== "unavailable"), policy: storagePolicyReport(), findings };
+}
+
+export function serviceStatusReport(profile, command = "/usr/bin/systemctl") {
+  const selected = profile?.units;
+  if (!Array.isArray(selected) || selected.length === 0 || selected.some((unit) => typeof unit !== "string" || !LEGACY_UNITS.includes(unit)) || new Set(selected).size !== selected.length) {
+    return { schemaVersion: 1, ok: false, findings: [finding("services", "error", "SERVICE_PROFILE_INVALID", "The installed service profile is invalid.")] };
+  }
+  const findings = selected.map((unit) => {
+    const active = spawnSync(command, ["--user", "is-active", unit], { encoding: "utf8", timeout: 2_000, maxBuffer: 4_096 }).stdout.trim() === "active";
+    const enabledState = spawnSync(command, ["--user", "is-enabled", unit], { encoding: "utf8", timeout: 2_000, maxBuffer: 4_096 }).stdout.trim();
+    const enabled = enabledState === "enabled" || (unit === "pi-web-searxng.service" && ["static", "indirect", "disabled"].includes(enabledState));
+    return finding(unit, active && enabled ? "pass" : "unavailable", active && enabled ? "SERVICE_HEALTHY" : "SERVICE_UNAVAILABLE", active && enabled ? "The selected service is active and has its reviewed enablement state." : "A selected service is unavailable or has an unexpected enablement state.");
+  });
+  return { schemaVersion: 1, ok: findings.every((item) => item.status === "pass"), findings };
 }
 
 function commandAvailable(command, pathValue = process.env.PATH ?? "") {
@@ -122,7 +139,7 @@ export function documentAssetReadiness(directory = process.env.DOCLING_ARTIFACTS
     }
     return { manifestValidated: true, office: capabilities.includes("office"), scannedPdf: capabilities.includes("scanned-pdf"), detail: `validated ${manifest.files.length} declared model asset file(s)` };
   } catch (error) {
-    return unavailable(error?.code === "ENOENT" ? "model asset manifest is absent" : error instanceof Error ? error.message : String(error));
+    return unavailable(error?.code === "ENOENT" ? "model asset manifest is absent" : "model asset validation failed");
   }
 }
 
@@ -161,11 +178,12 @@ export function profileDoctorChecks(profile, root = process.env.PI_WEB_INSTALL_R
 export async function runDoctor(socketPath, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS, profile = undefined) {
   try {
     return doctorReport(await probeWebx(socketPath, undefined, timeoutMs), profile);
-  } catch (error) {
+  } catch {
     return {
+      schemaVersion: 1,
       ok: false,
       policy: storagePolicyReport(),
-      checks: [{ name: "webxd", required: true, ok: false, detail: error instanceof Error ? error.message : String(error) }],
+      findings: [finding("authority", "unavailable", "AUTHORITY_UNAVAILABLE", "The WebX authority is unavailable or returned a malformed response.")],
     };
   }
 }
@@ -178,31 +196,30 @@ function parseObject(value, name) {
 
 async function main() {
   const args = process.argv.slice(2);
-  if (args.some((item) => item !== "--json")) {
-    console.error("usage: pi-web doctor [--json]");
+  if (args.some((item) => item !== "--json" && item !== "--status") || args.filter((item) => item === "--json").length > 1 || args.filter((item) => item === "--status").length > 1) {
+    console.error("usage: pi-web doctor [--json] | pi-web status [--json]");
     process.exitCode = 2;
     return;
   }
   const runtimeDirectory = process.env.XDG_RUNTIME_DIR;
-  if (!runtimeDirectory) throw new Error("XDG_RUNTIME_DIR is required");
+  if (!runtimeDirectory) throw new Error("runtime unavailable");
   const profilePath = process.env.PI_WEB_PROFILE_MANIFEST ?? `${process.env.XDG_CONFIG_HOME ?? `${process.env.HOME}/.config`}/pi-web/installed-profile.json`;
   let profile;
   try {
     profile = JSON.parse(await readFile(profilePath, "utf8"));
-  } catch (error) {
-    if (process.env.PI_WEB_PROFILE_MANIFEST) throw new Error("cannot read installed profile", { cause: error });
+  } catch {
+    if (process.env.PI_WEB_PROFILE_MANIFEST) throw new Error("profile unavailable");
   }
-  const report = await runDoctor(process.env.WEBXD_SOCKET ?? `${runtimeDirectory}/pi-web/webxd.sock`, DEFAULT_PROBE_TIMEOUT_MS, profile);
+  const report = args.includes("--status") ? serviceStatusReport(profile) : await runDoctor(process.env.WEBXD_SOCKET ?? `${runtimeDirectory}/pi-web/webxd.sock`, DEFAULT_PROBE_TIMEOUT_MS, profile);
   if (args.includes("--json")) console.log(JSON.stringify(report, null, 2));
-  else {
-    for (const check of report.checks) console.log(`${check.ok ? "ok" : check.required ? "FAIL" : "optional"}\t${check.name}\t${check.detail}`);
-  }
+  else for (const item of report.findings) console.log(`${item.status.toUpperCase()}\t${item.category}\t${item.code}\t${item.summary}`);
   if (!report.ok) process.exitCode = 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-  main().catch((error) => {
-    console.error(error instanceof Error ? error.message : String(error));
+  main().catch(() => {
+    if (process.argv.includes("--json")) console.log(JSON.stringify({ schemaVersion: 1, ok: false, findings: [finding("doctor", "error", "DOCTOR_FAILED", "The diagnostic request failed.")] }, null, 2));
+    else console.error("ERROR\tdoctor\tDOCTOR_FAILED\tThe diagnostic request failed.");
     process.exitCode = 1;
   });
 }

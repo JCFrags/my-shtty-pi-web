@@ -206,6 +206,14 @@ test("preflight is non-mutating, closed, and reports one reviewed package comman
   await assert.rejects(lstat(paths.dataRoot), /ENOENT/u, "preflight does not create managed roots");
   assert.equal(await readFile(systemd.log, "utf8").catch(() => ""), "", "injected preflight does not invoke systemctl");
 
+  const hostileBrowser = await installationPreflight(paths, systemd.command, release.root, release.gitSha, manifestDigest, { ...environment, WAYLAND_DISPLAY: "wayland-0", DBUS_SESSION_BUS_ADDRESS: "unix:path=private" }, {
+    osRelease: "ID=fedora\nVERSION_ID=44\n", architecture: "x64", systemdAvailable: true,
+    diskAvailableBytes: 2_000_000_000, runtimeAvailableBytes: 4_000_000_000, nodeVersion: "24.18.0", pythonVersion: "Python 3.14.7",
+    missingPackages: [], browser: { product: "SECRET_BROWSER_PRODUCT", version: "151.0.0.0-SECRET_BROWSER_VERSION" }, portState: "free", serviceConflict: false, destinationConflict: false, runtimeState: "clean",
+  });
+  assert.equal(hostileBrowser.findings.find((item) => item.category === "browser")?.code, "BROWSER_UNAVAILABLE");
+  assert.doesNotMatch(JSON.stringify(hostileBrowser), /SECRET_BROWSER_PRODUCT|SECRET_BROWSER_VERSION/u);
+
   const blocked = await installationPreflight(paths, systemd.command, release.root, release.gitSha, manifestDigest, environment, {
     osRelease: "ID=fedora\nVERSION_ID=43\n", architecture: "x64", systemdAvailable: false,
     diskAvailableBytes: 1, runtimeAvailableBytes: 1, nodeVersion: "23.0.0", pythonVersion: "Python 3.12.0",
@@ -221,15 +229,20 @@ test("production CLI requires exact identity, rejects option channels, and class
   const { paths, systemd, releases, environment } = await fixture();
   const script = join(sourceRoot, "scripts/pi-webctl.mjs");
   const invoke = (arguments_) => spawnSync(process.execPath, [script, ...arguments_], { encoding: "utf8", env: { ...process.env, ...environment } });
-  const missingIdentity = invoke(["install", "--release", releases]);
-  assert.equal(missingIdentity.status, 1);
-  assert.match(missingIdentity.stderr, /install requires --release <immutable-release-root> --expected-sha/u);
-  const duplicate = invoke(["preflight", "--release", releases, "--release", releases]);
-  assert.equal(duplicate.status, 1);
-  assert.match(duplicate.stderr, /duplicate option: --release/u);
-  const commandChannel = invoke(["status", "--systemctl", systemd.command]);
-  assert.equal(commandChannel.status, 1);
-  assert.match(commandChannel.stderr, /unsupported option: --systemctl/u);
+  for (const failure of [
+    invoke(["install", "--release", releases]),
+    invoke(["preflight", "--release", releases, "--release", releases]),
+    invoke(["status", "--systemctl", systemd.command]),
+  ]) {
+    assert.equal(failure.status, 1);
+    assert.equal(failure.stdout, "");
+    assert.equal(failure.stderr, "pi-webctl: PI_WEBCTL_FAILED: The requested operation failed.\n");
+    assert.doesNotMatch(failure.stderr, new RegExp(releases.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+  }
+  const statusFailure = invoke(["status", "--json"]);
+  assert.equal(statusFailure.status, 1);
+  assert.equal(statusFailure.stderr, "");
+  assert.deepEqual(JSON.parse(statusFailure.stdout), { schemaVersion: 1, ok: false, error: { code: "PI_WEBCTL_FAILED", summary: "The requested operation failed." } });
 
   const release = await syntheticRelease(releases, "0");
   await installRelease(paths, systemd.command, release.root);
@@ -599,14 +612,16 @@ test("CLI output rejects malformed private configuration without reflection", as
   await chmod(paths.configPath, 0o600);
   const semantic = invoke();
   assert.equal(semantic.status, 1);
-  assert.match(semantic.stderr, /installed configuration is invalid/u);
+  assert.equal(semantic.stderr, "");
+  assert.equal(JSON.parse(semantic.stdout).error.code, "PI_WEBCTL_FAILED");
   assert.doesNotMatch(semantic.stdout + semantic.stderr, /SECRET_PRIVATE_BACKEND_MARKER|\/tmp\//u);
 
   await writeFile(paths.configPath, '{"backend":"legacy","token":S3CR3T}\n');
   await chmod(paths.configPath, 0o600);
   const syntax = invoke();
   assert.equal(syntax.status, 1);
-  assert.match(syntax.stderr, /installed configuration is invalid/u);
+  assert.equal(syntax.stderr, "");
+  assert.equal(JSON.parse(syntax.stdout).error.code, "PI_WEBCTL_FAILED");
   assert.doesNotMatch(syntax.stdout + syntax.stderr, /S3CR3T|token|\/tmp\//u);
 });
 
@@ -649,6 +664,14 @@ test("doctor emits fixed classified findings without secrets or absolute managed
     authority: async () => ({ apiVersion: "3.0.0", capabilities: [{ id: "search", enabled: true, healthy: true }, { id: "read", enabled: true, healthy: true }] }),
   });
   assert.equal(candidate.findings.find((item) => item.category === "egress")?.status, "pass");
+
+  const hostileBrowser = await doctorReport(paths, systemd.command, { ...environment, WAYLAND_DISPLAY: "wayland-0", DBUS_SESSION_BUS_ADDRESS: "unix:path=private" }, {
+    browser: async () => ({ product: "SECRET_BROWSER_PRODUCT", version: "140.0.0.0-SECRET_BROWSER_VERSION" }),
+    proxy: async () => "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\n\r\n",
+    authority: async () => ({ apiVersion: "3.0.0", capabilities: [{ id: "search", enabled: true, healthy: true }, { id: "read", enabled: true, healthy: true }] }),
+  });
+  assert.equal(hostileBrowser.findings.find((item) => item.category === "browser")?.code, "BROWSER_UNAVAILABLE");
+  assert.doesNotMatch(JSON.stringify(hostileBrowser), /SECRET_BROWSER_PRODUCT|SECRET_BROWSER_VERSION/u);
 });
 
 test("doctor converts corruption and missing display into controlled classifications", async () => {

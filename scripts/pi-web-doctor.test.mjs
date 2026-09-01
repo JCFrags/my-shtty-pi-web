@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { doctorReport, documentAssetReadiness, probeWebx, profileDoctorChecks, runDoctor } from "./pi-web-doctor.mjs";
+import { doctorReport, documentAssetReadiness, probeWebx, profileDoctorChecks, runDoctor, serviceStatusReport } from "./pi-web-doctor.mjs";
 
 async function fixture(catalog) {
   const directory = await mkdtemp(join(tmpdir(), "pi-web-doctor-"));
@@ -68,8 +68,9 @@ test("doctor CLI runs once through direct and stable symlink paths", async () =>
       assert.equal(result.stderr, "");
       const report = JSON.parse(result.stdout);
       assert.equal(report.ok, false);
-      assert.equal(report.checks.length, 1);
-      assert.equal(report.checks[0]?.name, "webxd");
+      assert.equal(report.findings.length, 1);
+      assert.equal(report.findings[0]?.category, "authority");
+      assert.equal(report.findings[0]?.code, "AUTHORITY_UNAVAILABLE");
     }
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -91,9 +92,10 @@ test("doctor keeps optional browser failure nonfatal", async () => {
     assert.deepEqual(await probeWebx(service.socketPath), catalog);
     const report = await runDoctor(service.socketPath);
     assert.equal(report.ok, true);
-    assert.deepEqual(report.checks.find((item) => item.name === "browser"), {
-      name: "browser", required: false, ok: false, detail: "browser daemon is unavailable",
+    assert.deepEqual(report.findings.find((item) => item.category === "browser"), {
+      category: "browser", status: "warning", code: "BROWSER_UNAVAILABLE", summary: "The browser capability is unavailable.",
     });
+    assert.doesNotMatch(JSON.stringify(report), /browser daemon is unavailable/u);
   } finally {
     await service.close();
   }
@@ -107,7 +109,7 @@ test("doctor makes search or static reader failure fatal", () => {
       browserPaths: [],
     });
     assert.equal(report.ok, false);
-    assert.equal(report.checks.find((item) => item.name === failed)?.required, true);
+    assert.equal(report.findings.find((item) => item.category === failed)?.status, "error");
   }
 });
 
@@ -131,7 +133,7 @@ test("doctor checks the installed profile and reviewed core limits", () => {
       { id: "browser", enabled: true, healthy: false },
     ],
   }, profile);
-  assert.equal(report.checks.find((item) => item.name === "browser")?.required, true);
+  assert.equal(report.findings.find((item) => item.category === "browser")?.status, "error");
   assert.equal(report.ok, false);
 });
 
@@ -156,10 +158,27 @@ test("doctor reports bounded documents and refuses unvalidated model claims", as
   assert.equal(checks.find((item) => item.name === "office-model-assets")?.required, false);
 });
 
+test("status uses fixed allowlisted service classifications", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pi-web-status-"));
+  const command = join(directory, "systemctl");
+  await writeFile(command, "#!/bin/sh\ncase \"$2\" in is-active) printf 'active\\n' ;; is-enabled) printf 'enabled\\n' ;; esac\n");
+  await chmod(command, 0o755);
+  try {
+    const healthy = serviceStatusReport({ units: ["webxd.service"] }, command);
+    assert.equal(healthy.ok, true);
+    assert.equal(healthy.findings[0]?.code, "SERVICE_HEALTHY");
+    const invalid = serviceStatusReport({ units: ["SECRET_UNIT_MARKER.service"] }, command);
+    assert.equal(invalid.ok, false);
+    assert.equal(invalid.findings[0]?.code, "SERVICE_PROFILE_INVALID");
+    assert.doesNotMatch(JSON.stringify(invalid), /SECRET_UNIT_MARKER/u);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
 test("doctor reports an unavailable authority as fatal", async () => {
   const report = await runDoctor(join(tmpdir(), `missing-webxd-${process.pid}.sock`));
   assert.equal(report.ok, false);
-  assert.deepEqual(report.checks[0]?.name, "webxd");
+  assert.equal(report.findings[0]?.category, "authority");
+  assert.equal(report.findings[0]?.code, "AUTHORITY_UNAVAILABLE");
 });
 
 test("doctor times out when an authority accepts but never responds", async () => {
@@ -167,7 +186,8 @@ test("doctor times out when an authority accepts but never responds", async () =
   try {
     const report = await runDoctor(service.socketPath, 25);
     assert.equal(report.ok, false);
-    assert.equal(report.checks[0]?.detail, "WebX doctor probe timed out after 25 ms");
+    assert.equal(report.findings[0]?.summary, "The WebX authority is unavailable or returned a malformed response.");
+    assert.doesNotMatch(JSON.stringify(report), /timed out/u);
   } finally {
     await service.close();
   }
