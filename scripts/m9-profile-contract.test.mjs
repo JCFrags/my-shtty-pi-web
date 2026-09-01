@@ -47,7 +47,9 @@ test("AgentCursor is an explicit prebuilt candidate and never mutates the legacy
   assert.deepEqual(candidate.requestedProfiles, ["browser-agentcursor"]);
   assert.deepEqual(candidate.resolvedProfiles, ["web-core", "browser-agentcursor"]);
   assert.equal(candidate.defaultProfile, "web-core");
-  assert.deepEqual(candidate.runtimeFedoraPackages, ["chromium", "webkit2gtk4.1", "libappindicator-gtk3", "librsvg2", "gtk3"]);
+  assert.deepEqual(candidate.runtimeFedoraPackages, ["chromium", "desktop-file-utils", "gtk3", "libappindicator-gtk3", "librsvg2", "nodejs", "python3", "systemd", "webkit2gtk4.1"]);
+  assert(candidate.commands.includes("desktop-file-validate"));
+  assert(candidate.commands.includes("systemd-analyze"));
   assert.deepEqual(candidate.buildFedoraPackages, []);
   assert.deepEqual(candidate.npmPackages, []);
   assert.deepEqual(candidate.cargoPackages, []);

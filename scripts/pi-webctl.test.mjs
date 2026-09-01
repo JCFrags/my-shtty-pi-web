@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmod, copyFile, link, lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { chmod, copyFile, link, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   doctorReport,
+  installationPreflight,
   installRelease,
   installedPaths,
   rollbackRelease,
@@ -61,7 +63,8 @@ async function seal(root) {
   }
 }
 
-async function syntheticRelease(parent, character) {
+/** @param {string} parent @param {string} character @param {((root: string) => Promise<void>) | undefined} mutate */
+async function syntheticRelease(parent, character, mutate = undefined) {
   const gitSha = character.repeat(40);
   const releaseId = `phase4a-${gitSha}`;
   const root = join(parent, releaseId);
@@ -87,6 +90,7 @@ async function syntheticRelease(parent, character) {
     writeFile(join(root, "share/pi-webx/extension.mjs"), "export default function extension() {}\n"),
     ...unitNames.map((name) => copyFile(join(sourceRoot, `deploy/phase4a/systemd/${name}.in`), join(root, `share/deploy/systemd/${name}.in`))),
   ]);
+  await mutate?.(root);
   const immutableFiles = [];
   for (const path of await regularFiles(root)) {
     const bytes = await readFile(path);
@@ -158,8 +162,78 @@ async function fixture() {
   return { temporary, environment, paths, systemd, releases };
 }
 
-test("verified install is legacy-default, immutable, direct-launching, and preserves the legacy unit", async () => {
+test("preflight is non-mutating, closed, and reports one reviewed package command", async () => {
+  const { paths, systemd, releases, environment } = await fixture();
+  const release = await syntheticRelease(releases, "7");
+  const manifestDigest = digest(await readFile(join(release.root, "manifest.json")));
+  const ready = await installationPreflight(paths, systemd.command, release.root, release.gitSha, manifestDigest, { ...environment, WAYLAND_DISPLAY: "wayland-0", DBUS_SESSION_BUS_ADDRESS: "unix:path=private" }, {
+    osRelease: "ID=fedora\nVERSION_ID=44\n", architecture: "x64", systemdAvailable: true,
+    diskAvailableBytes: 2_000_000_000, runtimeAvailableBytes: 4_000_000_000, nodeVersion: "24.18.0", pythonVersion: "Python 3.14.7",
+    missingPackages: [], browser: { product: "Chromium", version: "151.0.0.0" }, portState: "free", serviceConflict: false, destinationConflict: false, runtimeState: "clean",
+  });
+  assert.equal(ready.ok, true);
+  assert.deepEqual(ready.findings.map((item) => item.category), ["release", "platform", "systemd", "session", "filesystem", "disk", "node", "python", "packages", "browser", "conflicts", "runtime", "existing"]);
+  assert.equal(ready.installCommand, null);
+  await assert.rejects(lstat(paths.dataRoot), /ENOENT/u, "preflight does not create managed roots");
+  assert.equal(await readFile(systemd.log, "utf8").catch(() => ""), "", "injected preflight does not invoke systemctl");
+
+  const blocked = await installationPreflight(paths, systemd.command, release.root, release.gitSha, manifestDigest, environment, {
+    osRelease: "ID=fedora\nVERSION_ID=43\n", architecture: "x64", systemdAvailable: false,
+    diskAvailableBytes: 1, runtimeAvailableBytes: 1, nodeVersion: "23.0.0", pythonVersion: "Python 3.12.0",
+    missingPackages: ["webkit2gtk4.1", "chromium"], portState: "conflict", serviceConflict: true, destinationConflict: true, runtimeState: "present",
+  });
+  assert.equal(blocked.ok, false);
+  assert.deepEqual(blocked.missingPackages, ["chromium", "webkit2gtk4.1"]);
+  assert.equal(blocked.installCommand, "/usr/bin/sudo /usr/bin/dnf install -- chromium webkit2gtk4.1");
+  assert.doesNotMatch(JSON.stringify(blocked), /\/tmp\/|DBUS_SESSION_BUS_ADDRESS|WAYLAND_DISPLAY|SECRET/u);
+});
+
+test("production CLI requires exact identity, rejects option channels, and classifies doctor output", async () => {
+  const { paths, systemd, releases, environment } = await fixture();
+  const script = join(sourceRoot, "scripts/pi-webctl.mjs");
+  const invoke = (arguments_) => spawnSync(process.execPath, [script, ...arguments_], { encoding: "utf8", env: { ...process.env, ...environment } });
+  const missingIdentity = invoke(["install", "--release", releases]);
+  assert.equal(missingIdentity.status, 1);
+  assert.match(missingIdentity.stderr, /install requires --release <immutable-release-root> --expected-sha/u);
+  const duplicate = invoke(["preflight", "--release", releases, "--release", releases]);
+  assert.equal(duplicate.status, 1);
+  assert.match(duplicate.stderr, /duplicate option: --release/u);
+  const commandChannel = invoke(["status", "--systemctl", systemd.command]);
+  assert.equal(commandChannel.status, 1);
+  assert.match(commandChannel.stderr, /unsupported option: --systemctl/u);
+
+  const release = await syntheticRelease(releases, "0");
+  await installRelease(paths, systemd.command, release.root);
+  const json = invoke(["doctor", "--json"]);
+  assert.equal(json.status, 1);
+  const report = JSON.parse(json.stdout);
+  assert.deepEqual(report.findings.map((item) => item.category), ["release", "filesystem", "services", "display", "browser", "egress", "authority", "resource", "workspace"]);
+  assert.doesNotMatch(json.stdout + json.stderr, /\/tmp\/|bindingSecret|socketPath|profile/u);
+  const human = invoke(["doctor"]);
+  assert.equal(human.status, 1);
+  assert.match(human.stdout, /^(?:PASS|WARNING|ERROR|UNAVAILABLE|NOT-TESTED)\t/u);
+  assert.doesNotMatch(human.stdout + human.stderr, /\/tmp\/|bindingSecret|socketPath|profile/u);
+});
+
+test("prospective render failure occurs before selector or systemctl changes", async () => {
   const { paths, systemd, releases } = await fixture();
+  const current = await syntheticRelease(releases, "8");
+  await installRelease(paths, systemd.command, current.root);
+  const logBefore = await readFile(systemd.log, "utf8");
+  const selectorBefore = await readlink(paths.activeSelectorLink);
+  const broken = await syntheticRelease(releases, "9", async (root) => {
+    const path = join(root, "share/deploy/systemd/webxd.service.in");
+    await writeFile(path, `${await readFile(path, "utf8")}\nUnknown=@UNREVIEWED_PLACEHOLDER@\n`);
+  });
+  await assert.rejects(installRelease(paths, systemd.command, broken.root), /unit template contains an unknown placeholder/u);
+  assert.equal(await readlink(paths.activeSelectorLink), selectorBefore);
+  assert.equal(await readlink(paths.currentLink), `../../releases/${current.releaseId}`);
+  assert.equal(await readFile(systemd.log, "utf8"), logBefore, "systemctl is not invoked for an invalid prospective render");
+  assert.equal((await readdir(paths.selectorsRoot)).filter((name) => /^selector-/u.test(name)).length, 1);
+});
+
+test("verified install is legacy-default, immutable, direct-launching, and preserves the legacy unit", async () => {
+  const { paths, systemd, releases, environment } = await fixture();
   const release = await syntheticRelease(releases, "a");
   await mkdir(paths.unitRoot, { recursive: true });
   await writeFile(join(paths.unitRoot, "pi-browserd.service"), "legacy-browser-unit\n");
@@ -174,9 +248,9 @@ test("verified install is legacy-default, immutable, direct-launching, and prese
   const config = JSON.parse(await readFile(paths.configPath, "utf8"));
   assert.equal(config.backend, "legacy");
   assert.equal(config.resources.maxBrowserSessions, 2);
-  const environment = await readFile(paths.environmentPath, "utf8");
-  assert.match(environment, /^PI_WEB_EGRESS_HOST="127\.0\.0\.1"$/mu);
-  assert.match(environment, /^PI_WEB_EGRESS_PORT="8877"$/mu);
+  const serviceEnvironment = await readFile(paths.environmentPath, "utf8");
+  assert.match(serviceEnvironment, /^PI_WEB_EGRESS_HOST="127\.0\.0\.1"$/mu);
+  assert.match(serviceEnvironment, /^PI_WEB_EGRESS_PORT="8877"$/mu);
   const webxd = await readFile(join(paths.unitRoot, "webxd.service"), "utf8");
   assert.match(webxd, /Wants=.*pi-browserd\.service/u);
   assert.doesNotMatch(webxd, /pi-web-agentcursor-browserd\.service/u);
@@ -187,6 +261,10 @@ test("verified install is legacy-default, immutable, direct-launching, and prese
   const desktop = await readFile(paths.desktopPath, "utf8");
   assert.match(desktop, /^Exec=".*\/current\/bin\/pi-browser-workspace"$/mu);
   assert.doesNotMatch(desktop, /\/bin\/(?:ba)?sh|--debug|vite/u);
+  const unitValidation = spawnSync("/usr/bin/systemd-analyze", ["--user", "verify", ...unitNames.map((name) => join(paths.unitRoot, name))], { encoding: "utf8", env: { ...process.env, ...environment, HOME: paths.home } });
+  assert.equal(unitValidation.status, 0, unitValidation.stderr || unitValidation.stdout);
+  const desktopValidation = spawnSync("/usr/bin/desktop-file-validate", [paths.desktopPath], { encoding: "utf8" });
+  assert.equal(desktopValidation.status, 0, desktopValidation.stderr || desktopValidation.stdout);
   assert.doesNotMatch(await readFile(systemd.log, "utf8"), /(?:disable|stop).*pi-browserd\.service/u);
 
   assert.equal((await setBackend(paths, systemd.command, "agentcursor")).backend, "agentcursor");
@@ -216,6 +294,7 @@ test("upgrade, release rollback, failed activation rollback, and reinstall are d
   assert.equal(upgraded.backend, "agentcursor", "upgrade preserves explicit backend choice");
   assert.equal(await readlink(paths.currentLink), `../../releases/${second.releaseId}`);
   assert.equal(await readlink(paths.previousLink), `../../releases/${first.releaseId}`);
+  assert.equal((await readdir(paths.selectorsRoot)).filter((name) => /^selector-/u.test(name)).length, 1, "obsolete selector generations are pruned after commit");
 
   const rolledBack = await rollbackRelease(paths, systemd.command);
   assert.equal(rolledBack.releaseId, first.releaseId);
@@ -263,6 +342,18 @@ test("closed release documents reject unknown fields, unsafe paths, and wrong ex
   checksums.files[0].path = "bin//unsafe";
   await chmod(checksumsPath, 0o644); await writeFile(checksumsPath, `${JSON.stringify(checksums)}\n`); await chmod(checksumsPath, 0o444);
   await assert.rejects(verifyInstallRelease(release.root), /checksum record 0 path is unsafe/u);
+});
+
+test("unmarked nonempty managed roots are never adopted or modified", async () => {
+  const { paths, systemd, releases } = await fixture();
+  const release = await syntheticRelease(releases, "a");
+  await mkdir(paths.dataRoot, { recursive: true });
+  const foreign = join(paths.dataRoot, "foreign-owner-data");
+  await writeFile(foreign, "preserve\n");
+  await assert.rejects(installRelease(paths, systemd.command, release.root), /refusing to adopt a nonempty unmarked managed root/u);
+  assert.equal(await readFile(foreign, "utf8"), "preserve\n");
+  await assert.rejects(lstat(join(paths.dataRoot, ".pi-web-managed-v1")), /ENOENT/u);
+  assert.equal(await readFile(systemd.log, "utf8").catch(() => ""), "");
 });
 
 test("hard-linked release payloads and symlinked managed roots fail closed", async () => {
