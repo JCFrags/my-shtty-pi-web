@@ -6,6 +6,7 @@ import {
   access,
   chmod,
   copyFile,
+  link,
   lstat,
   mkdir,
   readFile,
@@ -33,6 +34,7 @@ const UNITS = Object.freeze([
 const MARKER_NAME = ".pi-web-managed-v1";
 const MARKER_VALUE = "pi-web-managed-root-v1\n";
 const MAX_JSON_BYTES = 4 * 1024 * 1024;
+const LOCK_PUBLICATION_GRACE_MS = 5_000;
 const PREFLIGHT_PACKAGES = Object.freeze(["chromium", "desktop-file-utils", "gtk3", "libappindicator-gtk3", "librsvg2", "nodejs", "python3", "systemd", "webkit2gtk4.1"]);
 const MINIMUM_INSTALL_FREE_BYTES = 512 * 1024 * 1024;
 
@@ -611,14 +613,21 @@ async function verifyManagedRoot(root) {
   if (!markerInformation.isFile() || markerInformation.isSymbolicLink() || markerInformation.uid !== process.getuid?.() || markerInformation.nlink !== 1 || (markerInformation.mode & 0o777) !== 0o600 || await readFile(marker, "utf8") !== MARKER_VALUE) fail(`managed root ownership marker is invalid: ${root}`);
 }
 /** @param {ReturnType<typeof installedPaths>} paths */
-async function verifiedCandidateReleases(paths) {
+async function isCommittedCandidateCleanup(paths) {
+  return await currentReleaseId(paths) === undefined && await exists(paths.preinstallBackupPath);
+}
+/** @param {ReturnType<typeof installedPaths>} paths @param {boolean} allowPartialCleanup */
+async function verifiedCandidateReleases(paths, allowPartialCleanup = false) {
   /** @type {string[]} */
   const releases = [];
   if (!(await exists(paths.releasesRoot))) return releases;
   for (const name of await readdir(paths.releasesRoot)) {
     if (!/^phase4a-[0-9a-f]{40}$/u.test(name)) continue;
     const release = join(paths.releasesRoot, name);
-    await verifyInstallRelease(release);
+    if (allowPartialCleanup) {
+      const information = await lstat(release);
+      if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || await realpath(release) !== resolve(release) || ![0o555, 0o700].includes(information.mode & 0o777)) fail("partial candidate cleanup residue is unsafe");
+    } else await verifyInstallRelease(release);
     releases.push(release);
   }
   return releases.sort();
@@ -626,7 +635,7 @@ async function verifiedCandidateReleases(paths) {
 
 /** @param {ReturnType<typeof installedPaths>} paths @param {boolean} purge */
 async function prepareCandidateRemoval(paths, purge) {
-  await verifiedCandidateReleases(paths);
+  await verifiedCandidateReleases(paths, await isCommittedCandidateCleanup(paths));
   if (!purge) return;
   for (const root of [paths.cacheRoot, paths.configRoot, paths.dataRoot, paths.stateRoot]) if (await exists(root)) await verifyManagedRoot(root);
 }
@@ -656,7 +665,7 @@ async function uninstallCandidateUnlocked(paths, command, purge = false) {
  * @param {boolean} purge
  */
 async function cleanupCandidateRemoval(paths, purge) {
-  for (const release of await verifiedCandidateReleases(paths)) await removeOwnedTree(release);
+  for (const release of await verifiedCandidateReleases(paths, await isCommittedCandidateCleanup(paths))) await removeOwnedTree(release);
   for (const path of [paths.deploymentPath, paths.failurePath, paths.preinstallBackupPath]) await rm(path, { force: true });
   if (!purge) return;
   const roots = [paths.cacheRoot, paths.configRoot, paths.dataRoot, paths.stateRoot];
@@ -681,19 +690,31 @@ async function processStartTicks(pid) {
 /** @param {ReturnType<typeof installedPaths>} paths */
 async function acquireMutationLock(paths) {
   const create = async () => {
-    await mkdir(paths.mutationLockPath, { mode: 0o700 });
     const startTicks = await processStartTicks(process.pid);
     if (startTicks === undefined) fail("cannot establish controller process identity");
-    await atomicJson(join(paths.mutationLockPath, "owner.json"), { schemaVersion: 1, pid: process.pid, startTicks });
+    const stage = join(paths.stateRoot, `.mutation-lock-stage-${process.pid}-${randomBytes(12).toString("hex")}`);
+    await atomicJson(stage, { schemaVersion: 1, pid: process.pid, startTicks });
+    try { await link(stage, paths.mutationLockPath); }
+    finally { await rm(stage, { force: true }); }
   };
   try { await create(); }
   catch (error) {
     if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
     const information = await lstat(paths.mutationLockPath);
-    if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || (information.mode & 0o077) !== 0) fail("controller mutation lock is unsafe");
-    const owner = record(await readJson(join(paths.mutationLockPath, "owner.json")), "controller lock owner");
-    if (JSON.stringify(Object.keys(owner).sort()) !== JSON.stringify(["pid", "schemaVersion", "startTicks"]) || owner.schemaVersion !== 1 || !Number.isSafeInteger(owner.pid) || typeof owner.startTicks !== "string" || !/^[0-9]+$/u.test(owner.startTicks)) fail("controller mutation lock owner is invalid");
-    if (await processStartTicks(owner.pid) === owner.startTicks) fail("another pi-webctl mutation is in progress");
+    let owner;
+    if (information.isFile() && !information.isSymbolicLink() && information.uid === process.getuid?.() && (information.mode & 0o777) === 0o600 && information.nlink >= 1 && information.nlink <= 2) {
+      owner = record(await readJson(paths.mutationLockPath), "controller lock owner");
+    } else if (information.isDirectory() && !information.isSymbolicLink() && information.uid === process.getuid?.() && (information.mode & 0o077) === 0) {
+      try { owner = record(await readJson(join(paths.mutationLockPath, "owner.json")), "controller lock owner"); }
+      catch (ownerError) {
+        if (!(ownerError instanceof Error) || !("code" in ownerError) || ownerError.code !== "ENOENT") throw ownerError;
+        if (Date.now() - information.mtimeMs < LOCK_PUBLICATION_GRACE_MS) fail("controller mutation lock identity is not yet available");
+      }
+    } else fail("controller mutation lock is unsafe");
+    if (owner !== undefined) {
+      if (JSON.stringify(Object.keys(owner).sort()) !== JSON.stringify(["pid", "schemaVersion", "startTicks"]) || owner.schemaVersion !== 1 || !Number.isSafeInteger(owner.pid) || typeof owner.startTicks !== "string" || !/^[0-9]+$/u.test(owner.startTicks)) fail("controller mutation lock owner is invalid");
+      if (await processStartTicks(owner.pid) === owner.startTicks) fail("another pi-webctl mutation is in progress");
+    }
     const quarantine = join(paths.stateRoot, `.stale-mutation-lock-${randomBytes(12).toString("hex")}`);
     await rename(paths.mutationLockPath, quarantine);
     await removeOwnedTree(quarantine);

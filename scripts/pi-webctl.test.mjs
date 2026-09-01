@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmod, copyFile, link, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, link, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -496,9 +496,13 @@ test("post-commit uninstall cleanup never restores a pointer to removed bytes", 
   await assert.rejects(lstat(join(paths.releasesRoot, release.releaseId)), /ENOENT/u);
   await assert.rejects(lstat(paths.transactionPath), /ENOENT/u, "the reversible uninstall committed before destructive cleanup");
   await rm(paths.failurePath, { recursive: true });
+  const partialResidue = join(paths.releasesRoot, release.releaseId);
+  await mkdir(partialResidue, { mode: 0o700 });
+  await writeFile(join(partialResidue, "partial"), "interrupted deletion residue\n");
   await writeFile(systemd.operationFailure, "--user disable --now pi-web-agentcursor-egress-proxy.service\n");
   const retryLogStart = (await readFile(systemd.log, "utf8")).length;
   assert.equal((await uninstallCandidate(paths, systemd.command)).legacyPreserved, true, "cleanup failure is retryable");
+  await assert.rejects(lstat(partialResidue), /ENOENT/u, "retry removes only allowlisted owner-controlled post-commit residue");
   assert.doesNotMatch((await readFile(systemd.log, "utf8")).slice(retryLogStart), /disable --now|\b(?:start|stop|restart|enable|disable)\b/u, "cleanup retry does not mutate restored legacy services");
 });
 
@@ -516,6 +520,17 @@ test("stale lock recovery restores the complete prior activation before new work
   assert.equal(JSON.parse(await readFile(paths.configPath, "utf8")).backend, "legacy");
   assert.deepEqual(JSON.parse(await readFile(paths.recoveryPath, "utf8")), { schemaVersion: 1, operation: "backend", recovered: true });
   await assert.rejects(lstat(paths.transactionPath), /ENOENT/u);
+  await assert.rejects(lstat(paths.mutationLockPath), /ENOENT/u);
+});
+
+test("atomic lock publication preserves recent markerless locks and recovers stale legacy residue", async () => {
+  const { paths, systemd } = await fixture();
+  await uninstallCandidate(paths, systemd.command);
+  await mkdir(paths.mutationLockPath, { mode: 0o700 });
+  await assert.rejects(uninstallCandidate(paths, systemd.command), /lock identity is not yet available/u);
+  const old = new Date(Date.now() - 60_000);
+  await utimes(paths.mutationLockPath, old, old);
+  assert.equal((await uninstallCandidate(paths, systemd.command)).legacyPreserved, true);
   await assert.rejects(lstat(paths.mutationLockPath), /ENOENT/u);
 });
 
