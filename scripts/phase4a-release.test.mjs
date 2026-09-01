@@ -100,6 +100,15 @@ test("build identity refuses dirty, missing, and mismatched Git identities", () 
   releaseInternals.validateBuildIdentity(gitSha, gitSha, "");
 });
 
+test("both workspace binaries use the Tauri build context and only the primary build bundles", () => {
+  assert.deepEqual(releaseInternals.tauriBuildArguments("tauri.mjs", "release.json", false), [
+    "tauri.mjs", "build", "--config", "release.json", "--bundles", "rpm",
+  ]);
+  assert.deepEqual(releaseInternals.tauriBuildArguments("tauri.mjs", "release.json", true), [
+    "tauri.mjs", "build", "--config", "release.json", "--features", "installed-qualification", "--no-bundle",
+  ]);
+});
+
 test("output paths cannot enter the checkout lexically or through a symlink", async () => {
   assert.throws(() => releaseInternals.assertAbsoluteOutsideSource("relative", "output root"), /must be absolute/u);
   assert.throws(() => releaseInternals.assertAbsoluteOutsideSource(join(sourceRoot, "release"), "output root"), /outside the source checkout/u);

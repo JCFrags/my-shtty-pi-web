@@ -335,6 +335,17 @@ async function buildNodeBundles(releaseRoot) {
   return metafiles;
 }
 /**
+ * @param {string} tauriCli
+ * @param {string} override
+ * @param {boolean} qualification
+ * @returns {string[]}
+ */
+function tauriBuildArguments(tauriCli, override, qualification) {
+  return qualification
+    ? [tauriCli, "build", "--config", override, "--features", "installed-qualification", "--no-bundle"]
+    : [tauriCli, "build", "--config", override, "--bundles", "rpm"];
+}
+/**
  * @param {string} releaseRoot
  * @param {string} buildRoot
  * @param {string} sourceDateEpoch
@@ -358,11 +369,14 @@ async function buildTauri(releaseRoot, buildRoot, sourceDateEpoch, gitSha) {
   const tauriCli = await realpath(join(sourceRoot, "components/browser/apps/workspace/node_modules/@tauri-apps/cli/tauri.js"));
   const remapRoots = definedPaths([buildRoot, sourceRoot, process.env.CARGO_HOME, process.env.RUSTUP_HOME, process.env.HOME]);
   const encodedRustFlags = [...new Set(remapRoots)].map((path, index) => `--remap-path-prefix=${path}=/usr/src/pi-web-${index}`).join("\x1f");
-  command(process.execPath, [tauriCli, "build", "--config", override, "--bundles", "rpm"], { cwd: workspaceSource, env: { CARGO_TARGET_DIR: cargoTarget, CARGO_ENCODED_RUSTFLAGS: encodedRustFlags, RUSTFLAGS: "", SOURCE_DATE_EPOCH: sourceDateEpoch } });
+  const buildEnvironment = { CARGO_TARGET_DIR: cargoTarget, CARGO_ENCODED_RUSTFLAGS: encodedRustFlags, RUSTFLAGS: "", SOURCE_DATE_EPOCH: sourceDateEpoch };
+  command(process.execPath, tauriBuildArguments(tauriCli, override, false), { cwd: workspaceSource, env: buildEnvironment });
   const binary = join(cargoTarget, "release/pi-browser-workspace");
   if (!(await lstat(binary)).isFile()) fail("Tauri release binary was not produced");
   await copyFile(binary, join(releaseRoot, "bin/pi-browser-workspace"));
-  command("cargo", ["build", "--locked", "--release", "--package", "pi-browser-workspace", "--bin", "pi-browser-workspace", "--features", "installed-qualification"], { cwd: browserSource, env: { CARGO_TARGET_DIR: cargoTarget, CARGO_ENCODED_RUSTFLAGS: encodedRustFlags, RUSTFLAGS: "", SOURCE_DATE_EPOCH: sourceDateEpoch } });
+  // The Tauri CLI supplies a remappable generated context. A direct Cargo
+  // rebuild embeds the archived source directory in the qualification binary.
+  command(process.execPath, tauriBuildArguments(tauriCli, override, true), { cwd: workspaceSource, env: buildEnvironment });
   if (!(await lstat(binary)).isFile()) fail("Tauri qualification release binary was not produced");
   await copyFile(binary, join(releaseRoot, "bin/pi-browser-workspace-qualification"));
   const rpmRoot = join(cargoTarget, "release/bundle/rpm");
@@ -652,7 +666,7 @@ async function reproducibility(options) {
   process.stdout.write(`${JSON.stringify({ ok: true, report: reportPath }, null, 2)}\n`);
 }
 
-export const releaseInternals = { assertAbsoluteOutsideSource, buildNodeBundles, buildRelease, deterministicTreeDigest, immutablePayloadDigests, normalizedRelease, parse, publishImmutableRelease, removeOwnedTree, resolvedOutsideSource, setImmutableModes, validateBuildIdentity, verifyRelease, withFixedPythonInterpreter, writeBundledLicenses, writeChecksums, writeRustLicenses };
+export const releaseInternals = { assertAbsoluteOutsideSource, buildNodeBundles, buildRelease, deterministicTreeDigest, immutablePayloadDigests, normalizedRelease, parse, publishImmutableRelease, removeOwnedTree, resolvedOutsideSource, setImmutableModes, tauriBuildArguments, validateBuildIdentity, verifyRelease, withFixedPythonInterpreter, writeBundledLicenses, writeChecksums, writeRustLicenses };
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === releaseFile) {
   const { operation, options } = parse(process.argv.slice(2));
