@@ -567,6 +567,13 @@ function normalizedRpmPayload(rpmPath) {
   const query = "[%{FILENAMES}\\t%{FILEDIGESTS}\\t%{FILESIZES}\\t%{FILEMODES:perms}\\t%{FILEUSERNAME}\\t%{FILEGROUPNAME}\\n]";
   return sha256(command("rpm", ["-qp", "--queryformat", query, rpmPath], { cwd: tmpdir() }).split("\n").sort().join("\n"));
 }
+/** @param {string} releaseRoot */
+async function normalizedManifest(releaseRoot) {
+  /** @type {Record<string, unknown> & { immutableFiles?: Array<{ path?: unknown, sha256?: unknown, bytes?: unknown }> }} */
+  const parsed = JSON.parse(await readFile(join(releaseRoot, "manifest.json"), "utf8"));
+  for (const record of parsed.immutableFiles ?? []) if (typeof record.path === "string" && record.path.endsWith(".rpm")) { record.sha256 = `rpm-payload:${normalizedRpmPayload(join(releaseRoot, record.path))}`; record.bytes = 0; }
+  return parsed;
+}
 
 /**
  * @param {string} releaseRoot
@@ -581,15 +588,16 @@ async function normalizedRelease(releaseRoot) {
     if (name === "checksums.json") {
       /** @type {ChecksumsDocument} */
       const parsed = JSON.parse(await readFile(path, "utf8"));
-      for (const record of parsed.files) if (record.path.endsWith(".rpm")) { record.sha256 = `rpm-payload:${normalizedRpmPayload(join(releaseRoot, record.path))}`; record.bytes = 0; }
+      const normalizedManifestSha256 = sha256(Buffer.from(JSON.stringify(await normalizedManifest(releaseRoot))));
+      for (const record of parsed.files) {
+        if (record.path.endsWith(".rpm")) { record.sha256 = `rpm-payload:${normalizedRpmPayload(join(releaseRoot, record.path))}`; record.bytes = 0; }
+        else if (record.path === "manifest.json") { record.sha256 = `normalized-manifest:${normalizedManifestSha256}`; record.bytes = 0; }
+      }
       files[name] = sha256(Buffer.from(JSON.stringify(parsed)));
       continue;
     }
     if (name === "manifest.json") {
-      /** @type {Record<string, unknown> & { immutableFiles?: Array<{ path?: unknown, sha256?: unknown, bytes?: unknown }> }} */
-      const parsed = JSON.parse(await readFile(path, "utf8"));
-      for (const record of parsed.immutableFiles ?? []) if (typeof record.path === "string" && record.path.endsWith(".rpm")) { record.sha256 = `rpm-payload:${normalizedRpmPayload(join(releaseRoot, record.path))}`; record.bytes = 0; }
-      files[name] = sha256(Buffer.from(JSON.stringify(parsed)));
+      files[name] = sha256(Buffer.from(JSON.stringify(await normalizedManifest(releaseRoot))));
       continue;
     }
     files[name] = sha256(await readFile(path));
