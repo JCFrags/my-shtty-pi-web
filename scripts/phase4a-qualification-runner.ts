@@ -264,6 +264,7 @@ async function main(): Promise<void> {
     if (mode === "acceptance") {
       restartUnit("pi-web-qualification-egress-proxy.service"); proxyRestarts += 1;
       restartUnit("pi-web-qualification-webxd.service"); webxdRestarts += 1;
+      await waitForWebxdReady();
       await Promise.all([piA.stop(), piB.stop()]); await Promise.all([piA.start(), piB.start()]); piReconnects += 2;
       await piA.execute("browser_tabs", { action: "list" });
       await setUnitRunning("pi-web-qualification-browserd.service", false);
@@ -469,6 +470,15 @@ async function setUnitRunning(unit: "pi-web-qualification-browserd.service", run
   const probe = spawnSync("/usr/bin/systemctl", ["--user", "is-active", unit], { env: systemdEnvironment(), encoding: "utf8", timeout: 10_000, maxBuffer: 4_096 });
   if (running ? probe.status !== 0 || probe.stdout.trim() !== "active" : probe.status === 0 || probe.stdout.trim() !== "inactive") fail("qualification fixed browser service state is invalid");
   if (running) await waitForBrowserdReady();
+}
+
+async function waitForWebxdReady(): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    try { if ((await stat(webxPath)).isSocket()) return; }
+    catch { /* The fixed webxd socket is not ready yet. */ }
+    await sleep(50);
+  }
+  fail("qualification webxd service readiness timed out");
 }
 
 async function waitForBrowserdReady(): Promise<void> {
