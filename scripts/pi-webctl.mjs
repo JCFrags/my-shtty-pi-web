@@ -39,6 +39,9 @@ const QUALIFICATION_UNITS = Object.freeze([
 const MANAGED_UNITS = Object.freeze([...UNITS, ...QUALIFICATION_UNITS]);
 const QUALIFICATION_PROXY_PORT = 18_877;
 const QUALIFICATION_LOCAL_SERVICE_PORT = 18_878;
+const QUALIFICATION_PROXY_PROBE_ATTEMPTS = 20;
+const QUALIFICATION_PROXY_PROBE_DELAY_MS = 50;
+const QUALIFICATION_PROXY_PROBE_TIMEOUT_MS = 250;
 const MARKER_NAME = ".pi-web-managed-v1";
 const MARKER_VALUE = "pi-web-managed-root-v1\n";
 const MAX_JSON_BYTES = 4 * 1024 * 1024;
@@ -1103,7 +1106,7 @@ export async function qualifyInstalled(paths, command, mode, expectedSha, expect
       stopOrdinaryServices(command);
       qualification = await prepareQualificationRuntime(paths, verified);
       startQualificationServices(command);
-      const health = await (probes.proxy ?? (() => probeProxy("127.0.0.1", QUALIFICATION_PROXY_PORT)))();
+      const health = await probeQualificationProxy(probes.proxy ?? (() => probeProxy("127.0.0.1", QUALIFICATION_PROXY_PORT, QUALIFICATION_PROXY_PROBE_TIMEOUT_MS)));
       if (!health.startsWith("HTTP/1.1 204 No Content\r\n") || !health.includes("\r\nWebX-Egress-Proxy: secure-egress/1\r\n")) fail("qualification proxy is unavailable");
       const childEnvironment = qualificationChildEnvironment(environment, {
         ...qualification,
@@ -1494,12 +1497,25 @@ function reviewedResourceSummary(value) {
   return Object.freeze({ state: summary.state, supervisedSessions: summary.supervisedSessions, warningSessions: summary.warningSessions, limitedSessions: summary.limitedSessions, terminalLimitEvents: summary.terminalLimitEvents, lastTerminalReason: summary.lastTerminalReason });
 }
 
-/** @param {string} host @param {number} port */
-async function probeProxy(host, port) {
+/** @param {() => Promise<string>} probe */
+async function probeQualificationProxy(probe) {
+  let lastError;
+  for (let attempt = 0; attempt < QUALIFICATION_PROXY_PROBE_ATTEMPTS; attempt += 1) {
+    try { return await probe(); }
+    catch (error) {
+      lastError = error;
+      if (attempt + 1 < QUALIFICATION_PROXY_PROBE_ATTEMPTS) await new Promise((resolveDelay) => setTimeout(resolveDelay, QUALIFICATION_PROXY_PROBE_DELAY_MS));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("bounded qualification proxy probe failed");
+}
+
+/** @param {string} host @param {number} port @param {number} [timeoutMs] */
+async function probeProxy(host, port, timeoutMs = 2_000) {
   return await new Promise((resolveProbe, rejectProbe) => {
     const socket = createConnection({ host, port });
     let bytes = Buffer.alloc(0);
-    const deadline = setTimeout(() => socket.destroy(new Error("bounded proxy probe timed out")), 2_000);
+    const deadline = setTimeout(() => socket.destroy(new Error("bounded proxy probe timed out")), timeoutMs);
     /** @param {Error | undefined} error @param {string | undefined} [value] */
     const finish = (error, value) => { clearTimeout(deadline); socket.destroy(); if (error instanceof Error) rejectProbe(error); else resolveProbe(value); };
     socket.once("connect", () => socket.write("GET http://webx-egress.invalid/.well-known/webx-egress-health HTTP/1.1\r\nHost: webx-egress.invalid\r\nConnection: close\r\n\r\n"));

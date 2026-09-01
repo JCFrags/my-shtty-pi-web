@@ -778,11 +778,16 @@ test("installed qualification is exact, private, static, and restores ordinary s
   await writeFile(join(paths.qualificationRoot, "interrupted-private-state"), "discard\n", { mode: 0o600 });
   await writeFile(paths.transactionPath, `${JSON.stringify({ schemaVersion: 1, operation: "qualify", snapshot: interruptedSnapshot })}\n`, { mode: 0o600 });
 
+  let proxyCalls = 0;
   let workloadCalls = 0;
   let closeCalls = 0;
   const result = await qualifyInstalled(paths, systemd.command, "acceptance", release.gitSha, manifestSha256, { ...environment, WAYLAND_DISPLAY: "wayland-0", DBUS_SESSION_BUS_ADDRESS: "unix:path=private", SECRET_QUALIFICATION_MARKER: "must-not-cross" }, {
     ports: async () => undefined,
-    proxy: async () => "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\n\r\n",
+    proxy: async () => {
+      proxyCalls += 1;
+      if (proxyCalls < 3) throw new Error("qualification proxy is still starting");
+      return "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\n\r\n";
+    },
     workload: async (childEnvironment, verified, mode) => {
       workloadCalls += 1;
       assert.equal(mode, "acceptance");
@@ -810,6 +815,7 @@ test("installed qualification is exact, private, static, and restores ordinary s
     },
   });
   assert.equal(result.ok, true);
+  assert.equal(proxyCalls, 3);
   assert.equal(workloadCalls, 1);
   assert.equal(closeCalls, 1);
   await assert.rejects(lstat(paths.qualificationRoot), /ENOENT/u);
