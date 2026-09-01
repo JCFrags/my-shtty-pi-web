@@ -100,11 +100,12 @@ export function parseInstalledConfig(input) {
  * Return only fixed reviewed service variables. No descriptor secret or human
  * input can enter this static environment file.
  * @param {ReturnType<typeof parseInstalledConfig>} config
- * @param {{ releaseRoot: string, runtimeRoot: string }} paths
+ * @param {{ releaseRoot: string, runtimeRoot: string, cacheRoot: string }} paths
  */
 export function serviceEnvironment(config, paths) {
   absolutePath(paths.releaseRoot, "releaseRoot");
   absolutePath(paths.runtimeRoot, "runtimeRoot");
+  absolutePath(paths.cacheRoot, "cacheRoot");
   const proxy = `http://${config.proxy.host}:${config.proxy.port}/`;
   return Object.freeze({
     WEBX_BROWSER_BACKEND: config.backend,
@@ -113,6 +114,8 @@ export function serviceEnvironment(config, paths) {
     PI_WEB_EGRESS_HOST: config.proxy.host,
     PI_WEB_EGRESS_PORT: String(config.proxy.port),
     PYTHONDONTWRITEBYTECODE: "1",
+    WEBX_CACHE_DIR: `${paths.cacheRoot}/responses`,
+    WEBX_CONTENT_DIR: `${paths.cacheRoot}/content`,
     BROWSERD_RUNTIME_DIR: `${paths.runtimeRoot}/pi-browserd`,
     BROWSERD_PROFILE_ROOT: `${paths.runtimeRoot}/pi-web-agentcursor/profiles`,
     BROWSERD_SCREENSHOT_OBSERVATION_TTL_MS: String(config.browser.screenshotObservationTtlMs),

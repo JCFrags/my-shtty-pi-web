@@ -379,7 +379,7 @@ async function prepareInstallation(paths, releaseRoot, config) {
   let parsed;
   try { parsed = installedConfig.parseInstalledConfig(config); }
   catch { fail("installed configuration is invalid"); }
-  const environment = installedConfig.serializeEnvironmentFile(installedConfig.serviceEnvironment(parsed, { releaseRoot: paths.currentLink, runtimeRoot: paths.runtimeRoot }));
+  const environment = installedConfig.serializeEnvironmentFile(installedConfig.serviceEnvironment(parsed, { releaseRoot: paths.currentLink, runtimeRoot: paths.runtimeRoot, cacheRoot: paths.cacheRoot }));
   if (Buffer.byteLength(environment) > 65_536 || /[\0\r]/u.test(environment)) fail("prospective service environment is invalid");
   /** @type {Record<string, string>} */
   const units = {};
@@ -1027,7 +1027,7 @@ async function prepareQualificationRuntime(paths, verified) {
   try { parsed = configModule.parseInstalledConfig(qualificationConfig); }
   catch { fail("qualification configuration is invalid"); }
   const qualification = {
-    ...configModule.serviceEnvironment(parsed, { releaseRoot: verified.releaseRoot, runtimeRoot: paths.runtimeRoot }),
+    ...configModule.serviceEnvironment(parsed, { releaseRoot: verified.releaseRoot, runtimeRoot: paths.runtimeRoot, cacheRoot: join(paths.qualificationRoot, "cache") }),
     WEBX_BROWSER_BACKEND: "agentcursor",
     WEBX_EGRESS_PROXY: `http://127.0.0.1:${QUALIFICATION_PROXY_PORT}/`,
     BROWSERD_EGRESS_PROXY: `http://127.0.0.1:${QUALIFICATION_PROXY_PORT}/`,

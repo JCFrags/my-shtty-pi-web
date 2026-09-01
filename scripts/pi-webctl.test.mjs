@@ -324,6 +324,9 @@ test("verified install is legacy-default, immutable, direct-launching, and prese
   const serviceEnvironment = await readFile(paths.environmentPath, "utf8");
   assert.match(serviceEnvironment, /^PI_WEB_EGRESS_HOST="127\.0\.0\.1"$/mu);
   assert.match(serviceEnvironment, /^PI_WEB_EGRESS_PORT="8877"$/mu);
+  assert.ok(serviceEnvironment.includes(`WEBX_CACHE_DIR="${paths.cacheRoot}/responses"\n`));
+  assert.ok(serviceEnvironment.includes(`WEBX_CONTENT_DIR="${paths.cacheRoot}/content"\n`));
+  assert.ok(!serviceEnvironment.includes(`${environment.XDG_CACHE_HOME}/pi-web/`));
   const webxd = await readFile(join(paths.unitRoot, "webxd.service"), "utf8");
   assert.match(webxd, /Wants=.*pi-browserd\.service/u);
   assert.doesNotMatch(webxd, /pi-web-agentcursor-browserd\.service/u);
