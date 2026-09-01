@@ -114,9 +114,11 @@ async function fakeSystemctl(temporary) {
   const command = join(temporary, "systemctl");
   const log = join(temporary, "systemctl.log");
   const failure = join(temporary, "fail-webxd-active");
-  await writeFile(command, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${log}"\ncase "$*" in\n  '--user is-active --quiet webxd.service') [[ ! -f "${failure}" ]]; exit ;;\n  '--user is-active --quiet '*) exit 0 ;;\n  '--user is-enabled --quiet '*) exit 0 ;;\nesac\nexit 0\n`);
+  const operationFailure = join(temporary, "fail-systemctl-operation");
+  const deactivateOnRestart = join(temporary, "deactivate-webxd-on-restart");
+  await writeFile(command, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${log}"\nif [[ -f "${deactivateOnRestart}" ]] && [[ "$*" == '--user restart webxd.service' ]]; then touch "${failure}"; exit 1; fi\nif [[ -f "${operationFailure}" ]] && [[ "$*" == "$(cat "${operationFailure}")" ]]; then exit 1; fi\ncase "$*" in\n  '--user is-active --quiet webxd.service') [[ ! -f "${failure}" ]]; exit ;;\n  '--user is-active --quiet '*) exit 0 ;;\n  '--user is-enabled --quiet '*) exit 0 ;;\nesac\nexit 0\n`);
   await chmod(command, 0o755);
-  return { command, log, failure };
+  return { command, log, failure, operationFailure, deactivateOnRestart };
 }
 
 /** @param {string} path */
@@ -315,6 +317,23 @@ test("upgrade, release rollback, failed activation rollback, and reinstall are d
   assert.equal(reinstalled.backend, "legacy");
 });
 
+test("existing same-SHA release cannot bypass the requested manifest digest", async () => {
+  const { temporary, paths, systemd, releases } = await fixture();
+  const first = await syntheticRelease(releases, "e");
+  const alternateRoot = join(temporary, "alternate-releases");
+  await mkdir(alternateRoot);
+  const alternate = await syntheticRelease(alternateRoot, "e", async (root) => {
+    await writeFile(join(root, "share/icons/pi-web-workspace.png"), "different reviewed payload\n");
+  });
+  const firstDigest = digest(await readFile(join(first.root, "manifest.json")));
+  const alternateDigest = digest(await readFile(join(alternate.root, "manifest.json")));
+  assert.notEqual(firstDigest, alternateDigest);
+  await installRelease(paths, systemd.command, first.root, first.gitSha, firstDigest);
+  await assert.rejects(installRelease(paths, systemd.command, alternate.root, alternate.gitSha, alternateDigest), /manifest digest does not match the requested digest/u);
+  assert.equal(digest(await readFile(join(paths.releasesRoot, first.releaseId, "manifest.json"))), firstDigest);
+  assert.equal(await readlink(paths.currentLink), `../../releases/${first.releaseId}`);
+});
+
 test("checksum corruption is refused before activation", async () => {
   const { paths, systemd, releases } = await fixture();
   const release = await syntheticRelease(releases, "e");
@@ -373,6 +392,37 @@ test("hard-linked release payloads and symlinked managed roots fail closed", asy
   await assert.rejects(installRelease(second.paths, second.systemd.command, clean.root), /owner-controlled directory is unsafe/u);
 });
 
+test("service restore failures keep the transaction recoverable", async () => {
+  const { paths, systemd, releases } = await fixture();
+  const first = await syntheticRelease(releases, "3");
+  const failed = await syntheticRelease(releases, "4");
+  await installRelease(paths, systemd.command, first.root);
+  await writeFile(systemd.deactivateOnRestart, "fail\n");
+  await writeFile(systemd.operationFailure, "--user start webxd.service\n");
+  await assert.rejects(installRelease(paths, systemd.command, failed.root), /prior service states could not be restored/u);
+  assert.equal(await readlink(paths.currentLink), `../../releases/${first.releaseId}`);
+  assert.equal((await lstat(paths.transactionPath)).isFile(), true, "failed service restoration retains the recovery transaction");
+  await Promise.all([rm(systemd.failure), rm(systemd.operationFailure), rm(systemd.deactivateOnRestart)]);
+  const recovered = await setBackend(paths, systemd.command, "legacy");
+  assert.equal(recovered.changed, false);
+  assert.deepEqual(JSON.parse(await readFile(paths.recoveryPath, "utf8")), { schemaVersion: 1, operation: "install", recovered: true });
+  await assert.rejects(lstat(paths.transactionPath), /ENOENT/u);
+});
+
+test("post-commit uninstall cleanup never restores a pointer to removed bytes", async () => {
+  const { paths, systemd, releases } = await fixture();
+  const release = await syntheticRelease(releases, "4");
+  await installRelease(paths, systemd.command, release.root);
+  await rm(paths.deploymentPath);
+  await mkdir(paths.deploymentPath);
+  await assert.rejects(uninstallCandidate(paths, systemd.command), /EISDIR|directory/u);
+  await assert.rejects(lstat(paths.currentLink), /ENOENT/u);
+  await assert.rejects(lstat(join(paths.releasesRoot, release.releaseId)), /ENOENT/u);
+  await assert.rejects(lstat(paths.transactionPath), /ENOENT/u, "the reversible uninstall committed before destructive cleanup");
+  await rm(paths.deploymentPath, { recursive: true });
+  assert.equal((await uninstallCandidate(paths, systemd.command)).legacyPreserved, true, "cleanup failure is retryable");
+});
+
 test("stale lock recovery restores the complete prior activation before new work", async () => {
   const { paths, systemd, releases } = await fixture();
   const release = await syntheticRelease(releases, "4");
@@ -388,6 +438,25 @@ test("stale lock recovery restores the complete prior activation before new work
   assert.deepEqual(JSON.parse(await readFile(paths.recoveryPath, "utf8")), { schemaVersion: 1, operation: "backend", recovered: true });
   await assert.rejects(lstat(paths.transactionPath), /ENOENT/u);
   await assert.rejects(lstat(paths.mutationLockPath), /ENOENT/u);
+});
+
+test("preflight rejects a checksum-corrupt installed candidate", async () => {
+  const { paths, systemd, releases, environment } = await fixture();
+  const installed = await syntheticRelease(releases, "4");
+  const prospective = await syntheticRelease(releases, "5");
+  await installRelease(paths, systemd.command, installed.root);
+  const manifest = join(paths.releasesRoot, installed.releaseId, "manifest.json");
+  await chmod(manifest, 0o644);
+  await writeFile(manifest, "corrupt installed manifest\n");
+  await chmod(manifest, 0o444);
+  const report = await installationPreflight(paths, systemd.command, prospective.root, prospective.gitSha, digest(await readFile(join(prospective.root, "manifest.json"))), { ...environment, WAYLAND_DISPLAY: "wayland-0", DBUS_SESSION_BUS_ADDRESS: "unix:path=private" }, {
+    osRelease: "ID=fedora\nVERSION_ID=44\n", architecture: "x64", systemdAvailable: true,
+    diskAvailableBytes: 2_000_000_000, runtimeAvailableBytes: 4_000_000_000, nodeVersion: "24.18.0", pythonVersion: "Python 3.14.7",
+    missingPackages: [], browser: { product: "Chromium", version: "151.0.0.0" }, portState: "free", serviceConflict: false, destinationConflict: false, runtimeState: "clean",
+  });
+  assert.equal(report.ok, false);
+  assert.equal(report.findings.find((item) => item.category === "existing")?.code, "EXISTING_INSTALL_INVALID");
+  assert.doesNotMatch(JSON.stringify(report), /corrupt installed manifest|\/tmp\//u);
 });
 
 test("doctor emits fixed classified findings without secrets or absolute managed paths", async () => {

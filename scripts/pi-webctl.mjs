@@ -264,13 +264,15 @@ function serviceStates(command) {
 /** @param {string} command @param {Record<string, any>} states */
 function restoreServiceStates(command, states) {
   if (JSON.stringify(Object.keys(states).sort()) !== JSON.stringify([...UNITS].sort())) fail("service snapshot unit set is invalid");
-  const errors = [];
+  let failed = false;
   for (const [unit, stateValue] of Object.entries(states)) {
     const state = record(stateValue, "service state");
-    try { systemctl(command, [state.enabled ? "enable" : "disable", unit], false); } catch (error) { errors.push(error); }
-    try { systemctl(command, [state.active ? "start" : "stop", unit], false); } catch (error) { errors.push(error); }
+    systemctl(command, [state.enabled ? "enable" : "disable", unit], false);
+    if ((systemctl(command, ["is-enabled", "--quiet", unit], false).status === 0) !== state.enabled) failed = true;
+    systemctl(command, [state.active ? "start" : "stop", unit], false);
+    if ((systemctl(command, ["is-active", "--quiet", unit], false).status === 0) !== state.active) failed = true;
   }
-  if (errors.length > 0) fail("one or more prior service states could not be restored");
+  if (failed) fail("one or more prior service states could not be restored");
 }
 
 /** @param {string} value */
@@ -328,7 +330,7 @@ async function stageRelease(paths, releaseSource, expectedSha = undefined, expec
   const verified = await verifyInstallRelease(releaseSource, expectedSha, expectedManifestSha256);
   const destination = join(paths.releasesRoot, verified.releaseId);
   if (await exists(destination)) {
-    const installed = await verifyInstallRelease(destination, verified.gitSha);
+    const installed = await verifyInstallRelease(destination, verified.gitSha, verified.manifestSha256);
     if (installed.releaseId !== verified.releaseId) fail("installed release identity conflicts with staged release");
     return installed;
   }
@@ -336,12 +338,12 @@ async function stageRelease(paths, releaseSource, expectedSha = undefined, expec
   const temporary = join(stageParent, verified.releaseId);
   await mkdir(stageParent, { mode: 0o700 });
   await copyReleaseTree(verified.releaseRoot, temporary);
-  await verifyInstallRelease(temporary, verified.gitSha).catch(async (error) => { await removeOwnedTree(stageParent); throw error; });
+  await verifyInstallRelease(temporary, verified.gitSha, verified.manifestSha256).catch(async (error) => { await removeOwnedTree(stageParent); throw error; });
   await chmod(temporary, 0o755);
   await rename(temporary, destination);
   await chmod(destination, 0o555);
   await rm(stageParent, { recursive: true, force: true });
-  return await verifyInstallRelease(destination, verified.gitSha);
+  return await verifyInstallRelease(destination, verified.gitSha, verified.manifestSha256);
 }
 
 /** @param {ReturnType<typeof installedPaths>} paths */
@@ -421,7 +423,7 @@ async function restoreActivation(paths, command, snapshot) {
   const managed = record(snapshot.managed, "managed path snapshots");
   if (JSON.stringify(Object.keys(managed).sort()) !== JSON.stringify(managedPaths(paths).sort())) fail("managed path snapshot set is invalid");
   for (const [path, value] of Object.entries(managed)) await restorePath(path, record(value, "managed path snapshot"));
-  systemctl(command, ["daemon-reload"], false);
+  systemctl(command, ["daemon-reload"]);
   restoreServiceStates(command, record(snapshot.services, "service snapshots"));
 }
 
@@ -458,8 +460,8 @@ async function installReleaseUnlocked(paths, command, releaseSource, expectedSha
       systemctl(command, ["restart", "pi-web-agentcursor-egress-proxy.service"]);
       systemctl(command, ["restart", "pi-web-agentcursor-browserd.service"]);
     } else {
-      systemctl(command, ["disable", "--now", "pi-web-agentcursor-browserd.service"], false);
-      systemctl(command, ["disable", "--now", "pi-web-agentcursor-egress-proxy.service"], false);
+      systemctl(command, ["disable", "--now", "pi-web-agentcursor-browserd.service"]);
+      systemctl(command, ["disable", "--now", "pi-web-agentcursor-egress-proxy.service"]);
     }
     systemctl(command, ["daemon-reload"]);
     systemctl(command, ["restart", "webxd.service"]);
@@ -504,8 +506,8 @@ async function setBackendUnlocked(paths, command, backend) {
       systemctl(command, ["enable", "--now", "pi-web-agentcursor-egress-proxy.service"]);
       systemctl(command, ["enable", "--now", "pi-web-agentcursor-browserd.service"]);
     } else {
-      systemctl(command, ["disable", "--now", "pi-web-agentcursor-browserd.service"], false);
-      systemctl(command, ["disable", "--now", "pi-web-agentcursor-egress-proxy.service"], false);
+      systemctl(command, ["disable", "--now", "pi-web-agentcursor-browserd.service"]);
+      systemctl(command, ["disable", "--now", "pi-web-agentcursor-egress-proxy.service"]);
     }
     systemctl(command, ["restart", "webxd.service"]);
     if (systemctl(command, ["is-active", "--quiet", "webxd.service"], false).status !== 0) fail("webxd is not active after backend change");
@@ -541,8 +543,8 @@ async function rollbackReleaseUnlocked(paths, command) {
       systemctl(command, ["enable", "--now", "pi-web-agentcursor-egress-proxy.service"]);
       systemctl(command, ["enable", "--now", "pi-web-agentcursor-browserd.service"]);
     } else {
-      systemctl(command, ["disable", "--now", "pi-web-agentcursor-browserd.service"], false);
-      systemctl(command, ["disable", "--now", "pi-web-agentcursor-egress-proxy.service"], false);
+      systemctl(command, ["disable", "--now", "pi-web-agentcursor-browserd.service"]);
+      systemctl(command, ["disable", "--now", "pi-web-agentcursor-egress-proxy.service"]);
     }
     systemctl(command, ["restart", "webxd.service"]);
     if (systemctl(command, ["is-active", "--quiet", "webxd.service"], false).status !== 0) fail("webxd is not active after release rollback");
@@ -570,11 +572,30 @@ async function verifyManagedRoot(root) {
   const markerInformation = await lstat(marker);
   if (!markerInformation.isFile() || markerInformation.isSymbolicLink() || markerInformation.uid !== process.getuid?.() || markerInformation.nlink !== 1 || (markerInformation.mode & 0o777) !== 0o600 || await readFile(marker, "utf8") !== MARKER_VALUE) fail(`managed root ownership marker is invalid: ${root}`);
 }
+/** @param {ReturnType<typeof installedPaths>} paths */
+async function verifiedCandidateReleases(paths) {
+  /** @type {string[]} */
+  const releases = [];
+  if (!(await exists(paths.releasesRoot))) return releases;
+  for (const name of await readdir(paths.releasesRoot)) {
+    if (!/^phase4a-[0-9a-f]{40}$/u.test(name)) continue;
+    const release = join(paths.releasesRoot, name);
+    await verifyInstallRelease(release);
+    releases.push(release);
+  }
+  return releases.sort();
+}
+
+/** @param {ReturnType<typeof installedPaths>} paths @param {boolean} purge */
+async function prepareCandidateRemoval(paths, purge) {
+  await verifiedCandidateReleases(paths);
+  if (!purge) return;
+  for (const root of [paths.cacheRoot, paths.configRoot, paths.dataRoot, paths.stateRoot]) if (await exists(root)) await verifyManagedRoot(root);
+}
+
 /** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {boolean} purge */
 async function uninstallCandidateUnlocked(paths, command, purge = false) {
-  for (const unit of UNITS) {
-    systemctl(command, ["disable", "--now", unit], false);
-  }
+  for (const unit of UNITS) systemctl(command, ["disable", "--now", unit]);
   if (await exists(paths.preinstallBackupPath)) {
     const backup = record(await readJson(paths.preinstallBackupPath), "preinstall backup");
     const retainedConfig = await snapshotPath(paths.configPath);
@@ -583,25 +604,25 @@ async function uninstallCandidateUnlocked(paths, command, purge = false) {
   } else {
     for (const path of managedPaths(paths)) await rm(path, { force: true });
     await setReleasePointers(paths, undefined, undefined);
-    systemctl(command, ["daemon-reload"], false);
-  }
-  if (await exists(paths.releasesRoot)) {
-    for (const name of await readdir(paths.releasesRoot)) {
-      if (!/^phase4a-[0-9a-f]{40}$/u.test(name)) continue;
-      const release = join(paths.releasesRoot, name);
-      await verifyInstallRelease(release);
-      await removeOwnedTree(release);
-    }
-  }
-  for (const path of [paths.deploymentPath, paths.failurePath, paths.preinstallBackupPath]) await rm(path, { force: true });
-  if (purge) {
-    for (const root of [paths.cacheRoot, paths.stateRoot, paths.configRoot, paths.dataRoot]) {
-      if (!(await exists(root))) continue;
-      await verifyManagedRoot(root);
-      await rm(root, { recursive: true });
-    }
+    systemctl(command, ["daemon-reload"]);
   }
   return { ok: true, purged: purge, legacyPreserved: true };
+}
+
+/**
+ * Delete only inactive candidate bytes after the reversible transaction has
+ * committed. A cleanup failure can be retried without restoring pointers to a
+ * release that was already removed.
+ * @param {ReturnType<typeof installedPaths>} paths
+ * @param {boolean} purge
+ */
+async function cleanupCandidateRemoval(paths, purge) {
+  for (const release of await verifiedCandidateReleases(paths)) await removeOwnedTree(release);
+  for (const path of [paths.deploymentPath, paths.failurePath, paths.preinstallBackupPath]) await rm(path, { force: true });
+  if (!purge) return;
+  const roots = [paths.cacheRoot, paths.configRoot, paths.dataRoot, paths.stateRoot];
+  for (const root of roots) if (await exists(root)) await verifyManagedRoot(root);
+  for (const root of roots) if (await exists(root)) await rm(root, { recursive: true });
 }
 
 /** @param {number} pid */
@@ -660,8 +681,9 @@ async function recoverInterruptedActivation(paths, command) {
  * @param {string} operation
  * @param {() => Promise<T>} callback
  * @param {() => Promise<void>} [beforeSystemctl]
+ * @param {() => Promise<void>} [afterCommit]
  */
-async function withMutation(paths, command, operation, callback, beforeSystemctl = async () => undefined) {
+async function withMutation(paths, command, operation, callback, beforeSystemctl = async () => undefined, afterCommit = async () => undefined) {
   await ensureManagedRoots(paths);
   const releaseLock = await acquireMutationLock(paths);
   try {
@@ -669,17 +691,19 @@ async function withMutation(paths, command, operation, callback, beforeSystemctl
     await beforeSystemctl();
     const snapshot = await captureActivation(paths, command);
     await atomicJson(paths.transactionPath, { schemaVersion: 1, operation, snapshot });
+    let result;
     try {
-      const result = await callback();
-      await rm(paths.transactionPath, { force: true });
+      result = await callback();
       await pruneReleaseSelectors(paths);
-      return result;
+      await rm(paths.transactionPath, { force: true });
     } catch (error) {
       let restored = false;
       try { await restoreActivation(paths, command, snapshot); restored = true; }
       finally { if (restored) await rm(paths.transactionPath, { force: true }); }
       throw error;
     }
+    await afterCommit();
+    return result;
   } finally { await releaseLock(); }
 }
 
@@ -726,7 +750,9 @@ export async function rollbackRelease(paths, command) {
 }
 /** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {boolean} purge */
 export async function uninstallCandidate(paths, command, purge = false) {
-  return await withMutation(paths, command, "uninstall", async () => await uninstallCandidateUnlocked(paths, command, purge));
+  const prepare = async () => await prepareCandidateRemoval(paths, purge);
+  const cleanup = async () => await cleanupCandidateRemoval(paths, purge);
+  return await withMutation(paths, command, "uninstall", async () => await uninstallCandidateUnlocked(paths, command, purge), prepare, cleanup);
 }
 
 /** @param {NodeJS.ProcessEnv} environment */
@@ -954,8 +980,12 @@ export async function installationPreflight(paths, command, releaseSource, expec
   findings.push(preflightFinding("runtime", runtimeState === "clean" ? "pass" : "warning", runtimeState === "clean" ? "RUNTIME_STATE_CLEAN" : "RUNTIME_STATE_PRESENT", runtimeState === "clean" ? "No candidate runtime state is present." : "Owned candidate runtime state is present and requires operator review before cleanup."));
 
   let installedReleaseId = null;
-  try { installedReleaseId = (await releasePointers(paths)).currentReleaseId ?? null; }
-  catch { findings.push(preflightFinding("existing", "error", "EXISTING_INSTALL_INVALID", "Existing candidate activation state is invalid.")); }
+  try {
+    const pointers = await releasePointers(paths);
+    installedReleaseId = pointers.currentReleaseId ?? null;
+    if (pointers.currentReleaseId !== undefined) await verifyInstallRelease(join(paths.releasesRoot, pointers.currentReleaseId));
+    if (pointers.previousReleaseId !== undefined) await verifyInstallRelease(join(paths.releasesRoot, pointers.previousReleaseId));
+  } catch { findings.push(preflightFinding("existing", "error", "EXISTING_INSTALL_INVALID", "Existing candidate activation state or immutable release is invalid.")); }
   if (!findings.some((item) => item.category === "existing")) findings.push(preflightFinding("existing", installedReleaseId === null ? "pass" : "warning", installedReleaseId === null ? "CANDIDATE_NOT_INSTALLED" : "CANDIDATE_UPGRADE", installedReleaseId === null ? "No candidate release is currently installed; legacy state will be preserved." : "A verified candidate activation exists and will be treated as an upgrade."));
 
   const ok = findings.every((item) => item.status !== "error");
