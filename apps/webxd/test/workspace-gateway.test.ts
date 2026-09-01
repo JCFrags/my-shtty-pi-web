@@ -269,6 +269,40 @@ describe("private workspace gateway", () => {
     expect(runtime.releasedLeaseIds).toEqual([runtime.leaseId]);
   });
 
+  it("closes the trusted desktop authority and releases control when input fingerprinting fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "webxd-workspace-fingerprint-failure-"));
+    const runtime = new FakeWorkspaceRuntime();
+    const browserDirectory = join(root, "browserd");
+    const browserd = new BrowserdServer({ runtimeDirectory: browserDirectory, runtime: runtime as unknown as BrowserRuntime, allowTemporaryRuntimeDirectoryForTest: true });
+    await browserd.start(); cleanups.push(async () => await browserd.stop());
+    let failFingerprint = false;
+    const gateway = new WorkspaceGateway({
+      runtimeDirectory: join(root, "workspace"), browserBackend: "agentcursor",
+      browserDescriptorPath: join(browserDirectory, "browserd.json"), browserRuntimeDirectory: browserDirectory,
+      heartbeatMs: 100, inputFingerprintFaultForTest: () => { if (failFingerprint) throw new Error("injected fingerprint failure"); },
+    });
+    const descriptor = await gateway.start(); cleanups.push(async () => await gateway.stop());
+    const client = await FramedClient.open(descriptor.socketPath); cleanups.push(async () => client.close());
+    client.send({ protocolVersion: "workspace.v2", kind: "bind", requestId: "request:bind", bindingSecret: descriptor.bindingSecret }); await client.next(); await client.next();
+    client.send({ protocolVersion: "workspace.v2", kind: "frame.select", requestId: "request:select", selectionId: "selection_digest_fail", browserSessionId: "session:one", tabId: "tab:one" });
+    await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:select");
+    runtime.publishFrame();
+    const agentFrame = (await nextMatching(client, (header) => header.kind === "frame")).header as Record<string, unknown>;
+    client.send({ protocolVersion: "workspace.v2", kind: "control.acquire", requestId: "request:acquire", browserSessionId: "session:one", tabId: "tab:one", expectedControlEpoch: 1, frame: paintedBinding(agentFrame, new Date().toISOString()) });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:acquire")).header).toMatchObject({ ok: true, result: { controlState: "human", controlEpoch: 2 } });
+    runtime.controlEpoch = 2;
+    runtime.publishFrame();
+    const humanFrame = (await nextMatching(client, (header) => header.kind === "frame" && header.controlEpoch === 2)).header as Record<string, unknown>;
+    const secret = "phase4a-fingerprint-failure-secret-雪";
+    failFingerprint = true;
+    client.send({ protocolVersion: "workspace.v2", kind: "input.batch", requestId: "request:fingerprint-failure", browserSessionId: "session:one", tabId: "tab:one", controlEpoch: 2, inputBatchSequence: 1, inputTargetGeneration: 1, frame: paintedBinding(humanFrame, new Date().toISOString()), events: [{ kind: "text", text: secret }] });
+    expect((await nextMatching(client, (header) => header.kind === "response" && header.requestId === "request:fingerprint-failure")).header).toMatchObject({ ok: false, error: { code: "CONTROL_LEASE_CONFLICT", retryable: false } });
+    await waitUntil(() => gateway.diagnostics.clientConnections === 0 && runtime.releaseCount === 1);
+    expect(runtime.inputBatchCount).toBe(0);
+    expect(client.receivedText).not.toContain(secret);
+    expect(client.receivedText).not.toContain(runtime.leaseId);
+  });
+
   it("namespaces identical control request IDs across trusted desktop clients", async () => {
     const root = await mkdtemp(join(tmpdir(), "webxd-workspace-cross-client-control-"));
     const runtime = new FakeWorkspaceRuntime();
@@ -477,9 +511,9 @@ class FakeWorkspaceRuntime extends EventEmitter {
   async workspaceReleaseControl(_connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.control.release" }>): Promise<unknown> {
     if (request.leaseId !== this.leaseId) throw new BrowserProtocolError("CONTROL_LEASE_CONFLICT", "injected lease conflict");
     this.releaseCount++; this.releasedLeaseIds.push(request.leaseId); this.controlEpoch++;
-    return this.workspaceControlStatus("session:one");
+    return this.workspaceControlStatus();
   }
-  workspaceControlStatus(_browserSessionId: string): unknown { return { kind: "workspaceControlStatus", browserSessionId: "session:one", controlState: this.releaseCount > 0 ? "agent" : this.controlEpoch > 1 ? "human" : "agent", controlEpoch: this.controlEpoch, controlTransfer: "none", ...(this.controlEpoch > 1 && this.releaseCount === 0 ? { selectedHumanControlTabId: "tab:one" } : {}), captureReadiness: "ready", leaseExpiry: this.controlEpoch > 1 && this.releaseCount === 0 ? "healthy" : "none" }; }
+  workspaceControlStatus(): unknown { return { kind: "workspaceControlStatus", browserSessionId: "session:one", controlState: this.releaseCount > 0 ? "agent" : this.controlEpoch > 1 ? "human" : "agent", controlEpoch: this.controlEpoch, controlTransfer: "none", ...(this.controlEpoch > 1 && this.releaseCount === 0 ? { selectedHumanControlTabId: "tab:one" } : {}), captureReadiness: "ready", leaseExpiry: this.controlEpoch > 1 && this.releaseCount === 0 ? "healthy" : "none" }; }
   async workspaceInputBatch(_connectionId: string, request: Extract<WorkspaceBrokerRequest, { kind: "workspace.input.batch" }>): Promise<unknown> {
     if (request.leaseId !== this.leaseId) throw new BrowserProtocolError("CONTROL_LEASE_CONFLICT", "injected lease conflict");
     this.inputBatchCount++;

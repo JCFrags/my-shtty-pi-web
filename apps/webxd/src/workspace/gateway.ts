@@ -80,6 +80,8 @@ export interface WorkspaceGatewayOptions {
   readonly maxOutboundBytesPerClient?: number;
   readonly heartbeatMs?: number;
   readonly desktopHeartbeatTimeoutMs?: number;
+  /** Deterministic failure injection for the digest fail-closed test only. */
+  readonly inputFingerprintFaultForTest?: () => void;
 }
 
 export interface WorkspaceGatewayDiagnostics {
@@ -285,7 +287,16 @@ export class WorkspaceGateway {
       this.sendSuccess(client, command.requestId, { kind: "controlStatus", browserSessionId: command.browserSessionId, controlState: status.controlState, controlEpoch: status.controlEpoch, controlTransfer: status.controlTransfer, ...(status.selectedHumanControlTabId === undefined ? {} : { selectedHumanControlTabId: status.selectedHumanControlTabId }), captureReadiness: status.captureReadiness, leaseExpiry: status.leaseExpiry });
       return;
     }
-    const inputDigest = inputSemanticDigest(this.#inputFingerprintKey, command);
+    let inputDigest: string;
+    try {
+      this.options.inputFingerprintFaultForTest?.();
+      inputDigest = inputSemanticDigest(this.#inputFingerprintKey, command);
+    } catch {
+      const error = new WorkspaceProtocolError("CONTROL_LEASE_CONFLICT", "Workspace input fingerprint could not be computed.", false);
+      this.sendFailure(client, command.requestId, error);
+      await this.closeClient(client, true);
+      return;
+    }
     if (this.replayInputResponse(client, command.requestId, command.inputBatchSequence, inputDigest)) return;
     const control = requireClientControl(client, command.browserSessionId, command.controlEpoch, command.tabId);
     if (command.inputTargetGeneration !== control.inputTargetGeneration) throw new WorkspaceProtocolError("CONTROL_LEASE_CONFLICT", "Browser input target changed.", false);

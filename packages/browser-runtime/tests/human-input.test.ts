@@ -3,6 +3,8 @@ import { describe, it } from "vitest";
 import { BrowserProtocolError, type WorkspaceBrokerRequest } from "@webx/browser-protocol";
 import { HumanInputController } from "../src/control/human-input.js";
 import { bindMotorTab, SessionMotor, type DirectHumanInputEvent } from "../src/motor/session-motor.js";
+import { BrowserRuntime } from "../src/registry/runtime.js";
+import type { BrowserSession } from "../src/registry/session.js";
 import type { TabRecord } from "../src/targets/registry.js";
 
 function target(): TabRecord {
@@ -166,6 +168,76 @@ describe("shared direct human input lane", () => {
     }
   });
 
+  it("integrates semantic retries with the runtime in-flight path and terminates on digest failure", async () => {
+    const tab = target();
+    let sideEffects = 0;
+    let releaseDispatch!: () => void;
+    let enteredDispatch!: () => void;
+    const entered = new Promise<void>((resolve) => { enteredDispatch = resolve; });
+    bindMotorTab(tab, { connected: true, async send<T>(method: string): Promise<T> {
+      if (method === "Runtime.evaluate") return { result: { value: true } } as T;
+      sideEffects++;
+      enteredDispatch();
+      await new Promise<void>((resolve) => { releaseDispatch = resolve; });
+      return {} as T;
+    } });
+    const motor = new SessionMotor(tab.browserSessionId, 37);
+    const humanInput = new HumanInputController(motor);
+    humanInput.start(tab.tabId, 2);
+    let nextInputBatchSequence = 1;
+    let closeCount = 0;
+    const session = {
+      control: {
+        authorizeInputLease: () => undefined,
+        commitInputBatch: (_proof: unknown, sequence: number) => {
+          if (sequence !== nextInputBatchSequence) throw new BrowserProtocolError("INPUT_SEQUENCE_STALE", "Browser input sequence is stale.", false);
+          nextInputBatchSequence++;
+          return nextInputBatchSequence;
+        },
+      },
+      humanInput,
+      motor,
+      frames: { requestCapture: () => undefined },
+      dispatchHumanInput: async (_tabId: string, controlEpoch: number, events: readonly DirectHumanInputEvent[], beforeDispatch: () => void, signal?: AbortSignal) => await humanInput.dispatch(tab, controlEpoch, events, beforeDispatch, signal),
+      close: async () => { closeCount++; humanInput.stop(); },
+    };
+    const runtime = new BrowserRuntime();
+    const runtimeInternals = runtime as unknown as {
+      sessions: Map<string, BrowserSession>;
+      requireWorkspaceControlFrame: (...values: readonly unknown[]) => unknown;
+    };
+    runtimeInternals.sessions.set(tab.browserSessionId, session as unknown as BrowserSession);
+    runtimeInternals.requireWorkspaceControlFrame = () => ({
+      runtimeInstanceId: "runtime_human_input_test", subscriptionId: "subscription_human_input_test",
+      actor: { principalId: "owner:test", agentSessionId: "agent:test" }, browserSessionId: tab.browserSessionId, tabId: tab.tabId,
+      controlEpoch: 2, frameSequence: 1, documentGeneration: 1, viewportGeneration: 1,
+      imagePixelWidth: 1280, imagePixelHeight: 720, cssViewportWidth: 1280, cssViewportHeight: 720, devicePixelRatio: 1,
+      capturedMonotonicMs: performance.now(), artifactId: "artifact_human_input_test", sha256: "a".repeat(64), byteLength: 8, deliveredAtMs: performance.now(),
+    });
+
+    const original = inputRequest([{ kind: "pointerMove", point: { imageX: 10, imageY: 20 } }], { requestId: "request:runtime:first", operationId: "operation:runtime:first" });
+    const first = runtime.workspaceInputBatch("connection:workspace", original);
+    await entered;
+    const exactInFlight = runtime.workspaceInputBatch("connection:workspace", { ...original, requestId: "request:runtime:retry" });
+    await assert.rejects(runtime.workspaceInputBatch("connection:workspace", { ...original, requestId: "request:runtime:conflict", events: [{ kind: "pointerMove", point: { imageX: 11, imageY: 20 } }] }), code("CONTROL_LEASE_CONFLICT"));
+    assert.equal(sideEffects, 1);
+    releaseDispatch();
+    const acknowledgement = await first;
+    assert.deepEqual(await exactInFlight, acknowledgement);
+    assert.deepEqual(await runtime.workspaceInputBatch("connection:workspace", { ...original, requestId: "request:runtime:retained" }), acknowledgement);
+    assert.equal(sideEffects, 1);
+    await assert.rejects(runtime.workspaceInputBatch("connection:workspace", inputRequest([{ kind: "pointerMove", point: { imageX: 12, imageY: 20 } }], { requestId: "request:runtime:gap", operationId: "operation:runtime:gap", inputBatchSequence: 3 })), code("INPUT_SEQUENCE_STALE"));
+    await assert.rejects(runtime.workspaceInputBatch("connection:workspace", inputRequest([{ kind: "pointerMove", point: { imageX: 12, imageY: 20 } }], { requestId: "request:runtime:operation-conflict", operationId: original.operationId, inputBatchSequence: 2 })), code("CONTROL_LEASE_CONFLICT"));
+    assert.equal(sideEffects, 1);
+
+    humanInput.stop();
+    await assert.rejects(runtime.workspaceInputBatch("connection:workspace", inputRequest([{ kind: "text", text: "phase4a-runtime-digest-failure-secret-雪" }], { requestId: "request:runtime:digest-failure", operationId: "operation:runtime:digest-failure", inputBatchSequence: 2 })), code("CONTROL_LEASE_CONFLICT"));
+    assert.equal(closeCount, 1);
+    assert.equal(runtime.workspaceSnapshot().sessions.length, 0);
+    assert.equal(sideEffects, 1);
+    await runtime.close();
+  });
+
   it("retains only bounded sequence identity and sanitized acknowledgement, not human text", async () => {
     const tab = target();
     bindMotorTab(tab, { connected: true, async send<T>(method: string): Promise<T> {
@@ -191,7 +263,9 @@ describe("shared direct human input lane", () => {
   });
 });
 
-function inputRequest(events: Extract<WorkspaceBrokerRequest, { readonly kind: "workspace.input.batch" }>["events"]): Extract<WorkspaceBrokerRequest, { readonly kind: "workspace.input.batch" }> {
+type WorkspaceInputRequest = Extract<WorkspaceBrokerRequest, { readonly kind: "workspace.input.batch" }>;
+
+function inputRequest(events: WorkspaceInputRequest["events"], overrides: Partial<Omit<WorkspaceInputRequest, "events" | "frame">> = {}): WorkspaceInputRequest {
   return {
     protocolVersion: "browser.v3",
     kind: "workspace.input.batch",
@@ -215,5 +289,6 @@ function inputRequest(events: Extract<WorkspaceBrokerRequest, { readonly kind: "
       imagePixelHeight: 720,
     },
     events,
+    ...overrides,
   };
 }

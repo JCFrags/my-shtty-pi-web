@@ -287,7 +287,14 @@ export class BrowserRuntime extends EventEmitter {
       tabId: request.tabId, controlEpoch: request.controlEpoch, inputTargetGeneration: request.inputTargetGeneration,
     };
     session.control.authorizeInputLease(proof);
-    const semanticDigest = session.humanInput.semanticFingerprint(request);
+    let semanticDigest: string;
+    try {
+      semanticDigest = session.humanInput.semanticFingerprint(request);
+    } catch (error) {
+      session.humanInput.stop();
+      await this.terminateControlFailedSession(request.browserSessionId);
+      throw error;
+    }
     const retained = session.humanInput.retainedAcknowledgement(request.inputBatchSequence, request.operationId, semanticDigest);
     if (retained !== undefined) return retained;
     const active = this.workspaceInputInFlight.get(request.browserSessionId);
