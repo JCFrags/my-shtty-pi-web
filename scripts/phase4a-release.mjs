@@ -132,9 +132,10 @@ async function resolvedOutsideSource(pathValue, name) {
 }
 /**
  * @param {string} root
+ * @param {boolean} [requireImmutableDirectories]
  * @returns {Promise<string[]>}
  */
-async function regularFiles(root) {
+async function regularFiles(root, requireImmutableDirectories = false) {
   /** @type {string[]} */
   const pending = [root];
   /** @type {string[]} */
@@ -142,6 +143,10 @@ async function regularFiles(root) {
   while (pending.length > 0) {
     const directory = pending.pop();
     if (directory === undefined) fail("release traversal lost its directory");
+    if (requireImmutableDirectories) {
+      const stats = await lstat(directory);
+      if (!stats.isDirectory() || stats.isSymbolicLink() || stats.uid !== process.getuid?.() || (stats.mode & 0o777) !== 0o555) fail(`release directory mode or ownership is invalid: ${relative(root, directory) || "."}`);
+    }
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
       if (entry.isDirectory()) pending.push(path);
@@ -529,10 +534,10 @@ async function buildRelease(options) {
 async function verifyRelease(releaseRootValue, expectedSha, forbiddenPaths = [sourceRoot]) {
   const releaseRoot = await resolvedOutsideSource(releaseRootValue, "release root");
   const rootStats = await lstat(releaseRoot);
-  if (!rootStats.isDirectory() || (rootStats.mode & 0o222) !== 0) fail("release root is not an immutable directory");
-  const actual = (await regularFiles(releaseRoot)).map((path) => relative(releaseRoot, path).replaceAll(sep, "/")).filter((path) => path !== "checksums.json");
+  if (!rootStats.isDirectory() || rootStats.isSymbolicLink() || rootStats.uid !== process.getuid?.() || (rootStats.mode & 0o777) !== 0o555) fail("release root is not an immutable directory");
+  const actual = (await regularFiles(releaseRoot, true)).map((path) => relative(releaseRoot, path).replaceAll(sep, "/")).filter((path) => path !== "checksums.json");
   const checksumStats = await lstat(join(releaseRoot, "checksums.json"));
-  if (!checksumStats.isFile() || (checksumStats.mode & 0o777) !== 0o444) fail("release checksum document mode is invalid");
+  if (!checksumStats.isFile() || checksumStats.isSymbolicLink() || checksumStats.nlink !== 1 || checksumStats.uid !== process.getuid?.() || (checksumStats.mode & 0o777) !== 0o444) fail("release checksum document mode is invalid");
   const manifestBytes = await readFile(join(releaseRoot, "manifest.json"));
   const manifest = validateReleaseManifest(JSON.parse(manifestBytes.toString("utf8")));
   if (expectedSha !== undefined && (!/^[0-9a-f]{40}$/u.test(expectedSha) || manifest.gitSha !== expectedSha)) fail("release manifest does not match the expected Git SHA");
@@ -543,7 +548,8 @@ async function verifyRelease(releaseRootValue, expectedSha, forbiddenPaths = [so
     listed.add(record.path);
     const path = join(releaseRoot, record.path);
     const stats = await lstat(path);
-    if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1 || stats.uid !== process.getuid?.() || (stats.mode & 0o777) !== record.mode || (stats.mode & 0o222) !== 0) fail(`release file mode or ownership is invalid: ${record.path}`);
+    const expectedMode = record.path.startsWith("bin/") ? 0o555 : 0o444;
+    if (record.mode !== expectedMode || !stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1 || stats.uid !== process.getuid?.() || (stats.mode & 0o777) !== expectedMode) fail(`release file mode or ownership is invalid: ${record.path}`);
     const bytes = await readFile(path);
     if (bytes.byteLength !== record.bytes || sha256(bytes) !== record.sha256) fail(`release checksum failed: ${record.path}`);
   }

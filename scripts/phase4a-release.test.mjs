@@ -152,6 +152,16 @@ test("detached verification accepts a complete immutable inventory and detects t
   }
 });
 
+test("detached verification rejects mutable nested release directories", async () => {
+  const { temporaryRoot, releaseRoot } = await syntheticRelease();
+  try {
+    await chmod(join(releaseRoot, "share/deploy"), 0o755);
+    await assert.rejects(releaseInternals.verifyRelease(releaseRoot, gitSha), /release directory mode or ownership is invalid/u);
+  } finally {
+    await releaseInternals.removeOwnedTree(temporaryRoot);
+  }
+});
+
 test("release verification rejects an injected absolute build path", async () => {
   const forbiddenMarker = "/private/build-machine/cargo-home";
   const { temporaryRoot, releaseRoot } = await syntheticRelease(forbiddenMarker);

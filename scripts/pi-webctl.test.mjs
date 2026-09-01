@@ -116,9 +116,30 @@ async function fakeSystemctl(temporary) {
   const failure = join(temporary, "fail-webxd-active");
   const operationFailure = join(temporary, "fail-systemctl-operation");
   const deactivateOnRestart = join(temporary, "deactivate-webxd-on-restart");
-  await writeFile(command, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${log}"\nif [[ -f "${deactivateOnRestart}" ]] && [[ "$*" == '--user restart webxd.service' ]]; then touch "${failure}"; exit 1; fi\nif [[ -f "${operationFailure}" ]] && [[ "$*" == "$(cat "${operationFailure}")" ]]; then exit 1; fi\ncase "$*" in\n  '--user is-active --quiet webxd.service') [[ ! -f "${failure}" ]]; exit ;;\n  '--user is-active --quiet '*) exit 0 ;;\n  '--user is-enabled --quiet '*) exit 0 ;;\nesac\nexit 0\n`);
+  const state = join(temporary, "systemctl-state");
+  await mkdir(state);
+  await Promise.all([writeFile(join(state, "webxd.service.active"), ""), writeFile(join(state, "webxd.service.enabled"), "")]);
+  await writeFile(command, `#!/usr/bin/env bash
+raw="$*"
+printf '%s\\n' "$raw" >> "${log}"
+if [[ -f "${deactivateOnRestart}" ]] && [[ "$raw" == '--user restart webxd.service' ]]; then rm -f "${state}/webxd.service.active"; touch "${failure}"; exit 1; fi
+if [[ -f "${operationFailure}" ]] && [[ "$raw" == "$(cat "${operationFailure}")" ]]; then exit 1; fi
+[[ "$1" == '--user' ]] && shift
+operation="$1"; shift || true
+case "$operation" in
+  is-active) [[ "$1" == '--quiet' ]] && shift; unit="$1"; [[ "$unit" != 'webxd.service' || ! -f "${failure}" ]] && [[ -f "${state}/$unit.active" ]] ;;
+  is-enabled) [[ "$1" == '--quiet' ]] && shift; unit="$1"; [[ -f "${state}/$unit.enabled" ]] ;;
+  enable) now=0; [[ "$1" == '--now' ]] && { now=1; shift; }; unit="$1"; touch "${state}/$unit.enabled"; [[ "$now" == 0 ]] || touch "${state}/$unit.active" ;;
+  disable) now=0; [[ "$1" == '--now' ]] && { now=1; shift; }; unit="$1"; rm -f "${state}/$unit.enabled"; [[ "$now" == 0 ]] || rm -f "${state}/$unit.active" ;;
+  start) unit="$1"; touch "${state}/$unit.active" ;;
+  stop) unit="$1"; rm -f "${state}/$unit.active" ;;
+  restart) unit="$1"; touch "${state}/$unit.active" ;;
+  daemon-reload|show-environment) exit 0 ;;
+  *) exit 1 ;;
+esac
+`);
   await chmod(command, 0o755);
-  return { command, log, failure, operationFailure, deactivateOnRestart };
+  return { command, log, failure, operationFailure, deactivateOnRestart, state };
 }
 
 /** @param {string} path */
@@ -298,6 +319,10 @@ test("upgrade, release rollback, failed activation rollback, and reinstall are d
   assert.equal(await readlink(paths.currentLink), `../../releases/${second.releaseId}`);
   assert.equal(await readlink(paths.previousLink), `../../releases/${first.releaseId}`);
   assert.equal((await readdir(paths.selectorsRoot)).filter((name) => /^selector-/u.test(name)).length, 1, "obsolete selector generations are pruned after commit");
+  const deploymentBeforeReinstall = await readFile(paths.deploymentPath, "utf8");
+  const sameShaReinstall = await installRelease(paths, systemd.command, second.root);
+  assert.equal(sameShaReinstall.previousReleaseId, first.releaseId);
+  assert.equal(await readFile(paths.deploymentPath, "utf8"), deploymentBeforeReinstall, "same-SHA reinstall preserves the real rollback target and backend");
 
   const rolledBack = await rollbackRelease(paths, systemd.command);
   assert.equal(rolledBack.releaseId, first.releaseId);
@@ -433,6 +458,17 @@ test("hard-linked release payloads and symlinked managed roots fail closed", asy
   await assert.rejects(installRelease(second.paths, second.systemd.command, clean.root), /owner-controlled directory is unsafe/u);
 });
 
+test("service activation accepts idempotent nonzero results only when exact probes match", async () => {
+  const { paths, systemd, releases } = await fixture();
+  const release = await syntheticRelease(releases, "2");
+  await installRelease(paths, systemd.command, release.root);
+  await writeFile(systemd.operationFailure, "--user restart webxd.service\n");
+  assert.equal((await installRelease(paths, systemd.command, release.root)).releaseId, release.releaseId, "an idempotent nonzero restart is accepted when enabled and active probes match");
+  await writeFile(systemd.operationFailure, "--user enable pi-web-agentcursor-egress-proxy.service\n");
+  await assert.rejects(setBackend(paths, systemd.command, "agentcursor"), /candidate service is not enabled: pi-web-agentcursor-egress-proxy\.service/u);
+  assert.equal(JSON.parse(await readFile(paths.configPath, "utf8")).backend, "legacy");
+});
+
 test("service restore failures keep the transaction recoverable", async () => {
   const { paths, systemd, releases } = await fixture();
   const first = await syntheticRelease(releases, "3");
@@ -551,7 +587,7 @@ test("doctor emits fixed classified findings without secrets or absolute managed
   });
   assert.equal(report.ok, true);
   assert.deepEqual(report.findings.map((item) => item.category), ["release", "filesystem", "services", "display", "browser", "egress", "authority", "resource", "workspace"]);
-  assert.deepEqual(new Set(report.findings.map((item) => item.status)), new Set(["pass", "warning", "not-tested"]));
+  assert.deepEqual(new Set(report.findings.map((item) => item.status)), new Set(["pass", "not-tested"]));
   const serialized = JSON.stringify(report);
   assert.doesNotMatch(serialized, /SECRET_REASON_MARKER|PRIVATE_PROFILE_MARKER|bindingSecret|socketPath|profile|\/tmp\//u);
   assert.equal(report.findings.find((item) => item.category === "egress")?.code, "EGRESS_NOT_SELECTED");

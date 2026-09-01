@@ -284,6 +284,19 @@ function restoreServiceStates(command, states) {
   }
   if (failed) fail("one or more prior service states could not be restored");
 }
+/** @param {string} command @param {string} unit */
+function activateService(command, unit) {
+  systemctl(command, ["enable", unit], false);
+  systemctl(command, ["restart", unit], false);
+  if (systemctl(command, ["is-enabled", "--quiet", unit], false).status !== 0) fail(`candidate service is not enabled: ${unit}`);
+  if (systemctl(command, ["is-active", "--quiet", unit], false).status !== 0) fail(`candidate service is not active: ${unit}`);
+}
+/** @param {string} command @param {string} unit */
+function deactivateService(command, unit) {
+  systemctl(command, ["disable", "--now", unit], false);
+  if (systemctl(command, ["is-enabled", "--quiet", unit], false).status === 0) fail(`candidate service is not disabled: ${unit}`);
+  if (systemctl(command, ["is-active", "--quiet", unit], false).status === 0) fail(`candidate service is not inactive: ${unit}`);
+}
 
 /** @param {string} value */
 function desktopArgument(value) {
@@ -484,30 +497,26 @@ async function installReleaseUnlocked(paths, command, releaseSource, expectedSha
     const parsed = prepared.parsed;
     await writeInstalledConfig(paths, parsed);
     systemctl(command, ["daemon-reload"]);
-    systemctl(command, ["enable", "webxd.service"]);
     if (parsed.backend === "agentcursor") {
-      systemctl(command, ["enable", "pi-web-agentcursor-egress-proxy.service"]);
-      systemctl(command, ["enable", "pi-web-agentcursor-browserd.service"]);
-      systemctl(command, ["restart", "pi-web-agentcursor-egress-proxy.service"]);
-      systemctl(command, ["restart", "pi-web-agentcursor-browserd.service"]);
+      activateService(command, "pi-web-agentcursor-egress-proxy.service");
+      activateService(command, "pi-web-agentcursor-browserd.service");
     } else {
-      systemctl(command, ["disable", "--now", "pi-web-agentcursor-browserd.service"]);
-      systemctl(command, ["disable", "--now", "pi-web-agentcursor-egress-proxy.service"]);
+      deactivateService(command, "pi-web-agentcursor-browserd.service");
+      deactivateService(command, "pi-web-agentcursor-egress-proxy.service");
     }
-    systemctl(command, ["daemon-reload"]);
-    systemctl(command, ["restart", "webxd.service"]);
-    const requiredUnits = parsed.backend === "agentcursor" ? UNITS : ["webxd.service"];
-    for (const unit of requiredUnits) if (systemctl(command, ["is-active", "--quiet", unit], false).status !== 0) fail(`candidate service is not active: ${unit}`);
+    activateService(command, "webxd.service");
     const priorDeployment = await exists(paths.deploymentPath) ? record(await readJson(paths.deploymentPath), "deployment state") : undefined;
+    const sameRelease = before.currentReleaseId === staged.releaseId;
+    const nextPreviousBackend = before.currentReleaseId === undefined ? undefined : sameRelease ? priorDeployment?.previousBackend : priorDeployment?.currentBackend ?? "legacy";
     await atomicJson(paths.deploymentPath, {
       schemaVersion: 1,
       currentReleaseId: staged.releaseId,
       currentBackend: parsed.backend,
-      previousReleaseId: before.currentReleaseId,
-      previousBackend: priorDeployment?.currentBackend ?? (before.currentReleaseId === undefined ? undefined : "legacy"),
+      previousReleaseId: nextPreviousReleaseId,
+      previousBackend: nextPreviousBackend,
       failedReleaseRetained: false,
     });
-    return { ok: true, releaseId: staged.releaseId, gitSha: staged.gitSha, backend: parsed.backend, previousReleaseId: before.currentReleaseId ?? null };
+    return { ok: true, releaseId: staged.releaseId, gitSha: staged.gitSha, backend: parsed.backend, previousReleaseId: nextPreviousReleaseId ?? null };
   } catch (error) {
     await restoreActivation(paths, command, before).catch(() => undefined);
     await atomicJson(paths.failurePath, { schemaVersion: 1, failedReleaseId: staged.releaseId, error: error instanceof Error ? error.message.slice(0, 2_000) : "activation failed", releaseRetained: true });
@@ -534,14 +543,13 @@ async function setBackendUnlocked(paths, command, backend) {
     await writeInstalledConfig(paths, parsed);
     systemctl(command, ["daemon-reload"]);
     if (backend === "agentcursor") {
-      systemctl(command, ["enable", "--now", "pi-web-agentcursor-egress-proxy.service"]);
-      systemctl(command, ["enable", "--now", "pi-web-agentcursor-browserd.service"]);
+      activateService(command, "pi-web-agentcursor-egress-proxy.service");
+      activateService(command, "pi-web-agentcursor-browserd.service");
     } else {
-      systemctl(command, ["disable", "--now", "pi-web-agentcursor-browserd.service"]);
-      systemctl(command, ["disable", "--now", "pi-web-agentcursor-egress-proxy.service"]);
+      deactivateService(command, "pi-web-agentcursor-browserd.service");
+      deactivateService(command, "pi-web-agentcursor-egress-proxy.service");
     }
-    systemctl(command, ["restart", "webxd.service"]);
-    if (systemctl(command, ["is-active", "--quiet", "webxd.service"], false).status !== 0) fail("webxd is not active after backend change");
+    activateService(command, "webxd.service");
     const deployment = await exists(paths.deploymentPath) ? record(await readJson(paths.deploymentPath), "deployment state") : { schemaVersion: 1, currentReleaseId: releaseId };
     deployment.currentBackend = backend;
     await atomicJson(paths.deploymentPath, deployment);
@@ -571,14 +579,13 @@ async function rollbackReleaseUnlocked(paths, command) {
     await writeInstalledConfig(paths, parsed);
     systemctl(command, ["daemon-reload"]);
     if (parsed.backend === "agentcursor") {
-      systemctl(command, ["enable", "--now", "pi-web-agentcursor-egress-proxy.service"]);
-      systemctl(command, ["enable", "--now", "pi-web-agentcursor-browserd.service"]);
+      activateService(command, "pi-web-agentcursor-egress-proxy.service");
+      activateService(command, "pi-web-agentcursor-browserd.service");
     } else {
-      systemctl(command, ["disable", "--now", "pi-web-agentcursor-browserd.service"]);
-      systemctl(command, ["disable", "--now", "pi-web-agentcursor-egress-proxy.service"]);
+      deactivateService(command, "pi-web-agentcursor-browserd.service");
+      deactivateService(command, "pi-web-agentcursor-egress-proxy.service");
     }
-    systemctl(command, ["restart", "webxd.service"]);
-    if (systemctl(command, ["is-active", "--quiet", "webxd.service"], false).status !== 0) fail("webxd is not active after release rollback");
+    activateService(command, "webxd.service");
     await atomicJson(paths.deploymentPath, {
       schemaVersion: 1,
       currentReleaseId: deployment.previousReleaseId,
@@ -627,7 +634,7 @@ async function prepareCandidateRemoval(paths, purge) {
 /** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {boolean} purge */
 async function uninstallCandidateUnlocked(paths, command, purge = false) {
   if (await currentReleaseId(paths) === undefined) return { ok: true, purged: purge, legacyPreserved: true };
-  for (const unit of UNITS) systemctl(command, ["disable", "--now", unit]);
+  for (const unit of UNITS) deactivateService(command, unit);
   if (await exists(paths.preinstallBackupPath)) {
     const backup = record(await readJson(paths.preinstallBackupPath), "preinstall backup");
     const retainedConfig = await snapshotPath(paths.configPath);
