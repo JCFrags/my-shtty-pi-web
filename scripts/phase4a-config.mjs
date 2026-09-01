@@ -148,15 +148,15 @@ export function serializeEnvironmentFile(values) {
  * Render one immutable unit template. Path bytes use systemd-safe escapes;
  * timeout values remain decimal.
  * @param {string} template
- * @param {{ currentRelease: string, configHome: string, cacheHome: string, stateHome: string, browserdUnit: "pi-browserd.service" | "pi-web-agentcursor-browserd.service", startTimeoutSec: number, stopTimeoutSec: number }} values
+ * @param {{ currentRelease: string, configRoot: string, cacheRoot: string, stateRoot: string, browserdUnit: "pi-browserd.service" | "pi-web-agentcursor-browserd.service", startTimeoutSec: number, stopTimeoutSec: number }} values
  */
 export function renderUnitTemplate(template, values) {
-  for (const [name, path] of Object.entries({ currentRelease: values.currentRelease, configHome: values.configHome, cacheHome: values.cacheHome, stateHome: values.stateHome })) absolutePath(path, name);
+  for (const [name, path] of Object.entries({ currentRelease: values.currentRelease, configRoot: values.configRoot, cacheRoot: values.cacheRoot, stateRoot: values.stateRoot })) absolutePath(path, name);
   const replacements = {
     CURRENT_RELEASE: systemdPathFragment(values.currentRelease),
-    CONFIG_HOME: systemdPathFragment(values.configHome),
-    CACHE_HOME: systemdPathFragment(values.cacheHome),
-    STATE_HOME: systemdPathFragment(values.stateHome),
+    CONFIG_ROOT: systemdPathFragment(values.configRoot),
+    CACHE_ROOT: systemdPathFragment(values.cacheRoot),
+    STATE_ROOT: systemdPathFragment(values.stateRoot),
     BROWSERD_UNIT: enumeration(values.browserdUnit, "browserdUnit", ["pi-browserd.service", "pi-web-agentcursor-browserd.service"]),
     START_TIMEOUT_SEC: String(exactInteger(values.startTimeoutSec, "startTimeoutSec", 5, 120)),
     STOP_TIMEOUT_SEC: String(exactInteger(values.stopTimeoutSec, "stopTimeoutSec", 5, 120)),

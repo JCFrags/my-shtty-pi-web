@@ -8,7 +8,7 @@ StartLimitBurst=3
 [Service]
 Type=simple
 ExecStart=/usr/bin/python3 @CURRENT_RELEASE@/bin/pi-web-egress-proxy
-EnvironmentFile=@CONFIG_HOME@/pi-web/service.env
+EnvironmentFile=@CONFIG_ROOT@/service.env
 UMask=0077
 Restart=on-failure
 RestartSec=2s

@@ -8,7 +8,7 @@ StartLimitBurst=3
 [Service]
 Type=simple
 ExecStart=/usr/bin/node @CURRENT_RELEASE@/bin/pi-web-browserd.mjs
-EnvironmentFile=@CONFIG_HOME@/pi-web/service.env
+EnvironmentFile=@CONFIG_ROOT@/service.env
 RuntimeDirectory=pi-browserd pi-web-agentcursor
 RuntimeDirectoryMode=0700
 UMask=0077

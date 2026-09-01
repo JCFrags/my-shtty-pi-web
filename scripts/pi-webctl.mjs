@@ -387,9 +387,9 @@ async function prepareInstallation(paths, releaseRoot, config) {
     const template = await readFile(join(releaseRoot, `share/deploy/systemd/${name}.in`), "utf8");
     const rendered = installedConfig.renderUnitTemplate(template, {
       currentRelease: paths.currentLink,
-      configHome: paths.configHome,
-      cacheHome: paths.cacheHome,
-      stateHome: paths.stateHome,
+      configRoot: paths.configRoot,
+      cacheRoot: paths.cacheRoot,
+      stateRoot: paths.stateRoot,
       browserdUnit: parsed.backend === "agentcursor" ? "pi-web-agentcursor-browserd.service" : "pi-browserd.service",
       startTimeoutSec: parsed.services.startTimeoutSec,
       stopTimeoutSec: parsed.services.stopTimeoutSec,

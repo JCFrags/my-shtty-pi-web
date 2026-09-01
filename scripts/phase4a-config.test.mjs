@@ -78,15 +78,15 @@ test("service environment contains only reviewed fixed choices and no secrets", 
 });
 
 test("candidate unit templates are fixed, independent, and render without source paths", async () => {
-  const names = ["pi-web-agentcursor-egress-proxy.service", "pi-web-agentcursor-browserd.service", "webxd.service"];
+  const names = ["pi-web-agentcursor-egress-proxy.service", "pi-web-agentcursor-browserd.service", "pi-web-qualification-webxd.service", "webxd.service"];
   const rendered = new Map();
   for (const name of names) {
     const template = await readFile(`${unitRoot}/${name}.in`, "utf8");
     const unit = renderUnitTemplate(template, {
-      currentRelease: "/home/test/.local/share/pi-web/current",
-      configHome: "/home/test/.config",
-      cacheHome: "/home/test/.cache",
-      stateHome: "/home/test/.local/state",
+      currentRelease: "/home/test/.local/share/pi-web-phase4a/active/current",
+      configRoot: "/home/test/.config/pi-web-phase4a",
+      cacheRoot: "/home/test/.cache/pi-web-phase4a",
+      stateRoot: "/home/test/.local/state/pi-web-phase4a",
       browserdUnit: "pi-web-agentcursor-browserd.service",
       startTimeoutSec: 30,
       stopTimeoutSec: 30,
@@ -106,17 +106,27 @@ test("candidate unit templates are fixed, independent, and render without source
   assert.match(rendered.get("webxd.service"), /Wants=pi-web-reader\.service pi-web-searxng\.service pi-web-agentcursor-browserd\.service/u);
   assert.doesNotMatch(rendered.get("webxd.service"), /pi-browserd\.service|Requires=/u);
   const legacyWebxd = renderUnitTemplate(await readFile(`${unitRoot}/webxd.service.in`, "utf8"), {
-    currentRelease: "/home/test/.local/share/pi-web/current",
-    configHome: "/home/test/.config",
-    cacheHome: "/home/test/.cache",
-    stateHome: "/home/test/.local/state",
+    currentRelease: "/home/test/.local/share/pi-web-phase4a/active/current",
+    configRoot: "/home/test/.config/pi-web-phase4a",
+    cacheRoot: "/home/test/.cache/pi-web-phase4a",
+    stateRoot: "/home/test/.local/state/pi-web-phase4a",
     browserdUnit: "pi-browserd.service",
     startTimeoutSec: 30,
     stopTimeoutSec: 30,
   });
   assert.match(legacyWebxd, /Wants=pi-web-reader\.service pi-web-searxng\.service pi-browserd\.service/u);
   assert.doesNotMatch(legacyWebxd, /pi-web-agentcursor-browserd\.service|Requires=/u);
-  assert.match(rendered.get("webxd.service"), /ExecStart=\/usr\/bin\/node \/home\/test\/\.local\/share\/pi-web\/current\/bin\/pi-web-webxd\.mjs/u);
+  assert.match(rendered.get("webxd.service"), /ExecStart=\/usr\/bin\/node \/home\/test\/\.local\/share\/pi-web-phase4a\/active\/current\/bin\/pi-web-webxd\.mjs/u);
+  assert.match(rendered.get("webxd.service"), /EnvironmentFile=\/home\/test\/\.config\/pi-web-phase4a\/service\.env/u);
+  assert.match(rendered.get("webxd.service"), /WorkingDirectory=\/home\/test\/\.local\/state\/pi-web-phase4a/u);
+  assert.match(rendered.get("webxd.service"), /ReadWritePaths=\/home\/test\/\.cache\/pi-web-phase4a \/home\/test\/\.local\/state\/pi-web-phase4a/u);
+  assert.doesNotMatch(rendered.get("webxd.service"), /\/\.config\/pi-web\/|\/\.cache\/pi-web(?:\s|$)|\/\.local\/state\/pi-web(?:\s|$)/u);
+  const qualificationWebxd = rendered.get("pi-web-qualification-webxd.service");
+  assert.match(qualificationWebxd, /^WorkingDirectory=%t\/pi-web\/qualification$/mu);
+  assert.match(qualificationWebxd, /^ReadWritePaths=%t\/pi-web\/qualification %t\/pi-web\/workspace$/mu);
+  assert.ok(!qualificationWebxd.includes("/home/test/.config/pi-web-phase4a"));
+  assert.ok(!qualificationWebxd.includes("/home/test/.cache/pi-web-phase4a"));
+  assert.ok(!qualificationWebxd.includes("/home/test/.local/state/pi-web-phase4a"));
   assert.equal(names.some((name) => /workspace/u.test(name)), false, "Tauri must remain on-demand");
 });
 

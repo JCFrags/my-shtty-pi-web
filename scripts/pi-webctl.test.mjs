@@ -327,6 +327,12 @@ test("verified install is legacy-default, immutable, direct-launching, and prese
   const webxd = await readFile(join(paths.unitRoot, "webxd.service"), "utf8");
   assert.match(webxd, /Wants=.*pi-browserd\.service/u);
   assert.doesNotMatch(webxd, /pi-web-agentcursor-browserd\.service/u);
+  assert.ok(webxd.includes(`EnvironmentFile=${paths.configRoot}/service.env\n`));
+  assert.ok(webxd.includes(`WorkingDirectory=${paths.stateRoot}\n`));
+  assert.ok(webxd.includes(`ReadWritePaths=${paths.cacheRoot} ${paths.stateRoot}\n`));
+  assert.ok(!webxd.includes(`${environment.XDG_CONFIG_HOME}/pi-web/service.env`));
+  assert.ok(!webxd.includes(`${environment.XDG_CACHE_HOME}/pi-web `));
+  assert.ok(!webxd.includes(`${environment.XDG_STATE_HOME}/pi-web\n`));
   assert.doesNotMatch(webxd, /Projects\/|node_modules|tsx|vite/u);
   assert.equal(await readFile(join(paths.unitRoot, "pi-browserd.service"), "utf8"), "legacy-browser-unit\n");
   assert.equal(await readlink(paths.controlLink), join(paths.currentLink, "bin/pi-webctl.mjs"));
