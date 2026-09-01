@@ -17,8 +17,10 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
+import { createConnection } from "node:net";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { validateReleaseChecksums, validateReleaseManifest } from "./phase4a-release-format.mjs";
 
 const UNITS = Object.freeze([
   "pi-web-agentcursor-egress-proxy.service",
@@ -73,23 +75,19 @@ async function regularFiles(root) {
  * Verify a release without importing code from the source checkout.
  * @param {string} releaseRootValue
  * @param {string | undefined} expectedSha
+ * @param {string | undefined} expectedManifestSha256
  */
-export async function verifyInstallRelease(releaseRootValue, expectedSha = undefined) {
+export async function verifyInstallRelease(releaseRootValue, expectedSha = undefined, expectedManifestSha256 = undefined) {
   if (!isAbsolute(releaseRootValue)) fail("release root must be absolute");
   const releaseRoot = await realpath(releaseRootValue);
   const rootInformation = await lstat(releaseRoot);
   if (!rootInformation.isDirectory() || rootInformation.isSymbolicLink() || rootInformation.uid !== process.getuid?.() || (rootInformation.mode & 0o222) !== 0) fail("release root must be an owner-controlled immutable regular directory");
-  const manifest = record(await readJson(join(releaseRoot, "manifest.json")), "release manifest");
-  if (manifest.schemaVersion !== 1 || manifest.dirtyTree !== false || manifest.backendDefault !== "legacy" || typeof manifest.releaseId !== "string" || typeof manifest.gitSha !== "string" || !/^[0-9a-f]{40}$/u.test(manifest.gitSha)) fail("release manifest identity is invalid");
-  if (basename(releaseRoot) !== manifest.releaseId || !manifest.releaseId.endsWith(manifest.gitSha)) fail("release directory does not match manifest identity");
+  const manifest = validateReleaseManifest(await readJson(join(releaseRoot, "manifest.json")));
+  if (basename(releaseRoot) !== manifest.releaseId) fail("release directory does not match manifest identity");
   if (expectedSha !== undefined && manifest.gitSha !== expectedSha) fail("release Git SHA does not match the requested SHA");
-  if (manifest.compatibility?.defaultBackend !== "legacy" || manifest.compatibility?.candidateBackend !== "agentcursor") fail("release backend compatibility is invalid");
-  const checksums = record(await readJson(join(releaseRoot, "checksums.json")), "release checksums");
-  if (checksums.schemaVersion !== 1 || checksums.algorithm !== "sha256" || !Array.isArray(checksums.files) || JSON.stringify(checksums.excludes) !== JSON.stringify(["checksums.json"])) fail("release checksum document is invalid");
+  const checksums = validateReleaseChecksums(await readJson(join(releaseRoot, "checksums.json")));
   const listed = new Set();
-  for (const itemValue of checksums.files) {
-    const item = record(itemValue, "checksum record");
-    if (typeof item.path !== "string" || item.path.startsWith("/") || item.path.split("/").includes("..") || listed.has(item.path) || typeof item.sha256 !== "string" || !Number.isSafeInteger(item.bytes) || !Number.isSafeInteger(item.mode)) fail("release checksum record is invalid");
+  for (const item of checksums.files) {
     listed.add(item.path);
     const path = join(releaseRoot, item.path);
     const information = await lstat(path);
@@ -104,17 +102,26 @@ export async function verifyInstallRelease(releaseRootValue, expectedSha = undef
     "bin/pi-web-webxd.mjs",
     "bin/pi-web-egress-proxy",
     "bin/pi-browser-workspace",
+    "bin/phase4a-release-format.mjs",
     "share/pi-webx/extension.mjs",
     "share/deploy/phase4a-config.mjs",
     "share/deploy/config/default.json",
     ...UNITS.map((name) => `share/deploy/systemd/${name}.in`),
   ]) if (!listed.has(required)) fail(`release is missing required installed file: ${required}`);
-  return Object.freeze({ releaseRoot, releaseId: manifest.releaseId, gitSha: manifest.gitSha, manifest });
+  for (const artifact of Object.values(manifest.artifacts)) if (typeof artifact !== "string" || !listed.has(artifact)) fail("release manifest artifact is missing from the checksum inventory");
+  const immutableFiles = [];
+  for (const item of checksums.files) if (item.path !== "manifest.json") immutableFiles.push({ path: item.path, sha256: item.sha256, bytes: item.bytes });
+  if (JSON.stringify(manifest.immutableFiles) !== JSON.stringify(immutableFiles)) fail("release manifest payload digest inventory is invalid");
+  const manifestSha256 = sha256(await readFile(join(releaseRoot, "manifest.json")));
+  if (expectedManifestSha256 !== undefined && (!/^[0-9a-f]{64}$/u.test(expectedManifestSha256) || manifestSha256 !== expectedManifestSha256)) fail("release manifest digest does not match the requested digest");
+  return Object.freeze({ releaseRoot, releaseId: manifest.releaseId, gitSha: manifest.gitSha, manifest, manifestSha256 });
 }
 
 /** @param {string} root */
 async function removeOwnedTree(root) {
-  const information = await lstat(root);
+  let information;
+  try { information = await lstat(root); }
+  catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return; throw error; }
   if (!information.isDirectory() || information.isSymbolicLink()) { await rm(root, { force: true }); return; }
   const pending = [root];
   while (pending.length > 0) {
@@ -143,10 +150,17 @@ async function copyReleaseTree(source, destination) {
   await chmod(destination, information.mode & 0o777);
 }
 
+/** @param {string} path @param {number} mode */
+async function ensureOwnedDirectory(path, mode) {
+  await mkdir(path, { recursive: true, mode });
+  const information = await lstat(path);
+  if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || await realpath(path) !== resolve(path) || (information.mode & 0o022) !== 0) fail(`owner-controlled directory is unsafe: ${path}`);
+}
+
 /** @param {ReturnType<typeof installedPaths>} paths */
 async function ensureManagedRoots(paths) {
   for (const root of [paths.dataRoot, paths.configRoot, paths.cacheRoot, paths.stateRoot]) {
-    await mkdir(root, { recursive: true, mode: 0o700 });
+    await ensureOwnedDirectory(root, 0o700);
     const information = await lstat(root);
     if (!information.isDirectory() || information.isSymbolicLink()) fail(`managed root is unsafe: ${root}`);
     await chmod(root, 0o700);
@@ -156,11 +170,12 @@ async function ensureManagedRoots(paths) {
       if (!markerInformation.isFile() || markerInformation.isSymbolicLink() || await readFile(marker, "utf8") !== MARKER_VALUE) fail(`managed root marker is invalid: ${root}`);
     } else await atomicWrite(marker, MARKER_VALUE, 0o600);
   }
-  await mkdir(paths.releasesRoot, { recursive: true, mode: 0o700 });
-  await mkdir(paths.unitRoot, { recursive: true, mode: 0o700 });
-  await mkdir(paths.binRoot, { recursive: true, mode: 0o755 });
-  await mkdir(paths.applicationRoot, { recursive: true, mode: 0o755 });
-  await mkdir(dirname(paths.extensionPath), { recursive: true, mode: 0o700 });
+  await ensureOwnedDirectory(paths.releasesRoot, 0o700);
+  await ensureOwnedDirectory(paths.selectorsRoot, 0o700);
+  await ensureOwnedDirectory(paths.unitRoot, 0o700);
+  await ensureOwnedDirectory(paths.binRoot, 0o755);
+  await ensureOwnedDirectory(paths.applicationRoot, 0o755);
+  await ensureOwnedDirectory(dirname(paths.extensionPath), 0o700);
 }
 
 /** @param {string} path @param {string | Buffer} value @param {number} mode */
@@ -231,6 +246,7 @@ function serviceStates(command) {
 }
 /** @param {string} command @param {Record<string, any>} states */
 function restoreServiceStates(command, states) {
+  if (JSON.stringify(Object.keys(states).sort()) !== JSON.stringify([...UNITS].sort())) fail("service snapshot unit set is invalid");
   const errors = [];
   for (const [unit, stateValue] of Object.entries(states)) {
     const state = record(stateValue, "service state");
@@ -274,9 +290,9 @@ async function renderInstallation(paths, releaseRoot, config) {
   return parsed;
 }
 
-/** @param {ReturnType<typeof installedPaths>} paths @param {string} releaseSource @param {string | undefined} expectedSha */
-async function stageRelease(paths, releaseSource, expectedSha = undefined) {
-  const verified = await verifyInstallRelease(releaseSource, expectedSha);
+/** @param {ReturnType<typeof installedPaths>} paths @param {string} releaseSource @param {string | undefined} expectedSha @param {string | undefined} expectedManifestSha256 */
+async function stageRelease(paths, releaseSource, expectedSha = undefined, expectedManifestSha256 = undefined) {
+  const verified = await verifyInstallRelease(releaseSource, expectedSha, expectedManifestSha256);
   const destination = join(paths.releasesRoot, verified.releaseId);
   if (await exists(destination)) {
     const installed = await verifyInstallRelease(destination, verified.gitSha);
@@ -296,29 +312,55 @@ async function stageRelease(paths, releaseSource, expectedSha = undefined) {
 }
 
 /** @param {ReturnType<typeof installedPaths>} paths */
-async function currentReleaseId(paths) {
+async function releasePointers(paths) {
   try {
-    const information = await lstat(paths.currentLink);
-    if (!information.isSymbolicLink()) fail("current release pointer is not a symbolic link");
-    const target = await readlink(paths.currentLink);
-    const match = /^releases\/(phase4a-[0-9a-f]{40})$/u.exec(target);
-    if (!match) fail("current release pointer target is invalid");
-    return match[1];
+    const activeInformation = await lstat(paths.activeSelectorLink);
+    if (!activeInformation.isSymbolicLink()) fail("active release selector is not a symbolic link");
+    const activeTarget = await readlink(paths.activeSelectorLink);
+    const selectorMatch = /^selectors\/(selector-[0-9a-f]{24})$/u.exec(activeTarget);
+    if (!selectorMatch) fail("active release selector target is invalid");
+    const selectorRoot = join(paths.selectorsRoot, selectorMatch[1]);
+    const selectorInformation = await lstat(selectorRoot);
+    if (!selectorInformation.isDirectory() || selectorInformation.isSymbolicLink() || selectorInformation.uid !== process.getuid?.() || (selectorInformation.mode & 0o077) !== 0) fail("active release selector is unsafe");
+    /** @param {string} path @param {string} name */
+    const readPointer = async (path, name) => {
+      try {
+        const information = await lstat(path);
+        if (!information.isSymbolicLink()) fail(`${name} release pointer is not a symbolic link`);
+        const target = await readlink(path);
+        const match = /^\.\.\/\.\.\/releases\/(phase4a-[0-9a-f]{40})$/u.exec(target);
+        if (!match) fail(`${name} release pointer target is invalid`);
+        return match[1];
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
+        throw error;
+      }
+    };
+    return { currentReleaseId: await readPointer(paths.currentLink, "current"), previousReleaseId: await readPointer(paths.previousLink, "previous") };
   } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return { currentReleaseId: undefined, previousReleaseId: undefined };
     throw error;
   }
 }
-/** @param {ReturnType<typeof installedPaths>} paths @param {string | undefined} releaseId */
-async function setCurrent(paths, releaseId) { await atomicLink(paths.currentLink, releaseId === undefined ? undefined : `releases/${releaseId}`); }
-/** @param {ReturnType<typeof installedPaths>} paths @param {string | undefined} releaseId */
-async function setPrevious(paths, releaseId) { await atomicLink(paths.previousLink, releaseId === undefined ? undefined : `releases/${releaseId}`); }
+/** @param {ReturnType<typeof installedPaths>} paths */
+async function currentReleaseId(paths) { return (await releasePointers(paths)).currentReleaseId; }
+/** @param {ReturnType<typeof installedPaths>} paths @param {string | undefined} currentReleaseIdValue @param {string | undefined} previousReleaseIdValue */
+async function setReleasePointers(paths, currentReleaseIdValue, previousReleaseIdValue) {
+  for (const value of [currentReleaseIdValue, previousReleaseIdValue]) if (value !== undefined && !/^phase4a-[0-9a-f]{40}$/u.test(value)) fail("release pointer identity is invalid");
+  const selectorName = `selector-${randomBytes(12).toString("hex")}`;
+  const temporary = join(paths.selectorsRoot, `.stage-${selectorName}`);
+  const selectorRoot = join(paths.selectorsRoot, selectorName);
+  await mkdir(temporary, { mode: 0o700 });
+  if (currentReleaseIdValue !== undefined) await symlink(`../../releases/${currentReleaseIdValue}`, join(temporary, "current"));
+  if (previousReleaseIdValue !== undefined) await symlink(`../../releases/${previousReleaseIdValue}`, join(temporary, "previous"));
+  await rename(temporary, selectorRoot);
+  await atomicLink(paths.activeSelectorLink, `selectors/${selectorName}`);
+}
 
 /** @param {ReturnType<typeof installedPaths>} paths @param {string} command */
 async function captureActivation(paths, command) {
   return {
-    currentReleaseId: await currentReleaseId(paths),
-    previous: await snapshotPath(paths.previousLink),
+    ...(await releasePointers(paths)),
     config: await snapshotPath(paths.configPath),
     managed: Object.fromEntries(await Promise.all(managedPaths(paths).map(async (path) => [path, await snapshotPath(path)]))),
     services: serviceStates(command),
@@ -326,10 +368,11 @@ async function captureActivation(paths, command) {
 }
 /** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {Record<string, any>} snapshot */
 async function restoreActivation(paths, command, snapshot) {
-  await setCurrent(paths, snapshot.currentReleaseId);
-  await restorePath(paths.previousLink, record(snapshot.previous, "previous pointer snapshot"));
+  await setReleasePointers(paths, typeof snapshot.currentReleaseId === "string" ? snapshot.currentReleaseId : undefined, typeof snapshot.previousReleaseId === "string" ? snapshot.previousReleaseId : undefined);
   await restorePath(paths.configPath, record(snapshot.config, "config snapshot"));
-  for (const [path, value] of Object.entries(record(snapshot.managed, "managed path snapshots"))) await restorePath(path, record(value, "managed path snapshot"));
+  const managed = record(snapshot.managed, "managed path snapshots");
+  if (JSON.stringify(Object.keys(managed).sort()) !== JSON.stringify(managedPaths(paths).sort())) fail("managed path snapshot set is invalid");
+  for (const [path, value] of Object.entries(managed)) await restorePath(path, record(value, "managed path snapshot"));
   systemctl(command, ["daemon-reload"], false);
   restoreServiceStates(command, record(snapshot.services, "service snapshots"));
 }
@@ -342,10 +385,10 @@ async function readInstalledConfig(paths) {
 /** @param {ReturnType<typeof installedPaths>} paths @param {Record<string, any>} config */
 async function writeInstalledConfig(paths, config) { await atomicJson(paths.configPath, config); }
 
-/** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {string} releaseSource @param {string | undefined} expectedSha */
-export async function installRelease(paths, command, releaseSource, expectedSha = undefined) {
+/** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {string} releaseSource @param {string | undefined} expectedSha @param {string | undefined} expectedManifestSha256 */
+async function installReleaseUnlocked(paths, command, releaseSource, expectedSha = undefined, expectedManifestSha256 = undefined) {
   await ensureManagedRoots(paths);
-  const staged = await stageRelease(paths, releaseSource, expectedSha);
+  const staged = await stageRelease(paths, releaseSource, expectedSha, expectedManifestSha256);
   const before = await captureActivation(paths, command);
   const firstInstall = before.currentReleaseId === undefined;
   if (firstInstall && !(await exists(paths.preinstallBackupPath))) await atomicJson(paths.preinstallBackupPath, before);
@@ -353,8 +396,8 @@ export async function installRelease(paths, command, releaseSource, expectedSha 
   if (config === undefined) config = record(await readJson(join(staged.releaseRoot, "share/deploy/config/default.json")), "default installed configuration");
   if (firstInstall) config.backend = "legacy";
   try {
-    if (before.currentReleaseId !== undefined && before.currentReleaseId !== staged.releaseId) await setPrevious(paths, before.currentReleaseId);
-    await setCurrent(paths, staged.releaseId);
+    const nextPreviousReleaseId = before.currentReleaseId !== undefined && before.currentReleaseId !== staged.releaseId ? before.currentReleaseId : before.previousReleaseId;
+    await setReleasePointers(paths, staged.releaseId, nextPreviousReleaseId);
     const parsed = await renderInstallation(paths, staged.releaseRoot, config);
     await writeInstalledConfig(paths, parsed);
     systemctl(command, ["daemon-reload"]);
@@ -390,7 +433,7 @@ export async function installRelease(paths, command, releaseSource, expectedSha 
 }
 
 /** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {"legacy" | "agentcursor"} backend */
-export async function setBackend(paths, command, backend) {
+async function setBackendUnlocked(paths, command, backend) {
   const releaseId = await currentReleaseId(paths);
   if (releaseId === undefined) fail("no current Phase 4A release is installed");
   const releaseRoot = join(paths.releasesRoot, releaseId);
@@ -425,7 +468,7 @@ export async function setBackend(paths, command, backend) {
 }
 
 /** @param {ReturnType<typeof installedPaths>} paths @param {string} command */
-export async function rollbackRelease(paths, command) {
+async function rollbackReleaseUnlocked(paths, command) {
   if (!(await exists(paths.deploymentPath))) fail("deployment state is missing");
   const deployment = record(await readJson(paths.deploymentPath), "deployment state");
   if (typeof deployment.previousReleaseId !== "string" || !/^phase4a-[0-9a-f]{40}$/u.test(deployment.previousReleaseId)) fail("no verified previous candidate release is available");
@@ -436,12 +479,18 @@ export async function rollbackRelease(paths, command) {
   if (config === undefined) fail("installed configuration is missing");
   config.backend = deployment.previousBackend === "agentcursor" ? "agentcursor" : "legacy";
   try {
-    await setCurrent(paths, deployment.previousReleaseId);
-    await setPrevious(paths, before.currentReleaseId);
+    await setReleasePointers(paths, deployment.previousReleaseId, before.currentReleaseId);
     const parsed = await renderInstallation(paths, previousRoot, config);
     await writeInstalledConfig(paths, parsed);
     systemctl(command, ["daemon-reload"]);
-    for (const unit of UNITS) systemctl(command, ["restart", unit]);
+    if (parsed.backend === "agentcursor") {
+      systemctl(command, ["enable", "--now", "pi-web-agentcursor-egress-proxy.service"]);
+      systemctl(command, ["enable", "--now", "pi-web-agentcursor-browserd.service"]);
+    } else {
+      systemctl(command, ["disable", "--now", "pi-web-agentcursor-browserd.service"], false);
+      systemctl(command, ["disable", "--now", "pi-web-agentcursor-egress-proxy.service"], false);
+    }
+    systemctl(command, ["restart", "webxd.service"]);
     if (systemctl(command, ["is-active", "--quiet", "webxd.service"], false).status !== 0) fail("webxd is not active after release rollback");
     await atomicJson(paths.deploymentPath, {
       schemaVersion: 1,
@@ -462,13 +511,13 @@ export async function rollbackRelease(paths, command) {
 async function verifyManagedRoot(root) {
   if (!isAbsolute(root)) fail("managed root must be absolute");
   const information = await lstat(root);
-  if (!information.isDirectory() || information.isSymbolicLink()) fail(`managed root is unsafe: ${root}`);
+  if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || await realpath(root) !== resolve(root) || (information.mode & 0o077) !== 0) fail(`managed root is unsafe: ${root}`);
   const marker = join(root, MARKER_NAME);
   const markerInformation = await lstat(marker);
-  if (!markerInformation.isFile() || markerInformation.isSymbolicLink() || await readFile(marker, "utf8") !== MARKER_VALUE) fail(`managed root ownership marker is invalid: ${root}`);
+  if (!markerInformation.isFile() || markerInformation.isSymbolicLink() || markerInformation.uid !== process.getuid?.() || markerInformation.nlink !== 1 || (markerInformation.mode & 0o777) !== 0o600 || await readFile(marker, "utf8") !== MARKER_VALUE) fail(`managed root ownership marker is invalid: ${root}`);
 }
 /** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {boolean} purge */
-export async function uninstallCandidate(paths, command, purge = false) {
+async function uninstallCandidateUnlocked(paths, command, purge = false) {
   for (const unit of UNITS) {
     systemctl(command, ["disable", "--now", unit], false);
   }
@@ -479,8 +528,7 @@ export async function uninstallCandidate(paths, command, purge = false) {
     if (record(backup.config, "preinstall config snapshot").kind === "missing" && retainedConfig.kind === "file") await restorePath(paths.configPath, retainedConfig);
   } else {
     for (const path of managedPaths(paths)) await rm(path, { force: true });
-    await setCurrent(paths, undefined);
-    await setPrevious(paths, undefined);
+    await setReleasePointers(paths, undefined, undefined);
     systemctl(command, ["daemon-reload"], false);
   }
   if (await exists(paths.releasesRoot)) {
@@ -500,6 +548,93 @@ export async function uninstallCandidate(paths, command, purge = false) {
     }
   }
   return { ok: true, purged: purge, legacyPreserved: true };
+}
+
+/** @param {number} pid */
+async function processStartTicks(pid) {
+  try {
+    const text = await readFile(`/proc/${pid}/stat`, "utf8");
+    const close = text.lastIndexOf(")");
+    const fields = close < 0 ? [] : text.slice(close + 2).trim().split(/\s+/u);
+    const startTicks = fields[19];
+    return typeof startTicks === "string" && /^[0-9]+$/u.test(startTicks) ? startTicks : undefined;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+/** @param {ReturnType<typeof installedPaths>} paths */
+async function acquireMutationLock(paths) {
+  const create = async () => {
+    await mkdir(paths.mutationLockPath, { mode: 0o700 });
+    const startTicks = await processStartTicks(process.pid);
+    if (startTicks === undefined) fail("cannot establish controller process identity");
+    await atomicJson(join(paths.mutationLockPath, "owner.json"), { schemaVersion: 1, pid: process.pid, startTicks });
+  };
+  try { await create(); }
+  catch (error) {
+    if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
+    const information = await lstat(paths.mutationLockPath);
+    if (!information.isDirectory() || information.isSymbolicLink() || information.uid !== process.getuid?.() || (information.mode & 0o077) !== 0) fail("controller mutation lock is unsafe");
+    const owner = record(await readJson(join(paths.mutationLockPath, "owner.json")), "controller lock owner");
+    if (JSON.stringify(Object.keys(owner).sort()) !== JSON.stringify(["pid", "schemaVersion", "startTicks"]) || owner.schemaVersion !== 1 || !Number.isSafeInteger(owner.pid) || typeof owner.startTicks !== "string" || !/^[0-9]+$/u.test(owner.startTicks)) fail("controller mutation lock owner is invalid");
+    if (await processStartTicks(owner.pid) === owner.startTicks) fail("another pi-webctl mutation is in progress");
+    const quarantine = join(paths.stateRoot, `.stale-mutation-lock-${randomBytes(12).toString("hex")}`);
+    await rename(paths.mutationLockPath, quarantine);
+    await removeOwnedTree(quarantine);
+    await create();
+  }
+  return async () => await removeOwnedTree(paths.mutationLockPath);
+}
+
+/** @param {ReturnType<typeof installedPaths>} paths @param {string} command */
+async function recoverInterruptedActivation(paths, command) {
+  if (!(await exists(paths.transactionPath))) return false;
+  const transaction = record(await readJson(paths.transactionPath), "activation transaction");
+  if (JSON.stringify(Object.keys(transaction).sort()) !== JSON.stringify(["operation", "schemaVersion", "snapshot"]) || transaction.schemaVersion !== 1 || !["install", "backend", "rollback", "uninstall"].includes(transaction.operation)) fail("activation transaction is invalid");
+  await restoreActivation(paths, command, record(transaction.snapshot, "activation transaction snapshot"));
+  await atomicJson(paths.recoveryPath, { schemaVersion: 1, operation: transaction.operation, recovered: true });
+  await rm(paths.transactionPath);
+  return true;
+}
+
+/** @template T @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {string} operation @param {() => Promise<T>} callback */
+async function withMutation(paths, command, operation, callback) {
+  await ensureManagedRoots(paths);
+  const releaseLock = await acquireMutationLock(paths);
+  try {
+    await recoverInterruptedActivation(paths, command);
+    const snapshot = await captureActivation(paths, command);
+    await atomicJson(paths.transactionPath, { schemaVersion: 1, operation, snapshot });
+    try {
+      const result = await callback();
+      await rm(paths.transactionPath, { force: true });
+      return result;
+    } catch (error) {
+      let restored = false;
+      try { await restoreActivation(paths, command, snapshot); restored = true; }
+      finally { if (restored) await rm(paths.transactionPath, { force: true }); }
+      throw error;
+    }
+  } finally { await releaseLock(); }
+}
+
+/** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {string} releaseSource @param {string | undefined} expectedSha @param {string | undefined} expectedManifestSha256 */
+export async function installRelease(paths, command, releaseSource, expectedSha = undefined, expectedManifestSha256 = undefined) {
+  return await withMutation(paths, command, "install", async () => await installReleaseUnlocked(paths, command, releaseSource, expectedSha, expectedManifestSha256));
+}
+/** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {"legacy" | "agentcursor"} backend */
+export async function setBackend(paths, command, backend) {
+  return await withMutation(paths, command, "backend", async () => await setBackendUnlocked(paths, command, backend));
+}
+/** @param {ReturnType<typeof installedPaths>} paths @param {string} command */
+export async function rollbackRelease(paths, command) {
+  return await withMutation(paths, command, "rollback", async () => await rollbackReleaseUnlocked(paths, command));
+}
+/** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {boolean} purge */
+export async function uninstallCandidate(paths, command, purge = false) {
+  return await withMutation(paths, command, "uninstall", async () => await uninstallCandidateUnlocked(paths, command, purge));
 }
 
 /** @param {NodeJS.ProcessEnv} environment */
@@ -531,8 +666,10 @@ export function installedPaths(environment = process.env) {
     cacheRoot,
     stateRoot,
     releasesRoot: join(dataRoot, "releases"),
-    currentLink: join(dataRoot, "current"),
-    previousLink: join(dataRoot, "previous"),
+    selectorsRoot: join(dataRoot, "selectors"),
+    activeSelectorLink: join(dataRoot, "active"),
+    currentLink: join(dataRoot, "active/current"),
+    previousLink: join(dataRoot, "active/previous"),
     unitRoot: join(configHome, "systemd/user"),
     applicationRoot: join(dataHome, "applications"),
     configPath: join(configRoot, "config.json"),
@@ -540,6 +677,9 @@ export function installedPaths(environment = process.env) {
     deploymentPath: join(stateRoot, "deployment.json"),
     failurePath: join(stateRoot, "last-activation-failure.json"),
     preinstallBackupPath: join(stateRoot, "preinstall-backup.json"),
+    mutationLockPath: join(stateRoot, "mutation.lock"),
+    transactionPath: join(stateRoot, "activation-transaction.json"),
+    recoveryPath: join(stateRoot, "last-interrupted-recovery.json"),
     desktopPath: join(dataHome, "applications/pi-web-workspace.desktop"),
     extensionPath: join(home, ".pi/agent/extensions/pi-web"),
     controlLink: join(binRoot, "pi-webctl"),
@@ -549,20 +689,184 @@ export function installedPaths(environment = process.env) {
 
 /** @param {string[]} arguments_ */
 function parseCli(arguments_) {
-  const [command, subcommand, ...rest] = arguments_;
-  const allowed = new Set(["--release", "--expected-sha", "--json", "--purge"]);
+  const [command, ...tail] = arguments_;
+  const subcommand = command === "backend" ? tail[0] : undefined;
+  const rest = command === "backend" ? tail.slice(1) : tail;
+  const allowed = new Set(["--release", "--expected-sha", "--manifest-sha256", "--json", "--purge"]);
   /** @type {Record<string, string | boolean>} */
   const options = {};
   for (let index = 0; index < rest.length; index++) {
     const name = rest[index];
     if (!allowed.has(name)) fail(`unsupported option: ${name}`);
-    if (name === "--json" || name === "--purge") { options[name.slice(2)] = true; continue; }
+    const key = name.slice(2);
+    if (Object.hasOwn(options, key)) fail(`duplicate option: ${name}`);
+    if (name === "--json" || name === "--purge") { options[key] = true; continue; }
     const value = rest[++index];
     if (!value || value.startsWith("--")) fail(`${name} requires a value`);
-    options[name.slice(2)] = value;
+    options[key] = value;
   }
   return { command, subcommand, options };
 }
+
+const DOCTOR_CATEGORIES = Object.freeze(["release", "filesystem", "services", "display", "browser", "egress", "authority", "resource", "workspace"]);
+/** @typedef {"pass" | "warning" | "error" | "unavailable" | "not-tested"} DoctorStatus */
+/** @param {string} category @param {DoctorStatus} statusValue @param {string} code @param {string} summary */
+function doctorFinding(category, statusValue, code, summary) { return Object.freeze({ category, status: statusValue, code, summary }); }
+
+/** @param {string} socketPath */
+async function probeAuthority(socketPath) {
+  const socket = createConnection({ path: socketPath });
+  let buffer = "";
+  /** @type {Error | undefined} */
+  let failure;
+  /** @type {{resolve: (value: string) => void, reject: (error: Error) => void} | undefined} */
+  let waiter;
+  const drain = () => {
+    if (waiter === undefined) return;
+    const newline = buffer.indexOf("\n");
+    if (newline >= 0) {
+      const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
+      const target = waiter; waiter = undefined; target.resolve(line); return;
+    }
+    if (failure !== undefined) { const target = waiter; waiter = undefined; target.reject(failure); }
+  };
+  socket.on("data", (chunk) => { buffer += chunk.toString("utf8"); if (Buffer.byteLength(buffer) > 65_536) socket.destroy(new Error("bounded authority response exceeded")); drain(); });
+  socket.on("error", (error) => { failure = error; drain(); });
+  socket.on("close", () => { failure ??= new Error("authority connection closed"); drain(); });
+  const nextLine = () => new Promise((resolveLine, rejectLine) => { waiter = { resolve: resolveLine, reject: rejectLine }; drain(); });
+  const deadline = setTimeout(() => socket.destroy(new Error("bounded authority probe timed out")), 2_000);
+  try {
+    await new Promise((resolveConnect, rejectConnect) => { socket.once("connect", resolveConnect); socket.once("error", rejectConnect); });
+    socket.write(`${JSON.stringify({ bind: { ownerId: `pi-webctl-doctor-${process.pid}` } })}\n`);
+    const binding = record(JSON.parse(await nextLine()), "authority binding");
+    if (typeof binding.bindingId !== "string" || typeof binding.bindingSecret !== "string") fail("authority binding is invalid");
+    socket.write(`${JSON.stringify({ binding: { bindingId: binding.bindingId, bindingSecret: binding.bindingSecret }, request: { method: "GET", path: "/v1/capabilities", maxResponseBytes: 65_536 } })}\n`);
+    const response = record(JSON.parse(await nextLine()), "authority response");
+    if (response.status !== 200) fail("authority capability status is invalid");
+    return record(response.body, "authority capability catalog");
+  } finally { clearTimeout(deadline); socket.destroy(); }
+}
+
+/** @param {string} host @param {number} port */
+async function probeProxy(host, port) {
+  return await new Promise((resolveProbe, rejectProbe) => {
+    const socket = createConnection({ host, port });
+    let bytes = Buffer.alloc(0);
+    const deadline = setTimeout(() => socket.destroy(new Error("bounded proxy probe timed out")), 2_000);
+    /** @param {Error | undefined} error @param {string | undefined} [value] */
+    const finish = (error, value) => { clearTimeout(deadline); socket.destroy(); if (error instanceof Error) rejectProbe(error); else resolveProbe(value); };
+    socket.once("connect", () => socket.write("GET http://webx-egress.invalid/.well-known/webx-egress-health HTTP/1.1\r\nHost: webx-egress.invalid\r\nConnection: close\r\n\r\n"));
+    socket.on("data", (chunk) => { bytes = Buffer.concat([bytes, chunk]); if (bytes.byteLength > 4_096) finish(new Error("bounded proxy response exceeded")); });
+    socket.once("error", (error) => finish(error));
+    socket.once("end", () => finish(undefined, bytes.toString("ascii")));
+  });
+}
+
+/** @param {ReturnType<typeof installedPaths>} paths */
+async function doctorFilesystem(paths) {
+  for (const root of [paths.dataRoot, paths.configRoot, paths.cacheRoot, paths.stateRoot]) await verifyManagedRoot(root);
+  const runtimeInformation = await lstat(paths.runtimeRoot);
+  if (!runtimeInformation.isDirectory() || runtimeInformation.isSymbolicLink() || runtimeInformation.uid !== process.getuid?.() || (runtimeInformation.mode & 0o077) !== 0) fail("runtime root is unsafe");
+  for (const path of [...UNITS.map((name) => join(paths.unitRoot, name)), paths.environmentPath, paths.desktopPath, paths.configPath]) {
+    const information = await lstat(path);
+    if (!information.isFile() || information.isSymbolicLink() || information.uid !== process.getuid?.() || information.nlink !== 1) fail("installed managed file is unsafe");
+  }
+  for (const [path, target] of [[paths.extensionPath, join(paths.currentLink, "share/pi-webx")], [paths.controlLink, join(paths.currentLink, "bin/pi-webctl.mjs")], [paths.workspaceLink, join(paths.currentLink, "bin/pi-browser-workspace")]]) {
+    const information = await lstat(path);
+    if (!information.isSymbolicLink() || await readlink(path) !== target) fail("installed managed link is unsafe");
+  }
+}
+
+/** @param {ReturnType<typeof installedPaths>} paths @param {string} command @param {NodeJS.ProcessEnv} environment @param {{authority?: (path: string) => Promise<Record<string, any>>, proxy?: (host: string, port: number) => Promise<string>, browser?: () => Promise<{product: string, version: string} | undefined>}} probes */
+export async function doctorReport(paths, command, environment = process.env, probes = {}) {
+  /** @type {Array<{category: string, status: DoctorStatus, code: string, summary: string}>} */
+  const findings = [];
+  let releaseId;
+  let verified;
+  let config;
+  try {
+    const pointers = await releasePointers(paths); releaseId = pointers.currentReleaseId;
+    if (releaseId === undefined) throw new Error("not installed");
+    verified = await verifyInstallRelease(join(paths.releasesRoot, releaseId));
+    if (pointers.previousReleaseId !== undefined) await verifyInstallRelease(join(paths.releasesRoot, pointers.previousReleaseId));
+    config = await readInstalledConfig(paths);
+    if (config === undefined) throw new Error("missing config");
+    const modulePath = join(verified.releaseRoot, "share/deploy/phase4a-config.mjs");
+    config = (await import(`${pathToFileURL(modulePath).href}?doctor=${encodeURIComponent(releaseId)}`)).parseInstalledConfig(config);
+    if (await exists(paths.deploymentPath)) {
+      const deployment = record(await readJson(paths.deploymentPath), "deployment state");
+      if (deployment.currentReleaseId !== releaseId || deployment.currentBackend !== config.backend) throw new Error("deployment mismatch");
+    }
+    findings.push(doctorFinding("release", await exists(paths.failurePath) ? "warning" : "pass", await exists(paths.failurePath) ? "RELEASE_FAILURE_RETAINED" : "RELEASE_VERIFIED", await exists(paths.failurePath) ? "Current release is verified; bounded activation failure evidence is retained." : "Current and previous release identities are verified."));
+  } catch { findings.push(doctorFinding("release", releaseId === undefined ? "unavailable" : "error", releaseId === undefined ? "RELEASE_NOT_INSTALLED" : "RELEASE_INVALID", releaseId === undefined ? "No Phase 4A release is installed." : "The installed release identity or checksum is invalid.")); }
+
+  try { await doctorFilesystem(paths); findings.push(doctorFinding("filesystem", "pass", "FILESYSTEM_VERIFIED", "Managed roots, files, links, modes, and ownership are verified.")); }
+  catch { findings.push(doctorFinding("filesystem", "error", "FILESYSTEM_INVALID", "An installed managed path is missing or unsafe.")); }
+
+  try {
+    if (config === undefined) throw new Error("config unavailable");
+    const states = serviceStates(command);
+    const webxd = states["webxd.service"];
+    if (!webxd.active || !webxd.enabled) throw new Error("webxd unavailable");
+    if (config.backend === "agentcursor") {
+      if (!states["pi-web-agentcursor-egress-proxy.service"].active || !states["pi-web-agentcursor-browserd.service"].active) throw new Error("candidate unavailable");
+      findings.push(doctorFinding("services", "pass", "SERVICES_CANDIDATE_ACTIVE", "webxd and the selected AgentCursor services are active."));
+    } else {
+      const unexpected = states["pi-web-agentcursor-egress-proxy.service"].active || states["pi-web-agentcursor-browserd.service"].active;
+      findings.push(doctorFinding("services", unexpected ? "warning" : "pass", unexpected ? "SERVICES_CANDIDATE_UNEXPECTED" : "SERVICES_LEGACY_ACTIVE", unexpected ? "webxd is active, but an unselected candidate service is also active." : "webxd is active and candidate services are not selected."));
+    }
+  } catch { findings.push(doctorFinding("services", "unavailable", "SERVICES_UNAVAILABLE", "One or more selected user services are unavailable.")); }
+
+  const displayReady = (typeof environment.WAYLAND_DISPLAY === "string" && environment.WAYLAND_DISPLAY.length > 0) || (typeof environment.DISPLAY === "string" && environment.DISPLAY.length > 0);
+  const dbusReady = typeof environment.DBUS_SESSION_BUS_ADDRESS === "string" && environment.DBUS_SESSION_BUS_ADDRESS.length > 0;
+  findings.push(doctorFinding("display", displayReady && dbusReady ? "pass" : "unavailable", displayReady && dbusReady ? "DISPLAY_SESSION_AVAILABLE" : "DISPLAY_SESSION_UNAVAILABLE", displayReady && dbusReady ? "A graphical user session and session bus are available." : "The graphical user session or session bus is unavailable."));
+
+  try {
+    let browser = await probes.browser?.();
+    if (browser === undefined) {
+      for (const [path, product] of [["/usr/bin/google-chrome-stable", "Google Chrome"], ["/usr/bin/chromium-browser", "Chromium"], ["/usr/bin/chromium", "Chromium"]]) {
+        if (!(await exists(path))) continue;
+        const information = await lstat(path); if (!information.isFile() || information.isSymbolicLink() || (information.mode & 0o111) === 0) continue;
+        const result = spawnSync(path, ["--version"], { encoding: "utf8", timeout: 2_000, maxBuffer: 4_096 });
+        const version = /([0-9]+(?:\.[0-9]+){1,3})/u.exec(result.stdout)?.[1];
+        if (result.status === 0 && version !== undefined) { browser = { product, version }; break; }
+      }
+    }
+    if (browser === undefined) throw new Error("browser unavailable");
+    findings.push(doctorFinding("browser", "pass", "BROWSER_REVIEWED", `${browser.product} ${browser.version} is the reviewed executable.`));
+  } catch { findings.push(doctorFinding("browser", "unavailable", "BROWSER_UNAVAILABLE", "No reviewed browser executable is available.")); }
+
+  if (config?.backend !== "agentcursor") findings.push(doctorFinding("egress", "not-tested", "EGRESS_NOT_SELECTED", "Candidate egress is not selected by the legacy backend."));
+  else {
+    try {
+      const response = await (probes.proxy ?? probeProxy)(config.proxy.host, config.proxy.port);
+      if (!response.startsWith("HTTP/1.1 204 No Content\r\n") || !response.includes("\r\nWebX-Egress-Proxy: secure-egress/1\r\n")) throw new Error("wrong proxy");
+      findings.push(doctorFinding("egress", "pass", "EGRESS_PROXY_HEALTHY", "The reviewed loopback egress proxy passed its branded health probe."));
+    } catch { findings.push(doctorFinding("egress", "unavailable", "EGRESS_PROXY_UNAVAILABLE", "The selected reviewed egress proxy is unavailable or malformed.")); }
+  }
+
+  try {
+    if (verified === undefined) throw new Error("release unavailable");
+    const catalog = await (probes.authority ?? probeAuthority)(join(paths.runtimeRoot, "pi-web/webxd.sock"));
+    if (catalog.apiVersion !== record(verified.manifest.versions, "manifest versions").publicWebX || !Array.isArray(catalog.capabilities)) throw new Error("authority version mismatch");
+    for (const required of ["search", "read"]) {
+      const capability = catalog.capabilities.find((item) => item?.id === required);
+      if (capability?.enabled !== true || capability?.healthy !== true) throw new Error("required authority capability unavailable");
+    }
+    findings.push(doctorFinding("authority", "pass", "AUTHORITY_HEALTHY", "Trusted WebX authority and required search/read capabilities are healthy."));
+  } catch { findings.push(doctorFinding("authority", "unavailable", "AUTHORITY_UNAVAILABLE", "Trusted WebX authority or a required capability is unavailable.")); }
+
+  findings.push(doctorFinding("resource", config === undefined ? "error" : "not-tested", config === undefined ? "RESOURCE_CONFIG_INVALID" : "RESOURCE_ENFORCEMENT_NOT_TESTED", config === undefined ? "Resource configuration is unavailable." : "Resource limits are configured; live enforcement is not tested by doctor."));
+  const workspacePresent = verified !== undefined && await exists(join(verified.releaseRoot, "bin/pi-browser-workspace"));
+  findings.push(doctorFinding("workspace", workspacePresent ? "not-tested" : "error", workspacePresent ? "WORKSPACE_LIVE_NOT_TESTED" : "WORKSPACE_INVALID", workspacePresent ? "The workspace bundle is verified; live GUI readiness is not tested by doctor." : "The installed workspace bundle is missing or invalid."));
+
+  if (JSON.stringify(findings.map((item) => item.category)) !== JSON.stringify(DOCTOR_CATEGORIES)) fail("doctor category set is invalid");
+  const ok = findings.every((item) => item.status !== "error" && item.status !== "unavailable");
+  return Object.freeze({ schemaVersion: 1, ok, releaseId: releaseId ?? null, backend: typeof config?.backend === "string" ? config.backend : null, findings });
+}
+
+/** @param {ReturnType<typeof doctorReport> extends Promise<infer T> ? T : never} report */
+function renderDoctorHuman(report) { return `${report.findings.map((item) => `${item.status.toUpperCase()}\t${item.category}\t${item.code}\t${item.summary}`).join("\n")}\n`; }
 
 /** @param {ReturnType<typeof installedPaths>} paths @param {string} command */
 async function status(paths, command) {
@@ -574,8 +878,12 @@ async function status(paths, command) {
     backend: config?.backend ?? null,
     previousReleaseId: await exists(paths.deploymentPath) ? (await readJson(paths.deploymentPath)).previousReleaseId ?? null : null,
     services: serviceStates(command),
-    paths: { data: paths.dataRoot, config: paths.configRoot, state: paths.stateRoot },
   };
+}
+
+/** @param {Record<string, string | boolean>} options @param {string[]} allowed */
+function assertOptionSet(options, allowed) {
+  if (Object.keys(options).some((name) => !allowed.includes(name))) fail("one or more options are not valid for this command");
 }
 
 async function main() {
@@ -584,17 +892,23 @@ async function main() {
   const systemctlCommand = "/usr/bin/systemctl";
   let result;
   if (operation === "install" && subcommand === undefined) {
-    if (typeof options.release !== "string" || typeof options["expected-sha"] !== "string" || !/^[0-9a-f]{40}$/u.test(options["expected-sha"])) fail("install requires --release <immutable-release-root> --expected-sha <40-lowercase-hex>");
-    result = await installRelease(paths, systemctlCommand, resolve(options.release), options["expected-sha"]);
+    assertOptionSet(options, ["release", "expected-sha", "manifest-sha256", "json"]);
+    if (typeof options.release !== "string" || typeof options["expected-sha"] !== "string" || !/^[0-9a-f]{40}$/u.test(options["expected-sha"]) || typeof options["manifest-sha256"] !== "string" || !/^[0-9a-f]{64}$/u.test(options["manifest-sha256"])) fail("install requires --release <immutable-release-root> --expected-sha <40-lowercase-hex> --manifest-sha256 <64-lowercase-hex>");
+    result = await installRelease(paths, systemctlCommand, resolve(options.release), options["expected-sha"], options["manifest-sha256"]);
   } else if (operation === "backend" && subcommand === "show") {
-    const config = await readInstalledConfig(paths); if (config === undefined) fail("installed configuration is missing"); result = { ok: true, backend: config.backend };
-  } else if (operation === "backend" && (subcommand === "legacy" || subcommand === "agentcursor")) result = await setBackend(paths, systemctlCommand, subcommand);
-  else if (operation === "rollback" && subcommand === undefined) result = await rollbackRelease(paths, systemctlCommand);
-  else if (operation === "uninstall" && subcommand === undefined) result = await uninstallCandidate(paths, systemctlCommand, options.purge === true);
-  else if (operation === "status" && subcommand === undefined) result = await status(paths, systemctlCommand);
-  else if (operation === "version" && subcommand === undefined) {
-    const releaseId = await currentReleaseId(paths); if (releaseId === undefined) fail("no current Phase 4A release is installed"); const verified = await verifyInstallRelease(join(paths.releasesRoot, releaseId)); result = { ok: true, releaseId, gitSha: verified.gitSha };
-  } else fail("usage: pi-webctl {install --release PATH --expected-sha SHA|status|version|backend show|backend legacy|backend agentcursor|rollback|uninstall [--purge]}");
+    assertOptionSet(options, ["json"]); const config = await readInstalledConfig(paths); if (config === undefined) fail("installed configuration is missing"); result = { ok: true, backend: config.backend };
+  } else if (operation === "backend" && (subcommand === "legacy" || subcommand === "agentcursor")) { assertOptionSet(options, ["json"]); result = await setBackend(paths, systemctlCommand, subcommand); }
+  else if (operation === "rollback" && subcommand === undefined) { assertOptionSet(options, ["json"]); result = await rollbackRelease(paths, systemctlCommand); }
+  else if (operation === "uninstall" && subcommand === undefined) { assertOptionSet(options, ["json", "purge"]); result = await uninstallCandidate(paths, systemctlCommand, options.purge === true); }
+  else if (operation === "status" && subcommand === undefined) { assertOptionSet(options, ["json"]); result = await status(paths, systemctlCommand); }
+  else if (operation === "doctor" && subcommand === undefined) {
+    assertOptionSet(options, ["json"]); const report = await doctorReport(paths, systemctlCommand);
+    process.stdout.write(options.json === true ? `${JSON.stringify(report, null, 2)}\n` : renderDoctorHuman(report));
+    if (!report.ok) process.exitCode = 1;
+    return;
+  } else if (operation === "version" && subcommand === undefined) {
+    assertOptionSet(options, ["json"]); const releaseId = await currentReleaseId(paths); if (releaseId === undefined) fail("no current Phase 4A release is installed"); const verified = await verifyInstallRelease(join(paths.releasesRoot, releaseId)); result = { ok: true, releaseId, gitSha: verified.gitSha, manifestSha256: verified.manifestSha256 };
+  } else fail("usage: pi-webctl {install --release PATH --expected-sha SHA --manifest-sha256 DIGEST|doctor [--json]|status|version|backend show|backend legacy|backend agentcursor|rollback|uninstall [--purge]}");
   process.stdout.write(`${JSON.stringify(result, null, options.json ? 2 : 0)}\n`);
 }
 

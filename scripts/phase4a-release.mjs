@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseInstalledConfig } from "./phase4a-config.mjs";
+import { validateReleaseChecksums, validateReleaseManifest } from "./phase4a-release-format.mjs";
 
 const releaseFile = fileURLToPath(import.meta.url);
 const sourceRoot = resolve(dirname(releaseFile), "..");
@@ -476,6 +477,7 @@ async function buildRelease(options) {
       copyTree(join(sourceRoot, "deploy/phase4a"), join(releaseRoot, "share/deploy")),
       copyFile(join(sourceRoot, "scripts/phase4a-config.mjs"), join(releaseRoot, "share/deploy/phase4a-config.mjs")),
       copyFile(join(sourceRoot, "scripts/pi-webctl.mjs"), join(releaseRoot, "bin/pi-webctl.mjs")),
+      copyFile(join(sourceRoot, "scripts/phase4a-release-format.mjs"), join(releaseRoot, "bin/phase4a-release-format.mjs")),
       copyFile(join(sourceRoot, "components/browser/apps/workspace/src-tauri/icons/icon.png"), join(releaseRoot, "share/icons/pi-web-workspace.png")),
     ]);
     parseInstalledConfig(JSON.parse(await readFile(join(releaseRoot, "share/deploy/config/default.json"), "utf8")));
@@ -532,31 +534,29 @@ async function verifyRelease(releaseRootValue, expectedSha, forbiddenPaths = [so
   const checksumStats = await lstat(join(releaseRoot, "checksums.json"));
   if (!checksumStats.isFile() || (checksumStats.mode & 0o777) !== 0o444) fail("release checksum document mode is invalid");
   const manifestBytes = await readFile(join(releaseRoot, "manifest.json"));
-  /** @type {ReleaseManifestIdentity} */
-  const manifest = JSON.parse(manifestBytes.toString("utf8"));
-  if (manifest.schemaVersion !== releaseSchemaVersion || manifest.dirtyTree !== false || manifest.backendDefault !== "legacy" || typeof manifest.releaseId !== "string" || typeof manifest.gitSha !== "string" || !/^[0-9a-f]{40}$/u.test(manifest.gitSha) || !Array.isArray(manifest.immutableFiles)) fail("release manifest identity is invalid");
+  const manifest = validateReleaseManifest(JSON.parse(manifestBytes.toString("utf8")));
   if (expectedSha !== undefined && (!/^[0-9a-f]{40}$/u.test(expectedSha) || manifest.gitSha !== expectedSha)) fail("release manifest does not match the expected Git SHA");
-  if (basename(releaseRoot) !== manifest.releaseId || !manifest.releaseId.endsWith(manifest.gitSha)) fail("release directory does not match its Git identity");
-  /** @type {ChecksumsDocument} */
-  const checksums = JSON.parse(await readFile(join(releaseRoot, "checksums.json"), "utf8"));
-  if (checksums.schemaVersion !== 1 || checksums.algorithm !== "sha256" || !Array.isArray(checksums.files)) fail("release checksum document is invalid");
+  if (basename(releaseRoot) !== manifest.releaseId) fail("release directory does not match its Git identity");
+  const checksums = validateReleaseChecksums(JSON.parse(await readFile(join(releaseRoot, "checksums.json"), "utf8")));
   const listed = new Set();
   for (const record of checksums.files) {
-    if (typeof record.path !== "string" || record.path.startsWith("/") || record.path.split("/").includes("..") || listed.has(record.path)) fail("release checksum path is invalid");
     listed.add(record.path);
     const path = join(releaseRoot, record.path);
     const stats = await lstat(path);
-    if (!stats.isFile() || (stats.mode & 0o777) !== record.mode || (stats.mode & 0o222) !== 0) fail(`release file mode is invalid: ${record.path}`);
+    if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1 || stats.uid !== process.getuid?.() || (stats.mode & 0o777) !== record.mode || (stats.mode & 0o222) !== 0) fail(`release file mode or ownership is invalid: ${record.path}`);
     const bytes = await readFile(path);
     if (bytes.byteLength !== record.bytes || sha256(bytes) !== record.sha256) fail(`release checksum failed: ${record.path}`);
   }
   assert.deepEqual([...listed].sort(), actual.sort(), "release checksum inventory is incomplete");
+  for (const required of ["bin/pi-webctl.mjs", "bin/phase4a-release-format.mjs", "share/deploy/phase4a-config.mjs", "share/deploy/config/default.json"]) if (!listed.has(required)) fail(`release is missing required installed file: ${required}`);
+  for (const artifact of Object.values(manifest.artifacts)) if (!listed.has(artifact)) fail("release manifest artifact is missing from the checksum inventory");
   assert.deepEqual(manifest.immutableFiles, await immutablePayloadDigests(releaseRoot), "release manifest payload digest inventory is invalid");
   command(process.execPath, ["--check", join(releaseRoot, "bin/pi-web-browserd.mjs")], { cwd: tmpdir() });
   command(process.execPath, ["--check", join(releaseRoot, "bin/pi-web-webxd.mjs")], { cwd: tmpdir() });
   command(process.execPath, ["--check", join(releaseRoot, "share/pi-webx/extension.mjs")], { cwd: tmpdir() });
   command(process.execPath, ["--check", join(releaseRoot, "share/deploy/phase4a-config.mjs")], { cwd: tmpdir() });
   command(process.execPath, ["--check", join(releaseRoot, "bin/pi-webctl.mjs")], { cwd: tmpdir() });
+  command(process.execPath, ["--check", join(releaseRoot, "bin/phase4a-release-format.mjs")], { cwd: tmpdir() });
   parseInstalledConfig(JSON.parse(await readFile(join(releaseRoot, "share/deploy/config/default.json"), "utf8")));
   /** @type {Map<string, string>} */
   const deployUnits = new Map();
