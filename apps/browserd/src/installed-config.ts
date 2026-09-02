@@ -18,6 +18,8 @@ export function installedBrowserdOptions(environment: NodeJS.ProcessEnv): Browse
   const egressProxy = parseEgressProxy(environment.BROWSERD_EGRESS_PROXY);
   const runtimeDirectory = parseRuntimePath(environment.BROWSERD_RUNTIME_DIR ?? `${xdgRuntimeDirectory}/pi-browserd`, "BROWSERD_RUNTIME_DIR", xdgRuntimeDirectory);
   const profileRoot = parseRuntimePath(environment.BROWSERD_PROFILE_ROOT ?? `${xdgRuntimeDirectory}/pi-web-agentcursor/profiles`, "BROWSERD_PROFILE_ROOT", xdgRuntimeDirectory);
+  const qualificationDiagnostics = runtimeDirectory === `${xdgRuntimeDirectory}/pi-web/qualification/browserd`
+    && profileRoot === `${xdgRuntimeDirectory}/pi-web/qualification/profiles`;
   const screenshotObservationTtlMs = parseInteger(environment.BROWSERD_SCREENSHOT_OBSERVATION_TTL_MS, "BROWSERD_SCREENSHOT_OBSERVATION_TTL_MS", 60_000, 10_000, 120_000);
   const domObservationTtlMs = parseInteger(environment.BROWSERD_DOM_OBSERVATION_TTL_MS, "BROWSERD_DOM_OBSERVATION_TTL_MS", 60_000, 10_000, 120_000);
   const idleIntervalMs = parseInteger(environment.BROWSERD_FRAME_IDLE_INTERVAL_MS, "BROWSERD_FRAME_IDLE_INTERVAL_MS", 2_000, 500, 10_000);
@@ -44,6 +46,7 @@ export function installedBrowserdOptions(environment: NodeJS.ProcessEnv): Browse
     screenshotObservationTtlMs,
     domObservationTtlMs,
     maxSessionsGlobal,
+    qualificationDiagnostics,
     resourceLimits: {
       perSessionSoftPssBytes: perSessionSoftPssMiB * MIB,
       perSessionHardPssBytes: perSessionHardPssMiB * MIB,

@@ -107,6 +107,7 @@ export const WorkspaceBrokerBindRequestSchema = Type.Object({
 
 export const BrowserRequestSchema = Type.Union([
   request("capabilities.get", {}),
+  request("qualification.diagnostics", {}),
   request("session.create", { initialUrl: Type.Optional(HttpUrlSchema), navigationAuthorization: Type.Optional(NavigationAuthorizationSchema) }),
   request("session.list", {}),
   request("session.close", { browserSessionId: IdSchema, controlEpoch: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }) }),
@@ -451,9 +452,41 @@ const capabilityResult = Type.Object({
     warningSessions: Type.Integer({ minimum: 0, maximum: 256 }),
     limitedSessions: Type.Integer({ minimum: 0, maximum: 256 }),
     terminalLimitEvents: Type.Integer({ minimum: 0, maximum: 256 }),
-    lastTerminalReason: Type.Union([Type.Literal("none"), Type.Literal("session-memory"), Type.Literal("profile-storage"), Type.Literal("global-memory")]),
+    lastTerminalReason: Type.Union([Type.Literal("none"), Type.Literal("session-memory"), Type.Literal("profile-storage"), Type.Literal("global-memory"), Type.Literal("sampling-unavailable")]),
   }, strict)),
   sessionCapacity: Type.Object({ current: Type.Integer({ minimum: 0, maximum: 256 }), limit: Type.Integer({ minimum: 1, maximum: 256 }), available: Type.Integer({ minimum: 0, maximum: 256 }) }, strict),
+}, strict);
+const qualificationCaptureDiagnostics = Type.Object({
+  agentRequests: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  frameRequests: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  agentScreenshotAttempts: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  frameScreenshotAttempts: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  agentScreenshotRetries: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  agentScreenshotTimeouts: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  recoveredAgentScreenshotTimeouts: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  unrecoveredAgentScreenshotTimeouts: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  frameScreenshotTimeouts: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  failedAgent: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  droppedFrame: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  coalescedFrame: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+}, strict);
+const qualificationDiagnosticsResult = Type.Object({
+  kind: Type.Literal("qualificationDiagnostics"),
+  sessions: Type.Integer({ minimum: 0, maximum: 256 }),
+  tabs: Type.Integer({ minimum: 0, maximum: 4096 }),
+  operations: Type.Integer({ minimum: 0, maximum: 2048 }),
+  activeOperations: Type.Integer({ minimum: 0, maximum: 2048 }),
+  artifacts: Type.Integer({ minimum: 0, maximum: 256 }),
+  artifactBytes: Type.Integer({ minimum: 0, maximum: 16 * 1024 * 1024 }),
+  actorSubscriptions: Type.Integer({ minimum: 0, maximum: 16_384 }),
+  workspaceSubscriptions: Type.Integer({ minimum: 0, maximum: 32 }),
+  workspaceFrameLedgers: Type.Integer({ minimum: 0, maximum: 4096 }),
+  frameRingEntries: Type.Integer({ minimum: 0, maximum: 4096 }),
+  framePins: Type.Integer({ minimum: 0, maximum: 4096 }),
+  humanLeases: Type.Integer({ minimum: 0, maximum: 256 }),
+  heldKeys: Type.Integer({ minimum: 0, maximum: 8192 }),
+  heldButtons: Type.Integer({ minimum: 0, maximum: 768 }),
+  capture: qualificationCaptureDiagnostics,
 }, strict);
 const sessionsResult = Type.Object({ kind: Type.Literal("sessions"), sessions: Type.Array(SessionDescriptorSchema, { maxItems: 32 }) }, strict);
 const tabsResult = Type.Object({ kind: Type.Literal("tabs"), tabs: Type.Array(TabDescriptorSchema, { maxItems: 16 }) }, strict);
@@ -503,7 +536,7 @@ export const WorkspaceInputAckResultSchema = Type.Object({
   awaitingNewFrame: Type.Boolean(),
 }, strict);
 
-export const ResultSchema = Type.Union([capabilityResult, SessionDescriptorSchema, sessionsResult, TabDescriptorSchema, tabsResult, ScreenshotObservationSchema, DomObservationSchema, OperationStatusSchema, artifactResult, ackResult, subscriptionResult]);
+export const ResultSchema = Type.Union([capabilityResult, qualificationDiagnosticsResult, SessionDescriptorSchema, sessionsResult, TabDescriptorSchema, tabsResult, ScreenshotObservationSchema, DomObservationSchema, OperationStatusSchema, artifactResult, ackResult, subscriptionResult]);
 export const WorkspaceResultSchema = Type.Union([
   WorkspaceSnapshotSchema, workspaceSubscriptionResult, workspaceArtifactResult, workspacePongResult,
   WorkspaceControlStatusResultSchema, WorkspaceControlHeartbeatResultSchema,

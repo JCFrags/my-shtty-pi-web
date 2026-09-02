@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it, vi } from "vitest";
 import { BrowserProtocolError, PROTOCOL_VERSION, type ActorIdentity, type BrowserRequest } from "@webx/browser-protocol";
-import type { BrowserResourceReason } from "../src/resources/supervisor.js";
+import type { BrowserResourceTerminalReason } from "../src/resources/supervisor.js";
 import { BrowserRuntime } from "../src/registry/runtime.js";
 
 const owner: ActorIdentity = { principalId: "principal:resource-terminal", agentSessionId: "agent:resource-terminal" };
@@ -24,7 +24,7 @@ interface FakeSession {
 interface InternalRuntime {
   readonly sessions: Map<string, FakeSession>;
   readonly resourceLimitTerminals: Map<string, unknown>;
-  terminateResourceLimitedSession(browserSessionId: string, reason: Exclude<BrowserResourceReason, "none" | "sampling-unavailable">): Promise<void>;
+  terminateResourceLimitedSession(browserSessionId: string, reason: BrowserResourceTerminalReason): Promise<void>;
 }
 
 function runtime(): BrowserRuntime {
@@ -80,6 +80,21 @@ describe("resource-limit terminal classification", () => {
     }), { kind: "sessions", sessions: [] });
     await expectCode(value.dispatch(owner, tabList("session:limited", "same-owner")), "BROWSER_RESOURCE_LIMIT", "profile-storage");
     await expectCode(value.dispatch(otherOwner, tabList("session:limited", "other-owner")), "SESSION_NOT_FOUND");
+  });
+
+  it("retains sampling-unavailable for the exact owner without remapping or disclosing it cross-actor", async () => {
+    const value = runtime();
+    const state = internal(value);
+    let closes = 0;
+    state.sessions.set("session:sampling-lost", fakeSession(owner, () => { closes++; }));
+
+    await state.terminateResourceLimitedSession("session:sampling-lost", "sampling-unavailable");
+
+    assert.equal(closes, 1);
+    assert.equal(state.sessions.has("session:sampling-lost"), false);
+    assert.deepEqual(value.listSessions(owner), []);
+    await expectCode(value.dispatch(owner, tabList("session:sampling-lost", "sampling-owner")), "BROWSER_RESOURCE_LIMIT", "sampling-unavailable");
+    await expectCode(value.dispatch(otherOwner, tabList("session:sampling-lost", "sampling-other")), "SESSION_NOT_FOUND");
   });
 
   it("classifies a live closing session before tab listing can expose terminal state as not found", async () => {

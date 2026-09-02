@@ -64,7 +64,7 @@ async function started(): Promise<{ server: BrowserdServer; directory: string }>
 function bind(secret: string, principalId = "owner:test", agentSessionId = "agent:test") {
   return { protocolVersion: PROTOCOL_VERSION, kind: "bind", requestId: "request:bind", bindingSecret: secret, actor: { principalId, agentSessionId } };
 }
-function request(kind: "capabilities.get" | "session.list", id: string) {
+function request(kind: "capabilities.get" | "qualification.diagnostics" | "session.list", id: string) {
   return { protocolVersion: PROTOCOL_VERSION, kind, requestId: `request:${id}`, operationId: `operation:${id}`, deadline: new Date(Date.now() + 60_000).toISOString() };
 }
 function workspaceBind(secret: string) { return { protocolVersion: PROTOCOL_VERSION, kind: "workspace.bind", requestId: "request:workspace-bind", workspaceBrokerSecret: secret }; }
@@ -100,6 +100,39 @@ describe("browserd actor-bound Unix service", () => {
     const rejected = await client.next() as { kind: string; error: { code: string } };
     assert.equal(rejected.kind, "response");
     assert.equal(rejected.error.code, "ALREADY_BOUND");
+    client.close();
+  });
+
+  it("exposes bounded count-only diagnostics only for an explicit qualification runtime", async () => {
+    const ordinary = await started();
+    const ordinaryClient = await Client.open(ordinary.server.descriptor.socketPath);
+    ordinaryClient.send(bind(ordinary.server.descriptor.bindingSecret)); await ordinaryClient.next();
+    ordinaryClient.send(request("qualification.diagnostics", "ordinary-diagnostics"));
+    assert.equal(((await ordinaryClient.next()) as { error: { code: string } }).error.code, "CAPABILITY_UNAVAILABLE");
+    ordinaryClient.close();
+
+    const directory = await mkdtemp(join(tmpdir(), "browserd-qualification-diagnostics-test-"));
+    directories.push(directory);
+    const server = new BrowserdServer({ runtimeDirectory: directory, qualificationDiagnostics: true });
+    servers.push(server); await server.start();
+    const client = await Client.open(server.descriptor.socketPath);
+    client.send(bind(server.descriptor.bindingSecret)); await client.next();
+    client.send(request("qualification.diagnostics", "qualification-diagnostics"));
+    const response = await client.next() as { ok: boolean; result: Record<string, unknown> };
+    assert.equal(response.ok, true);
+    assert.deepEqual(response.result, {
+      kind: "qualificationDiagnostics", sessions: 0, tabs: 0, operations: 0, activeOperations: 0,
+      artifacts: 0, artifactBytes: 0, actorSubscriptions: 0, workspaceSubscriptions: 0,
+      workspaceFrameLedgers: 0, frameRingEntries: 0, framePins: 0, humanLeases: 0,
+      heldKeys: 0, heldButtons: 0,
+      capture: {
+        agentRequests: 0, frameRequests: 0, agentScreenshotAttempts: 0, frameScreenshotAttempts: 0,
+        agentScreenshotRetries: 0, agentScreenshotTimeouts: 0, recoveredAgentScreenshotTimeouts: 0,
+        unrecoveredAgentScreenshotTimeouts: 0, frameScreenshotTimeouts: 0, failedAgent: 0,
+        droppedFrame: 0, coalescedFrame: 0,
+      },
+    });
+    assert.equal(JSON.stringify(response).includes(server.descriptor.bindingSecret), false);
     client.close();
   });
 

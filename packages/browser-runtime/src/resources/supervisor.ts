@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { BrowserProtocolError } from "@webx/browser-protocol";
 
 export const MIB = 1024 * 1024;
+export const PERSISTENT_SAMPLING_FAILURE_THRESHOLD = 3;
 
 export interface BrowserProcessIdentity {
   readonly pid: number;
@@ -34,6 +35,7 @@ export const DEFAULT_BROWSER_RESOURCE_LIMITS: BrowserResourceLimits = Object.fre
 
 export type BrowserResourceState = "normal" | "warning" | "draining" | "resource-limited" | "closing" | "closed";
 export type BrowserResourceReason = "none" | "session-memory" | "profile-storage" | "global-memory" | "sampling-unavailable";
+export type BrowserResourceTerminalReason = Exclude<BrowserResourceReason, "none">;
 
 export interface BrowserResourceStatus {
   readonly state: BrowserResourceState;
@@ -46,7 +48,7 @@ export interface BrowserResourceSummary {
   readonly warningSessions: number;
   readonly limitedSessions: number;
   readonly terminalLimitEvents: number;
-  readonly lastTerminalReason: Exclude<BrowserResourceReason, "none" | "sampling-unavailable"> | "none";
+  readonly lastTerminalReason: BrowserResourceTerminalReason | "none";
 }
 
 export interface BrowserResourceSample {
@@ -67,11 +69,11 @@ export interface BrowserResourceSessionHooks {
   readonly profileDirectory: string;
   controlState(): "agent" | "takeover-pending" | "human" | "human-disconnected" | "return-pending";
   hasRunningWork(): boolean;
-  fence(reason: Exclude<BrowserResourceReason, "none" | "sampling-unavailable">): void;
-  cancelOperations(): void;
+  fence(reason: BrowserResourceTerminalReason): void;
+  cancelOperations(reason: BrowserResourceTerminalReason): void;
   awaitOperationSettlement(signal: AbortSignal): Promise<void>;
   returnHumanControl(signal: AbortSignal): Promise<void>;
-  close(reason: Exclude<BrowserResourceReason, "none" | "sampling-unavailable">): Promise<void>;
+  close(reason: BrowserResourceTerminalReason): Promise<void>;
   changed(status: BrowserResourceStatus): void;
 }
 
@@ -94,10 +96,11 @@ interface SessionRecord {
   sample: BrowserResourceSample | undefined;
   drainPromise: Promise<void> | undefined;
   closeAttempt: CloseAttempt | undefined;
+  consecutiveSamplingFailures: number;
 }
 
 interface TerminalEvent {
-  readonly reason: Exclude<BrowserResourceReason, "none" | "sampling-unavailable">;
+  readonly reason: BrowserResourceTerminalReason;
 }
 
 export class BrowserResourceSupervisor extends EventEmitter {
@@ -127,7 +130,7 @@ export class BrowserResourceSupervisor extends EventEmitter {
   register(hooks: BrowserResourceSessionHooks): void {
     if (this.closed) throw new BrowserProtocolError("CAPABILITY_UNAVAILABLE", "Browser resource supervision is closed.", true);
     if (this.sessions.has(hooks.browserSessionId)) throw new BrowserProtocolError("OPERATION_CONFLICT", "Browser resource session is already supervised.");
-    const record: SessionRecord = { hooks, sequence: this.nextSequence++, status: { state: "normal", reason: "none" }, sample: undefined, drainPromise: undefined, closeAttempt: undefined };
+    const record: SessionRecord = { hooks, sequence: this.nextSequence++, status: { state: "normal", reason: "none" }, sample: undefined, drainPromise: undefined, closeAttempt: undefined, consecutiveSamplingFailures: 0 };
     this.sessions.set(hooks.browserSessionId, record);
     hooks.changed(record.status);
   }
@@ -187,16 +190,19 @@ export class BrowserResourceSupervisor extends EventEmitter {
 
   private async sampleAndEnforce(): Promise<void> {
     for (const record of [...this.sessions.values()]) {
-      if (record.status.state === "resource-limited" && isHardReason(record.status.reason)) {
+      if (record.status.state === "resource-limited" && isTerminalReason(record.status.reason)) {
         await this.closeLimitedRecord(record, record.status.reason);
         continue;
       }
       if (!isSampleable(record.status.state)) continue;
       try {
         record.sample = await this.sampler.sample(record.hooks.processIdentity, record.hooks.profileDirectory);
+        record.consecutiveSamplingFailures = 0;
       } catch {
         record.sample = undefined;
-        this.setStatus(record, { state: "warning", reason: "sampling-unavailable" });
+        record.consecutiveSamplingFailures++;
+        if (record.consecutiveSamplingFailures >= PERSISTENT_SAMPLING_FAILURE_THRESHOLD) await this.beginDrain(record, "sampling-unavailable");
+        else this.setStatus(record, { state: "warning", reason: "sampling-unavailable" });
         continue;
       }
       if (record.sample.pssBytes >= this.limits.perSessionHardPssBytes) {
@@ -223,8 +229,13 @@ export class BrowserResourceSupervisor extends EventEmitter {
   private async resampleOpenSessions(): Promise<void> {
     for (const record of this.sessions.values()) {
       if (!isSampleable(record.status.state)) continue;
-      try { record.sample = await this.sampler.sample(record.hooks.processIdentity, record.hooks.profileDirectory); }
-      catch { record.sample = undefined; this.setStatus(record, { state: "warning", reason: "sampling-unavailable" }); }
+      try { record.sample = await this.sampler.sample(record.hooks.processIdentity, record.hooks.profileDirectory); record.consecutiveSamplingFailures = 0; }
+      catch {
+        record.sample = undefined;
+        record.consecutiveSamplingFailures++;
+        if (record.consecutiveSamplingFailures >= PERSISTENT_SAMPLING_FAILURE_THRESHOLD) await this.beginDrain(record, "sampling-unavailable");
+        else this.setStatus(record, { state: "warning", reason: "sampling-unavailable" });
+      }
     }
   }
 
@@ -243,19 +254,19 @@ export class BrowserResourceSupervisor extends EventEmitter {
       .sort((left, right) => victimRank(left) - victimRank(right) || left.sequence - right.sequence);
   }
 
-  private async beginDrain(record: SessionRecord, reason: Exclude<BrowserResourceReason, "none" | "sampling-unavailable">): Promise<void> {
+  private async beginDrain(record: SessionRecord, reason: BrowserResourceTerminalReason): Promise<void> {
     if (record.drainPromise !== undefined) return await record.drainPromise;
     if (!isSampleable(record.status.state)) return;
     this.setStatus(record, { state: "draining", reason });
     record.hooks.fence(reason);
-    record.hooks.cancelOperations();
+    record.hooks.cancelOperations(reason);
     const promise = this.drain(record, reason);
     record.drainPromise = promise;
     try { await promise; }
     finally { if (record.drainPromise === promise) record.drainPromise = undefined; }
   }
 
-  private async drain(record: SessionRecord, reason: Exclude<BrowserResourceReason, "none" | "sampling-unavailable">): Promise<void> {
+  private async drain(record: SessionRecord, reason: BrowserResourceTerminalReason): Promise<void> {
     try {
       await withBudget(this.limits.drainTimeoutMs, async (signal) => {
         await record.hooks.awaitOperationSettlement(signal);
@@ -269,7 +280,7 @@ export class BrowserResourceSupervisor extends EventEmitter {
     await this.closeLimitedRecord(record, reason);
   }
 
-  private async closeLimitedRecord(record: SessionRecord, reason: Exclude<BrowserResourceReason, "none" | "sampling-unavailable">): Promise<void> {
+  private async closeLimitedRecord(record: SessionRecord, reason: BrowserResourceTerminalReason): Promise<void> {
     this.setStatus(record, { state: "closing", reason });
     let attempt = record.closeAttempt;
     if (attempt === undefined || (attempt.settled && !attempt.succeeded)) {
@@ -447,10 +458,10 @@ function victimRank(record: SessionRecord): number {
 }
 
 function isSampleable(state: BrowserResourceState): boolean { return state === "normal" || state === "warning"; }
-function isHardReason(reason: BrowserResourceReason): reason is Exclude<BrowserResourceReason, "none" | "sampling-unavailable"> { return reason === "session-memory" || reason === "profile-storage" || reason === "global-memory"; }
+function isTerminalReason(reason: BrowserResourceReason): reason is BrowserResourceTerminalReason { return reason !== "none"; }
 
 function resourceLimitError(reason: BrowserResourceReason): BrowserProtocolError {
-  const boundedReason = reason === "profile-storage" ? "profile-storage" : reason === "global-memory" ? "global-memory" : "session-memory";
+  const boundedReason = reason === "profile-storage" ? "profile-storage" : reason === "global-memory" ? "global-memory" : reason === "sampling-unavailable" ? "sampling-unavailable" : "session-memory";
   return new BrowserProtocolError("BROWSER_RESOURCE_LIMIT", "Browser session reached a resource limit.", false, { reason: boundedReason });
 }
 

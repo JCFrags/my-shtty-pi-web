@@ -8,6 +8,7 @@ import { OperationRegistry } from "../src/operations/registry.js";
 import {
   BrowserResourceSupervisor,
   MIB,
+  PERSISTENT_SAMPLING_FAILURE_THRESHOLD,
   ProcfsBrowserResourceSampler,
   parseProcessStat,
   parseSmapsRollup,
@@ -199,7 +200,7 @@ describe("BrowserResourceSupervisor", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("degrades on sampling failure without signalling or closing a process", async () => {
+  it("keeps one transient sampling failure non-destructive and clears it on recovery", async () => {
     const sampler = new FakeSampler();
     const session = hooks("session:sample", 401);
     sampler.samples.set(401, new Error("private sampler detail"));
@@ -207,7 +208,56 @@ describe("BrowserResourceSupervisor", () => {
     supervisor.register(session.hooks);
     await supervisor.sampleNow();
     assert.deepEqual(supervisor.status("session:sample"), { state: "warning", reason: "sampling-unavailable" });
+    assert.doesNotThrow(() => supervisor.assertAdmission("session:sample"));
     assert.deepEqual(session.calls, []);
+
+    sampler.samples.set(401, sample(400));
+    await supervisor.sampleNow();
+    assert.deepEqual(supervisor.status("session:sample"), { state: "normal", reason: "none" });
+    assert.deepEqual(session.calls, []);
+  });
+
+  it("fences persistent sampling failure at the fixed threshold and retries only the exact close", async () => {
+    assert.equal(PERSISTENT_SAMPLING_FAILURE_THRESHOLD, 3);
+    const sampler = new FakeSampler();
+    const session = hooks("session:persistent-sample", 402);
+    session.running = true;
+    session.control = "human";
+    session.returnFailure = true;
+    session.closeFailures = 1;
+    sampler.samples.set(402, new Error("SECRET_PID_PATH_PSS_PROFILE_PAGE_INPUT"));
+    const supervisor = createSupervisor(sampler);
+    supervisor.register(session.hooks);
+
+    for (let attempt = 1; attempt < PERSISTENT_SAMPLING_FAILURE_THRESHOLD; attempt++) {
+      await supervisor.sampleNow();
+      assert.deepEqual(supervisor.status("session:persistent-sample"), { state: "warning", reason: "sampling-unavailable" });
+      assert.doesNotThrow(() => supervisor.assertAdmission("session:persistent-sample"));
+      assert.deepEqual(session.calls, []);
+    }
+
+    await supervisor.sampleNow();
+    assert.deepEqual(supervisor.status("session:persistent-sample"), { state: "resource-limited", reason: "sampling-unavailable" });
+    assert.throws(() => supervisor.assertAdmission("session:persistent-sample"), (error) => {
+      assert.ok(error instanceof BrowserProtocolError);
+      assert.equal(error.code, "BROWSER_RESOURCE_LIMIT");
+      assert.deepEqual(error.details, { reason: "sampling-unavailable" });
+      assert.doesNotMatch(JSON.stringify(error), /SECRET_PID_PATH_PSS_PROFILE_PAGE_INPUT/u);
+      return true;
+    });
+    assert.deepEqual(session.calls, [
+      "session:persistent-sample:fence:sampling-unavailable",
+      "session:persistent-sample:cancel",
+      "session:persistent-sample:settle",
+      "session:persistent-sample:return",
+      "session:persistent-sample:close:sampling-unavailable",
+    ]);
+
+    await supervisor.sampleNow();
+    await supervisor.sampleNow();
+    assert.equal(session.calls.filter((value) => value === "session:persistent-sample:close:sampling-unavailable").length, 2);
+    assert.equal(supervisor.summary().terminalLimitEvents, 1);
+    assert.equal(supervisor.summary().lastTerminalReason, "sampling-unavailable");
   });
 });
 
@@ -245,11 +295,17 @@ describe("resource-limit operation settlement", () => {
     const gate = deferred();
     registry.submit(actor, { operationId: "operation:resource", kind: "navigate", laneKey: "motor", deadline: new Date(Date.now() + 10_000).toISOString(), browserSessionId: "session:resource", controlEpoch: 1 }, async (context) => { await gate.promise; context.checkpoint(); });
     await until(() => registry.status(actor, "operation:resource").state === "running");
-    registry.limitSession(actor, "session:resource");
+    registry.submit(actor, { operationId: "operation:queued", kind: "input.text", laneKey: "motor", deadline: new Date(Date.now() + 10_000).toISOString(), browserSessionId: "session:resource", controlEpoch: 1 }, async () => undefined);
+    assert.equal(registry.status(actor, "operation:queued").state, "queued");
+    registry.limitSession(actor, "session:resource", "sampling-unavailable");
     assert.equal(registry.status(actor, "operation:resource").error?.code, "BROWSER_RESOURCE_LIMIT");
+    assert.deepEqual(registry.status(actor, "operation:resource").error?.details, { reason: "sampling-unavailable" });
+    assert.equal(registry.status(actor, "operation:queued").error?.code, "BROWSER_RESOURCE_LIMIT");
+    assert.deepEqual(registry.status(actor, "operation:queued").error?.details, { reason: "sampling-unavailable" });
     gate.resolve();
     await registry.awaitSessionSettlement(actor, "session:resource");
     assert.equal(registry.status(actor, "operation:resource").state, "failed");
+    assert.equal(registry.status(actor, "operation:queued").state, "failed");
   });
 });
 

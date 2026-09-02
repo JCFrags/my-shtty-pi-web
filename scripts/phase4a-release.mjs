@@ -544,6 +544,11 @@ async function buildRelease(options) {
     throw error;
   }
 }
+/** @param {string} source */
+function validateFixedQualificationRunner(source) {
+  if (!source.includes("soak-4h") || !/\b14400\b/u.test(source) || !/process\.argv\.length\s*===\s*3/u.test(source)) fail("release qualification runner lacks the fixed four-hour mode");
+  if (/--(?:duration|seconds|minutes|hours)\b/u.test(source)) fail("release qualification runner exposes an arbitrary duration");
+}
 /**
  * @param {string} releaseRootValue
  * @param {string} [expectedSha]
@@ -578,7 +583,9 @@ async function verifyRelease(releaseRootValue, expectedSha, forbiddenPaths = [so
   assert.deepEqual(manifest.immutableFiles, await immutablePayloadDigests(releaseRoot), "release manifest payload digest inventory is invalid");
   command(process.execPath, ["--check", join(releaseRoot, "bin/pi-web-browserd.mjs")], { cwd: tmpdir() });
   command(process.execPath, ["--check", join(releaseRoot, "bin/pi-web-webxd.mjs")], { cwd: tmpdir() });
-  command(process.execPath, ["--check", join(releaseRoot, "bin/pi-web-qualification-runner.mjs")], { cwd: tmpdir() });
+  const qualificationRunnerPath = join(releaseRoot, "bin/pi-web-qualification-runner.mjs");
+  command(process.execPath, ["--check", qualificationRunnerPath], { cwd: tmpdir() });
+  validateFixedQualificationRunner(await readFile(qualificationRunnerPath, "utf8"));
   command(process.execPath, ["--check", join(releaseRoot, "bin/pi-web-qualification-pi-worker.mjs")], { cwd: tmpdir() });
   command(process.execPath, ["--check", join(releaseRoot, "share/pi-webx/extension.mjs")], { cwd: tmpdir() });
   command(process.execPath, ["--check", join(releaseRoot, "share/deploy/phase4a-config.mjs")], { cwd: tmpdir() });
@@ -666,7 +673,7 @@ async function reproducibility(options) {
   process.stdout.write(`${JSON.stringify({ ok: true, report: reportPath }, null, 2)}\n`);
 }
 
-export const releaseInternals = { assertAbsoluteOutsideSource, buildNodeBundles, buildRelease, deterministicTreeDigest, immutablePayloadDigests, normalizedRelease, parse, publishImmutableRelease, removeOwnedTree, resolvedOutsideSource, setImmutableModes, tauriBuildArguments, validateBuildIdentity, verifyRelease, withFixedPythonInterpreter, writeBundledLicenses, writeChecksums, writeRustLicenses };
+export const releaseInternals = { assertAbsoluteOutsideSource, buildNodeBundles, buildRelease, deterministicTreeDigest, immutablePayloadDigests, normalizedRelease, parse, publishImmutableRelease, removeOwnedTree, resolvedOutsideSource, setImmutableModes, tauriBuildArguments, validateBuildIdentity, validateFixedQualificationRunner, verifyRelease, withFixedPythonInterpreter, writeBundledLicenses, writeChecksums, writeRustLicenses };
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === releaseFile) {
   const { operation, options } = parse(process.argv.slice(2));

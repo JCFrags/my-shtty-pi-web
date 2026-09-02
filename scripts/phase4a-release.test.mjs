@@ -43,7 +43,7 @@ async function syntheticRelease(forbiddenMarker) {
     writeFile(join(releaseRoot, "bin/pi-web-egress-proxy"), "#!/usr/bin/python3\npass\n"),
     writeFile(join(releaseRoot, "bin/pi-web-qualification-proxy"), "#!/usr/bin/python3\npass\n"),
     writeFile(join(releaseRoot, "bin/pi-web-qualification-atspi.py"), "#!/usr/bin/python3\npass\n"),
-    writeFile(join(releaseRoot, "bin/pi-web-qualification-runner.mjs"), "export {};\n"),
+    writeFile(join(releaseRoot, "bin/pi-web-qualification-runner.mjs"), "const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; export { mode, seconds };\n"),
     writeFile(join(releaseRoot, "bin/pi-web-qualification-pi-worker.mjs"), "export {};\n"),
     writeFile(join(releaseRoot, "bin/pi-browser-workspace"), "workspace fixture\n"),
     writeFile(join(releaseRoot, "bin/pi-browser-workspace-qualification"), "workspace qualification fixture\n"),
@@ -146,6 +146,12 @@ test("production Node bundles have a closed syntax-checked dependency and licens
   } finally {
     await releaseInternals.removeOwnedTree(temporaryRoot);
   }
+});
+
+test("fixed qualification runner verification requires immutable four-hour mode without duration options", () => {
+  releaseInternals.validateFixedQualificationRunner("const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400;");
+  assert.throws(() => releaseInternals.validateFixedQualificationRunner("const mode = process.argv.length === 3 ? 'soak' : 'acceptance'; const seconds = 14400;"), /fixed four-hour/u);
+  assert.throws(() => releaseInternals.validateFixedQualificationRunner("const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; const option = '--duration';"), /arbitrary duration/u);
 });
 
 test("detached verification accepts a complete immutable inventory and detects tampering", async () => {

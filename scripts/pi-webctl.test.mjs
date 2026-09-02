@@ -730,6 +730,23 @@ test("doctor emits fixed classified findings without secrets or absolute managed
   assert.equal(candidate.findings.find((item) => item.category === "egress")?.status, "pass");
   assert.equal(candidate.findings.find((item) => item.category === "resource")?.code, "RESOURCE_SUPERVISION_HEALTHY");
 
+  const samplingWarning = await doctorReport(paths, systemd.command, { ...environment, WAYLAND_DISPLAY: "wayland-0", DBUS_SESSION_BUS_ADDRESS: "unix:path=private" }, {
+    browser: async () => ({ product: "Chromium", version: "140.0.0.0" }),
+    proxy: async () => "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\n\r\n",
+    authority: async () => ({ apiVersion: "3.0.0", capabilities: [{ id: "search", enabled: true, healthy: true }, { id: "read", enabled: true, healthy: true }] }),
+    resources: async () => ({ state: "warning", supervisedSessions: 1, warningSessions: 1, limitedSessions: 0, terminalLimitEvents: 0, lastTerminalReason: "none" }),
+  });
+  assert.equal(samplingWarning.findings.find((item) => item.category === "resource")?.code, "RESOURCE_SUPERVISION_WARNING");
+
+  const samplingFenced = await doctorReport(paths, systemd.command, { ...environment, WAYLAND_DISPLAY: "wayland-0", DBUS_SESSION_BUS_ADDRESS: "unix:path=private" }, {
+    browser: async () => ({ product: "Chromium", version: "140.0.0.0" }),
+    proxy: async () => "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\n\r\n",
+    authority: async () => ({ apiVersion: "3.0.0", capabilities: [{ id: "search", enabled: true, healthy: true }, { id: "read", enabled: true, healthy: true }] }),
+    resources: async () => ({ state: "normal", supervisedSessions: 0, warningSessions: 0, limitedSessions: 0, terminalLimitEvents: 1, lastTerminalReason: "sampling-unavailable" }),
+  });
+  assert.equal(samplingFenced.ok, false);
+  assert.equal(samplingFenced.findings.find((item) => item.category === "resource")?.code, "RESOURCE_SUPERVISION_UNAVAILABLE");
+
   const hostileBrowser = await doctorReport(paths, systemd.command, { ...environment, WAYLAND_DISPLAY: "wayland-0", DBUS_SESSION_BUS_ADDRESS: "unix:path=private" }, {
     browser: async () => ({ product: "SECRET_BROWSER_PRODUCT", version: "140.0.0.0-SECRET_BROWSER_VERSION" }),
     proxy: async () => "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\n\r\n",
@@ -832,6 +849,37 @@ test("installed qualification is exact, private, static, and restores ordinary s
   const systemctlLog = await readFile(systemd.log, "utf8");
   assert.match(systemctlLog, /--user start pi-web-qualification-egress-proxy\.service/u);
   assert.doesNotMatch(systemctlLog, /--user enable(?: --now)? pi-web-qualification/u);
+});
+
+test("fixed soak-4h accepts only a bounded 14400-second workload report", async () => {
+  const { paths, systemd, releases, environment } = await fixture();
+  const release = await syntheticRelease(releases, "4");
+  await installRelease(paths, systemd.command, release.root);
+  await setBackend(paths, systemd.command, "agentcursor");
+  const manifestSha256 = digest(await readFile(join(release.root, "manifest.json")));
+  const probes = (workloadDurationSeconds, durationSeconds = workloadDurationSeconds + 12, extraSummary = {}) => ({
+    ports: async () => undefined,
+    proxy: async () => "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\n\r\n",
+    workload: async (_childEnvironment, _verified, mode) => ({ schemaVersion: 1, ok: true, mode, releaseId: release.releaseId, gitSha: release.gitSha, manifestSha256, durationSeconds, summary: { workloadDurationSeconds, actors: 2, ...extraSummary } }),
+    closeWorkspace: () => undefined,
+  });
+
+  const accepted = await qualifyInstalled(paths, systemd.command, "soak-4h", release.gitSha, manifestSha256, environment, probes(14_400));
+  assert.equal(accepted.mode, "soak-4h");
+  assert.equal(accepted.summary.workloadDurationSeconds, 14_400);
+  assert.deepEqual(accepted.summary.controllerCleanup, { qualificationServices: 0, qualificationRootEntries: 0, ordinaryServiceStateMismatches: 0, complete: true });
+  const rich = await qualifyInstalled(paths, systemd.command, "soak-4h", release.gitSha, manifestSha256, environment, probes(14_400, 14_412, {
+    privacyScan: { humanInputCanaryMatches: 0, descriptorSecretMatches: 0 },
+    longWindow: {
+      roles: { browserd: { pssFull: { count: 1440, start: 100, end: 101, min: 99, max: 102, p50: 100, p95: 101, elapsedSeconds: 14_400, slopeKiBPerHour: 0.25 } } },
+      chromiumTrees: { tree1: { privateDirtyFull: { count: 1440, start: 50, end: 51, min: 49, max: 52, p50: 50, p95: 51, elapsedSeconds: 14_400, slopeKiBPerHour: 0.25 } } },
+    },
+  }));
+  assert.equal(rich.summary.longWindow.roles.browserd.pssFull.p95, 101);
+  await assert.rejects(qualifyInstalled(paths, systemd.command, "soak-4h", release.gitSha, manifestSha256, environment, probes(14_399)), /qualification report is invalid/u);
+  await assert.rejects(qualifyInstalled(paths, systemd.command, "soak-4h", release.gitSha, manifestSha256, environment, probes(14_521)), /qualification report is invalid/u);
+  await assert.rejects(qualifyInstalled(paths, systemd.command, "soak-4h", release.gitSha, manifestSha256, environment, probes(14_400, 14_521)), /qualification report is invalid/u);
+  await assert.rejects(lstat(paths.qualificationRoot), /ENOENT/u);
 });
 
 test("qualification failure removes private runtime and restores the exact activation", async () => {

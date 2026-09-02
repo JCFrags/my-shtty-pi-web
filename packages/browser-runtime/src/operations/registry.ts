@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { BrowserProtocolError, type ActorIdentity, type DispatchState, type OperationState, type OperationStatus, type ProtocolError } from "@webx/browser-protocol";
 import { actorKey } from "../actor/identity.js";
+import type { BrowserResourceTerminalReason } from "../resources/supervisor.js";
 
 interface MutableOperation {
   readonly actor: string;
@@ -78,6 +79,7 @@ export class OperationRegistry {
   }
 
   get size(): number { return this.operations.size; }
+  get activeSize(): number { return [...this.operations.values()].filter((operation) => !operation.physicallySettled).length; }
 
   workspaceSummary(browserSessionId: string): { operationId: string; kind: string; state: "queued" | "running" | "cancelling" | "terminal"; dispatchState: DispatchState; startedAt?: string; cancellable: boolean } | undefined {
     const candidates = [...this.operations.values()].filter((operation) => operation.browserSessionId === browserSessionId && !isTerminal(operation.state));
@@ -198,10 +200,10 @@ export class OperationRegistry {
     return publicStatus(operation);
   }
 
-  limitSession(actor: ActorIdentity, browserSessionId: string): void {
+  limitSession(actor: ActorIdentity, browserSessionId: string, reason: BrowserResourceTerminalReason): void {
     for (const operation of this.operations.values()) {
       if (operation.actor === actorKey(actor) && operation.browserSessionId === browserSessionId && !isTerminal(operation.state)) {
-        this.failMutable(operation, new BrowserProtocolError("BROWSER_RESOURCE_LIMIT", "Browser session reached a resource limit.", false));
+        this.failMutable(operation, new BrowserProtocolError("BROWSER_RESOURCE_LIMIT", "Browser session reached a resource limit.", false, { reason }));
       }
     }
   }

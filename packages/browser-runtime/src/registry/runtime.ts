@@ -9,7 +9,7 @@ import { ProfileManager } from "../chrome/profile-manager.js";
 import type { ControlLeaseProof } from "../control/session-control.js";
 import type { CoordinateAction, DirectHumanInputEvent } from "../motor/session-motor.js";
 import { canonicalOperationFingerprint, OperationRegistry, type OperationContext } from "../operations/registry.js";
-import { BrowserResourceSupervisor, DEFAULT_BROWSER_RESOURCE_LIMITS, type BrowserResourceLimits, type BrowserResourceReason, type BrowserResourceSupervisorOptions } from "../resources/supervisor.js";
+import { BrowserResourceSupervisor, DEFAULT_BROWSER_RESOURCE_LIMITS, type BrowserResourceLimits, type BrowserResourceSupervisorOptions, type BrowserResourceTerminalReason } from "../resources/supervisor.js";
 import { BrowserSession, type DomFallbackAction } from "./session.js";
 
 interface RuntimeSubscription { readonly actor: string; readonly connectionId: string; readonly subscriptionId: string; readonly address: TabAddress; readonly interest: "idle" | "selected"; readonly consumerKey: string }
@@ -17,7 +17,7 @@ interface WorkspaceSubscription { readonly connectionId: string; readonly subscr
 interface WorkspaceFrameSelection { readonly subscriptionId: string; readonly browserSessionId: string; readonly tabId: string }
 interface ResourceLimitTerminal {
   readonly owner: string;
-  readonly reason: Exclude<BrowserResourceReason, "none" | "sampling-unavailable">;
+  readonly reason: BrowserResourceTerminalReason;
   readonly expiresAtMs: number;
 }
 interface WorkspaceFrameLedgerEntry {
@@ -69,6 +69,7 @@ export interface BrowserRuntimeOptions {
   requireEgressForSessions?: boolean;
   resourceLimits?: BrowserResourceLimits;
   resourceSupervisor?: BrowserResourceSupervisorOptions;
+  qualificationDiagnostics?: boolean;
 }
 
 export class BrowserRuntime extends EventEmitter {
@@ -102,6 +103,7 @@ export class BrowserRuntime extends EventEmitter {
   private readonly egressConfigured: boolean;
   private readonly egressBindingId: string | undefined;
   private readonly requireEgressForSessions: boolean;
+  private readonly qualificationDiagnosticsEnabled: boolean;
 
   constructor(options: BrowserRuntimeOptions = {}) {
     super();
@@ -122,12 +124,42 @@ export class BrowserRuntime extends EventEmitter {
     const proxy = options.chrome?.egressProxy;
     this.egressBindingId = options.egressBindingId ?? (proxy === undefined ? undefined : `forward-proxy://${proxy.host === "::1" ? "[::1]" : proxy.host}:${proxy.port}`);
     this.requireEgressForSessions = options.requireEgressForSessions ?? false;
+    this.qualificationDiagnosticsEnabled = options.qualificationDiagnostics ?? false;
     this.resources = new BrowserResourceSupervisor(options.resourceLimits ?? DEFAULT_BROWSER_RESOURCE_LIMITS, options.resourceSupervisor);
   }
 
   get subscriptionCount(): number { let count = 0; for (const values of this.subscriptions.values()) count += values.size; for (const values of this.workspaceSubscriptions.values()) count += values.size; return count; }
   get workspaceSubscriptionCount(): number { let count = 0; for (const values of this.workspaceSubscriptions.values()) count += values.size; return count; }
   get workspaceLedgerCount(): number { let count = 0; for (const values of this.workspaceFrameLedgers.values()) count += values.length; return count; }
+
+  qualificationDiagnostics(): Record<string, unknown> {
+    if (!this.qualificationDiagnosticsEnabled) throw new BrowserProtocolError("CAPABILITY_UNAVAILABLE", "Qualification diagnostics are unavailable.");
+    const sessions = [...this.sessions.values()].map((session) => session.qualificationDiagnostics);
+    const captureKeys = [
+      "agentRequests", "frameRequests", "agentScreenshotAttempts", "frameScreenshotAttempts", "agentScreenshotRetries",
+      "agentScreenshotTimeouts", "recoveredAgentScreenshotTimeouts", "unrecoveredAgentScreenshotTimeouts", "frameScreenshotTimeouts",
+      "failedAgent", "droppedFrame", "coalescedFrame",
+    ] as const;
+    const capture = Object.fromEntries(captureKeys.map((key) => [key, boundedCounterSum(sessions.map((session) => session.capture[key]))]));
+    return {
+      kind: "qualificationDiagnostics",
+      sessions: sessions.length,
+      tabs: boundedCounterSum(sessions.map((session) => session.tabs)),
+      operations: this.operations.size,
+      activeOperations: this.operations.activeSize,
+      artifacts: this.artifacts.entryCount,
+      artifactBytes: this.artifacts.totalBytes,
+      actorSubscriptions: this.subscriptionCount - this.workspaceSubscriptionCount,
+      workspaceSubscriptions: this.workspaceSubscriptionCount,
+      workspaceFrameLedgers: this.workspaceLedgerCount,
+      frameRingEntries: this.artifacts.frameRingCount,
+      framePins: this.artifacts.framePinCount,
+      humanLeases: boundedCounterSum(sessions.map((session) => session.humanLease)),
+      heldKeys: boundedCounterSum(sessions.map((session) => session.heldKeys)),
+      heldButtons: boundedCounterSum(sessions.map((session) => session.heldButtons)),
+      capture,
+    };
+  }
 
   listSessions(actor: ActorIdentity): SessionDescriptor[] { const owner = actorKey(actor); return [...this.sessions.values()].filter((session) => actorKey(session.actor) === owner).map((session) => session.actorDescriptor()); }
   ownsSession(actor: ActorIdentity, browserSessionId: string): boolean { const session = this.sessions.get(browserSessionId); return session !== undefined && actorKey(session.actor) === actorKey(actor); }
@@ -470,7 +502,7 @@ export class BrowserRuntime extends EventEmitter {
     signal.throwIfAborted();
   }
 
-  private async terminateResourceLimitedSession(browserSessionId: string, reason: Exclude<BrowserResourceReason, "none" | "sampling-unavailable">): Promise<void> {
+  private async terminateResourceLimitedSession(browserSessionId: string, reason: BrowserResourceTerminalReason): Promise<void> {
     const session = this.sessions.get(browserSessionId);
     if (session === undefined) return;
     session.setResourceStatus({ state: "closing", reason });
@@ -558,6 +590,7 @@ export class BrowserRuntime extends EventEmitter {
     ensureRequestLive(request);
     signal?.throwIfAborted();
     if (request.kind === "capabilities.get") return await this.capabilities();
+    if (request.kind === "qualification.diagnostics") return this.qualificationDiagnostics();
     if (request.kind === "session.list") return { kind: "sessions", sessions: this.listSessions(actor) };
     if (request.kind === "operation.status") return this.operations.status(actor, request.targetOperationId);
     if (request.kind === "operation.cancel") return this.operations.cancel(actor, request.targetOperationId);
@@ -621,7 +654,7 @@ export class BrowserRuntime extends EventEmitter {
               this.removeSessionSubscriptions(session.browserSessionId);
               this.workspaceChanged("runtime", session.browserSessionId);
             },
-            cancelOperations: () => this.operations.limitSession(session.actor, session.browserSessionId),
+            cancelOperations: (reason) => this.operations.limitSession(session.actor, session.browserSessionId, reason),
             awaitOperationSettlement: async (resourceSignal) => await this.operations.awaitSessionSettlement(session.actor, session.browserSessionId, resourceSignal),
             returnHumanControl: async (resourceSignal) => await session.returnHumanControlForResourceLimit(resourceSignal),
             close: async (reason) => await this.terminateResourceLimitedSession(session.browserSessionId, reason),
@@ -872,6 +905,14 @@ function requestFingerprint(request: BrowserRequest, connectionId?: string): str
 }
 function isExecutedRequest(request: BrowserRequest): boolean {
   return request.kind !== "capabilities.get" && request.kind !== "session.list" && request.kind !== "tab.list" && request.kind !== "operation.status" && request.kind !== "operation.cancel" && request.kind !== "artifact.read";
+}
+function boundedCounterSum(values: readonly number[]): number {
+  let total = 0;
+  for (const value of values) {
+    if (!Number.isSafeInteger(value) || value < 0 || total > Number.MAX_SAFE_INTEGER - value) throw new Error("qualification diagnostic counter is invalid");
+    total += value;
+  }
+  return total;
 }
 function requireConnectionId(connectionId: string | undefined): string { if (connectionId === undefined) throw new BrowserProtocolError("AUTH_FAILED", "Frame operations require a bound connection."); return connectionId; }
 function ensureRequestLive(request: BrowserRequest): void { if (Date.parse(request.deadline) <= Date.now()) throw new BrowserProtocolError("DEADLINE_EXCEEDED", "Request deadline has expired."); }

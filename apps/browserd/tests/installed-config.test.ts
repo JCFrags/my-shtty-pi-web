@@ -22,6 +22,7 @@ describe("installed browserd configuration", () => {
     assert.deepEqual(options.chrome?.egressProxy, { host: "127.0.0.1", port: 8877 });
     assert.deepEqual(options.frameScheduler, { idleIntervalMs: 2_000, selectedIntervalMs: 500, burstIntervalMs: 100 });
     assert.equal(options.maxSessionsGlobal, 16);
+    assert.equal(options.qualificationDiagnostics, false);
     assert.deepEqual(options.resourceLimits, {
       perSessionSoftPssBytes: 1024 * 1024 * 1024,
       perSessionHardPssBytes: 1280 * 1024 * 1024,
@@ -32,6 +33,19 @@ describe("installed browserd configuration", () => {
       drainTimeoutMs: 30_000,
       emergencyTimeoutMs: 15_000,
     });
+  });
+
+  it("enables count-only diagnostics only for the exact isolated qualification roots", () => {
+    assert.equal(installedBrowserdOptions(environment({
+      BROWSERD_RUNTIME_DIR: `${runtime}/pi-web/qualification/browserd`,
+      BROWSERD_PROFILE_ROOT: `${runtime}/pi-web/qualification/profiles`,
+    })).qualificationDiagnostics, true);
+    assert.equal(installedBrowserdOptions(environment({
+      BROWSERD_RUNTIME_DIR: `${runtime}/pi-web/qualification/browserd`,
+    })).qualificationDiagnostics, false);
+    assert.equal(installedBrowserdOptions(environment({
+      BROWSERD_PROFILE_ROOT: `${runtime}/pi-web/qualification/profiles`,
+    })).qualificationDiagnostics, false);
   });
 
   it("accepts only the fixed reviewed browser products", () => {

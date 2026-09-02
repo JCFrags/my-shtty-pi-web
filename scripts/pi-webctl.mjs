@@ -42,6 +42,9 @@ const QUALIFICATION_LOCAL_SERVICE_PORT = 18_878;
 const QUALIFICATION_PROXY_PROBE_ATTEMPTS = 20;
 const QUALIFICATION_PROXY_PROBE_DELAY_MS = 50;
 const QUALIFICATION_PROXY_PROBE_TIMEOUT_MS = 250;
+const QUALIFICATION_SOAK_4H_WORKLOAD_SECONDS = 14_400;
+const QUALIFICATION_SOAK_4H_MAX_WORKLOAD_SECONDS = 14_520;
+const QUALIFICATION_SOAK_4H_CONTROLLER_TIMEOUT_MS = 15_300_000;
 const MARKER_NAME = ".pi-web-managed-v1";
 const MARKER_VALUE = "pi-web-managed-root-v1\n";
 const MAX_JSON_BYTES = 4 * 1024 * 1024;
@@ -994,12 +997,18 @@ function boundedQualificationSummary(value, depth = 0) {
   return Object.freeze(output);
 }
 
-/** @param {unknown} value @param {"acceptance" | "soak"} mode @param {Awaited<ReturnType<typeof verifyInstallRelease>>} verified */
+/** @param {unknown} value @param {"acceptance" | "soak" | "soak-4h"} mode @param {Awaited<ReturnType<typeof verifyInstallRelease>>} verified */
 function validateQualificationReport(value, mode, verified) {
   const report = record(value, "qualification report");
   const requiredKeys = ["durationSeconds", "gitSha", "manifestSha256", "mode", "ok", "releaseId", "schemaVersion", "summary"];
-  if (JSON.stringify(Object.keys(report).sort()) !== JSON.stringify(requiredKeys) || report.schemaVersion !== 1 || report.ok !== true || report.mode !== mode || report.releaseId !== verified.releaseId || report.gitSha !== verified.gitSha || report.manifestSha256 !== verified.manifestSha256 || typeof report.durationSeconds !== "number" || !Number.isFinite(report.durationSeconds) || report.durationSeconds < 0 || report.durationSeconds > 600 || (mode === "soak" && report.durationSeconds < 300)) fail("qualification report is invalid");
-  return Object.freeze({ schemaVersion: 1, ok: true, mode, releaseId: verified.releaseId, gitSha: verified.gitSha, manifestSha256: verified.manifestSha256, durationSeconds: report.durationSeconds, summary: boundedQualificationSummary(report.summary) });
+  const durationMaximum = mode === "soak-4h" ? QUALIFICATION_SOAK_4H_MAX_WORKLOAD_SECONDS : 600;
+  if (JSON.stringify(Object.keys(report).sort()) !== JSON.stringify(requiredKeys) || report.schemaVersion !== 1 || report.ok !== true || report.mode !== mode || report.releaseId !== verified.releaseId || report.gitSha !== verified.gitSha || report.manifestSha256 !== verified.manifestSha256 || typeof report.durationSeconds !== "number" || !Number.isFinite(report.durationSeconds) || report.durationSeconds < 0 || report.durationSeconds > durationMaximum || (mode === "soak" && report.durationSeconds < 300)) fail("qualification report is invalid");
+  const summary = /** @type {Readonly<Record<string, unknown>>} */ (boundedQualificationSummary(report.summary));
+  if (mode === "soak-4h") {
+    const workloadDurationSeconds = summary["workloadDurationSeconds"];
+    if (typeof workloadDurationSeconds !== "number" || !Number.isFinite(workloadDurationSeconds) || workloadDurationSeconds < QUALIFICATION_SOAK_4H_WORKLOAD_SECONDS || workloadDurationSeconds > QUALIFICATION_SOAK_4H_MAX_WORKLOAD_SECONDS || report.durationSeconds < workloadDurationSeconds) fail("qualification report is invalid");
+  }
+  return Object.freeze({ schemaVersion: 1, ok: true, mode, releaseId: verified.releaseId, gitSha: verified.gitSha, manifestSha256: verified.manifestSha256, durationSeconds: report.durationSeconds, summary });
 }
 
 /** @param {NodeJS.ProcessEnv} source @param {Record<string, string>} qualification */
@@ -1055,13 +1064,13 @@ async function prepareQualificationRuntime(paths, verified) {
   return /** @type {Record<string, string>} */ (qualification);
 }
 
-/** @param {Record<string, string>} environment @param {Awaited<ReturnType<typeof verifyInstallRelease>>} verified @param {"acceptance" | "soak"} mode */
+/** @param {Record<string, string>} environment @param {Awaited<ReturnType<typeof verifyInstallRelease>>} verified @param {"acceptance" | "soak" | "soak-4h"} mode */
 function runQualification(environment, verified, mode) {
   const result = spawnSync("/usr/bin/node", [join(verified.releaseRoot, "bin/pi-web-qualification-runner.mjs"), mode], {
     cwd: verified.releaseRoot,
     encoding: "utf8",
     env: environment,
-    timeout: 600_000,
+    timeout: mode === "soak-4h" ? QUALIFICATION_SOAK_4H_CONTROLLER_TIMEOUT_MS : 600_000,
     maxBuffer: 1024 * 1024,
   });
   if (result.status !== 0 || typeof result.stdout !== "string" || Buffer.byteLength(result.stdout) > 1024 * 1024) fail("installed qualification workload failed");
@@ -1076,11 +1085,11 @@ function runQualification(environment, verified, mode) {
  * only the immutable release identity and one reviewed workload mode.
  * @param {ReturnType<typeof installedPaths>} paths
  * @param {string} command
- * @param {"acceptance" | "soak"} mode
+ * @param {"acceptance" | "soak" | "soak-4h"} mode
  * @param {string} expectedSha
  * @param {string} expectedManifestSha256
  * @param {NodeJS.ProcessEnv} environment
- * @param {{ports?: () => Promise<void>, proxy?: () => Promise<string>, workload?: (environment: Record<string, string>, verified: Awaited<ReturnType<typeof verifyInstallRelease>>, mode: "acceptance" | "soak") => Promise<unknown> | unknown, closeWorkspace?: (environment: NodeJS.ProcessEnv, executable: string) => void}} probes
+ * @param {{ports?: () => Promise<void>, proxy?: () => Promise<string>, workload?: (environment: Record<string, string>, verified: Awaited<ReturnType<typeof verifyInstallRelease>>, mode: "acceptance" | "soak" | "soak-4h") => Promise<unknown> | unknown, closeWorkspace?: (environment: NodeJS.ProcessEnv, executable: string) => void}} probes
  */
 export async function qualifyInstalled(paths, command, mode, expectedSha, expectedManifestSha256, environment = process.env, probes = {}) {
   /** @type {Awaited<ReturnType<typeof verifyInstallRelease>> | undefined} */
@@ -1102,6 +1111,7 @@ export async function qualifyInstalled(paths, command, mode, expectedSha, expect
     if (verified === undefined) fail("qualification release verification was not completed");
     const ordinaryStates = snapshotServiceStates(command);
     let qualification;
+    let report;
     try {
       stopOrdinaryServices(command);
       qualification = await prepareQualificationRuntime(paths, verified);
@@ -1114,8 +1124,9 @@ export async function qualifyInstalled(paths, command, mode, expectedSha, expect
         PI_WEB_QUALIFICATION_GIT_SHA: verified.gitSha,
         PI_WEB_QUALIFICATION_MANIFEST_SHA256: verified.manifestSha256,
       });
-      if (probes.workload === undefined) return runQualification(/** @type {Record<string, string>} */ (childEnvironment), verified, mode);
-      return validateQualificationReport(await probes.workload(/** @type {Record<string, string>} */ (childEnvironment), verified, mode), mode, verified);
+      report = probes.workload === undefined
+        ? runQualification(/** @type {Record<string, string>} */ (childEnvironment), verified, mode)
+        : validateQualificationReport(await probes.workload(/** @type {Record<string, string>} */ (childEnvironment), verified, mode), mode, verified);
     } finally {
       if (qualification !== undefined) {
         const executable = join(verified.releaseRoot, "bin/pi-browser-workspace-qualification");
@@ -1127,6 +1138,16 @@ export async function qualifyInstalled(paths, command, mode, expectedSha, expect
       await removeOwnedTree(paths.qualificationRoot);
       restoreServiceStates(command, ordinaryStates);
     }
+    if (report === undefined || await exists(paths.qualificationRoot)) fail("qualification cleanup verification failed");
+    const restoredStates = snapshotServiceStates(command);
+    if (JSON.stringify(restoredStates) !== JSON.stringify(ordinaryStates)) fail("qualification service restoration verification failed");
+    for (const unit of QUALIFICATION_UNITS) if (exactServiceState(command, "is-active", unit) !== "inactive") fail("qualification service cleanup verification failed");
+    const validatedReport = record(report, "qualification report");
+    const validatedSummary = record(validatedReport.summary, "qualification summary");
+    return Object.freeze({ ...validatedReport, summary: Object.freeze({
+      ...validatedSummary,
+      controllerCleanup: Object.freeze({ qualificationServices: 0, qualificationRootEntries: 0, ordinaryServiceStateMismatches: 0, complete: true }),
+    }) });
   }, prepare);
 }
 
@@ -1493,7 +1514,7 @@ function reviewedResourceSummary(value) {
   const summary = record(value, "browser resource summary");
   if (!new Set(["normal", "warning", "resource-limited"]).has(String(summary.state))) fail("browser resource state is invalid");
   for (const name of ["supervisedSessions", "warningSessions", "limitedSessions", "terminalLimitEvents"]) if (!Number.isSafeInteger(summary[name]) || summary[name] < 0 || summary[name] > 256) fail("browser resource count is invalid");
-  if (!new Set(["none", "session-memory", "profile-storage", "global-memory"]).has(String(summary.lastTerminalReason))) fail("browser resource reason is invalid");
+  if (!new Set(["none", "session-memory", "profile-storage", "global-memory", "sampling-unavailable"]).has(String(summary.lastTerminalReason))) fail("browser resource reason is invalid");
   return Object.freeze({ state: summary.state, supervisedSessions: summary.supervisedSessions, warningSessions: summary.warningSessions, limitedSessions: summary.limitedSessions, terminalLimitEvents: summary.terminalLimitEvents, lastTerminalReason: summary.lastTerminalReason });
 }
 
@@ -1618,7 +1639,8 @@ export async function doctorReport(paths, command, environment = process.env, pr
     try {
       const summary = await (probes.resources ?? probeBrowserdResources)(join(paths.runtimeRoot, "pi-browserd"));
       const state = summary.state;
-      if (state === "normal") findings.push(doctorFinding("resource", "pass", "RESOURCE_SUPERVISION_HEALTHY", "Browser resource supervision is active and within configured limits."));
+      if (summary.lastTerminalReason === "sampling-unavailable") findings.push(doctorFinding("resource", "unavailable", "RESOURCE_SUPERVISION_UNAVAILABLE", "Persistent browser resource sampling failure fenced and closed an affected session."));
+      else if (state === "normal") findings.push(doctorFinding("resource", "pass", "RESOURCE_SUPERVISION_HEALTHY", "Browser resource supervision is active and within configured limits."));
       else if (state === "warning") findings.push(doctorFinding("resource", "warning", "RESOURCE_SUPERVISION_WARNING", "Browser resource supervision reports a bounded warning."));
       else if (state === "resource-limited") findings.push(doctorFinding("resource", "warning", "RESOURCE_LIMIT_ACTIVE", "Browser resource supervision is closing an affected session."));
       else throw new Error("resource state unavailable");
@@ -1683,7 +1705,7 @@ async function main() {
   } else if (operation === "backend" && subcommand === "show") {
     assertOptionSet(options, ["json"]); const config = await readValidatedInstalledConfig(paths); result = { ok: true, backend: config.backend };
   } else if (operation === "backend" && (subcommand === "legacy" || subcommand === "agentcursor")) { assertOptionSet(options, ["json"]); result = await setBackend(paths, systemctlCommand, subcommand); }
-  else if (operation === "qualify" && (subcommand === "acceptance" || subcommand === "soak")) {
+  else if (operation === "qualify" && (subcommand === "acceptance" || subcommand === "soak" || subcommand === "soak-4h")) {
     assertOptionSet(options, ["expected-sha", "manifest-sha256", "json"]);
     if (typeof options["expected-sha"] !== "string" || !/^[0-9a-f]{40}$/u.test(options["expected-sha"]) || typeof options["manifest-sha256"] !== "string" || !/^[0-9a-f]{64}$/u.test(options["manifest-sha256"])) fail("qualify requires --expected-sha <40-lowercase-hex> --manifest-sha256 <64-lowercase-hex>");
     result = await qualifyInstalled(paths, systemctlCommand, subcommand, options["expected-sha"], options["manifest-sha256"]);
@@ -1698,7 +1720,7 @@ async function main() {
     return;
   } else if (operation === "version" && subcommand === undefined) {
     assertOptionSet(options, ["json"]); const releaseId = await currentReleaseId(paths); if (releaseId === undefined) fail("no current Phase 4A release is installed"); const verified = await verifyInstallRelease(join(paths.releasesRoot, releaseId)); result = { ok: true, releaseId, gitSha: verified.gitSha, manifestSha256: verified.manifestSha256 };
-  } else fail("usage: pi-webctl {preflight|install} --release PATH --expected-sha SHA --manifest-sha256 DIGEST [--json] | qualify {acceptance|soak} --expected-sha SHA --manifest-sha256 DIGEST [--json] | doctor [--json] | status | version | backend show | backend legacy | backend agentcursor | rollback | uninstall [--purge]");
+  } else fail("usage: pi-webctl {preflight|install} --release PATH --expected-sha SHA --manifest-sha256 DIGEST [--json] | qualify {acceptance|soak|soak-4h} --expected-sha SHA --manifest-sha256 DIGEST [--json] | doctor [--json] | status | version | backend show | backend legacy | backend agentcursor | rollback | uninstall [--purge]");
   process.stdout.write(`${JSON.stringify(result, null, options.json ? 2 : 0)}\n`);
 }
 

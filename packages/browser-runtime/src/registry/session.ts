@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { BrowserProtocolError, type ActorIdentity, type DomObservation, type FrameEvent, type ScreenshotObservation, type SessionDescriptor, type TabAddress, type TabDescriptor } from "@webx/browser-protocol";
 import type { NavigationAuthorization, NavigationAuthorizationContext } from "../actor/identity.js";
 import type { BrowserArtifactStore } from "../artifacts/store.js";
-import { SessionCaptureCoordinator } from "../capture/coordinator.js";
+import { SessionCaptureCoordinator, type SessionCaptureDiagnostics } from "../capture/coordinator.js";
 import { captureProofIdentity, SessionCaptureReadiness, type CaptureReadinessState } from "../capture/readiness.js";
 import { ChromeHost, type ChromeHostOptions } from "../chrome/host.js";
 import { HumanInputController } from "../control/human-input.js";
@@ -122,6 +122,25 @@ export class BrowserSession extends EventEmitter {
   get resourceStatus(): BrowserResourceStatus { return this.resourceStatusValue; }
   get processIdentity(): { readonly pid: number; readonly processStartTicks: string } { return this.host.processIdentity; }
   get profileDirectory(): string { return this.host.profileDirectory; }
+  get qualificationDiagnostics(): {
+    readonly tabs: number;
+    readonly humanLease: 0 | 1;
+    readonly heldKeys: number;
+    readonly heldButtons: number;
+    readonly capture: Omit<SessionCaptureDiagnostics, "activeTabId">;
+  } {
+    const capture = this.captureDiagnostics();
+    const { activeTabId, ...boundedCapture } = capture;
+    void activeTabId;
+    return {
+      tabs: this.targets.list(this.controlEpoch).length,
+      humanLease: this.control.state === "human" || this.control.state === "human-disconnected" ? 1 : 0,
+      heldKeys: this.motor.heldInputState.keys.length,
+      heldButtons: this.motor.heldInputState.buttons.length,
+      capture: boundedCapture,
+    };
+  }
+  private captureDiagnostics() { return this.captureCoordinator.diagnostics; }
   tabCaptureReadiness(tabId: string): CaptureReadinessState { return this.captureReadiness.tabState(tabId); }
 
   descriptor(): SessionDescriptor {
@@ -203,7 +222,7 @@ export class BrowserSession extends EventEmitter {
   setResourceStatus(status: BrowserResourceStatus): void { this.resourceStatusValue = status; }
   assertResourceAdmission(): void {
     if (this.resourceStatusValue.state === "draining" || this.resourceStatusValue.state === "resource-limited" || this.resourceStatusValue.state === "closing" || this.resourceStatusValue.state === "closed") {
-      const reason = this.resourceStatusValue.reason === "profile-storage" ? "profile-storage" : this.resourceStatusValue.reason === "global-memory" ? "global-memory" : "session-memory";
+      const reason = this.resourceStatusValue.reason === "profile-storage" ? "profile-storage" : this.resourceStatusValue.reason === "global-memory" ? "global-memory" : this.resourceStatusValue.reason === "sampling-unavailable" ? "sampling-unavailable" : "session-memory";
       throw new BrowserProtocolError("BROWSER_RESOURCE_LIMIT", "Browser session reached a resource limit.", false, { reason });
     }
   }
