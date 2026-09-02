@@ -75,7 +75,11 @@ describe("private workspace gateway", () => {
     browserd = new BrowserdServer({ runtimeDirectory: browserDirectory, allowTemporaryRuntimeDirectoryForTest: true, chrome: { profileRoot: join(root, "profiles-new") } });
     const replacement = await browserd.start(); cleanups.push(async () => await browserd.stop());
     await waitUntil(() => gateway.diagnostics.broker.runtimeInstanceId === replacement.runtimeInstanceId && gateway.diagnostics.broker.connected, 4_000);
-    const replacedSnapshot = await bindAndSnapshot(workspace);
+    const replacedSnapshot = await waitForSnapshot(
+      workspace,
+      (snapshot) => snapshot.browserdRuntimeInstanceId === replacement.runtimeInstanceId && snapshot.browserdState === "ready",
+      4_000,
+    );
     expect(replacedSnapshot).toMatchObject({ browserdRuntimeInstanceId: replacement.runtimeInstanceId, browserdState: "ready", sessions: [] });
     expect(replacement.runtimeInstanceId).not.toBe(firstBrowser.runtimeInstanceId);
   });
@@ -564,6 +568,19 @@ async function bindAndSnapshot(descriptor: { socketPath: string; bindingSecret: 
     client.send({ protocolVersion: "workspace.v2", kind: "snapshot.get", requestId: "request:snapshot" });
     const response = (await client.next()).header as { result: { snapshot: Record<string, unknown> } }; return response.result.snapshot;
   } finally { await client.close(); }
+}
+async function waitForSnapshot(
+  descriptor: { socketPath: string; bindingSecret: string },
+  check: (snapshot: Record<string, unknown>) => boolean,
+  timeoutMs = 2_000,
+): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const snapshot = await bindAndSnapshot(descriptor);
+    if (check(snapshot)) return snapshot;
+    if (Date.now() >= deadline) throw new Error("timed out waiting for workspace snapshot");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 async function waitUntil(check: () => boolean, timeoutMs = 2_000): Promise<void> { const deadline = Date.now() + timeoutMs; while (!check()) { if (Date.now() >= deadline) throw new Error("timed out waiting for condition"); await new Promise((resolve) => setTimeout(resolve, 10)); } }
 async function nextMatching(client: FramedClient, predicate: (header: Record<string, unknown>) => boolean, timeoutMs = 4_000): Promise<WorkspaceWireRecord> {
