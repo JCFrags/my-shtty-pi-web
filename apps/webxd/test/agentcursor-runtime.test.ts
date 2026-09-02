@@ -328,6 +328,18 @@ describe("actual AgentCursor WebX Unix route", () => {
     expect(presented.artifactPayload).toMatchObject({ mediaType: "image/png", dataBase64: imageBase64, complete: true, mode: "image" });
     expect(JSON.stringify(presented.data)).not.toContain(imageBase64);
     expect(JSON.stringify((presented as unknown as { details?: unknown }).details ?? null)).not.toContain(imageBase64);
+    const facadeTabId = openedData.tabs[0]?.tabId;
+    if (facadeTabId === undefined) throw new Error("facade route fixture did not create a tab");
+    await facade.request("browser.act", { browserSessionId: openedData.browserSessionId, tabId: facadeTabId, action: { kind: "key-press", key: "Tab" } }, { ...facadeOptions, idempotencyKey: "route-facade-key" });
+    await facade.request("browser.act", { browserSessionId: openedData.browserSessionId, tabId: facadeTabId, action: { kind: "text-input", text: "", replace: true } }, { ...facadeOptions, idempotencyKey: "route-facade-text" });
+    expect(browserd.requests).toContainEqual(expect.objectContaining({
+      actor: { principalId: "route-facade", agentSessionId: "route-facade" },
+      request: expect.objectContaining({ kind: "input.key", key: "Tab" }),
+    }));
+    expect(browserd.requests).toContainEqual(expect.objectContaining({
+      actor: { principalId: "route-facade", agentSessionId: "route-facade" },
+      request: expect.objectContaining({ kind: "input.text", text: "", replace: true }),
+    }));
     await facade.stop({ ownerId: "route-facade" });
 
     await browserd.replaceRuntime();

@@ -180,6 +180,12 @@ export class WebxFacadeClient {
       return { kind, x: requiredNumber(action.x, "action.x"), y: requiredNumber(action.y, "action.y"), button: pointerButton(action.button), ...binding };
     }
     if (kind === "navigate") return { kind, url: requiredString(action.url, "action.url") };
+    if (kind === "key-press") return { kind, key: boundedString(action.key, "action.key", 1, 64) };
+    if (kind === "text-input") {
+      const text = boundedString(action.text, "action.text", 0, 65_536);
+      const replace = strictOptionalBoolean(action.replace, "action.replace");
+      return replace === undefined ? { kind, text } : { kind, text, replace };
+    }
     if (kind === "dom-click" || kind === "dom-double-click" || kind === "dom-hover") return { kind, domObservationId: requiredString(action.domObservationId, "action.domObservationId"), handle: requiredString(action.handle, "action.handle"), button: pointerButton(action.button) };
     if (kind === "dom-type" || kind === "dom-fill") return { kind, domObservationId: requiredString(action.domObservationId, "action.domObservationId"), handle: requiredString(action.handle, "action.handle"), text: requiredString(action.text, "action.text") };
     if (kind === "dom-key-press") return { kind, domObservationId: requiredString(action.domObservationId, "action.domObservationId"), handle: requiredString(action.handle, "action.handle"), key: requiredString(action.key, "action.key") };
@@ -249,6 +255,7 @@ function readSaveOptions(value: unknown): ReadSaveOptions | undefined {
   return { path, overwrite };
 }
 function requiredString(value: unknown, name: string): string { if (typeof value !== "string" || value.length === 0) throw new TypeError(`${name} is required`); return value; }
+function boundedString(value: unknown, name: string, minimum: number, maximum: number): string { if (typeof value !== "string" || value.length < minimum || value.length > maximum) throw new TypeError(`${name} must contain ${minimum} to ${maximum} characters`); return value; }
 function optionalString(value: unknown): string | undefined { return typeof value === "string" ? value : undefined; }
 function requiredNumber(value: unknown, name: string): number { if (typeof value !== "number" || !Number.isFinite(value)) throw new TypeError(`${name} is required`); return value; }
 function optionalNumber(value: unknown): number | undefined { return typeof value === "number" ? value : undefined; }
