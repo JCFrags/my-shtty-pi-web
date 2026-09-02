@@ -5,6 +5,8 @@ import { createConnection } from "node:net";
 import { lstat, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { makeQualificationFailure, safeQualificationToolCode, validateAuthorityRefresh } from "./phase4a-qualification-contract.mjs";
+import { QualificationDiagnosticsReader } from "./phase4a-qualification-diagnostics.mjs";
 
 interface ToolPresentation { readonly content: Array<{ readonly type: "text"; readonly text: string } | { readonly type: "image"; readonly data: string; readonly mimeType: string }>; readonly details: unknown }
 interface BrowserIdentity { readonly browserSessionId: string; readonly tabId: string }
@@ -51,10 +53,16 @@ interface LongWindowMetrics {
 }
 type Mode = "acceptance" | "soak" | "soak-4h";
 type AgentActionKind = "move" | "click" | "drag" | "wheel" | "key" | "unicodeText";
+type FailureStage = "environment" | "fixture" | "workspace" | "browser" | "pi" | "authority" | "workload" | "report" | "cleanup" | "restoration" | "runner" | "controller" | "unknown";
+type QualificationFailure = { readonly stage: string; readonly code: string; readonly status: number; readonly count: number };
 
 class QualificationToolError extends Error {
   constructor(readonly code: string, readonly status: number) { super("qualification tool returned a classified failure"); this.name = "QualificationToolError"; }
 }
+class ClassifiedQualificationError extends Error {
+  constructor(readonly failure: QualificationFailure) { super("qualification runner failed"); this.name = "ClassifiedQualificationError"; }
+}
+let failureStage: FailureStage = "runner";
 
 const FIXTURE_BASE = "http://93.184.216.34/.well-known/pi-web-qualification";
 const SEARCH_QUERY = "phase4a qualification fixture";
@@ -62,19 +70,34 @@ const LOCAL_SERVICE_HOST = "127.0.0.1";
 const LOCAL_SERVICE_PORT = 18_878;
 const SOAK_SECONDS = 300;
 const SOAK_4H_SECONDS = 14_400;
-const MAX_DIAGNOSTIC_BYTES = 64 * 1024 * 1024;
+const SOAK_4H_MAX_WORKLOAD_SECONDS = 14_520;
+const SOAK_4H_MAX_TOTAL_WALL_SECONDS = 15_300;
 const MAX_SAMPLES = 2_048;
-const mode = process.argv.length === 3 && (process.argv[2] === "acceptance" || process.argv[2] === "soak" || process.argv[2] === "soak-4h") ? process.argv[2] as Mode : fail("qualification mode is invalid");
-const releaseId = required("PI_WEB_QUALIFICATION_RELEASE_ID", /^phase4a-[0-9a-f]{40}$/u);
-const gitSha = required("PI_WEB_QUALIFICATION_GIT_SHA", /^[0-9a-f]{40}$/u);
-const manifestSha256 = required("PI_WEB_QUALIFICATION_MANIFEST_SHA256", /^[0-9a-f]{64}$/u);
-const runtimeRoot = required("XDG_RUNTIME_DIR");
-const qualificationRoot = join(runtimeRoot, "pi-web/qualification");
-const webxPath = required("WEBXD_SOCKET");
-const workspaceBinary = required("PI_WEB_WORKSPACE_BIN");
-const diagnosticsPath = join(qualificationRoot, "tauri.jsonl");
+let mode: Mode = "acceptance";
+let releaseId = "";
+let gitSha = "";
+let manifestSha256 = "";
+let runtimeRoot = "";
+let qualificationRoot = "";
+let webxPath = "";
+let workspaceBinary = "";
+let diagnosticsPath = "";
 const releaseRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-if (basename(releaseRoot) !== releaseId || releaseId !== `phase4a-${gitSha}` || workspaceBinary !== join(releaseRoot, "bin/pi-browser-workspace-qualification") || webxPath !== join(qualificationRoot, "webxd.sock")) fail("qualification release binding is invalid");
+function initializeQualification(): void {
+  failureStage = "environment";
+  const requestedMode = process.argv.length === 3 && (process.argv[2] === "acceptance" || process.argv[2] === "soak" || process.argv[2] === "soak-4h") ? process.argv[2] as Mode : undefined;
+  if (requestedMode === undefined) fail("qualification mode is invalid");
+  mode = requestedMode;
+  releaseId = required("PI_WEB_QUALIFICATION_RELEASE_ID", /^phase4a-[0-9a-f]{40}$/u);
+  gitSha = required("PI_WEB_QUALIFICATION_GIT_SHA", /^[0-9a-f]{40}$/u);
+  manifestSha256 = required("PI_WEB_QUALIFICATION_MANIFEST_SHA256", /^[0-9a-f]{64}$/u);
+  runtimeRoot = required("XDG_RUNTIME_DIR");
+  qualificationRoot = join(runtimeRoot, "pi-web/qualification");
+  webxPath = required("WEBXD_SOCKET");
+  workspaceBinary = required("PI_WEB_WORKSPACE_BIN");
+  diagnosticsPath = join(qualificationRoot, "tauri.jsonl");
+  if (basename(releaseRoot) !== releaseId || releaseId !== `phase4a-${gitSha}` || workspaceBinary !== join(releaseRoot, "bin/pi-browser-workspace-qualification") || webxPath !== join(qualificationRoot, "webxd.sock")) fail("qualification release binding is invalid");
+}
 
 class LocalServiceFixture {
   #server: Server | undefined;
@@ -162,7 +185,7 @@ class PiWorker {
       else {
         const errorCode = message.errorCode;
         const errorStatus = message.errorStatus;
-        if (typeof errorCode === "string" && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u.test(errorCode) && typeof errorStatus === "number" && Number.isSafeInteger(errorStatus) && errorStatus >= 0 && errorStatus <= 599) pending.reject(new QualificationToolError(errorCode, errorStatus));
+        if (typeof errorCode === "string" && typeof errorStatus === "number" && Number.isSafeInteger(errorStatus) && errorStatus >= 0 && errorStatus <= 599) pending.reject(new QualificationToolError(safeQualificationToolCode(errorCode), errorStatus));
         else pending.reject(new Error("qualification Pi operation failed"));
       }
     });
@@ -209,6 +232,7 @@ class PiWorker {
 
 class Workspace {
   #child: ChildProcess | undefined;
+  #diagnostics = new QualificationDiagnosticsReader(diagnosticsPath);
   get pid(): number | undefined { return this.#child?.pid; }
   async start(): Promise<void> {
     const information = await stat(workspaceBinary);
@@ -217,7 +241,7 @@ class Workspace {
     this.#child = child;
     await this.waitFor((record) => record.kind === "frontendReady", 0, 30_000);
   }
-  async index(): Promise<number> { return (await this.records()).length; }
+  async index(): Promise<number> { return await this.#diagnostics.index(); }
   async select(identity: BrowserIdentity): Promise<number> {
     await this.waitFor((record) => snapshotHasIdentity(record, identity), 0, 20_000);
     const from = await this.index(); const started = performance.now();
@@ -244,25 +268,13 @@ class Workspace {
     await waitExit(child, 10_000).catch(() => child.kill("SIGKILL"));
     this.#child = undefined;
   }
-  async records(): Promise<Diagnostic[]> {
-    const information = await stat(diagnosticsPath).catch(() => undefined);
-    if (information === undefined) return [];
-    if (!information.isFile() || information.size > MAX_DIAGNOSTIC_BYTES) fail("qualification diagnostics are unsafe");
-    const text = await readFile(diagnosticsPath, "utf8");
-    const lines = text.endsWith("\n") ? text.trimEnd().split("\n") : text.split("\n").slice(0, -1);
-    if (lines.length > 100_000) fail("qualification diagnostics are unsafe");
-    return lines.filter(Boolean).map((line) => {
-      const value: unknown = JSON.parse(line);
-      if (!isRecord(value) || typeof value.kind !== "string" || typeof value.recordedAt !== "string") fail("qualification diagnostics are invalid");
-      return value as Diagnostic;
-    });
-  }
+  async records(): Promise<Diagnostic[]> { return await this.#diagnostics.records() as Diagnostic[]; }
   async waitFor(predicate: (record: Diagnostic) => boolean, from: number, timeoutMs: number): Promise<Diagnostic> {
     const deadline = performance.now() + timeoutMs;
     while (performance.now() < deadline) {
       if (this.#child?.exitCode !== null || this.#child?.signalCode !== null) fail("qualification workspace exited");
-      const match = (await this.records()).slice(from).find(predicate);
-      if (match !== undefined) return match;
+      const match = await this.#diagnostics.find((record) => predicate(record as Diagnostic), from);
+      if (match !== undefined) return match as Diagnostic;
       await sleep(50);
     }
     fail("qualification workspace diagnostic timed out");
@@ -270,6 +282,7 @@ class Workspace {
 }
 
 async function main(): Promise<void> {
+  initializeQualification();
   const manifest = await readFile(join(releaseRoot, "manifest.json"));
   if (createHash("sha256").update(manifest).digest("hex") !== manifestSha256) fail("qualification manifest binding failed");
   const startedAt = performance.now(); const startedWallMs = Date.now();
@@ -283,11 +296,16 @@ async function main(): Promise<void> {
   const sessionIds = new Set<string>();
   let iterations = 0; let controlCycles = 0; let heldInputReturnChecks = 0; let inputRetryConflicts = 0; let piReconnects = 0; let workspaceReconnects = 0; let proxyRestarts = 0; let webxdRestarts = 0; let browserdReplacements = 0; let ownershipDenials = 0; let browserOutageDenials = 0; let searchReadChecks = 0; let resourceWarnings = 0; let resourceHardLimits = 0; let tabCreates = 0; let tabCloses = 0; let workloadDurationSeconds = 0; let staleMutationDenials = 0; let statusChecks = 0; let doctorChecks = 0;
   try {
+    failureStage = "fixture";
     await localServices.start();
+    failureStage = "workspace";
     await workspace.start();
+    failureStage = "browser";
     await waitForBrowserdReady();
+    failureStage = "pi";
     await Promise.all([piA.start(), piB.start()]);
     for (const pi of [piA, piB]) for (const tool of ["web_search", "web_read", "browser_open", "browser_tabs", "browser_observe", "browser_act"]) if (!pi.activeTools.includes(tool)) fail("qualification Pi capability is unavailable");
+    failureStage = "workload";
     await exerciseSearchRead(piA); searchReadChecks += 1;
     await exerciseSearchRead(piB); searchReadChecks += 1;
     [identityA, identityB] = await openActors(piA, piB);
@@ -329,6 +347,7 @@ async function main(): Promise<void> {
     await piA.execute("browser_tabs", { action: "list" });
 
     if (mode === "acceptance") {
+      failureStage = "browser";
       restartUnit("pi-web-qualification-egress-proxy.service"); proxyRestarts += 1;
       await waitForProxyReady();
       restartUnit("pi-web-qualification-webxd.service"); webxdRestarts += 1;
@@ -353,9 +372,11 @@ async function main(): Promise<void> {
       resourceHardLimits += resourceResult.hardLimit;
       browserdReplacements += 2;
     } else {
+      failureStage = "workload";
       const soakStart = performance.now();
       const requiredWorkloadSeconds = mode === "soak-4h" ? SOAK_4H_SECONDS : SOAK_SECONDS;
       while ((performance.now() - soakStart) / 1000 < requiredWorkloadSeconds) {
+        if (mode === "soak-4h" && (performance.now() - startedAt) / 1000 >= SOAK_4H_MAX_TOTAL_WALL_SECONDS) fail("qualification total wall bound was exceeded");
         if (identityA === undefined || identityB === undefined) fail("qualification actors are unavailable");
         const actor = iterations % 2 === 0 ? piA : piB; const identity = iterations % 2 === 0 ? identityA : identityB;
         await observeImage(actor, identity, observationLatency);
@@ -385,6 +406,7 @@ async function main(): Promise<void> {
         await sleep(10_000);
       }
       workloadDurationSeconds = (performance.now() - soakStart) / 1000;
+      if (mode === "soak-4h" && (workloadDurationSeconds < SOAK_4H_SECONDS || workloadDurationSeconds > SOAK_4H_MAX_WORKLOAD_SECONDS || (performance.now() - startedAt) / 1000 > SOAK_4H_MAX_TOTAL_WALL_SECONDS)) fail("qualification time bound was exceeded");
       if (mode === "soak-4h") await collectLongWindowMetrics(longMetrics, workspace, (performance.now() - startedAt) / 1000);
       if (controlCycles < (mode === "soak-4h" ? 100 : 4) || heldInputReturnChecks !== controlCycles) fail("qualification soak control-cycle floor was not met");
       if (mode === "soak-4h" && Object.values(agentActionKinds).some((count) => count < 1)) fail("qualification AgentCursor action coverage was incomplete");
@@ -393,6 +415,7 @@ async function main(): Promise<void> {
 
     if (searchReadChecks < 3 || browserOutageDenials < 1) fail("qualification search/read outage isolation was incomplete");
     if (mode === "acceptance" && (resourceWarnings !== 1 || resourceHardLimits !== 1)) fail("qualification resource limit exercise was incomplete");
+    failureStage = "cleanup";
     if (identityA !== undefined) { await piA.execute("browser_tabs", { action: "close-session", browserSessionId: identityA.browserSessionId }); identityA = undefined; }
     if (identityB !== undefined) { await piB.execute("browser_tabs", { action: "close-session", browserSessionId: identityB.browserSessionId }); identityB = undefined; }
     await Promise.all([piA.stop(), piB.stop()]);
@@ -400,14 +423,13 @@ async function main(): Promise<void> {
     const finalCleanup = await waitForFinalCleanup();
     const privacyScan = await scanQualificationPrivacy(domCanary, agentInputCanary, retryConflictCanary, startedWallMs);
     if (Object.entries(privacyScan).some(([name, value]) => name.endsWith("Matches") && value !== 0)) fail("qualification privacy scan failed");
-    const durationSeconds = (performance.now() - startedAt) / 1000;
+    const totalWallSeconds = (performance.now() - startedAt) / 1000;
     const summary = {
       actors: 2,
       iterations,
       controlCycles,
       heldInputReturnChecks,
       inputRetryConflicts,
-      workloadDurationSeconds,
       piReconnects,
       workspaceReconnects,
       proxyRestarts,
@@ -432,8 +454,11 @@ async function main(): Promise<void> {
       memoryKiB: memorySummary(memorySamples),
       longWindow: mode === "soak-4h" ? summarizeLongWindowMetrics(longMetrics) : { enabled: false },
     };
-    process.stdout.write(`${JSON.stringify({ schemaVersion: 1, ok: true, mode, releaseId, gitSha, manifestSha256, durationSeconds, summary })}\n`);
+    process.stdout.write(`${JSON.stringify({ schemaVersion: 1, ok: true, mode, releaseId, gitSha, manifestSha256, workloadDurationSeconds, totalWallSeconds, summary })}\n`);
+  } catch (error: unknown) {
+    throw new ClassifiedQualificationError(failureForError(error));
   } finally {
+    failureStage = "cleanup";
     await Promise.all([piA.stop(), piB.stop()]);
     await workspace.stop();
     await localServices.stop();
@@ -454,13 +479,8 @@ async function exerciseControl(workspace: Workspace, pi: PiWorker, identity: Bro
 }
 async function refreshActorAuthority(pi: PiWorker, identity: BrowserIdentity): Promise<void> {
   const value = presentationValue(await pi.execute("browser_tabs", { action: "list" }));
-  if (!isRecord(value) || !Array.isArray(value.sessions)) fail("qualification returned-control authority refresh is invalid");
-  const sessions = value.sessions.filter((item) => isRecord(item) && item.browserSessionId === identity.browserSessionId);
-  if (sessions.length !== 1) fail("qualification returned-control session identity changed");
-  const session = sessions[0];
-  if (!isRecord(session) || !Number.isSafeInteger(session.controlEpoch) || (session.controlEpoch as number) < 1 || !Array.isArray(session.tabs)) fail("qualification returned-control authority refresh is invalid");
-  const tabs = session.tabs.filter((item) => isRecord(item) && item.tabId === identity.tabId);
-  if (tabs.length !== 1) fail("qualification returned-control tab identity changed");
+  const refreshed = validateAuthorityRefresh(value, identity);
+  if (refreshed === undefined) fail("qualification returned-control authority refresh is invalid");
 }
 async function openActors(piA: PiWorker, piB: PiWorker): Promise<[BrowserIdentity, BrowserIdentity]> {
   const [openedA, openedB] = await Promise.all([piA.execute("browser_open", { url: `${FIXTURE_BASE}/alpha` }), piB.execute("browser_open", { url: `${FIXTURE_BASE}/beta` })]);
@@ -1262,6 +1282,43 @@ function isRecord(value: unknown): value is Record<string, unknown> { return typ
 function asRecord(value: unknown): Record<string, unknown> { if (!isRecord(value)) fail("qualification value is invalid"); return value; }
 function sleep(ms: number): Promise<void> { return new Promise((resolveSleep) => setTimeout(resolveSleep, ms)); }
 async function waitExit(child: ChildProcess, timeoutMs: number): Promise<void> { if (child.exitCode !== null || child.signalCode !== null) return; await new Promise<void>((resolveExit, rejectExit) => { const timeout = setTimeout(() => { child.off("exit", exited); rejectExit(new Error("qualification child exit timed out")); }, timeoutMs); const exited = () => { clearTimeout(timeout); resolveExit(); }; child.once("exit", exited); }); }
-function fail(message: string): never { throw new Error(message); }
+function failureForError(error: unknown): QualificationFailure {
+  if (error instanceof ClassifiedQualificationError) return error.failure;
+  if (error instanceof QualificationToolError) return makeQualificationFailure("pi", safeQualificationToolCode(error.code), error.status, 1) as QualificationFailure;
+  const message = error instanceof Error ? error.message : "";
+  let code: string;
+  if (/diagnostics (?:were )?replaced|diagnostics (?:were )?truncated|diagnostics are unsafe|diagnostics cursor expired/u.test(message)) code = "WORKSPACE_DIAGNOSTICS_UNSAFE";
+  else if (/diagnostics (?:are )?invalid/u.test(message)) code = "WORKSPACE_DIAGNOSTICS_INVALID";
+  else if (/qualification report is invalid/u.test(message)) code = "REPORT_INVALID";
+  else if (/timed out|timeout/u.test(message)) code = failureStage === "pi" ? "PI_WORKER_TIMEOUT" : failureStage === "workspace" ? "WORKSPACE_EXITED" : "TOOL_TIMEOUT";
+  else if (/proxy/u.test(message)) code = "PROXY_FAILED";
+  else if (/authority|capability/u.test(message)) code = "AUTHORITY_FAILED";
+  else if (/resource/u.test(message)) code = "RESOURCE_LIMIT";
+  else if (/cleanup|held input|privacy scan/u.test(message)) code = "CLEANUP_FAILED";
+  else if (/restor|service/u.test(message)) code = "SERVICE_RESTORE_FAILED";
+  else if (/workspace/u.test(message)) code = "WORKSPACE_FAILED";
+  else if (/Pi worker|Pi operation/u.test(message)) code = "PI_WORKER_FAILED";
+  else if (/release binding|manifest binding|release identity|release checksum|release Git SHA|release directory/u.test(message)) code = "RELEASE_BINDING_INVALID";
+  else if (/environment/u.test(message) || failureStage === "environment") code = "ENVIRONMENT_INVALID";
+  else if (failureStage === "fixture") code = "FIXTURE_FAILED";
+  else if (failureStage === "browser") code = "BROWSER_SERVICE_FAILED";
+  else if (failureStage === "workspace") code = "WORKSPACE_FAILED";
+  else if (failureStage === "pi") code = "PI_WORKER_FAILED";
+  else if (failureStage === "workload") code = "WORKLOAD_FAILED";
+  else code = "UNEXPECTED";
+  return makeQualificationFailure(failureStage, code, 0, 1) as QualificationFailure;
+}
+function fail(message: string): never { throw new ClassifiedQualificationError(failureForError(new Error(message))); }
 
-main().catch(() => { process.stderr.write("qualification runner failed\n"); process.exitCode = 1; });
+let failureOutputWritten = false;
+function publishFailureOutput(error: unknown): void {
+  if (failureOutputWritten) return;
+  failureOutputWritten = true;
+  const failure = failureForError(error);
+  process.stdout.write(`${JSON.stringify({ schemaVersion: 1, ok: false, failure })}\n`);
+  process.exitCode = 1;
+}
+process.once("uncaughtException", publishFailureOutput);
+process.once("unhandledRejection", publishFailureOutput);
+
+main().catch((error: unknown) => { publishFailureOutput(error); });

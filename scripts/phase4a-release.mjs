@@ -552,9 +552,15 @@ function validateFixedQualificationRunner(source) {
   const restartHelper = /async function restartQualificationBrowserd\([^)]*\)\s*\{[^}]*restartUnit\(["']pi-web-qualification-browserd\.service["']\);[^}]*await waitForBrowserdReady\(\);[^}]*\}/u;
   const resourceFinally = /finally\s*\{[\s\S]{0,1000}?await atomicPrivateText\([\s\S]{0,500}?await restartQualificationBrowserd\(\);/u;
   if (!restartHelper.test(source) || !resourceFinally.test(source)) fail("release qualification runner lacks ready-checked browserd restoration");
-  const authorityRefresh = /async function refreshActorAuthority\([^)]*\)\s*\{[\s\S]{0,2000}?execute\(["']browser_tabs["']\s*,\s*\{\s*action:\s*["']list["'][\s\S]{0,2000}?browserSessionId[\s\S]{0,1000}?controlEpoch[\s\S]{0,1000}?tabs[\s\S]{0,1000}?tabId/u;
+  const authorityList = /execute\(["']browser_tabs["']\s*,\s*\{\s*action:\s*["']list["']/u;
+  const explicitAuthorityRefresh = /async function refreshActorAuthority\([^)]*\)\s*\{[\s\S]{0,2000}?browserSessionId[\s\S]{0,1000}?controlEpoch[\s\S]{0,1000}?tabs[\s\S]{0,1000}?tabId/u;
+  const validatedAuthorityRefresh = /async function refreshActorAuthority\([^)]*\)\s*\{[\s\S]{0,2000}?validateAuthorityRefresh\(value\s*,\s*identity\)/u;
+  const authorityContract = /(?:function|const)\s+validateAuthorityRefresh[\s\S]{0,4000}?controlEpoch/u;
   const controlRefresh = /async function exerciseControl\([^)]*\)\s*\{[\s\S]{0,1000}?await workspace\.control\([^;]+;[\s\S]{0,500}?await refreshActorAuthority\(pi\s*,\s*identity\);/u;
-  if (!authorityRefresh.test(source) || !controlRefresh.test(source)) fail("release qualification runner lacks returned-control authority refresh");
+  if (!authorityList.test(source) || (!explicitAuthorityRefresh.test(source) && (!validatedAuthorityRefresh.test(source) || !authorityContract.test(source))) || !controlRefresh.test(source)) fail("release qualification runner lacks returned-control authority refresh");
+  if (!/workloadDurationSeconds[\s\S]{0,2000}?totalWallSeconds/u.test(source) || /\bdurationSeconds\b/u.test(source)) fail("release qualification runner lacks separate timing report fields");
+  if (!/schemaVersion:\s*1[\s\S]{0,200}?ok:\s*false[\s\S]{0,200}?failure/u.test(source) || !/uncaughtException/u.test(source) || !/unhandledRejection/u.test(source)) fail("release qualification runner lacks classified failure output");
+  if (!/QualificationDiagnosticsReader/u.test(source) || !/WORKSPACE_DIAGNOSTICS_UNSAFE/u.test(source)) fail("release qualification runner lacks bounded diagnostics integration");
 }
 /**
  * @param {string} releaseRootValue

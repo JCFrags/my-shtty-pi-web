@@ -1,5 +1,6 @@
 import { createPiWebxExtension } from "../apps/pi-webx/src/index.js";
 import { WebxError, WebxFacadeClient } from "../packages/sdk/src/index.js";
+import { safeQualificationToolCode } from "./phase4a-qualification-contract.mjs";
 
 interface ToolPresentation { readonly content: Array<{ readonly type: "text"; readonly text: string } | { readonly type: "image"; readonly data: string; readonly mimeType: string }>; readonly details: unknown }
 interface RegisteredTool { readonly name: string; readonly execute: (toolCallId: string, input: unknown, signal: AbortSignal, onUpdate: unknown, context: unknown) => Promise<ToolPresentation> }
@@ -87,8 +88,8 @@ async function shutdown(): Promise<void> {
 }
 
 function boundedFailure(error: unknown): { readonly code: string; readonly status: number } {
-  if (error instanceof WebxError && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u.test(error.problem.code) && Number.isSafeInteger(error.status) && error.status >= 400 && error.status <= 599) return { code: error.problem.code, status: error.status };
-  return { code: "UNEXPECTED", status: 0 };
+  if (error instanceof WebxError && Number.isSafeInteger(error.status) && error.status >= 400 && error.status <= 599) return { code: safeQualificationToolCode(error.problem.code), status: error.status };
+  return { code: "TOOL_FAILED", status: 0 };
 }
 function required(name: string): string { const value = process.env[name]; if (value === undefined || value === "" || /[\0\r\n]/u.test(value)) throw new Error(`${name} is required`); return value; }
 function text(value: unknown, name: string): string { if (typeof value !== "string" || value === "") throw new Error(`${name} is required`); return value; }

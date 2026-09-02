@@ -18,6 +18,7 @@ import {
   uninstallCandidate,
   verifyInstallRelease,
 } from "./pi-webctl.mjs";
+import { makeQualificationFailure, safeQualificationToolCode, validateAuthorityRefresh, validateQualificationFailure } from "./phase4a-qualification-contract.mjs";
 
 const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ordinaryUnitNames = ["pi-web-agentcursor-egress-proxy.service", "pi-web-agentcursor-browserd.service", "webxd.service"];
@@ -198,6 +199,29 @@ async function fixture() {
   const releases = join(temporary, "source-releases"); await mkdir(releases);
   return { temporary, environment, paths, systemd, releases };
 }
+
+test("qualification failure and refreshed-authority contracts are finite and closed", () => {
+  const failure = makeQualificationFailure("workload", "WORKLOAD_FAILED", 503, 2);
+  assert.deepEqual(failure, { stage: "workload", code: "WORKLOAD_FAILED", status: 503, count: 2 });
+  assert.equal(safeQualificationToolCode("SECRET_TOOL_CODE"), "TOOL_FAILED");
+  assert.equal(safeQualificationToolCode("not-found"), "not-found");
+  assert.deepEqual(validateQualificationFailure({ schemaVersion: 1, ok: false, failure }), { schemaVersion: 1, ok: false, failure });
+  for (const value of [
+    { schemaVersion: 1, ok: false, failure: { ...failure, extra: "discard" } },
+    { schemaVersion: 1, ok: false, failure: { ...failure, status: 600 } },
+    { schemaVersion: 1, ok: false, failure: { ...failure, count: 0 } },
+    { schemaVersion: 1, ok: false, failure: { ...failure, code: "SECRET_CODE" } },
+    { schemaVersion: 1, ok: false, failure: { ...failure, stage: "SECRET_STAGE" } },
+  ]) assert.equal(validateQualificationFailure(value), undefined);
+
+  const refreshed = validateAuthorityRefresh({ sessions: [{ browserSessionId: "session-a", controlEpoch: 7, tabs: [{ tabId: "tab-a" }] }] }, { browserSessionId: "session-a", tabId: "tab-a" });
+  assert.deepEqual(refreshed, { browserSessionId: "session-a", tabId: "tab-a", controlEpoch: 7 });
+  const nestedRefreshed = validateAuthorityRefresh({ sessions: [{ browserSessionId: "session-a", controlEpoch: 7, tabs: [{ tabId: "tab-a", address: { browserSessionId: "session-a", tabId: "tab-a", controlEpoch: 7 } }] }] }, { browserSessionId: "session-a", tabId: "tab-a" });
+  assert.deepEqual(nestedRefreshed, { browserSessionId: "session-a", tabId: "tab-a", controlEpoch: 7 });
+  assert.equal(validateAuthorityRefresh({ sessions: [{ browserSessionId: "session-a", controlEpoch: 8, tabs: [{ tabId: "tab-a", address: { browserSessionId: "session-a", tabId: "tab-a", controlEpoch: 7 } }] }] }, { browserSessionId: "session-a", tabId: "tab-a" }), undefined);
+  assert.equal(validateAuthorityRefresh({ sessions: [{ browserSessionId: "session-a", controlEpoch: 7, tabs: [{ tabId: "tab-a", controlEpoch: 8 }] }] }, { browserSessionId: "session-a", tabId: "tab-a" }), undefined);
+  assert.equal(validateAuthorityRefresh({ sessions: [{ browserSessionId: "session-a", controlEpoch: 7, tabs: [{ tabId: "tab-a" }, { tabId: "tab-a" }] }] }, { browserSessionId: "session-a", tabId: "tab-a" }), undefined);
+});
 
 test("preflight is non-mutating, legacy-isolated, closed, and reports one reviewed package command", async () => {
   const { paths, systemd, releases, environment } = await fixture();
@@ -787,7 +811,7 @@ test("installed qualification is exact, private, static, and restores ordinary s
   const manifestSha256 = digest(await readFile(join(release.root, "manifest.json")));
   await assert.rejects(
     qualifyInstalled(paths, systemd.command, "acceptance", release.gitSha, manifestSha256, environment, { ports: async () => undefined }),
-    /explicit AgentCursor backend/u,
+    (error) => error?.failure?.stage === "environment" && error.failure.code === "ENVIRONMENT_INVALID" && error.failure.status === 0 && error.failure.count === 1 && !String(error).includes("explicit AgentCursor backend"),
   );
   await setBackend(paths, systemd.command, "agentcursor");
   const interruptedSnapshot = await activationSnapshot(paths, release.releaseId, undefined);
@@ -823,7 +847,7 @@ test("installed qualification is exact, private, static, and restores ordinary s
       assert.equal(leaseInformation.nlink, 1);
       const lease = JSON.parse(await readFile(paths.qualificationLeasePath, "utf8"));
       assert.deepEqual(lease, { schemaVersion: 1, releaseId: release.releaseId, gitSha: release.gitSha, manifestSha256 });
-      return { schemaVersion: 1, ok: true, mode, releaseId: release.releaseId, gitSha: release.gitSha, manifestSha256, durationSeconds: 1, summary: { checks: { installed: true, private: true }, actors: 2 } };
+      return { schemaVersion: 1, ok: true, mode, releaseId: release.releaseId, gitSha: release.gitSha, manifestSha256, workloadDurationSeconds: 0, totalWallSeconds: 1, summary: { checks: { installed: true, private: true }, actors: 2 } };
     },
     closeWorkspace: (childEnvironment, executable) => {
       closeCalls += 1;
@@ -836,6 +860,7 @@ test("installed qualification is exact, private, static, and restores ordinary s
   assert.equal(workloadCalls, 1);
   assert.equal(closeCalls, 1);
   await assert.rejects(lstat(paths.qualificationRoot), /ENOENT/u);
+  await assert.rejects(lstat(paths.qualificationFailurePath), /ENOENT/u);
   await assert.rejects(lstat(paths.transactionPath), /ENOENT/u);
   assert.deepEqual(JSON.parse(await readFile(paths.recoveryPath, "utf8")), { schemaVersion: 1, operation: "qualify", recovered: true });
   for (const unit of ordinaryUnitNames) {
@@ -857,16 +882,17 @@ test("fixed soak-4h accepts only a bounded 14400-second workload report", async 
   await installRelease(paths, systemd.command, release.root);
   await setBackend(paths, systemd.command, "agentcursor");
   const manifestSha256 = digest(await readFile(join(release.root, "manifest.json")));
-  const probes = (workloadDurationSeconds, durationSeconds = workloadDurationSeconds + 12, extraSummary = {}) => ({
+  const probes = (workloadDurationSeconds, totalWallSeconds = workloadDurationSeconds + 12, extraSummary = {}) => ({
     ports: async () => undefined,
     proxy: async () => "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\n\r\n",
-    workload: async (_childEnvironment, _verified, mode) => ({ schemaVersion: 1, ok: true, mode, releaseId: release.releaseId, gitSha: release.gitSha, manifestSha256, durationSeconds, summary: { workloadDurationSeconds, actors: 2, ...extraSummary } }),
+    workload: async (_childEnvironment, _verified, mode) => ({ schemaVersion: 1, ok: true, mode, releaseId: release.releaseId, gitSha: release.gitSha, manifestSha256, workloadDurationSeconds, totalWallSeconds, summary: { actors: 2, ...extraSummary } }),
     closeWorkspace: () => undefined,
   });
 
   const accepted = await qualifyInstalled(paths, systemd.command, "soak-4h", release.gitSha, manifestSha256, environment, probes(14_400));
   assert.equal(accepted.mode, "soak-4h");
-  assert.equal(accepted.summary.workloadDurationSeconds, 14_400);
+  assert.equal(accepted.workloadDurationSeconds, 14_400);
+  assert.equal(accepted.totalWallSeconds, 14_412);
   assert.deepEqual(accepted.summary.controllerCleanup, { qualificationServices: 0, qualificationRootEntries: 0, ordinaryServiceStateMismatches: 0, complete: true });
   const rich = await qualifyInstalled(paths, systemd.command, "soak-4h", release.gitSha, manifestSha256, environment, probes(14_400, 14_412, {
     privacyScan: { humanInputCanaryMatches: 0, descriptorSecretMatches: 0 },
@@ -876,10 +902,50 @@ test("fixed soak-4h accepts only a bounded 14400-second workload report", async 
     },
   }));
   assert.equal(rich.summary.longWindow.roles.browserd.pssFull.p95, 101);
-  await assert.rejects(qualifyInstalled(paths, systemd.command, "soak-4h", release.gitSha, manifestSha256, environment, probes(14_399)), /qualification report is invalid/u);
-  await assert.rejects(qualifyInstalled(paths, systemd.command, "soak-4h", release.gitSha, manifestSha256, environment, probes(14_521)), /qualification report is invalid/u);
-  await assert.rejects(qualifyInstalled(paths, systemd.command, "soak-4h", release.gitSha, manifestSha256, environment, probes(14_400, 14_521)), /qualification report is invalid/u);
+  /** @type {Array<[string, number, number]>} */
+  const invalidReports = [
+    ["workload below fixed target", 14_399, 14_412],
+    ["workload above fixed maximum", 14_521, 14_521],
+    ["wall time below workload", 14_400, 14_399],
+    ["wall time above fixed maximum", 14_400, 15_301],
+    ["non-finite workload", Number.NaN, 14_400],
+    ["non-finite wall time", 14_400, Number.POSITIVE_INFINITY],
+    ["negative workload", -1, 14_400],
+  ];
+  for (const [label, workloadDurationSeconds, totalWallSeconds] of invalidReports) await assert.rejects(qualifyInstalled(paths, systemd.command, "soak-4h", release.gitSha, manifestSha256, environment, probes(workloadDurationSeconds, totalWallSeconds)), /qualification report is invalid/u, label);
+  await assert.rejects(qualifyInstalled(paths, systemd.command, "soak-4h", release.gitSha, manifestSha256, environment, {
+    ports: async () => undefined,
+    proxy: async () => "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\n\r\n",
+    workload: async (_childEnvironment, _verified, mode) => ({ schemaVersion: 1, ok: true, mode, releaseId: release.releaseId, gitSha: release.gitSha, manifestSha256, durationSeconds: 14_400, summary: { actors: 2 } }),
+    closeWorkspace: () => undefined,
+  }), /qualification report is invalid/u);
+  assert.equal((await qualifyInstalled(paths, systemd.command, "soak-4h", release.gitSha, manifestSha256, environment, probes(14_520, 15_300))).workloadDurationSeconds, 14_520);
   await assert.rejects(lstat(paths.qualificationRoot), /ENOENT/u);
+});
+
+test("installed runner failures stay classified, private, and clear after a later success", async () => {
+  const { paths, systemd, releases, environment } = await fixture();
+  const failureEnvelope = { schemaVersion: 1, ok: false, failure: { stage: "workload", code: "WORKLOAD_FAILED", status: 503, count: 2 } };
+  const release = await syntheticRelease(releases, "5", async (root) => {
+    await writeFile(join(root, "bin/pi-web-qualification-runner.mjs"), `process.stdout.write(${JSON.stringify(JSON.stringify(failureEnvelope))}); process.exitCode = 1;\n`);
+  });
+  await installRelease(paths, systemd.command, release.root);
+  await setBackend(paths, systemd.command, "agentcursor");
+  const manifestSha256 = digest(await readFile(join(release.root, "manifest.json")));
+  await assert.rejects(qualifyInstalled(paths, systemd.command, "acceptance", release.gitSha, manifestSha256, environment, {
+    ports: async () => undefined,
+    proxy: async () => "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\n\r\n",
+    closeWorkspace: () => undefined,
+  }), (error) => error?.failure?.stage === "workload" && error.failure.code === "WORKLOAD_FAILED" && error.failure.status === 503 && error.failure.count === 2 && !String(error).includes(JSON.stringify(failureEnvelope)));
+  assert.deepEqual(JSON.parse(await readFile(paths.qualificationFailurePath, "utf8")), failureEnvelope);
+  const success = await qualifyInstalled(paths, systemd.command, "acceptance", release.gitSha, manifestSha256, environment, {
+    ports: async () => undefined,
+    proxy: async () => "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\n\r\n",
+    workload: async (_childEnvironment, _verified, mode) => ({ schemaVersion: 1, ok: true, mode, releaseId: release.releaseId, gitSha: release.gitSha, manifestSha256, workloadDurationSeconds: 0, totalWallSeconds: 1, summary: { actors: 2 } }),
+    closeWorkspace: () => undefined,
+  });
+  assert.equal(success.ok, true);
+  await assert.rejects(lstat(paths.qualificationFailurePath), /ENOENT/u);
 });
 
 test("qualification failure removes private runtime and restores the exact activation", async () => {
@@ -893,7 +959,14 @@ test("qualification failure removes private runtime and restores the exact activ
     proxy: async () => "HTTP/1.1 204 No Content\r\nWebX-Egress-Proxy: secure-egress/1\r\nContent-Length: 0\r\n\r\n",
     workload: async () => { throw new Error("PRIVATE_WORKLOAD_FAILURE"); },
     closeWorkspace: () => undefined,
-  }), /PRIVATE_WORKLOAD_FAILURE/u);
+  }), (error) => error?.failure?.stage === "workload" && error.failure.code === "WORKLOAD_FAILED" && error.failure.status === 0 && error.failure.count === 1 && !String(error).includes("PRIVATE_WORKLOAD_FAILURE"));
+  assert.deepEqual(JSON.parse(await readFile(paths.qualificationFailurePath, "utf8")), { schemaVersion: 1, ok: false, failure: { stage: "workload", code: "WORKLOAD_FAILED", status: 0, count: 1 } });
+  const retained = await doctorReport(paths, systemd.command, environment, { browser: async () => undefined });
+  assert.equal(retained.findings.find((item) => item.category === "release")?.code, "QUALIFICATION_FAILURE_RETAINED");
+  assert.doesNotMatch(JSON.stringify(retained), /PRIVATE_WORKLOAD_FAILURE|qualificationFailurePath|\/tmp\//u);
+  await chmod(paths.qualificationFailurePath, 0o644);
+  const malformed = await doctorReport(paths, systemd.command, environment, { browser: async () => undefined });
+  assert.equal(malformed.findings.find((item) => item.category === "release")?.code, "QUALIFICATION_FAILURE_INVALID");
   await assert.rejects(lstat(paths.qualificationRoot), /ENOENT/u);
   await assert.rejects(lstat(paths.transactionPath), /ENOENT/u);
   for (const unit of ordinaryUnitNames) {

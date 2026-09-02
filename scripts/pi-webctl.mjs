@@ -44,7 +44,76 @@ const QUALIFICATION_PROXY_PROBE_DELAY_MS = 50;
 const QUALIFICATION_PROXY_PROBE_TIMEOUT_MS = 250;
 const QUALIFICATION_SOAK_4H_WORKLOAD_SECONDS = 14_400;
 const QUALIFICATION_SOAK_4H_MAX_WORKLOAD_SECONDS = 14_520;
-const QUALIFICATION_SOAK_4H_CONTROLLER_TIMEOUT_MS = 15_300_000;
+const QUALIFICATION_SOAK_4H_MAX_TOTAL_WALL_SECONDS = 15_300;
+const QUALIFICATION_SOAK_4H_CONTROLLER_TIMEOUT_MS = QUALIFICATION_SOAK_4H_MAX_TOTAL_WALL_SECONDS * 1_000;
+const QUALIFICATION_FAILURE_STAGES = Object.freeze(["environment", "fixture", "workspace", "browser", "pi", "authority", "workload", "report", "cleanup", "restoration", "runner", "controller", "unknown"]);
+const QUALIFICATION_FAILURE_CODES = Object.freeze(["ENVIRONMENT_INVALID", "RELEASE_BINDING_INVALID", "FIXTURE_FAILED", "WORKSPACE_FAILED", "WORKSPACE_EXITED", "WORKSPACE_DIAGNOSTICS_UNSAFE", "WORKSPACE_DIAGNOSTICS_INVALID", "PI_WORKER_FAILED", "PI_WORKER_TIMEOUT", "TOOL_FAILED", "WORKLOAD_FAILED", "TOOL_UNAVAILABLE", "TOOL_TIMEOUT", "AUTHORITY_FAILED", "PROXY_FAILED", "BROWSER_SERVICE_FAILED", "RESOURCE_LIMIT", "REPORT_INVALID", "CLEANUP_FAILED", "SERVICE_RESTORE_FAILED", "RUNNER_TIMEOUT", "RUNNER_FAILED", "RUNNER_OUTPUT_INVALID", "UNEXPECTED", "not-found", "CAPABILITY_UNAVAILABLE", "CONTROL_HELD_BY_HUMAN", "BROWSER_RESOURCE_LIMIT", "OPERATION_CONFLICT", "BAD_REQUEST", "UNAUTHORIZED", "FORBIDDEN", "CONFLICT", "TIMEOUT", "UNAVAILABLE", "INTERNAL_ERROR", "INVALID_ARGUMENT", "STALE_OBSERVATION", "STALE_FRAME", "BROWSER_DISCONNECTED", "SESSION_NOT_FOUND", "TAB_NOT_FOUND", "AUTHORITY_UNAVAILABLE"]);
+const QUALIFICATION_FAILURE_STAGE_SET = new Set(QUALIFICATION_FAILURE_STAGES);
+const QUALIFICATION_FAILURE_CODE_SET = new Set(QUALIFICATION_FAILURE_CODES);
+/** @typedef {{readonly stage: string, readonly code: string, readonly status: number, readonly count: number}} QualificationFailure */
+/** @typedef {{readonly state: "none"} | {readonly state: "retained", readonly failure: QualificationFailure} | {readonly state: "invalid"}} QualificationFailureState */
+class QualificationControllerError extends Error {
+  /** @type {QualificationFailure} */
+  failure;
+  constructor(/** @type {QualificationFailure} */ failure, /** @type {string} */ message = failure.code === "REPORT_INVALID" ? "qualification report is invalid" : "installed qualification failed") {
+    super(message);
+    this.name = "QualificationControllerError";
+    /** @type {QualificationFailure} */
+    this.failure = Object.freeze(failure);
+  }
+}
+/**
+ * @param {unknown} stage
+ * @param {unknown} code
+ * @param {unknown} [status]
+ * @param {unknown} [count]
+ * @returns {QualificationFailure}
+ */
+function qualificationFailure(stage, code, status = 0, count = 1) {
+  const safeStage = typeof stage === "string" && QUALIFICATION_FAILURE_STAGE_SET.has(stage) ? stage : "unknown";
+  const safeCode = typeof code === "string" && QUALIFICATION_FAILURE_CODE_SET.has(code) ? code : "UNEXPECTED";
+  const safeStatus = typeof status === "number" && Number.isSafeInteger(status) && status >= 0 && status <= 599 ? status : 0;
+  const safeCount = typeof count === "number" && Number.isSafeInteger(count) && count >= 1 && count <= 64 ? count : 1;
+  return Object.freeze({ stage: safeStage, code: safeCode, status: safeStatus, count: safeCount });
+}
+/**
+ * @param {unknown} value
+ * @returns {{schemaVersion: 1, ok: false, failure: QualificationFailure} | undefined}
+ */
+function validatedQualificationFailure(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const report = /** @type {Record<string, any>} */ (value);
+  if (JSON.stringify(Object.keys(report).sort()) !== JSON.stringify(["failure", "ok", "schemaVersion"]) || report.schemaVersion !== 1 || report.ok !== false || typeof report.failure !== "object" || report.failure === null || Array.isArray(report.failure)) return undefined;
+  const failure = report.failure;
+  if (JSON.stringify(Object.keys(failure).sort()) !== JSON.stringify(["code", "count", "stage", "status"]) || !QUALIFICATION_FAILURE_STAGE_SET.has(failure.stage) || !QUALIFICATION_FAILURE_CODE_SET.has(failure.code) || !Number.isSafeInteger(failure.status) || failure.status < 0 || failure.status > 599 || !Number.isSafeInteger(failure.count) || failure.count < 1 || failure.count > 64) return undefined;
+  return Object.freeze({ schemaVersion: 1, ok: false, failure: qualificationFailure(failure.stage, failure.code, failure.status, failure.count) });
+}
+/**
+ * @param {unknown} error
+ * @param {string} [stage]
+ * @returns {QualificationFailure}
+ */
+function qualificationFailureFromError(error, stage = "controller") {
+  if (error instanceof QualificationControllerError) return error.failure;
+  const message = error instanceof Error ? error.message : "";
+  let effectiveStage = stage;
+  let code = stage === "workload" ? "WORKLOAD_FAILED" : stage === "report" ? "REPORT_INVALID" : "UNEXPECTED";
+  if (/diagnostics (?:were )?replaced|diagnostics (?:were )?truncated|diagnostics are unsafe|diagnostics cursor expired/u.test(message)) { effectiveStage = "workspace"; code = "WORKSPACE_DIAGNOSTICS_UNSAFE"; }
+  else if (/diagnostics (?:are )?invalid/u.test(message)) { effectiveStage = "workspace"; code = "WORKSPACE_DIAGNOSTICS_INVALID"; }
+  else if (/qualification report is invalid/u.test(message)) { effectiveStage = "report"; code = "REPORT_INVALID"; }
+  else if (/timed out|timeout/u.test(message)) code = "TOOL_TIMEOUT";
+  else if (/proxy/u.test(message)) { effectiveStage = "browser"; code = "PROXY_FAILED"; }
+  else if (/authority|capability/u.test(message)) { effectiveStage = "authority"; code = "AUTHORITY_FAILED"; }
+  else if (/resource/u.test(message)) { effectiveStage = "workload"; code = "RESOURCE_LIMIT"; }
+  else if (/cleanup|held input|privacy scan/u.test(message)) { effectiveStage = "cleanup"; code = "CLEANUP_FAILED"; }
+  else if (/restor|service/u.test(message)) { effectiveStage = "restoration"; code = "SERVICE_RESTORE_FAILED"; }
+  else if (/workspace/u.test(message)) { effectiveStage = "workspace"; code = "WORKSPACE_FAILED"; }
+  else if (/Pi worker|Pi operation/u.test(message)) { effectiveStage = "pi"; code = "PI_WORKER_FAILED"; }
+  else if (/release binding|release Git SHA|release manifest|release directory|release checksum|manifest digest/u.test(message)) { effectiveStage = "environment"; code = "RELEASE_BINDING_INVALID"; }
+  else if (/explicit AgentCursor backend|release verification|no current Phase 4A release|qualification configuration|fixed qualification port/u.test(message)) { effectiveStage = "environment"; code = "ENVIRONMENT_INVALID"; }
+  return qualificationFailure(effectiveStage, code);
+}
+
 const MARKER_NAME = ".pi-web-managed-v1";
 const MARKER_VALUE = "pi-web-managed-root-v1\n";
 const MAX_JSON_BYTES = 4 * 1024 * 1024;
@@ -737,7 +806,7 @@ async function uninstallCandidateUnlocked(paths, command, purge = false) {
  */
 async function cleanupCandidateRemoval(paths, purge) {
   for (const release of await verifiedCandidateReleases(paths, await isCommittedCandidateCleanup(paths))) await removeOwnedTree(release);
-  for (const path of [paths.deploymentPath, paths.failurePath, paths.preinstallBackupPath]) await rm(path, { force: true });
+  for (const path of [paths.deploymentPath, paths.failurePath, paths.qualificationFailurePath, paths.preinstallBackupPath]) await rm(path, { force: true });
   if (!purge) return;
   const roots = [paths.cacheRoot, paths.configRoot, paths.dataRoot, paths.stateRoot];
   for (const root of roots) if (await exists(root)) await verifyManagedRoot(root);
@@ -1000,15 +1069,16 @@ function boundedQualificationSummary(value, depth = 0) {
 /** @param {unknown} value @param {"acceptance" | "soak" | "soak-4h"} mode @param {Awaited<ReturnType<typeof verifyInstallRelease>>} verified */
 function validateQualificationReport(value, mode, verified) {
   const report = record(value, "qualification report");
-  const requiredKeys = ["durationSeconds", "gitSha", "manifestSha256", "mode", "ok", "releaseId", "schemaVersion", "summary"];
-  const durationMaximum = mode === "soak-4h" ? QUALIFICATION_SOAK_4H_MAX_WORKLOAD_SECONDS : 600;
-  if (JSON.stringify(Object.keys(report).sort()) !== JSON.stringify(requiredKeys) || report.schemaVersion !== 1 || report.ok !== true || report.mode !== mode || report.releaseId !== verified.releaseId || report.gitSha !== verified.gitSha || report.manifestSha256 !== verified.manifestSha256 || typeof report.durationSeconds !== "number" || !Number.isFinite(report.durationSeconds) || report.durationSeconds < 0 || report.durationSeconds > durationMaximum || (mode === "soak" && report.durationSeconds < 300)) fail("qualification report is invalid");
+  const requiredKeys = ["gitSha", "manifestSha256", "mode", "ok", "releaseId", "schemaVersion", "summary", "totalWallSeconds", "workloadDurationSeconds"];
+  const totalWallMaximum = mode === "soak-4h" ? QUALIFICATION_SOAK_4H_MAX_TOTAL_WALL_SECONDS : 600;
+  const workloadMaximum = mode === "soak-4h" ? QUALIFICATION_SOAK_4H_MAX_WORKLOAD_SECONDS : 600;
+  if (JSON.stringify(Object.keys(report).sort()) !== JSON.stringify(requiredKeys) || report.schemaVersion !== 1 || report.ok !== true || report.mode !== mode || report.releaseId !== verified.releaseId || report.gitSha !== verified.gitSha || report.manifestSha256 !== verified.manifestSha256
+    || typeof report.workloadDurationSeconds !== "number" || !Number.isFinite(report.workloadDurationSeconds) || report.workloadDurationSeconds < 0 || report.workloadDurationSeconds > workloadMaximum
+    || typeof report.totalWallSeconds !== "number" || !Number.isFinite(report.totalWallSeconds) || report.totalWallSeconds < report.workloadDurationSeconds || report.totalWallSeconds > totalWallMaximum
+    || (mode === "soak" && report.workloadDurationSeconds < 300)
+    || (mode === "soak-4h" && (report.workloadDurationSeconds < QUALIFICATION_SOAK_4H_WORKLOAD_SECONDS || report.workloadDurationSeconds > QUALIFICATION_SOAK_4H_MAX_WORKLOAD_SECONDS))) fail("qualification report is invalid");
   const summary = /** @type {Readonly<Record<string, unknown>>} */ (boundedQualificationSummary(report.summary));
-  if (mode === "soak-4h") {
-    const workloadDurationSeconds = summary["workloadDurationSeconds"];
-    if (typeof workloadDurationSeconds !== "number" || !Number.isFinite(workloadDurationSeconds) || workloadDurationSeconds < QUALIFICATION_SOAK_4H_WORKLOAD_SECONDS || workloadDurationSeconds > QUALIFICATION_SOAK_4H_MAX_WORKLOAD_SECONDS || report.durationSeconds < workloadDurationSeconds) fail("qualification report is invalid");
-  }
-  return Object.freeze({ schemaVersion: 1, ok: true, mode, releaseId: verified.releaseId, gitSha: verified.gitSha, manifestSha256: verified.manifestSha256, durationSeconds: report.durationSeconds, summary });
+  return Object.freeze({ schemaVersion: 1, ok: true, mode, releaseId: verified.releaseId, gitSha: verified.gitSha, manifestSha256: verified.manifestSha256, workloadDurationSeconds: report.workloadDurationSeconds, totalWallSeconds: report.totalWallSeconds, summary });
 }
 
 /** @param {NodeJS.ProcessEnv} source @param {Record<string, string>} qualification */
@@ -1066,18 +1136,67 @@ async function prepareQualificationRuntime(paths, verified) {
 
 /** @param {Record<string, string>} environment @param {Awaited<ReturnType<typeof verifyInstallRelease>>} verified @param {"acceptance" | "soak" | "soak-4h"} mode */
 function runQualification(environment, verified, mode) {
-  const result = spawnSync("/usr/bin/node", [join(verified.releaseRoot, "bin/pi-web-qualification-runner.mjs"), mode], {
-    cwd: verified.releaseRoot,
-    encoding: "utf8",
-    env: environment,
-    timeout: mode === "soak-4h" ? QUALIFICATION_SOAK_4H_CONTROLLER_TIMEOUT_MS : 600_000,
-    maxBuffer: 1024 * 1024,
-  });
-  if (result.status !== 0 || typeof result.stdout !== "string" || Buffer.byteLength(result.stdout) > 1024 * 1024) fail("installed qualification workload failed");
+  let result;
+  try {
+    result = spawnSync("/usr/bin/node", [join(verified.releaseRoot, "bin/pi-web-qualification-runner.mjs"), mode], {
+      cwd: verified.releaseRoot,
+      encoding: "utf8",
+      env: environment,
+      timeout: mode === "soak-4h" ? QUALIFICATION_SOAK_4H_CONTROLLER_TIMEOUT_MS : 600_000,
+      maxBuffer: 1024 * 1024,
+    });
+  } catch { throw new QualificationControllerError(qualificationFailure("runner", "RUNNER_FAILED")); }
+  if (result.error) throw new QualificationControllerError(qualificationFailure("runner", "RUNNER_FAILED"));
+  if (result.signal !== null || result.status === null) throw new QualificationControllerError(qualificationFailure("runner", "RUNNER_TIMEOUT"));
+  if (typeof result.stdout !== "string" || Buffer.byteLength(result.stdout) > 1024 * 1024) throw new QualificationControllerError(qualificationFailure("runner", "RUNNER_OUTPUT_INVALID"));
   let report;
   try { report = JSON.parse(result.stdout); }
-  catch { fail("installed qualification workload returned invalid data"); }
+  catch { throw new QualificationControllerError(qualificationFailure("runner", "RUNNER_OUTPUT_INVALID")); }
+  const failureReport = validatedQualificationFailure(report);
+  if (failureReport !== undefined) throw new QualificationControllerError(failureReport.failure);
+  if (result.status !== 0) throw new QualificationControllerError(qualificationFailure("runner", "RUNNER_FAILED"));
   return validateQualificationReport(report, mode, verified);
+}
+
+/** @param {ReturnType<typeof installedPaths>} paths @param {QualificationFailure} failure */
+async function publishQualificationFailure(paths, failure) {
+  const report = Object.freeze({ schemaVersion: 1, ok: false, failure: qualificationFailure(failure.stage, failure.code, failure.status, failure.count) });
+  if (validatedQualificationFailure(report) === undefined) fail("qualification failure record is invalid");
+  await atomicJson(paths.qualificationFailurePath, report);
+  const information = await lstat(paths.qualificationFailurePath);
+  if (!information.isFile() || information.isSymbolicLink() || information.nlink !== 1 || information.uid !== process.getuid?.() || information.gid !== process.getgid?.() || (information.mode & 0o777) !== 0o600) fail("qualification failure record is unsafe");
+}
+/** @param {ReturnType<typeof installedPaths>} paths */
+async function readQualificationFailure(paths) {
+  let information;
+  try { information = await lstat(paths.qualificationFailurePath); }
+  catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
+    throw error;
+  }
+  if (!information.isFile() || information.isSymbolicLink() || information.nlink !== 1 || information.uid !== process.getuid?.() || information.gid !== process.getgid?.() || (information.mode & 0o777) !== 0o600 || information.size > 16 * 1024) fail("qualification failure record is unsafe");
+  let value;
+  try { value = JSON.parse(await readFile(paths.qualificationFailurePath, "utf8")); }
+  catch { fail("qualification failure record is invalid"); }
+  const report = validatedQualificationFailure(value);
+  if (report === undefined) fail("qualification failure record is invalid");
+  return report.failure;
+}
+/** @param {ReturnType<typeof installedPaths>} paths */
+async function clearQualificationFailure(paths) {
+  try {
+    const information = await lstat(paths.qualificationFailurePath);
+    if (information.isFile() && !information.isSymbolicLink() && information.nlink === 1 && information.uid === process.getuid?.() && information.gid === process.getgid?.() && (information.mode & 0o777) === 0o600) await rm(paths.qualificationFailurePath, { force: true });
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) return;
+  }
+}
+/** @param {ReturnType<typeof installedPaths>} paths @returns {Promise<QualificationFailureState>} */
+async function qualificationFailureState(paths) {
+  try {
+    const failure = await readQualificationFailure(paths);
+    return failure === undefined ? { state: "none" } : { state: "retained", failure };
+  } catch { return { state: "invalid" }; }
 }
 
 /**
@@ -1095,6 +1214,7 @@ export async function qualifyInstalled(paths, command, mode, expectedSha, expect
   /** @type {Awaited<ReturnType<typeof verifyInstallRelease>> | undefined} */
   let verified;
   const prepare = async () => {
+    if (!(mode === "acceptance" || mode === "soak" || mode === "soak-4h") || !/^[0-9a-f]{40}$/u.test(expectedSha) || !/^[0-9a-f]{64}$/u.test(expectedManifestSha256)) fail("qualification release identity is invalid");
     const releaseId = await currentReleaseId(paths);
     if (releaseId === undefined) fail("no current Phase 4A release is installed");
     verified = await verifyInstallRelease(join(paths.releasesRoot, releaseId), expectedSha, expectedManifestSha256);
@@ -1107,48 +1227,65 @@ export async function qualifyInstalled(paths, command, mode, expectedSha, expect
     } else await probes.ports();
     stopQualificationServices(command);
   };
-  return await withMutation(paths, command, "qualify", async () => {
-    if (verified === undefined) fail("qualification release verification was not completed");
-    const ordinaryStates = snapshotServiceStates(command);
-    let qualification;
-    let report;
-    try {
-      stopOrdinaryServices(command);
-      qualification = await prepareQualificationRuntime(paths, verified);
-      startQualificationServices(command);
-      const health = await probeQualificationProxy(probes.proxy ?? (() => probeProxy("127.0.0.1", QUALIFICATION_PROXY_PORT, QUALIFICATION_PROXY_PROBE_TIMEOUT_MS)));
-      if (!health.startsWith("HTTP/1.1 204 No Content\r\n") || !health.includes("\r\nWebX-Egress-Proxy: secure-egress/1\r\n")) fail("qualification proxy is unavailable");
-      const childEnvironment = qualificationChildEnvironment(environment, {
-        ...qualification,
-        PI_WEB_QUALIFICATION_RELEASE_ID: verified.releaseId,
-        PI_WEB_QUALIFICATION_GIT_SHA: verified.gitSha,
-        PI_WEB_QUALIFICATION_MANIFEST_SHA256: verified.manifestSha256,
-      });
-      report = probes.workload === undefined
-        ? runQualification(/** @type {Record<string, string>} */ (childEnvironment), verified, mode)
-        : validateQualificationReport(await probes.workload(/** @type {Record<string, string>} */ (childEnvironment), verified, mode), mode, verified);
-    } finally {
-      if (qualification !== undefined) {
-        const executable = join(verified.releaseRoot, "bin/pi-browser-workspace-qualification");
-        const closeEnvironment = qualificationChildEnvironment(environment, qualification);
-        if (probes.closeWorkspace === undefined) spawnSync(executable, ["--qualification-close"], { env: closeEnvironment, timeout: 15_000, stdio: "ignore" });
-        else probes.closeWorkspace(closeEnvironment, executable);
+  try {
+    return await withMutation(paths, command, "qualify", async () => {
+      const checkedVerified = verified;
+      if (checkedVerified === undefined) fail("qualification release verification was not completed");
+      const ordinaryStates = snapshotServiceStates(command);
+      let qualification;
+      let report;
+      try {
+        stopOrdinaryServices(command);
+        qualification = await prepareQualificationRuntime(paths, checkedVerified);
+        startQualificationServices(command);
+        const health = await probeQualificationProxy(probes.proxy ?? (() => probeProxy("127.0.0.1", QUALIFICATION_PROXY_PORT, QUALIFICATION_PROXY_PROBE_TIMEOUT_MS)));
+        if (!health.startsWith("HTTP/1.1 204 No Content\r\n") || !health.includes("\r\nWebX-Egress-Proxy: secure-egress/1\r\n")) fail("qualification proxy is unavailable");
+        const childEnvironment = qualificationChildEnvironment(environment, {
+          ...qualification,
+          PI_WEB_QUALIFICATION_RELEASE_ID: checkedVerified.releaseId,
+          PI_WEB_QUALIFICATION_GIT_SHA: checkedVerified.gitSha,
+          PI_WEB_QUALIFICATION_MANIFEST_SHA256: checkedVerified.manifestSha256,
+        });
+        if (probes.workload === undefined) {
+          report = runQualification(/** @type {Record<string, string>} */ (childEnvironment), checkedVerified, mode);
+        } else {
+          try {
+            report = validateQualificationReport(await probes.workload(/** @type {Record<string, string>} */ (childEnvironment), checkedVerified, mode), mode, checkedVerified);
+          } catch (error) {
+            if (error instanceof QualificationControllerError) throw error;
+            const stage = error instanceof Error && /qualification report is invalid/u.test(error.message) ? "report" : "workload";
+            throw new QualificationControllerError(qualificationFailureFromError(error, stage));
+          }
+        }
+      } finally {
+        if (qualification !== undefined) {
+          const executable = join(checkedVerified.releaseRoot, "bin/pi-browser-workspace-qualification");
+          const closeEnvironment = qualificationChildEnvironment(environment, qualification);
+          if (probes.closeWorkspace === undefined) spawnSync(executable, ["--qualification-close"], { env: closeEnvironment, timeout: 15_000, stdio: "ignore" });
+          else probes.closeWorkspace(closeEnvironment, executable);
+        }
+        stopQualificationServices(command);
+        await removeOwnedTree(paths.qualificationRoot);
+        restoreServiceStates(command, ordinaryStates);
       }
-      stopQualificationServices(command);
-      await removeOwnedTree(paths.qualificationRoot);
-      restoreServiceStates(command, ordinaryStates);
-    }
-    if (report === undefined || await exists(paths.qualificationRoot)) fail("qualification cleanup verification failed");
-    const restoredStates = snapshotServiceStates(command);
-    if (JSON.stringify(restoredStates) !== JSON.stringify(ordinaryStates)) fail("qualification service restoration verification failed");
-    for (const unit of QUALIFICATION_UNITS) if (exactServiceState(command, "is-active", unit) !== "inactive") fail("qualification service cleanup verification failed");
-    const validatedReport = record(report, "qualification report");
-    const validatedSummary = record(validatedReport.summary, "qualification summary");
-    return Object.freeze({ ...validatedReport, summary: Object.freeze({
-      ...validatedSummary,
-      controllerCleanup: Object.freeze({ qualificationServices: 0, qualificationRootEntries: 0, ordinaryServiceStateMismatches: 0, complete: true }),
-    }) });
-  }, prepare);
+      if (report === undefined || await exists(paths.qualificationRoot)) fail("qualification cleanup verification failed");
+      const restoredStates = snapshotServiceStates(command);
+      if (JSON.stringify(restoredStates) !== JSON.stringify(ordinaryStates)) fail("qualification service restoration verification failed");
+      for (const unit of QUALIFICATION_UNITS) if (exactServiceState(command, "is-active", unit) !== "inactive") fail("qualification service cleanup verification failed");
+      const validatedReport = record(report, "qualification report");
+      const validatedSummary = record(validatedReport.summary, "qualification summary");
+      return Object.freeze({ ...validatedReport, summary: Object.freeze({
+        ...validatedSummary,
+        controllerCleanup: Object.freeze({ qualificationServices: 0, qualificationRootEntries: 0, ordinaryServiceStateMismatches: 0, complete: true }),
+      }) });
+    }, prepare, async () => { await clearQualificationFailure(paths); });
+  } catch (error) {
+    const failure = qualificationFailureFromError(error);
+    try { await publishQualificationFailure(paths, failure); }
+    catch { throw new QualificationControllerError(qualificationFailure("cleanup", "CLEANUP_FAILED"), "qualification failure publication failed"); }
+    if (error instanceof QualificationControllerError) throw error;
+    throw new QualificationControllerError(failure);
+  }
 }
 
 /** @param {NodeJS.ProcessEnv} environment */
@@ -1202,6 +1339,7 @@ export function installedPaths(environment = process.env) {
     qualificationEnvironmentPath: join(runtimeRoot, "pi-web/qualification/service.env"),
     qualificationLeasePath: join(runtimeRoot, "pi-web/qualification/lease.json"),
     qualificationDiagnosticsPath: join(runtimeRoot, "pi-web/qualification/tauri.jsonl"),
+    qualificationFailurePath: join(stateRoot, "last-qualification-failure.json"),
     desktopPath: join(dataHome, "applications/pi-web-workspace.desktop"),
     extensionPath: join(home, ".pi/agent/extensions/pi-web"),
     controlLink: join(binRoot, "pi-webctl"),
@@ -1581,7 +1719,16 @@ export async function doctorReport(paths, command, environment = process.env, pr
       const deployment = record(await readJson(paths.deploymentPath), "deployment state");
       if (deployment.currentReleaseId !== releaseId || deployment.currentBackend !== config.backend) throw new Error("deployment mismatch");
     }
-    findings.push(doctorFinding("release", await exists(paths.failurePath) ? "warning" : "pass", await exists(paths.failurePath) ? "RELEASE_FAILURE_RETAINED" : "RELEASE_VERIFIED", await exists(paths.failurePath) ? "Current release is verified; bounded activation failure evidence is retained." : "Current and previous release identities are verified."));
+    const qualificationState = await qualificationFailureState(paths);
+    if (qualificationState.state === "retained") {
+      const failure = /** @type {QualificationFailure} */ (qualificationState.failure);
+      findings.push(doctorFinding("release", "warning", "QUALIFICATION_FAILURE_RETAINED", `A classified qualification failure is retained (stage=${failure.stage}, code=${failure.code}, status=${failure.status}, count=${failure.count}).`));
+    } else if (qualificationState.state === "invalid") {
+      findings.push(doctorFinding("release", "warning", "QUALIFICATION_FAILURE_INVALID", "A retained qualification failure record is malformed or unsafe."));
+    } else {
+      const activationFailure = await exists(paths.failurePath);
+      findings.push(doctorFinding("release", activationFailure ? "warning" : "pass", activationFailure ? "RELEASE_FAILURE_RETAINED" : "RELEASE_VERIFIED", activationFailure ? "Current release is verified; bounded activation failure evidence is retained." : "Current and previous release identities are verified."));
+    }
   } catch { findings.push(doctorFinding("release", releaseId === undefined ? "unavailable" : "error", releaseId === undefined ? "RELEASE_NOT_INSTALLED" : "RELEASE_INVALID", releaseId === undefined ? "No Phase 4A release is installed." : "The installed release identity or checksum is invalid.")); }
 
   try { await doctorFilesystem(paths); findings.push(doctorFinding("filesystem", "pass", "FILESYSTEM_VERIFIED", "Managed roots, files, links, modes, and ownership are verified.")); }
@@ -1727,8 +1874,11 @@ async function main() {
 if (process.argv[1]) {
   let invoked;
   try { invoked = await realpath(process.argv[1]); } catch { invoked = undefined; }
-  if (invoked && import.meta.url === pathToFileURL(invoked).href) main().catch(() => {
-    if (process.argv.includes("--json")) process.stdout.write(`${JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "PI_WEBCTL_FAILED", summary: "The requested operation failed." } }, null, 2)}\n`);
+  if (invoked && import.meta.url === pathToFileURL(invoked).href) main().catch((error) => {
+    if (error instanceof QualificationControllerError) {
+      if (process.argv.includes("--json")) process.stdout.write(`${JSON.stringify({ schemaVersion: 1, ok: false, failure: error.failure }, null, 2)}\n`);
+      else process.stderr.write(`pi-webctl: QUALIFICATION_FAILED: stage=${error.failure.stage} code=${error.failure.code} status=${error.failure.status} count=${error.failure.count}\n`);
+    } else if (process.argv.includes("--json")) process.stdout.write(`${JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "PI_WEBCTL_FAILED", summary: "The requested operation failed." } }, null, 2)}\n`);
     else process.stderr.write("pi-webctl: PI_WEBCTL_FAILED: The requested operation failed.\n");
     process.exitCode = 1;
   });
