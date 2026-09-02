@@ -32,6 +32,11 @@ jobs:
           node-version: '24'
       - run: corepack enable
       - run: corepack prepare pnpm@10.13.1 --activate
+      - name: Provide the fixed installed Node path for user-unit verification
+        run: |
+          if [[ ! -e /usr/bin/node ]]; then
+            sudo ln -s "$(command -v node)" /usr/bin/node
+          fi
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
