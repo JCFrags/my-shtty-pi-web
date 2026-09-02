@@ -40,3 +40,7 @@ Run the read-only dependency report before a build:
 ```
 
 After cutover, `pi-web doctor --json` reports the installed profile, the reviewed core and document limits, `pdftotext`, selected artifact checks, and capability health. Office and scanned PDF readiness stays optional and false unless the release contains an acceptance-tested asset-set allowlist entry and `DOCLING_ARTIFACTS_PATH/model-assets.json` matches it. The current release has no such entry. A local digest manifest alone cannot enable or claim these capabilities. Browser health is required only when the installed profile contains `browser`.
+
+## Phase 4A canary profile
+
+`browser-agentcursor` is a separate prebuilt immutable candidate profile. It does not mutate or replace the legacy `browser` profile. Its closed Fedora 44 package set supplies Node 24, Python, Chromium, GTK/WebKit, systemd tools, and the release-mode Tauri runtime. Installation still selects `legacy`; use `~/.local/bin/pi-webctl backend agentcursor` only after exact-SHA preflight and install. See `browser-rebuild/PHASE4A-INSTALL-RUNBOOK.md`.

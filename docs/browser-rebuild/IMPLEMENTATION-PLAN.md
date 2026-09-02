@@ -173,7 +173,7 @@ Each phase has one acceptance gate. Keep the old browser production path until t
 
 **Goal:** ship the runtime reliably on the supported Fedora desktop.
 
-**Status:** in progress on `rebuild/screenshot-first-browser`. Commit `02b6c78` implements and accepts the deterministic BrowserResourceSupervisor half of ADR-012. Installed acceptance and the exact-release four-hour soak remain open. AgentCursor remains opt-in and `legacy` remains the default.
+**Status:** Phase 4A implementation and exact installed qualification are complete on `rebuild/screenshot-first-browser` at code SHA `30d76dc608cf9ce62d4c887cada02e63e93967b9`. The user superseded the original four-hour soak with a maximum of ten minutes; the fixed 300-second workload passed in 315.024 seconds. AgentCursor remains opt-in and `legacy` remains the default.
 
 **Resource supervision delivered:** strict installed limits; exact `/proc` process-start identity; process-tree PSS/private dirty and profile-byte sampling; soft warnings; typed hard fencing; bounded operation and human-return drain; deterministic global victim order; one retryable close attempt; isolated Chrome process sessions; exact profile retention on cleanup uncertainty; bounded private workspace and doctor status. See ADR-027.
 
@@ -191,7 +191,7 @@ Each phase has one acceptance gate. Keep the old browser production path until t
 
 **Tests:** clean Fedora install; upgrade; uninstall; staged cutover/rollback; reboot; Chrome crash; authority crash; no display; missing browser; full disk/profile failure; two-session CPU/memory soak; socket and profile permission tests.
 
-**Acceptance gate:** staged install and rollback pass on Fedora. Two sessions meet reviewed resource limits. Doctor detects each required misconfiguration.
+**Acceptance gate:** passed for the Phase 4A canary. Immutable install/upgrade, two-actor installed acceptance, resource warning and hard limit, browser outage/search-read independence, rollback to the previous candidate, reinstall, classified doctor, reboot recovery, and the user-shortened installed soak passed. This does not authorize production-default routing.
 
 **Deletions enabled:** obsolete Rust toolchain and browser-only Cargo entries; old version pins, deployment profiles, and operations text.
 

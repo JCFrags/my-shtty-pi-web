@@ -134,3 +134,7 @@ pnpm benchmark:extraction
 ```
 
 The benchmark uses local fixtures only. It compares current quality with the reviewed baseline. See [`components/browser/benchmarks/extraction/README.md`](components/browser/benchmarks/extraction/README.md) for limits, metrics, optional adapter slots, and baseline review steps.
+
+## Phase 4A Fedora canary
+
+The immutable AgentCursor release candidate is documented in [`docs/browser-rebuild/PHASE4A-RESULTS.md`](docs/browser-rebuild/PHASE4A-RESULTS.md). It uses isolated `pi-web-phase4a` XDG roots, supervised proxy/browserd/webxd, an on-demand installed Tauri workspace, classified doctor, and deterministic rollback. `legacy` remains the repository and installed default. Use the Phase 4A install and rollback runbooks; do not use development-tree commands as production installation.

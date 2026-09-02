@@ -98,7 +98,7 @@ These decisions apply to the replacement browser runtime. They supersede conflic
 
 **Consequence:** Do not weaken one-process-per-session isolation to improve the metric. A recycling design must preserve explicit session identity, operation dispatch truth, cleanup, and visible recovery. Resource limits remain a production gate, not a Phase 2 development blocker.
 
-**Phase 4A status:** Commit `02b6c78` supplies the tested hard containment mechanism defined by ADR-027. It fences and explicitly closes only the affected session; it never recycles or remaps that session ID. ADR-012 remains open until the exact installed immutable candidate also passes representative installed-service acceptance and the uninterrupted four-hour soak. AgentCursor remains non-default.
+**Phase 4A status:** Commit `02b6c78` supplies the tested hard containment mechanism defined by ADR-027. Exact installed candidate `30d76dc` passed representative acceptance, one typed hard-limit closure, and the user-approved fixed 300-second soak. It fences and explicitly closes only the affected session; it never recycles or remaps that session ID. ADR-012 is resolved for canary use only. AgentCursor remains non-default, and Phase 4B requires a separate default-cutover decision.
 
 ## ADR-013: Public screenshot-first contract
 
@@ -166,7 +166,13 @@ Phase 2B.1 confirms barrier-reproduced same-session overlap, one session capture
 
 **Reason:** Workspace selection and received frames do not prove authority or what the user saw. Model work, stale desktop instances, reconnects, response loss, and input cleanup must all fail closed across an agent-user-agent ABA sequence. Return cannot depend on an ordinary queue that may be full or waiting for a fresh frame.
 
-**Consequence:** Private protocols are `browser.v3` and `workspace.v2`; public WebX remains `3.0.0`. React receives no raw lease, epoch, internal identity, secret, descriptor, socket path, or retained input. Human control is absent from model tools. Tauri still connects only to webxd. Production routing remains `legacy` by default, the legacy runtime remains selectable, and ADR-012 remains unresolved. See `ADR-021-BROWSERD-HUMAN-CONTROL-AUTHORITY.md`, `ADR-022-PAINTED-FRAME-PRIVATE-INPUT.md`, `ADR-023-FAIL-SAFE-RETURN-AND-USER-ENTRY.md`, and `PHASE3B-RESULTS.md`.
+**Consequence:** Private protocols are `browser.v3` and `workspace.v2`; public WebX remains `3.0.0`. React receives no raw lease, epoch, internal identity, secret, descriptor, socket path, or retained input. Human control is absent from model tools. Tauri still connects only to webxd. Production routing remains `legacy` by default and the legacy runtime remains selectable. Phase 4A later resolves ADR-012 only for bounded canary use. See `ADR-021-BROWSERD-HUMAN-CONTROL-AUTHORITY.md`, `ADR-022-PAINTED-FRAME-PRIVATE-INPUT.md`, `ADR-023-FAIL-SAFE-RETURN-AND-USER-ENTRY.md`, and `PHASE3B-RESULTS.md`.
+
+## ADR-024 through ADR-026: Phase 4A trust and deployment
+
+**Decision:** Use independent ephemeral keyed semantic fingerprints for human-input retries; run one canonical webxd with distinct candidate proxy/browserd user services and on-demand Tauri; publish complete immutable releases selected by one atomic current/previous pointer with verified rollback.
+
+**Consequence:** Human input is not retained, browser outages do not disable search/read, services never use checkout code, and candidate uninstall preserves legacy roots. See ADR-024 through ADR-026.
 
 ## ADR-027: Browser resource supervision
 
@@ -174,4 +180,10 @@ Phase 2B.1 confirms barrier-reproduced same-session overlap, one session capture
 
 **Reason:** Earlier long evidence did not prove a Chrome plateau. Production containment must be deterministic without weakening one-process-per-session isolation or hiding browser loss behind an old session ID.
 
-**Consequence:** Candidate defaults are 1,024/1,280 MiB per-session soft/hard PSS, 4,096 MiB global Chrome PSS, 512/1,024 MiB profile soft/hard, a 5-second sample interval, a 30-second drain budget, and a 15-second emergency close wait. Cleanup uses an isolated POSIX process session plus exact PID-start identities. Uncertain cleanup retains the profile. Private status is bounded and sanitized. This mechanism completes the deterministic half of ADR-012; installed four-hour evidence remains required. See `ADR-027-BROWSER-RESOURCE-SUPERVISION.md`.
+**Consequence:** Candidate defaults are 1,024/1,280 MiB per-session soft/hard PSS, 4,096 MiB global Chrome PSS, 512/1,024 MiB profile soft/hard, a 5-second sample interval, a 30-second drain budget, and a 15-second emergency close wait. Cleanup uses an isolated POSIX process session plus exact PID-start identities. Uncertain cleanup retains the profile. Private status is bounded and sanitized. Exact installed acceptance and the user-shortened fixed soak complete the Phase 4A canary gate; they do not authorize a default switch. See `ADR-027-BROWSER-RESOURCE-SUPERVISION.md` and `PHASE4A-RESULTS.md`.
+
+## ADR-028: AgentCursor canary selection
+
+**Decision:** Keep `legacy` as the repository and installed default. Enable AgentCursor only through the immutable controller as one process-level selection. Never permit request-level selection, fallback, or session remapping.
+
+**Consequence:** Phase 4A qualification supports an explicit canary while preserving the legacy runtime and deterministic rollback. Any default cutover requires a separate Phase 4B decision. See `ADR-028-AGENTCURSOR-CANARY-SELECTION.md`.

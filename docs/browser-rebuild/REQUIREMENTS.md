@@ -137,4 +137,16 @@ Phase 3A completes BR-03, BR-15, and BR-52 through BR-59 for read-only viewing. 
 | BR-68 | Real graphical control is isolated and recoverable. | Use two Pi worker processes, two Chromium sessions, real Tauri Rust and React; prove actor isolation, blocked controlled actor, unrelated actor progress, reconnect, webxd restart, browserd replacement, abandoned takeover fencing, return/resume, and complete cleanup. |
 | BR-69 | Final control qualification is clean, exact, and uninterrupted. | From an externally pinned clean SHA, run at least 1,800 seconds and 100 takeover/return cycles; record process, input, privacy, restart, replacement, latency, resource, screenshot, and cleanup evidence with zero unrecovered failures. |
 
-Phase 3B completes BR-60 through BR-69 on the frozen runtime and harness SHA recorded in `PHASE3B-RESULTS.md`. It does not resolve ADR-012 or authorize production-default AgentCursor routing.
+Phase 3B completes BR-60 through BR-69 on the frozen runtime and harness SHA recorded in `PHASE3B-RESULTS.md`.
+
+## Phase 4A release requirements
+
+| ID | Requirement | Acceptance |
+| --- | --- | --- |
+| BR-70 | Human-input retries bind complete semantics without retaining human text. | Independent ephemeral HMAC-SHA-256 at webxd and browserd; exact retry has one side effect; conflicts are typed and dispatch nothing. |
+| BR-71 | Production bytes are immutable and detached from the checkout. | Exact-SHA manifest, complete checksums/licenses, two-build normalized reproducibility, fixed Node/Python/Tauri packaging. |
+| BR-72 | Candidate deployment is strict and reversible. | Closed Fedora preflight, atomic current/previous selector, transaction recovery, upgrade, rollback, uninstall/reinstall, legacy preservation. |
+| BR-73 | Browser resources have deterministic hard containment. | Exact PID-start/process-session identity, bounded warning/drain/close, typed loss, unrelated-process protection, no remapping. |
+| BR-74 | Installed AgentCursor remains a canary. | Installed-only two-actor acceptance and user-shortened fixed 300-second soak pass; repository and installed default remain `legacy`. |
+
+Phase 4A completes BR-70 through BR-74 at code SHA `30d76dc608cf9ce62d4c887cada02e63e93967b9`. It resolves ADR-012 for canary use only and does not authorize a production-default switch.

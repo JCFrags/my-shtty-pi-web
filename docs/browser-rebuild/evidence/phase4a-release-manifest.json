@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "evidenceKind": "phase4a-release-manifest-summary",
+  "releaseId": "phase4a-30d76dc608cf9ce62d4c887cada02e63e93967b9",
+  "gitSha": "30d76dc608cf9ce62d4c887cada02e63e93967b9",
+  "dirtyTree": false,
+  "manifestSha256": "fc0b0f7bf57dab1d37a219497431d97966ace5b7fe680b5b32c49ee4a346fb64",
+  "checksumsSha256": "9b32b5ccfbbd58fd49ab7fc2813b448ea5fb291af2f9a4a1e39ca45f1c8aa522",
+  "toolchain": {
+    "node": "24.18.0",
+    "pnpm": "10.13.1",
+    "rust": "rustc 1.88.0 (6b00bc388 2025-06-23)",
+    "tauriCli": "2.8.4",
+    "tauriLibrary": "2.11.5"
+  },
+  "versions": {
+    "publicWebX": "3.0.0",
+    "publicBrowserContract": "3.0.0",
+    "browserPrivateProtocol": "browser.v3",
+    "workspacePrivateProtocol": "workspace.v2"
+  },
+  "agentCursor": {
+    "version": "0.3.0",
+    "commit": "b23c633c66fd240f836f5edd1034f6fcf678e237",
+    "vendoredSourceSha256": "b37f058d396229cdcc5027a2eba9eb4b4679c1d8b197ce7fbd413073609c47f9"
+  },
+  "supportedFedora": 44,
+  "testedBrowser": "Fedora Chromium 151.0.7922.173",
+  "buildMode": "release",
+  "backendDefault": "legacy",
+  "packaging": {
+    "node": "esbuild single-file ESM bundles",
+    "proxy": "stdlib-only Python with fixed Fedora interpreter",
+    "tauri": "release binary plus RPM"
+  }
+}

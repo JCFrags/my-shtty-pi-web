@@ -73,8 +73,12 @@ The Pi-facing authority covers search, read, stored normalized content, capabili
 
 Page history search returns explicit `501 unavailable`. Safe browser debug permits `console`, `network`, `html`, `pdf`, `record-start`, and `record-stop`. Secret-bearing `evaluate`, `cookies`, and `storage` operations are refused.
 
-## Phase 3A private workspace gateway
+## Private workspace gateway
 
-In AgentCursor mode, webxd is also the only browserd workspace-broker client. It reads the separate browserd workspace secret, receives sanitized aggregate snapshots and exact subscribed frames, and publishes `workspace.v1` under `$XDG_RUNTIME_DIR/pi-web/workspace/`. The directory is `0700`; the descriptor and unique socket are `0600`; descriptor publication and cleanup are instance-safe.
+In AgentCursor mode, webxd is also the only browserd workspace-broker client. It reads the separate browserd workspace secret, receives sanitized aggregate snapshots, exact subscribed frames, and browserd-owned control state, and publishes `workspace.v2` under `$XDG_RUNTIME_DIR/pi-web/workspace/`. The directory is `0700`; the descriptor and unique socket are `0600`; descriptor publication and cleanup are instance-safe.
 
-The gateway accepts only bounded bind, snapshot, local selection, clear, ping, and close commands. State records are non-droppable. Screenshot records use bounded length-prefixed JSON plus raw payload bytes and latest-only backpressure. Tauri Rust receives the descriptor and secret; JavaScript does not. Webxd restart reconnects to a surviving browserd. Browserd replacement clears old subscriptions and sessions. The gateway is read-only and is not part of the Pi model contract.
+The gateway accepts only bounded binding, snapshot, local selection, frame acknowledgement, control transfer, input, ping, and close commands. State records are non-droppable. Screenshot records use bounded length-prefixed JSON plus raw payload bytes and latest-only backpressure. Tauri Rust receives the descriptor, secret, and private control binding; JavaScript receives no raw lease or secret. Webxd restart cannot reclaim a human lease. Browserd replacement clears old subscriptions, controls, and sessions. This private authority is not part of the Pi model contract.
+
+## Phase 4A installed runtime
+
+The immutable release bundles webxd as one production ESM file. `webxd.service` points only through the verified current release and reads one strict rendered backend at process start. AgentCursor remains explicit opt-in. The installed authority capability probe requires healthy search/read before reconnect qualification; browser failures remain independent. Human-input retry state uses a process-local ephemeral HMAC and retains no human text.

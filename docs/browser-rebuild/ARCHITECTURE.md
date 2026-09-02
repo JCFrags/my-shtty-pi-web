@@ -201,7 +201,7 @@ The Phase 1.2 two-hour mixed run did not prove a memory plateau. Total PSS slope
 
 Phase 4A adds one `BrowserResourceSupervisor` in browserd. It samples exact Chrome process trees and symlink-safe profile bytes every five seconds. Candidate defaults are 1,024/1,280 MiB per-session soft/hard PSS, 4,096 MiB global Chrome PSS, and 512/1,024 MiB profile soft/hard. Soft limits report a bounded private warning. Hard limits fence observations, mutations, subscriptions, takeover, and input with `BROWSER_RESOURCE_LIMIT`; settle operations and human return within 30 seconds; and close only that session with one shared close attempt. Global victim order prefers idle non-human sessions and is stable by registration order. It never replaces a browser under the old session ID.
 
-This tested containment mechanism is the deterministic half of ADR-012. ADR-012 remains open until the exact immutable installed candidate passes representative installed-service acceptance and the uninterrupted four-hour soak. The backend default remains `legacy`. See `ADR-027-BROWSER-RESOURCE-SUPERVISION.md`.
+This tested containment mechanism and the exact installed Phase 4A acceptance resolve ADR-012 for bounded canary use. The user superseded the original four-hour soak with a maximum of ten minutes; the exact candidate passed the fixed 300-second workload in 315.024 seconds. The short run is not a general Chrome plateau claim. The backend default remains `legacy`, and a separate Phase 4B decision is required before any default switch. See `ADR-027-BROWSER-RESOURCE-SUPERVISION.md` and `PHASE4A-RESULTS.md`.
 
 ## Phase 3A viewer and Phase 3B human control
 

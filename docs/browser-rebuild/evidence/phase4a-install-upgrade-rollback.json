@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "evidenceKind": "phase4a-install-upgrade-rollback-summary",
+  "qualifyingRelease": "phase4a-30d76dc608cf9ce62d4c887cada02e63e93967b9",
+  "qualifyingGitSha": "30d76dc608cf9ce62d4c887cada02e63e93967b9",
+  "manifestSha256": "fc0b0f7bf57dab1d37a219497431d97966ace5b7fe680b5b32c49ee4a346fb64",
+  "previousRelease": "phase4a-596730e9cafe586d08acd14ee52b2c60be9d3cf4",
+  "checks": {
+    "detachedVerification": true,
+    "closedPreflight": true,
+    "firstIsolatedCandidateCleanInstall": true,
+    "explicitAgentCursorActivation": true,
+    "immutableUpgrade": true,
+    "versionAfterUpgrade": true,
+    "statusAfterUpgrade": true,
+    "doctorAfterUpgrade": true,
+    "rollbackToPrevious": true,
+    "versionAfterRollback": true,
+    "statusAfterRollback": true,
+    "doctorAfterRollback": true,
+    "exactReinstall": true,
+    "versionAfterReinstall": true,
+    "statusAfterReinstall": true,
+    "doctorAfterReinstall": true,
+    "earlierNonPurgeUninstallRestoredLegacy": true,
+    "legacyRootsPreserved": true
+  },
+  "finalBackend": "agentcursor",
+  "finalServices": {
+    "pi-web-agentcursor-egress-proxy.service":{"active":true,"enabled":true},
+    "pi-web-agentcursor-browserd.service":{"active":true,"enabled":true},
+    "webxd.service":{"active":true,"enabled":true}
+  }
+}

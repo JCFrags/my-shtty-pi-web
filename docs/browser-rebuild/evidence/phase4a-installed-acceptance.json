@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "mode": "acceptance",
+  "releaseId": "phase4a-30d76dc608cf9ce62d4c887cada02e63e93967b9",
+  "gitSha": "30d76dc608cf9ce62d4c887cada02e63e93967b9",
+  "manifestSha256": "fc0b0f7bf57dab1d37a219497431d97966ace5b7fe680b5b32c49ee4a346fb64",
+  "durationSeconds": 17.837780019999997,
+  "summary": {
+    "actors": 2,
+    "iterations": 0,
+    "controlCycles": 1,
+    "piReconnects": 5,
+    "proxyRestarts": 1,
+    "webxdRestarts": 1,
+    "browserdReplacements": 3,
+    "ownershipDenials": 2,
+    "browserOutageDenials": 1,
+    "searchReadChecks": 3,
+    "resourceWarnings": 1,
+    "resourceHardLimits": 1,
+    "checks": {"installedOnly":true,"fixtureOnly":true,"twoActorIsolation":true,"screenshot":true,"domAction":true,"workspacePaint":true,"humanAuthority":true,"searchReadExecuted":true,"searchReadDuringBrowserOutage":true,"resourceWarning":true,"resourceHardLimit":true,"cleanupRequested":true},
+    "actionLatencyMs": {"count":2,"min":472.42485899999997,"median":472.42485899999997,"p95":472.42485899999997,"max":3518.0563020000004,"mean":1995.2405805000003},
+    "observationLatencyMs": {"count":4,"min":9.478941000000077,"median":18.684298000000126,"p95":24.74363799999992,"max":60.727772999998706,"mean":28.408662499999707},
+    "workspaceLatencyMs": {"count":3,"min":99.55434200000013,"median":248.9840809999987,"p95":248.9840809999987,"max":552.592587,"mean":300.37700333333294},
+    "memoryKiB": {"count":0,"start":0,"end":0,"min":0,"max":0,"elapsedSeconds":0,"slopeKiBPerHour":0}
+  }
+}

@@ -124,3 +124,7 @@ pi-web doctor --json
 ```
 
 The rollback rehearsal restored prior candidate `401f4488f9303b754d02c38132ca5f45a19f6fa8` and all seven prior active services. The final `web-core` apply then restored the three required core services and left the four optional services inactive. This command is rollback, not uninstall. Keep both candidate releases and the final journal until a later accepted installation has its own tested rollback.
+
+## 9. Phase 4A AgentCursor canary
+
+The AgentCursor candidate uses a separate immutable controller and isolated `pi-web-phase4a` roots; do not apply the legacy cutover commands above to it. Use [`browser-rebuild/PHASE4A-INSTALL-RUNBOOK.md`](browser-rebuild/PHASE4A-INSTALL-RUNBOOK.md), [`browser-rebuild/PHASE4A-UPGRADE-ROLLBACK-RUNBOOK.md`](browser-rebuild/PHASE4A-UPGRADE-ROLLBACK-RUNBOOK.md), and [`browser-rebuild/PHASE4A-OPERATIONS-RUNBOOK.md`](browser-rebuild/PHASE4A-OPERATIONS-RUNBOOK.md). The installed and repository default remains `legacy`.

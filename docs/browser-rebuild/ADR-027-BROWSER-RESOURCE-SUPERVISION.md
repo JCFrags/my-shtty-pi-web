@@ -4,7 +4,7 @@
 
 Accepted for the Phase 4A candidate runtime on 2026-09-01.
 
-The deterministic hard-bound implementation is complete. ADR-012 remains open until the exact installed candidate also passes the required representative installed-service acceptance and uninterrupted four-hour soak. AgentCursor remains an explicit opt-in. The installed and repository default remains `legacy`.
+The deterministic hard-bound implementation and exact installed qualification are complete. The user superseded the original four-hour soak with a maximum of ten minutes; the exact candidate passed the fixed 300-second workload. This resolves ADR-012 for bounded Phase 4A canary use, not for a production-default switch. AgentCursor remains an explicit opt-in. The installed and repository default remains `legacy`.
 
 ## Context
 
@@ -45,7 +45,7 @@ A sampling failure produces a bounded `warning` with reason `sampling-unavailabl
 | Idle timeout | disabled |
 | Maximum session age | disabled |
 
-These memory defaults are above the previously observed normal per-session range. They are candidate limits, not a plateau claim. Phase 4A installed evidence may justify a later reviewed adjustment. Configuration is strict and bounded. Unknown `PI_WEB_RESOURCE_*` variables fail startup. Soft limits must be below hard limits, the global limit cannot be below the per-session hard limit, and the emergency timeout cannot exceed the drain timeout.
+These memory defaults are above the previously observed normal per-session range. They are candidate limits, not a plateau claim. The Phase 4A installed acceptance proved one warning and one hard-limit closure; the shortened soak remained below the limits. A later reviewed adjustment requires new evidence. Configuration is strict and bounded. Unknown `PI_WEB_RESOURCE_*` variables fail startup. Soft limits must be below hard limits, the global limit cannot be below the per-session hard limit, and the emergency timeout cannot exceed the drain timeout.
 
 ### Soft limit
 
@@ -129,16 +129,17 @@ Deterministic tests cover:
 - exact profile retention on uncertain tree, identity change, same-UID use, and late process-session membership;
 - exact failed-launch settlement.
 
-The accepted implementation is commit `02b6c78` on `rebuild/screenshot-first-browser`. Before that commit, repository lint, typecheck, tests, schema checks, release-builder checks, Rust workspace check/tests, and focused runtime tests passed. Independent exact-diff review result `res_01M1EW4KZYRYJXN9GJ8RC4GB55` accepted the final descendant-cleanup correction.
+The base implementation is commit `02b6c78` on `rebuild/screenshot-first-browser`. Terminal classification and qualification races were corrected through exact candidate `30d76dc608cf9ce62d4c887cada02e63e93967b9`. Repository lint, typecheck, tests, schema checks, release-builder checks, exact Rust 1.88 workspace tests, and focused runtime tests passed. Installed acceptance proved one profile warning, one typed hard limit, same-owner bounded terminal classification, cross-owner nondisclosure, exact cleanup, and no remapping.
 
 ## Consequences
 
-ADR-012 now has a tested deterministic containment mechanism, but Phase 4A has not yet supplied the second required input: representative evidence from the exact installed immutable release and the uninterrupted four-hour installed-service soak. Until that evidence passes:
+ADR-012 now has both a tested deterministic containment mechanism and representative evidence from the exact installed immutable release. The user-approved fixed soak completed in 315.024 seconds with 23 memory samples, start/end 670,356/660,692 KiB, min/max 474,260/694,004 KiB, and a full-window fitted slope of -120,709.733 KiB/hour. The short window is not a general Chrome plateau claim and cannot supply final-two-hour, final-hour, or final-30-minute slopes.
 
-- ADR-012 remains open;
+This is sufficient only for the Phase 4A canary because hard containment, typed loss, exact cleanup, unrelated-process protection, and no remapping were also proved. Therefore:
+
 - AgentCursor remains non-default;
 - `WEBX_BROWSER_BACKEND=legacy` remains the default;
 - the legacy runtime and rollback switch remain installed;
-- no Phase 4B default switch is authorized.
+- no Phase 4B default switch is authorized by this ADR.
 
-If the installed soak shows a credible plateau below the limits, the limits remain a safety backstop. If it shows continued growth, qualification can still pass only when the supervisor contains the affected session before the hard bound with exact cleanup, explicit typed loss, no unrelated signal, and no silent remapping.
+A future default-cutover decision must review continued operational evidence and keep these limits as a safety backstop.

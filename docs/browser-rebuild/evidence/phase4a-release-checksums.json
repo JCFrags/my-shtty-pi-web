@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "evidenceKind": "phase4a-release-checksum-summary",
+  "releaseId": "phase4a-30d76dc608cf9ce62d4c887cada02e63e93967b9",
+  "manifestSha256": "fc0b0f7bf57dab1d37a219497431d97966ace5b7fe680b5b32c49ee4a346fb64",
+  "checksumsSha256": "9b32b5ccfbbd58fd49ab7fc2813b448ea5fb291af2f9a4a1e39ca45f1c8aa522",
+  "checksummedFiles": 587,
+  "selectedImmutableFiles": [
+    {"path":"bin/pi-browser-workspace","sha256":"b4fe6f7fa81beb1521612631f624ee1a43813befb94013ec18d4f542aefe337a","bytes":8637640},
+    {"path":"bin/pi-web-browserd.mjs","sha256":"4c11baf523b959b5c9d7a1708b3c89414e59601f6cdd2f99343b4106d4178ac6","bytes":781228},
+    {"path":"bin/pi-web-egress-proxy","sha256":"f45867c94b00d82c3a1a7dbdc76244e236764fa890dcb8a3b8f441931d8c12b2","bytes":8885},
+    {"path":"bin/pi-web-webxd.mjs","sha256":"873d3ff3d83bac4a35a1c14296511bdeb93700491e33062726aae6f2f75bfc60","bytes":736848},
+    {"path":"bin/pi-webctl.mjs","sha256":"d4ff0f4454d5843e5606328bfddcd6e278db98c8819e9e931a309e20bf570ed7","bytes":114471},
+    {"path":"share/artifacts/Pi Browser Workspace-0.1.0-1.x86_64.rpm","sha256":"22a76f53d76abb57a7332d3c53feebc80fc527ad460ad19581f7440552442963","bytes":3425352}
+  ],
+  "note": "The installed checksums.json is authoritative and is not copied in full because this evidence is intentionally bounded."
+}

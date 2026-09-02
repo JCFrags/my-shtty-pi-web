@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "evidenceKind": "phase4a-bounded-security-self-review",
+  "gitSha": "30d76dc608cf9ce62d4c887cada02e63e93967b9",
+  "reviewMode": "direct self-review; independent audits suspended by explicit user instruction",
+  "checks": {
+    "immutableReleaseChecksums": "pass",
+    "releaseOwnerModeAndLinkCount": "pass",
+    "symlinkAndAncestorSafety": "pass",
+    "staleLockAndPidReuse": "pass",
+    "fixedCommandsAndExecutables": "pass",
+    "unknownConfigurationRejected": "pass",
+    "environmentAndChromeFlagChannelsClosed": "pass",
+    "loopbackProxyAndCdp": "pass",
+    "proxyBypassDenied": "pass",
+    "socketAndDescriptorModes": "pass",
+    "tauriCspAndCapabilities": "pass",
+    "frontendSecretAbsence": "pass",
+    "humanInputHmacPrivacy": "pass",
+    "rollbackIdentity": "pass",
+    "uninstallPathAllowlist": "pass",
+    "dependencyLicenseClosure": "pass",
+    "forbiddenArtifactScan": "pass"
+  },
+  "trustBoundary": "No hostile same-UID isolation claim.",
+  "retainedSensitiveData": false,
+  "notIncluded": ["page bodies","human input","URLs","descriptors","secrets","PIDs","profile paths","raw logs","screenshots"]
+}

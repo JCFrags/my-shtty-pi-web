@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "releaseId": "phase4a-30d76dc608cf9ce62d4c887cada02e63e93967b9",
+  "backend": "agentcursor",
+  "findings": [
+    {"category":"release","status":"pass","code":"RELEASE_VERIFIED"},
+    {"category":"filesystem","status":"pass","code":"FILESYSTEM_VERIFIED"},
+    {"category":"services","status":"pass","code":"SERVICES_CANDIDATE_ACTIVE"},
+    {"category":"display","status":"pass","code":"DISPLAY_SESSION_AVAILABLE"},
+    {"category":"browser","status":"pass","code":"BROWSER_REVIEWED","product":"Chromium","version":"151.0.7922.173"},
+    {"category":"egress","status":"pass","code":"EGRESS_PROXY_HEALTHY"},
+    {"category":"authority","status":"pass","code":"AUTHORITY_HEALTHY"},
+    {"category":"resource","status":"pass","code":"RESOURCE_SUPERVISION_HEALTHY"},
+    {"category":"workspace","status":"not-tested","code":"WORKSPACE_LIVE_NOT_TESTED"}
+  ],
+  "privacy": "Controlled classifications only; no paths, descriptors, secrets, process IDs, profiles, page content, or human input."
+}

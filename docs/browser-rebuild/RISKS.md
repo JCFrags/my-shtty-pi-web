@@ -85,4 +85,17 @@ Phase 3A removes the former “production Tauri frame bridge” residual item. I
 | Human control becomes a model-facing or generic command surface | Critical | Low | Keep takeover/return in strict user-only Pi command handling and a fixed executable with bounded shell-free arguments. Add no SDK operation, tool schema, generic launcher, arbitrary CDP, or JavaScript evaluation. |
 | CDP virtual input is mistaken for trusted desktop input | High | Medium | State the boundary explicitly. Phase 3B does not add Wayland portal input, X11 XTest, active-window selection, global coordinates, or bot-detection guarantees. OS pointer research remains optional Phase 6 work. |
 
-Phase 3B closes the qualified human-takeover authority risk for its Fedora Chromium/CDP scope. It does not resolve Google Chrome coverage, packaging, multi-monitor/fractional-scale OS coordinates, hostile same-UID code, long-term Chrome plateau, or ADR-012. Production-default routing remains disabled.
+Phase 3B closes the qualified human-takeover authority risk for its Fedora Chromium/CDP scope.
+
+## Phase 4A disposition
+
+| Risk | Disposition |
+| --- | --- |
+| Unbounded Chrome growth | Deterministic supervisor warning and hard closure passed installed acceptance. The shortened soak was below limits but is not a general plateau claim. |
+| Release or rollback drift | Exact manifest/checksums, immutable selector, transaction recovery, rollback and reinstall passed. |
+| Browser outage disables research | Search/read remained healthy during installed browser outage and service replacement. |
+| Candidate overwrites legacy state | Candidate uses isolated `pi-web-phase4a` roots; legacy nonempty roots and services were preserved. |
+| Human input leaks into retry/evidence | Independent ephemeral HMACs and bounded privacy scans passed. |
+| Environment coverage is overstated | Google Chrome, fractional scale, and multi-monitor remain untested; hostile same-UID and OS pointer control remain outside scope. |
+
+ADR-012 is resolved only for the explicit Phase 4A canary. Production-default routing remains disabled.

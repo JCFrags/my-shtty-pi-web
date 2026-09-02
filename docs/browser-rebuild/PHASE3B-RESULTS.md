@@ -164,4 +164,6 @@ git diff --check
 
 Phase 3B covers Fedora Chromium and CDP virtual input. It does not cover Google Chrome, trusted Wayland/X11 pointer injection, multi-monitor or fractional-scale OS coordinates, packaging and supervision, production-default routing, hostile same-UID isolation, uploads/downloads, cross-origin out-of-process iframe DOM fallback, or a long-term Chrome memory plateau.
 
-Rollback is to avoid launching the workspace and run webxd with its default `legacy` backend. The legacy runtime remains installed and selectable. Do not merge this branch to `main` or enable AgentCursor by default based on Phase 3B alone. Deployment remains Phase 4, and ADR-012 plus later release gates still apply.
+Rollback is to avoid launching the workspace and run webxd with its default `legacy` backend. The legacy runtime remains installed and selectable. Do not merge this branch to `main` or enable AgentCursor by default based on Phase 3B alone.
+
+Phase 4A later packaged and qualified these bytes as an explicit Fedora canary at `30d76dc608cf9ce62d4c887cada02e63e93967b9`. It resolves ADR-012 for canary use with deterministic resource containment and the user-shortened installed soak. It still does not authorize a default switch. See `PHASE4A-RESULTS.md`.

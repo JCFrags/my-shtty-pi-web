@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "evidenceKind": "phase4a-systemd-security-summary",
+  "platform": "Fedora 44 x86_64 user systemd",
+  "units": [
+    {"name":"pi-web-agentcursor-egress-proxy.service","active":true,"enabled":true,"exposureScore":5.6,"exposureClass":"MEDIUM"},
+    {"name":"pi-web-agentcursor-browserd.service","active":true,"enabled":true,"exposureScore":6.5,"exposureClass":"MEDIUM"},
+    {"name":"webxd.service","active":true,"enabled":true,"exposureScore":5.6,"exposureClass":"MEDIUM"}
+  ],
+  "controls": [
+    "fixed immutable executables and arguments",
+    "owner-only runtime directories and sockets",
+    "restrictive UMask",
+    "loopback-only proxy and CDP",
+    "no shell or arbitrary executable channel",
+    "bounded restart policy",
+    "webxd search/read independence from browser services"
+  ],
+  "trustBoundary": "Cooperative same-UID protection; hostile same-UID isolation is not claimed."
+}
