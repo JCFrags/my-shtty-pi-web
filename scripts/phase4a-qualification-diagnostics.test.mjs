@@ -39,6 +39,19 @@ async function expectCode(promise, code) {
   }
 });
 
+test("diagnostics reader consumes complete lines before applying the residual bound", async () => {
+  const { root, path } = await temporaryJournal();
+  try {
+    const line = `${JSON.stringify(record(1, { payload: "x".repeat(900) }))}\n`;
+    await writeFile(path, line.repeat(200), { mode: 0o600 });
+    const reader = new QualificationDiagnosticsReader(path);
+    assert.equal((await reader.records()).length, 200);
+    assert.equal(await reader.index(), 200);
+  } finally {
+    await closeJournal(root);
+  }
+});
+
 test("diagnostics reader bounds the ring and expires old cursors", async () => {
   const { root, path } = await temporaryJournal();
   try {

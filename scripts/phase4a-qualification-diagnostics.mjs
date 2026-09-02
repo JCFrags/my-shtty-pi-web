@@ -160,8 +160,8 @@ export class QualificationDiagnosticsReader {
           throw new QualificationDiagnosticsError("invalid");
         }
         this.partial += decoded;
-        if (Buffer.byteLength(this.partial, "utf8") > this.maxLineBytes) throw new QualificationDiagnosticsError("unsafe");
         this.consumeCompleteLines();
+        if (Buffer.byteLength(this.partial, "utf8") > this.maxLineBytes) throw new QualificationDiagnosticsError("unsafe");
         this.offset += result.bytesRead;
       }
       const after = await handle.stat();
