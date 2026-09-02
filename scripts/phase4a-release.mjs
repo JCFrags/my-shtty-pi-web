@@ -548,6 +548,7 @@ async function buildRelease(options) {
 function validateFixedQualificationRunner(source) {
   if (!source.includes("soak-4h") || !/\b14400\b/u.test(source) || !/process\.argv\.length\s*===\s*3/u.test(source)) fail("release qualification runner lacks the fixed four-hour mode");
   if (/--(?:duration|seconds|minutes|hours)\b/u.test(source)) fail("release qualification runner exposes an arbitrary duration");
+  if (!/kind:\s*["']session\.list["']/u.test(source) || !/kind:\s*["']tab\.list["'][^}]*\bcontrolEpoch\b/u.test(source)) fail("release qualification runner lacks exact tab-list authority");
 }
 /**
  * @param {string} releaseRootValue

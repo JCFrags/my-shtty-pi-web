@@ -43,7 +43,7 @@ async function syntheticRelease(forbiddenMarker) {
     writeFile(join(releaseRoot, "bin/pi-web-egress-proxy"), "#!/usr/bin/python3\npass\n"),
     writeFile(join(releaseRoot, "bin/pi-web-qualification-proxy"), "#!/usr/bin/python3\npass\n"),
     writeFile(join(releaseRoot, "bin/pi-web-qualification-atspi.py"), "#!/usr/bin/python3\npass\n"),
-    writeFile(join(releaseRoot, "bin/pi-web-qualification-runner.mjs"), "const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; export { mode, seconds };\n"),
+    writeFile(join(releaseRoot, "bin/pi-web-qualification-runner.mjs"), "const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; const sessions = { kind: 'session.list' }; const tabs = { kind: 'tab.list', controlEpoch: 1 }; export { mode, seconds, sessions, tabs };\n"),
     writeFile(join(releaseRoot, "bin/pi-web-qualification-pi-worker.mjs"), "export {};\n"),
     writeFile(join(releaseRoot, "bin/pi-browser-workspace"), "workspace fixture\n"),
     writeFile(join(releaseRoot, "bin/pi-browser-workspace-qualification"), "workspace qualification fixture\n"),
@@ -134,11 +134,12 @@ test("production Node bundles have a closed syntax-checked dependency and licens
     const metafiles = await releaseInternals.buildNodeBundles(temporaryRoot);
     const licenses = await releaseInternals.writeBundledLicenses(temporaryRoot, metafiles);
     assert.ok(licenses.length > 0, "bundled dependency licenses must not be empty");
-    for (const relativePath of ["bin/pi-web-browserd.mjs", "bin/pi-web-webxd.mjs", "share/pi-webx/extension.mjs"]) {
+    for (const relativePath of ["bin/pi-web-browserd.mjs", "bin/pi-web-webxd.mjs", "bin/pi-web-qualification-runner.mjs", "share/pi-webx/extension.mjs"]) {
       const path = join(temporaryRoot, relativePath);
       execFileSync(process.execPath, ["--check", path], { cwd: tmpdir(), stdio: "pipe" });
       assert.equal((await readFile(path)).includes(Buffer.from(sourceRoot)), false, `${relativePath} contains the source checkout path`);
     }
+    releaseInternals.validateFixedQualificationRunner(await readFile(join(temporaryRoot, "bin/pi-web-qualification-runner.mjs"), "utf8"));
     const extension = await readFile(join(temporaryRoot, "share/pi-webx/extension.mjs"), "utf8");
     assert.match(extension, /from "@earendil-works\/pi-ai"/u);
     assert.match(extension, /from "@earendil-works\/pi-tui"/u);
@@ -148,10 +149,13 @@ test("production Node bundles have a closed syntax-checked dependency and licens
   }
 });
 
-test("fixed qualification runner verification requires immutable four-hour mode without duration options", () => {
-  releaseInternals.validateFixedQualificationRunner("const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400;");
-  assert.throws(() => releaseInternals.validateFixedQualificationRunner("const mode = process.argv.length === 3 ? 'soak' : 'acceptance'; const seconds = 14400;"), /fixed four-hour/u);
-  assert.throws(() => releaseInternals.validateFixedQualificationRunner("const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; const option = '--duration';"), /arbitrary duration/u);
+test("fixed qualification runner verification requires immutable four-hour mode and exact tab authority", () => {
+  const authority = "const sessions = { kind: 'session.list' }; const tabs = { kind: 'tab.list', controlEpoch: 1 };";
+  releaseInternals.validateFixedQualificationRunner(`const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; ${authority}`);
+  assert.throws(() => releaseInternals.validateFixedQualificationRunner(`const mode = process.argv.length === 3 ? 'soak' : 'acceptance'; const seconds = 14400; ${authority}`), /fixed four-hour/u);
+  assert.throws(() => releaseInternals.validateFixedQualificationRunner(`const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; const option = '--duration'; ${authority}`), /arbitrary duration/u);
+  assert.throws(() => releaseInternals.validateFixedQualificationRunner("const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; const tabs = { kind: 'tab.list', controlEpoch: 1 };"), /exact tab-list authority/u);
+  assert.throws(() => releaseInternals.validateFixedQualificationRunner("const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; const sessions = { kind: 'session.list' }; const tabs = { kind: 'tab.list' };"), /exact tab-list authority/u);
 });
 
 test("detached verification accepts a complete immutable inventory and detects tampering", async () => {
