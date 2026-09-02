@@ -549,6 +549,9 @@ function validateFixedQualificationRunner(source) {
   if (!source.includes("soak-4h") || !/\b14400\b/u.test(source) || !/process\.argv\.length\s*===\s*3/u.test(source)) fail("release qualification runner lacks the fixed four-hour mode");
   if (/--(?:duration|seconds|minutes|hours)\b/u.test(source)) fail("release qualification runner exposes an arbitrary duration");
   if (!/kind:\s*["']session\.list["']/u.test(source) || !/kind:\s*["']tab\.list["'][^}]*\bcontrolEpoch\b/u.test(source)) fail("release qualification runner lacks exact tab-list authority");
+  const restartHelper = /async function restartQualificationBrowserd\([^)]*\)\s*\{[^}]*restartUnit\(["']pi-web-qualification-browserd\.service["']\);[^}]*await waitForBrowserdReady\(\);[^}]*\}/u;
+  const resourceFinally = /finally\s*\{[\s\S]{0,1000}?await atomicPrivateText\([\s\S]{0,500}?await restartQualificationBrowserd\(\);/u;
+  if (!restartHelper.test(source) || !resourceFinally.test(source)) fail("release qualification runner lacks ready-checked browserd restoration");
 }
 /**
  * @param {string} releaseRootValue

@@ -43,7 +43,7 @@ async function syntheticRelease(forbiddenMarker) {
     writeFile(join(releaseRoot, "bin/pi-web-egress-proxy"), "#!/usr/bin/python3\npass\n"),
     writeFile(join(releaseRoot, "bin/pi-web-qualification-proxy"), "#!/usr/bin/python3\npass\n"),
     writeFile(join(releaseRoot, "bin/pi-web-qualification-atspi.py"), "#!/usr/bin/python3\npass\n"),
-    writeFile(join(releaseRoot, "bin/pi-web-qualification-runner.mjs"), "const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; const sessions = { kind: 'session.list' }; const tabs = { kind: 'tab.list', controlEpoch: 1 }; export { mode, seconds, sessions, tabs };\n"),
+    writeFile(join(releaseRoot, "bin/pi-web-qualification-runner.mjs"), "const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; const sessions = { kind: 'session.list' }; const tabs = { kind: 'tab.list', controlEpoch: 1 }; async function restartQualificationBrowserd() { restartUnit('pi-web-qualification-browserd.service'); await waitForBrowserdReady(); } try {} finally { await atomicPrivateText(); await restartQualificationBrowserd(); } export { mode, seconds, sessions, tabs };\n"),
     writeFile(join(releaseRoot, "bin/pi-web-qualification-pi-worker.mjs"), "export {};\n"),
     writeFile(join(releaseRoot, "bin/pi-browser-workspace"), "workspace fixture\n"),
     writeFile(join(releaseRoot, "bin/pi-browser-workspace-qualification"), "workspace qualification fixture\n"),
@@ -149,13 +149,16 @@ test("production Node bundles have a closed syntax-checked dependency and licens
   }
 });
 
-test("fixed qualification runner verification requires immutable four-hour mode and exact tab authority", () => {
+test("fixed qualification runner verification requires immutable mode, exact tab authority, and ready-checked browserd restoration", () => {
   const authority = "const sessions = { kind: 'session.list' }; const tabs = { kind: 'tab.list', controlEpoch: 1 };";
-  releaseInternals.validateFixedQualificationRunner(`const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; ${authority}`);
-  assert.throws(() => releaseInternals.validateFixedQualificationRunner(`const mode = process.argv.length === 3 ? 'soak' : 'acceptance'; const seconds = 14400; ${authority}`), /fixed four-hour/u);
-  assert.throws(() => releaseInternals.validateFixedQualificationRunner(`const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; const option = '--duration'; ${authority}`), /arbitrary duration/u);
-  assert.throws(() => releaseInternals.validateFixedQualificationRunner("const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; const tabs = { kind: 'tab.list', controlEpoch: 1 };"), /exact tab-list authority/u);
-  assert.throws(() => releaseInternals.validateFixedQualificationRunner("const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; const sessions = { kind: 'session.list' }; const tabs = { kind: 'tab.list' };"), /exact tab-list authority/u);
+  const restoration = "async function restartQualificationBrowserd() { restartUnit('pi-web-qualification-browserd.service'); await waitForBrowserdReady(); } try {} finally { await atomicPrivateText(); await restartQualificationBrowserd(); }";
+  releaseInternals.validateFixedQualificationRunner(`const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; ${authority} ${restoration}`);
+  assert.throws(() => releaseInternals.validateFixedQualificationRunner(`const mode = process.argv.length === 3 ? 'soak' : 'acceptance'; const seconds = 14400; ${authority} ${restoration}`), /fixed four-hour/u);
+  assert.throws(() => releaseInternals.validateFixedQualificationRunner(`const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; const option = '--duration'; ${authority} ${restoration}`), /arbitrary duration/u);
+  assert.throws(() => releaseInternals.validateFixedQualificationRunner(`const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; const tabs = { kind: 'tab.list', controlEpoch: 1 }; ${restoration}`), /exact tab-list authority/u);
+  assert.throws(() => releaseInternals.validateFixedQualificationRunner(`const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; const sessions = { kind: 'session.list' }; const tabs = { kind: 'tab.list' }; ${restoration}`), /exact tab-list authority/u);
+  assert.throws(() => releaseInternals.validateFixedQualificationRunner(`const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; ${authority}`), /ready-checked browserd restoration/u);
+  assert.throws(() => releaseInternals.validateFixedQualificationRunner(`const mode = process.argv.length === 3 ? 'soak-4h' : 'acceptance'; const seconds = 14400; ${authority} async function restartQualificationBrowserd() { restartUnit('pi-web-qualification-browserd.service'); } try {} finally { await atomicPrivateText(); await restartQualificationBrowserd(); }`), /ready-checked browserd restoration/u);
 });
 
 test("detached verification accepts a complete immutable inventory and detects tampering", async () => {

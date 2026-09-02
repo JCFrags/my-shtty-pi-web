@@ -472,8 +472,7 @@ async function exerciseResourceLimits(pi: PiWorker, workspace: Workspace): Promi
   let identity: BrowserIdentity | undefined;
   await atomicPrivateText(environmentPath, constrained);
   try {
-    restartUnit("pi-web-qualification-browserd.service");
-    await waitForBrowserdReady();
+    await restartQualificationBrowserd();
     identity = browserIdentity(await pi.execute("browser_open", { url: `${FIXTURE_BASE}/alpha` }));
     const resourceIdentity = identity;
     await workspace.select(resourceIdentity);
@@ -500,8 +499,12 @@ async function exerciseResourceLimits(pi: PiWorker, workspace: Workspace): Promi
   } finally {
     if (filler !== undefined) await rm(filler, { force: true }).catch(() => undefined);
     await atomicPrivateText(environmentPath, original);
-    restartUnit("pi-web-qualification-browserd.service");
+    await restartQualificationBrowserd();
   }
+}
+async function restartQualificationBrowserd(): Promise<void> {
+  restartUnit("pi-web-qualification-browserd.service");
+  await waitForBrowserdReady();
 }
 async function qualificationProfileDirectory(): Promise<string> {
   const root = join(qualificationRoot, "profiles");
