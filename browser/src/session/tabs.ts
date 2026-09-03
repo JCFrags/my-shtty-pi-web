@@ -169,18 +169,25 @@ export class TabManager {
     return tab.agentRuntime.observe(maxElements, includeText);
   }
 
+  agentActivate(id: number): boolean {
+    const tab = this.tabs.find((candidate) => candidate.id === id);
+    if (
+      !tab ||
+      this.control.state !== "agent" ||
+      !this.host.agentTabSwitchAllowed() ||
+      tab.controller.popup ||
+      tab.controller.devtoolsFocused
+    ) {
+      return false;
+    }
+    return this.activate(id);
+  }
+
   async agentClick(id: number, request: AgentClickRequest): Promise<AgentClickResult> {
     const tab = this.tabs.find((candidate) => candidate.id === id);
     if (!tab) throw new Error(`no tab ${id}`);
     return this.control.runMutation(request.expectedControlEpoch, async () => {
-      if (
-        !this.host.agentTabSwitchAllowed() ||
-        tab.controller.popup ||
-        tab.controller.devtoolsFocused
-      ) {
-        throw new Error("cannot activate a tab while terminal-browser is in a modal state");
-      }
-      if (!this.activate(id)) {
+      if (!this.agentActivate(id)) {
         throw new Error("cannot activate a tab while terminal-browser is in a modal state");
       }
       try {

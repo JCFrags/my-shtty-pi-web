@@ -486,8 +486,8 @@ class Session {
       openAppTab: (spec, app) => this.openAppTab(spec, app),
       openTab: (url, cwd) => this.tabs.create(url ? normalizeUrl(url, cwd) : DEFAULT_URL).id,
       activateTab: (id) => {
-        if (!this.tabs.has(id) || this.activeRecord()?.reviewing) return false;
-        return this.tabs.activate(id);
+        if (this.activeRecord()?.reviewing) return false;
+        return this.tabs.agentActivate(id);
       },
       agentTabSwitchAllowed: () => this.agentTabSwitchAllowed(),
       agentStatus: () => this.control.snapshot,
