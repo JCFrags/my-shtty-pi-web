@@ -9,6 +9,7 @@ import { TerminalBrowserDriver } from "./terminal-browser-driver";
 import type { BrowserControl } from "./control";
 import type {
   AgentActionService,
+  AgentActivity,
   AgentBrowserTarget,
   AgentClickRequest,
   AgentClickResult,
@@ -18,6 +19,7 @@ import type {
 
 export interface BrowserAgentRuntimeOptions {
   control: BrowserControl;
+  onActivityChange?: (activity: AgentActivity | null) => void;
   observer?: AgentPageObserver;
   driver?: BrowserDriver;
   actionServiceFactory?: (driver: BrowserDriver) => Promise<AgentActionService>;
@@ -42,6 +44,7 @@ export class BrowserAgentRuntime {
   readonly observer: AgentPageObserver;
   readonly driver: BrowserDriver;
   private readonly control: BrowserControl;
+  private readonly onActivityChange: (activity: AgentActivity | null) => void;
   private readonly actionServiceFactory: (driver: BrowserDriver) => Promise<AgentActionService>;
   private readonly observationId: () => string;
   private latestObservation: AgentObservation | null = null;
@@ -53,15 +56,20 @@ export class BrowserAgentRuntime {
     documentGeneration: number;
     controlEpoch: number;
   } | null = null;
+  private activityValue: AgentActivity | null = null;
+  private pulseTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly target: AgentBrowserTarget,
     options: BrowserAgentRuntimeOptions,
   ) {
     this.control = options.control;
+    this.onActivityChange = options.onActivityChange ?? (() => {});
     this.observer = options.observer ?? new PageObserver(target);
     this.driver = options.driver ?? new TerminalBrowserDriver(target, this.observer, {
       beforeInput: () => this.assertClickInput(),
+      onPointer: (event) => this.updateActivity(event),
+      onTarget: (point) => this.updateTarget(point),
     });
     this.actionServiceFactory = options.actionServiceFactory ?? defaultActionServiceFactory;
     this.observationId = options.observationId ?? randomUUID;
@@ -69,6 +77,15 @@ export class BrowserAgentRuntime {
 
   get controlEpoch(): number {
     return this.control.snapshot.controlEpoch;
+  }
+
+  get activity(): AgentActivity | null {
+    if (!this.activityValue) return null;
+    return {
+      ...this.activityValue,
+      cursor: this.activityValue.cursor ? { ...this.activityValue.cursor } : null,
+      target: this.activityValue.target ? { ...this.activityValue.target } : null,
+    };
   }
 
   async observe(maxElements = 200, includeText = true): Promise<AgentObservation> {
@@ -97,11 +114,13 @@ export class BrowserAgentRuntime {
     try {
       this.target.releaseAgentPointer();
     } catch {}
+    this.clearActivity();
   }
 
   invalidateControl(): void {
     this.documentGeneration += 1;
     this.latestObservation = null;
+    this.clearActivity();
   }
 
   async click(request: AgentClickRequest): Promise<AgentClickResult> {
@@ -140,6 +159,7 @@ export class BrowserAgentRuntime {
         };
       } finally {
         if (this.activeClick === click) this.activeClick = null;
+        this.clearTarget();
       }
     });
   }
@@ -160,6 +180,71 @@ export class BrowserAgentRuntime {
       throw new Error("stale or unknown observation");
     }
     this.control.assertAgent(request.expectedControlEpoch);
+  }
+
+  private updateActivity(event: import("../page/input").ProgrammaticPointerEvent) {
+    if (!this.currentClickActivity()) return;
+    const previous = this.activityValue;
+    this.activityValue = {
+      cursor: { x: event.x, y: event.y },
+      target: previous?.target ?? null,
+      pulse: event.kind === "down" || previous?.pulse === true,
+    };
+    if (event.kind === "down") this.startPulse();
+    this.emitActivity();
+  }
+
+  private updateTarget(point: Point) {
+    if (!this.currentClickActivity()) return;
+    const previous = this.activityValue;
+    this.activityValue = {
+      cursor: previous?.cursor ?? null,
+      target: { ...point },
+      pulse: true,
+    };
+    this.startPulse();
+    this.emitActivity();
+  }
+
+  private currentClickActivity(): boolean {
+    const click = this.activeClick;
+    return (
+      !!click &&
+      click.controlEpoch === this.control.snapshot.controlEpoch &&
+      this.control.state === "agent" &&
+      click.documentGeneration === this.documentGeneration &&
+      this.latestObservation?.observationId === click.observationId
+    );
+  }
+
+  private clearTarget() {
+    if (!this.activityValue || !this.activityValue.target) return;
+    this.activityValue = { ...this.activityValue, target: null };
+    this.emitActivity();
+  }
+
+  private startPulse() {
+    if (this.pulseTimer) clearTimeout(this.pulseTimer);
+    this.pulseTimer = setTimeout(() => {
+      this.pulseTimer = null;
+      if (!this.activityValue) return;
+      this.activityValue = { ...this.activityValue, pulse: false };
+      this.emitActivity();
+    }, 450);
+  }
+
+  private clearActivity() {
+    if (this.pulseTimer) {
+      clearTimeout(this.pulseTimer);
+      this.pulseTimer = null;
+    }
+    if (!this.activityValue) return;
+    this.activityValue = null;
+    this.emitActivity();
+  }
+
+  private emitActivity() {
+    this.onActivityChange(this.activity);
   }
 
   private assertClickInput(): void {

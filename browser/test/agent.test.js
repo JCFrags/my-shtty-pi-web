@@ -93,6 +93,21 @@ test("driver double-click produces two complete click cycles", async () => {
   ]);
 });
 
+test("driver activity callbacks report cursor, target, and click phases", async () => {
+  const activity = [];
+  const { driver } = driverFixture({
+    onTarget: (point) => activity.push({ kind: "target", point }),
+    onPointer: (event) => activity.push(event),
+  });
+  await driver.click(clickArgs({ pressMs: 0 }));
+  assert.deepEqual(activity, [
+    { kind: "move", x: 10, y: 12 },
+    { kind: "target", point: { x: 20, y: 24 } },
+    { kind: "down", x: 20, y: 24, button: "left" },
+    { kind: "up", x: 20, y: 24, button: "left" },
+  ]);
+});
+
 test("cursorState uses viewport center before the first movement", async () => {
   const { driver } = driverFixture();
   assert.deepEqual(await driver.cursorState(), { x: 50, y: 40 });
@@ -159,6 +174,7 @@ function runtimeFixture(options = {}) {
     control,
     observer,
     actionServiceFactory,
+    onActivityChange: options.onActivityChange,
     observationId: () => `observation-${++nextObservation}`,
   });
   return {
@@ -222,6 +238,57 @@ test("BrowserAgentRuntime delegates a valid click to ActionService", async () =>
     controlEpoch: 1,
     url: "https://example.test/",
   });
+});
+
+test("BrowserAgentRuntime forwards native click activity and clears it on invalidation", async () => {
+  const activity = [];
+  const { runtime } = runtimeFixture({
+    onActivityChange: (value) => activity.push(value),
+    actionServiceFactory: async (driver) => ({
+      click: async () => {
+        await driver.click(clickArgs({ pressMs: 0 }));
+        return { x: 20, y: 24 };
+      },
+    }),
+  });
+  const observation = await runtime.observe();
+  await runtime.click({ ref: "e1", observationId: observation.observationId, expectedControlEpoch: 1 });
+  assert.deepEqual(runtime.activity, {
+    cursor: { x: 20, y: 24 },
+    target: null,
+    pulse: true,
+  });
+  assert.notEqual(activity.length, 0);
+  runtime.invalidateDocument();
+  assert.equal(runtime.activity, null);
+  assert.equal(activity.at(-1), null);
+});
+
+test("BrowserAgentRuntime does not recreate activity after control takeover", async () => {
+  const activity = [];
+  let runtime;
+  const control = new BrowserControl({ onTransition: () => runtime?.invalidateControl() });
+  const fixture = runtimeFixture({
+    control,
+    onActivityChange: (value) => {
+      activity.push(value);
+      if (value?.target) control.takeHuman("pointer");
+    },
+    actionServiceFactory: async (driver) => ({
+      click: async () => {
+        await driver.click(clickArgs({ pressMs: 0 }));
+        return { x: 20, y: 24 };
+      },
+    }),
+  });
+  runtime = fixture.runtime;
+  const observation = await runtime.observe();
+  await assert.rejects(
+    runtime.click({ ref: "e1", observationId: observation.observationId, expectedControlEpoch: 1 }),
+    /stale control epoch/,
+  );
+  assert.equal(runtime.activity, null);
+  assert.equal(activity.at(-1), null);
 });
 
 test("BrowserAgentRuntime stops an active click after control takeover", async () => {

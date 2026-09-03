@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text } from "pixel-react";
 import type { EngineInfo, Surface } from "pixel-react";
-import type { BrowserState } from "../page/types";
+import type { BrowserSurfaceLayout, BrowserState } from "../page/types";
+import type { AgentControlSnapshot } from "../agent/control";
+import type { AgentActivity } from "../agent/types";
+import { AgentActivityOverlay } from "./agent-overlay";
 import { Icon } from "./icons";
 import type { IconName } from "./icons";
 import { PageContextMenu } from "./context-menu";
@@ -52,6 +55,9 @@ export function Chrome({
   record,
   recordSurface,
   pageSurface,
+  surfaceLayout,
+  agentControl,
+  agentActivity,
   popupSurface,
   devtoolsSurface,
 }: {
@@ -75,6 +81,9 @@ export function Chrome({
   record: RecordView | null;
   recordSurface: Surface | null;
   pageSurface: Surface;
+  surfaceLayout: BrowserSurfaceLayout;
+  agentControl: AgentControlSnapshot;
+  agentActivity: AgentActivity | null;
   popupSurface: Surface;
   devtoolsSurface: Surface;
 }) {
@@ -117,6 +126,14 @@ export function Chrome({
         agentActive={agentActive}
       />
       {agentActive && <AgentGlow layout={layout} theme={theme} intensity={glowPulse} />}
+      <AgentActivityOverlay
+        activity={agentActivity}
+        control={agentControl}
+        layout={surfaceLayout}
+        noOverlays={noOverlays}
+        rem={layout.rem}
+        theme={theme}
+      />
       {layout.devtools && (
         <DevtoolsPane
           layout={layout}

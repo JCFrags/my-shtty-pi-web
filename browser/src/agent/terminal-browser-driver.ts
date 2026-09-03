@@ -8,6 +8,7 @@ import type {
 };
 
 import type { AgentBrowserTarget, AgentPageObserver } from "./types";
+import type { ProgrammaticPointerEvent } from "../page/input";
 
 type ClickArgs = Parameters<BrowserDriver["click"]>[0];
 type TypeArgs = Parameters<BrowserDriver["type"]>[0];
@@ -20,11 +21,15 @@ type ResolveLocatorArgs = Parameters<BrowserDriver["resolveLocator"]>;
 export interface TerminalBrowserDriverOptions {
   sleep?: (ms: number) => Promise<void>;
   beforeInput?: () => void;
+  onPointer?: (event: ProgrammaticPointerEvent) => void;
+  onTarget?: (point: Point) => void;
 }
 
 export class TerminalBrowserDriver implements BrowserDriver {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly beforeInput: (() => void) | undefined;
+  private readonly onPointer: ((event: ProgrammaticPointerEvent) => void) | undefined;
+  private readonly onTarget: ((point: Point) => void) | undefined;
   private lastPosition: Point | null = null;
 
   constructor(
@@ -34,6 +39,8 @@ export class TerminalBrowserDriver implements BrowserDriver {
   ) {
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.beforeInput = options.beforeInput;
+    this.onPointer = options.onPointer;
+    this.onTarget = options.onTarget;
   }
 
   snapshot(maxElements: number, includeText: boolean) {
@@ -123,18 +130,25 @@ export class TerminalBrowserDriver implements BrowserDriver {
       const delay = at - previousAt;
       if (delay > 0) await this.sleep(delay);
       if (guard) this.beforeInput?.();
-      this.target.agentPointer({ kind: "move", x: sample.x, y: sample.y });
+      const move = { kind: "move" as const, x: sample.x, y: sample.y };
+      this.target.agentPointer(move);
+      this.onPointer?.(move);
       previousAt = at;
     }
   }
 
   private async clickCycle(point: Point, button: ClickArgs["button"], pressMs: number) {
+    this.onTarget?.(point);
     this.beforeInput?.();
-    this.target.agentPointer({ kind: "down", x: point.x, y: point.y, button });
+    const down = { kind: "down" as const, x: point.x, y: point.y, button };
+    this.target.agentPointer(down);
+    this.onPointer?.(down);
     try {
       if (pressMs > 0) await this.sleep(pressMs);
     } finally {
-      this.target.agentPointer({ kind: "up", x: point.x, y: point.y, button });
+      const up = { kind: "up" as const, x: point.x, y: point.y, button };
+      this.target.agentPointer(up);
+      this.onPointer?.(up);
     }
   }
 

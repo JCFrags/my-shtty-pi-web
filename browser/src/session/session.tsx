@@ -39,6 +39,7 @@ import { RecordSession } from "../record/session";
 import type { RecordActions } from "../record/types";
 import { Registry } from "../registry";
 import { Chrome } from "../ui/chrome";
+import { AgentOverlayRenderCoalescer } from "../ui/agent-overlay";
 import { ICONS } from "../ui/icons";
 import type {
   ChromeActions,
@@ -226,6 +227,7 @@ class Session {
   private popupSurface: Surface | null = null;
   private devtoolsSurface: Surface | null = null;
   private registry: Registry | null = null;
+  private readonly agentOverlayRender: AgentOverlayRenderCoalescer;
 
   private layout: ChromeLayout | null = null;
   private surfaceLayout: BrowserSurfaceLayout | null = null;
@@ -324,6 +326,10 @@ class Session {
         this.render();
       },
     });
+    this.agentOverlayRender = new AgentOverlayRenderCoalescer(
+      (callback) => setImmediate(callback),
+      () => this.render(),
+    );
     this.tabs = new TabManager(
       {
         createController: (url, visible, onState, options) =>
@@ -364,6 +370,7 @@ class Session {
         onTabClosed: (id) => this.closeOrShutdown(id),
         tabSwitchAllowed: () => !this.activeRecord()?.reviewing,
         agentTabSwitchAllowed: () => this.agentTabSwitchAllowed(),
+        requestAgentRender: () => this.agentOverlayRender.request(),
         onTabsChanged: () => {
           this.syncChromeComposition();
           this.registry?.update();
@@ -622,6 +629,7 @@ class Session {
     }
     this.registry?.dispose();
     this.registry = null;
+    this.agentOverlayRender.dispose();
     this.tabs.stopAll();
     try {
       this.popupSurface?.close();
@@ -742,10 +750,11 @@ class Session {
   }
 
   private render() {
-    if (!this.root || !this.layout || !this.popupSurface) return;
+    if (!this.root || !this.layout || !this.popupSurface || !this.surfaceLayout) return;
     if (!this.devtoolsSurface) return;
     const pageSurface = this.tabs.activeController?.surface;
     if (!pageSurface) return;
+    const noOverlays = this.sessionFlags.noOverlays || this.appIdentity != null;
     this.root.render(
       <Chrome
         state={this.tabs.activeState ?? this.fallbackState}
@@ -761,7 +770,10 @@ class Session {
             : null
         }
         urlEdit={this.urlEditOpen}
-        noOverlays={this.sessionFlags.noOverlays || this.appTabActive()}
+        noOverlays={noOverlays}
+        agentControl={this.control.snapshot}
+        agentActivity={this.tabs.active?.agentRuntime.activity ?? null}
+        surfaceLayout={this.surfaceLayout}
         popup={this.popupView()}
         zoomHud={this.zoomHud}
         download={this.download}

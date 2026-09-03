@@ -54,6 +54,7 @@ export interface TabHost {
   onDevtoolsAction(action: DevtoolsAction): void;
   onPageMenu(params: Electron.ContextMenuParams): void;
   onTabsChanged(): void;
+  requestAgentRender(): void;
   onTabOpened(opener: BrowserController, url: string): void;
   onTabClosed(id: number): void;
   tabSwitchAllowed(): boolean;
@@ -116,7 +117,10 @@ export class TabManager {
       if (tab.id === this.activeId) this.host.onActiveState(state, urlChanged);
       this.host.requestRender();
     }, { ...options, tabId: tab.id });
-    tab.agentRuntime = new BrowserAgentRuntime(tab.controller, { control: this.control });
+    tab.agentRuntime = new BrowserAgentRuntime(tab.controller, {
+      control: this.control,
+      onActivityChange: () => this.host.requestAgentRender(),
+    });
     tab.controller.onMainFrameNavigationStart = () => tab.agentRuntime.invalidateDocument();
     tab.controller.onCursorChange = () => {
       if (tab.id === this.activeId) this.host.onCursorChanged();
@@ -187,6 +191,7 @@ export class TabManager {
     const at = this.tabs.findIndex((t) => t.id === id);
     if (at < 0) return;
     const [closed] = this.tabs.splice(at, 1);
+    closed.agentRuntime.invalidateControl();
     closed.controller.stop();
     if (this.activeId === id) {
       const fallback = this.tabs[Math.min(at, this.tabs.length - 1)];
@@ -327,7 +332,10 @@ export class TabManager {
 
   stopAll() {
     this.stopAgentSweep();
-    for (const tab of this.tabs) tab.controller.stop();
+    for (const tab of this.tabs) {
+      tab.agentRuntime.invalidateControl();
+      tab.controller.stop();
+    }
     this.tabs = [];
     this.activeId = 0;
   }

@@ -29,6 +29,12 @@ export interface AgentObservation {
   snapshot: PageSnapshot;
 }
 
+export interface AgentActivity {
+  cursor: Point | null;
+  target: Point | null;
+  pulse: boolean;
+}
+
 export interface AgentClickRequest {
   ref: string;
   observationId: string;
