@@ -1,17 +1,23 @@
 id = "zenbu-labs.terminal-browser"
 name = "Terminal Browser"
-version = "0.1.1"
+version = "0.2.0"
 min_herdr_version = "0.8.2"
-description = "Open a browser inside herdr"
+description = "Open an owner-bound browser beside a Pi agent"
 platforms = ["linux", "macos"]
 
 [[build]]
-command = ["bash", "-c", "set -o pipefail; curl -fsSL https://terminal-browser.sh/install | bash"]
+command = ["bash", "-c", "cd .. && pnpm build"]
 platforms = ["linux", "macos"]
 
+[[panes]]
+id = "companion"
+title = "Terminal Browser"
+placement = "split"
+command = ["bash", "open-companion.sh"]
+
 [[actions]]
-id = "open-split"
-title = "Open terminal-browser (right split)"
-description = "Split the focused pane and open terminal-browser in it"
+id = "open-companion"
+title = "Open or focus Pi browser companion"
+description = "Open or focus the terminal-browser owned by the selected Pi pane"
 contexts = ["global"]
-command = ["bash", "open-split.sh"]
+command = ["bash", "focus-companion.sh"]

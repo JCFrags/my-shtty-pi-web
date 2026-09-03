@@ -448,6 +448,7 @@ function registryHost(key, calls = []) {
   return {
     key,
     tty: null,
+    owner: null,
     splitDir: null,
     parentTty: null,
     state: () => ({ url: "about:blank", title: "", favicon: null, loading: false, canGoBack: false, canGoForward: false, findMatches: null, zoom: 1 }),
@@ -476,6 +477,38 @@ function registryHost(key, calls = []) {
     viewport: () => ({ width: 100, height: 80 }),
   };
 }
+
+test("registry publishes complete browser owner metadata", () => {
+  const host = registryHost(`owner-${randomUUID()}`);
+  host.owner = {
+    workspaceId: "w1",
+    tabId: "w1:t2",
+    paneId: "w1:p3",
+    sessionId: "pi-session",
+    projectDir: "/tmp/project",
+  };
+  const registry = new Registry(host);
+  try {
+    assert.deepEqual(
+      {
+        ownerWorkspaceId: registry.record().ownerWorkspaceId,
+        ownerTabId: registry.record().ownerTabId,
+        ownerPaneId: registry.record().ownerPaneId,
+        ownerSessionId: registry.record().ownerSessionId,
+        ownerProjectDir: registry.record().ownerProjectDir,
+      },
+      {
+        ownerWorkspaceId: "w1",
+        ownerTabId: "w1:t2",
+        ownerPaneId: "w1:p3",
+        ownerSessionId: "pi-session",
+        ownerProjectDir: "/tmp/project",
+      },
+    );
+  } finally {
+    registry.dispose();
+  }
+});
 
 test("socket dispatches native action requests and enforces the 256 KiB line bound", async () => {
   const key = `d-${randomUUID()}`;

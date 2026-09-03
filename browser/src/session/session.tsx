@@ -26,7 +26,7 @@ import { initialBrowserState } from "../page/types";
 import type { BrowserState, BrowserSurfaceLayout } from "../page/types";
 import { zoomDirection } from "../page/zoom";
 import type { ZoomDirection } from "../page/zoom";
-import { appId, lastUrl, listApps, setLastUrl, settings, store } from "pixel-store";
+import { appId, lastUrl, listApps, parseBrowserOwner, setLastUrl, settings, store } from "pixel-store";
 import type {
   DevtoolsDock,
   InstanceRow,
@@ -469,6 +469,7 @@ class Session {
     this.registry = new Registry({
       key: this.ctx.key,
       tty: this.ctx.tty ?? null,
+      owner: parseBrowserOwner(this.ctx.env),
       where: async () => {
         const pane = await this.findOwnPane();
         return {

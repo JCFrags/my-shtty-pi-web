@@ -24,6 +24,11 @@ export const instances = sqliteTable("instances", {
   } | null>(),
   splitDir: text("split_dir", { enum: ["right", "left", "down", "up"] }),
   parentTty: text("parent_tty"),
+  ownerWorkspaceId: text("owner_workspace_id"),
+  ownerTabId: text("owner_tab_id"),
+  ownerPaneId: text("owner_pane_id"),
+  ownerSessionId: text("owner_session_id"),
+  ownerProjectDir: text("owner_project_dir"),
   startedAt: integer("started_at").notNull(),
 });
 

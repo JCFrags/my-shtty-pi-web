@@ -13,6 +13,16 @@ export { openStore, store } from "./client";
 export type { Store } from "./client";
 export { appState, instances, settings } from "./schema";
 export type { DevtoolsDock, InstanceRow, NewInstanceRow, SettingsRow } from "./schema";
+export {
+  BROWSER_OWNER_ENV,
+  browserOwnerColumns,
+  browserOwnerEnvironment,
+  browserOwnerFromColumns,
+  parseBrowserOwner,
+  requireHerdrBrowserOwner,
+  sameBrowserOwner,
+} from "./owner";
+export type { BrowserOwner, BrowserOwnerColumns } from "./owner";
 export { listInstances, removeInstance, upsertInstance } from "./instances";
 export { lastUrl, setLastUrl } from "./app-state";
 export {

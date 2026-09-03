@@ -4,6 +4,8 @@ import path from "node:path";
 
 import { z } from "zod";
 
+import type { BrowserOwner } from "./owner";
+
 const HOME = os.homedir();
 
 function interopRoot(kind: "state" | "share"): string {
@@ -37,13 +39,29 @@ export interface OpenResult {
   tab: number;
 }
 
+const browserOwnerSchema = z.object({
+  workspaceId: z.string(),
+  tabId: z.string(),
+  paneId: z.string(),
+  sessionId: z.string().nullable(),
+  projectDir: z.string(),
+});
+
 export const interopInstanceSchema = z.object({
   protocolVersions: z.array(z.number()),
   mode: z.enum(["browser", "app"]).catch("browser"),
   pid: z.number(),
   socket: z.string(),
   startedAt: z.number().catch(0),
-});
+  owner: browserOwnerSchema.nullable(),
+}) satisfies z.ZodType<{
+  protocolVersions: number[];
+  mode: "browser" | "app";
+  pid: number;
+  socket: string;
+  startedAt: number;
+  owner: BrowserOwner | null;
+}>;
 export type InteropInstance = z.infer<typeof interopInstanceSchema>;
 
 export function instanceKey(record: InteropInstance): string {

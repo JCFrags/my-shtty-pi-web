@@ -1,7 +1,8 @@
 import type { Terminal } from "pixel-terminals";
 
+import { currentBrowserOwner } from "./companion";
 import { control } from "./control";
-import { browsers, recordKey, targets } from "./instances";
+import { browsers, ownedBy, recordKey, targets } from "./instances";
 import type { Browser } from "./instances";
 
 const DEFAULT_MAX_ELEMENTS = 200;
@@ -279,14 +280,19 @@ async function selectBrowser(terminal: Terminal | null, key: string | undefined)
     if (matches.length > 1) throw new Error(`browser key ${key} is ambiguous`);
     return matches[0]!;
   }
+  if (process.env.HERDR_ENV === "1" || process.env.TERMINAL_BROWSER_OWNER_PANE_ID) {
+    const owner = currentBrowserOwner(process.env, process.cwd());
+    const owned = found.filter((browser) => ownedBy(browser, owner));
+    if (owned.length === 1) return owned[0]!;
+    if (owned.length === 0) {
+      throw new Error("no browser companion for this Pi pane; call browser_open first");
+    }
+    throw new Error("multiple browsers claim this Pi pane");
+  }
   const here = found.filter((browser) => browser.inCurrentTab);
   if (here.length === 1) return here[0]!;
-  if (here.length === 0) {
-    throw new Error("no browser in the current terminal tab; use --browser <key>");
-  }
-  throw new Error(
-    `${here.length} browsers in the current terminal tab; use --browser <key>`,
-  );
+  if (here.length === 0) throw new Error("no browser in the current terminal tab; use --browser <key>");
+  throw new Error(`${here.length} browsers in the current terminal tab; use --browser <key>`);
 }
 
 async function selectTab(browser: Browser, requested: number | undefined): Promise<number> {

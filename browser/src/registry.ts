@@ -8,10 +8,11 @@ import {
   advertiseInstance,
   openSpecSchema,
   removeInstance,
+  browserOwnerColumns,
   upsertInstance,
   withdrawInstance,
 } from "pixel-store";
-import type { InstanceRow, OpenResult, OpenSpec } from "pixel-store";
+import type { BrowserOwner, InstanceRow, OpenResult, OpenSpec } from "pixel-store";
 
 import type { AgentControlSnapshot } from "./agent/control";
 import {
@@ -55,6 +56,7 @@ export interface InteropInfo {
 export interface ControlHost {
   key: string;
   tty: string | null;
+  owner: BrowserOwner | null;
   where(): Promise<Where>;
   splitDir: InstanceRow["splitDir"];
   parentTty: string | null;
@@ -146,6 +148,7 @@ export class Registry {
       tty: this.tty,
       splitDir: this.host.splitDir,
       parentTty: this.host.parentTty,
+      ...browserOwnerColumns(this.host.owner),
       socket: this.socketPath,
       cdpPort: this.cdpPort,
       startedAt: this.startedAt,
@@ -174,6 +177,7 @@ export class Registry {
       pid: process.pid,
       socket: this.socketPath,
       startedAt: this.startedAt,
+      owner: this.host.owner,
     });
   }
 

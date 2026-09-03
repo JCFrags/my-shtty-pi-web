@@ -1,3 +1,5 @@
+import { browserOwnerFromColumns, sameBrowserOwner } from "pixel-store";
+import type { BrowserOwner } from "pixel-store";
 import { callerTty } from "pixel-terminals";
 import type { Direction, Pane, Terminal } from "pixel-terminals";
 
@@ -23,6 +25,14 @@ export interface Browser extends InstanceRecord {
 
 export function recordKey(record: InstanceRecord): string {
   return record.key ?? String(record.pid);
+}
+
+export function ownedBy(record: InstanceRecord, owner: BrowserOwner): boolean {
+  return sameBrowserOwner(browserOwnerFromColumns(record), owner);
+}
+
+export function ownerMatches(records: InstanceRecord[], owner: BrowserOwner): InstanceRecord[] {
+  return records.filter((record) => ownedBy(record, owner));
 }
 
 export interface Where {

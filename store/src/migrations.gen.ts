@@ -19,5 +19,15 @@ export const migrations: { id: string; statements: string[] }[] = [
       "ALTER TABLE `instances` ADD `split_dir` text;",
       "ALTER TABLE `instances` ADD `parent_tty` text;"
     ]
+  },
+  {
+    "id": "0003_chemical_sway",
+    "statements": [
+      "ALTER TABLE `instances` ADD `owner_workspace_id` text;",
+      "ALTER TABLE `instances` ADD `owner_tab_id` text;",
+      "ALTER TABLE `instances` ADD `owner_pane_id` text;",
+      "ALTER TABLE `instances` ADD `owner_session_id` text;",
+      "ALTER TABLE `instances` ADD `owner_project_dir` text;"
+    ]
   }
 ];

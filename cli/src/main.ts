@@ -26,6 +26,7 @@ import {
 import type { Direction, Terminal, TerminalCheck } from "pixel-terminals";
 import { actionCommand } from "./action";
 import { agentCommand } from "./agent";
+import { currentBrowserOwner, openCompanion } from "./companion";
 import { control } from "./control";
 import { setupCommand } from "./editors";
 import { ensureSetup, linkSkills, markSetupDone } from "./setup";
@@ -586,6 +587,19 @@ async function tryAdopt(args: string[]): Promise<boolean> {
   return false;
 }
 
+async function companionCommand(args: string[]): Promise<number> {
+  const subcommand = args.shift();
+  if (subcommand !== "open") fail("companion needs open");
+  const newTab = takeBoolFlag(args, "--new-tab");
+  const noFocus = takeBoolFlag(args, "--no-focus");
+  const url = args.shift();
+  if (url?.startsWith("-")) fail(`unknown option ${url}`);
+  if (args.length > 0) fail(`unexpected ${args[0]}`);
+  const owner = currentBrowserOwner(process.env, process.cwd());
+  print(await openCompanion(owner, { url, newTab, focus: !noFocus }, process.env));
+  return 0;
+}
+
 async function openCommand(args: string[]) {
   requirePaneAccess();
   const split = takeSplitFlag(args);
@@ -749,6 +763,10 @@ async function main(): Promise<number> {
     requirePaneAccess();
     const key = takeFlag(args, "--browser");
     return newTabCommand(args.find((arg) => !arg.startsWith("-")), key);
+  }
+  if (command === "companion") {
+    requirePaneAccess();
+    return companionCommand(args);
   }
   if (command === "agent") {
     requirePaneAccess();
