@@ -52,6 +52,7 @@ terminal-browser action # an agent-browser compatible cli for interacting with o
 | Copy / paste / cut | cmd+c / cmd+v / cmd+x | ctrl+c / ctrl+v / ctrl+x |
 | Record page (start/stop) | ctrl+r | ctrl+shift+r |
 | Complete recording review | ctrl+enter | ctrl+enter |
+| Start element selection (send to agent) | ctrl+g | ctrl+g |
 | Close popup / overlay | escape | escape |
 
 
