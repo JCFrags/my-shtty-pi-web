@@ -164,11 +164,11 @@ export function Chrome({
       {findOpen && (
         <FindBar state={state} actions={actions} layout={layout} theme={theme} />
       )}
-      {zoomHud != null && (
+      {!noOverlays && zoomHud != null && (
         <ZoomHud factor={zoomHud} layout={layout} theme={theme} findOpen={findOpen} />
       )}
-      {download && <DownloadHud download={download} layout={layout} theme={theme} />}
-      {toast && <Toast toast={toast} layout={layout} theme={theme} />}
+      {!noOverlays && download && <DownloadHud download={download} layout={layout} theme={theme} />}
+      {!noOverlays && toast && <Toast toast={toast} layout={layout} theme={theme} />}
       {popup && (
         <PopupModal
           view={popup}

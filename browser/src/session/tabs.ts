@@ -173,7 +173,11 @@ export class TabManager {
     const tab = this.tabs.find((candidate) => candidate.id === id);
     if (!tab) throw new Error(`no tab ${id}`);
     return this.control.runMutation(request.expectedControlEpoch, async () => {
-      if (!this.host.agentTabSwitchAllowed()) {
+      if (
+        !this.host.agentTabSwitchAllowed() ||
+        tab.controller.popup ||
+        tab.controller.devtoolsFocused
+      ) {
         throw new Error("cannot activate a tab while terminal-browser is in a modal state");
       }
       if (!this.activate(id)) {
