@@ -11,7 +11,8 @@ const SCRIPT_ASSET = "react-grab/index.global.js";
 let librarySource: string | null = null;
 function reactGrabLibrary(): string {
   if (librarySource) return librarySource;
-  const file = bundledAsset(SCRIPT_ASSET) ?? require.resolve("react-grab/dist/index.global.js");
+  const file = bundledAsset(SCRIPT_ASSET);
+  if (!file) throw new Error(`react-grab bundle missing: assets/${SCRIPT_ASSET} (run pnpm install)`);
   librarySource = `${fs.readFileSync(file, "utf8")}\n;undefined;`;
   return librarySource;
 }

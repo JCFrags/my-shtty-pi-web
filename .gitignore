@@ -51,3 +51,5 @@ dist-release/
 .dev.vars
 .wrangler/
 skill/build/
+
+/assets/react-grab/index.global.js
