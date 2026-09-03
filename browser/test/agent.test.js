@@ -7,7 +7,7 @@ const { BrowserAgentRuntime } = require("../dist/agent/runtime.js");
 const { TerminalBrowserDriver } = require("../dist/agent/terminal-browser-driver.js");
 const { Registry } = require("../dist/registry.js");
 
-function driverFixture() {
+function driverFixture(driverOptions = {}) {
   const events = [];
   const sleeps = [];
   const target = {
@@ -27,6 +27,7 @@ function driverFixture() {
   };
   const driver = new TerminalBrowserDriver(target, observer, {
     sleep: async (ms) => sleeps.push(ms),
+    ...driverOptions,
   });
   return { driver, events, sleeps, observer };
 }
@@ -110,6 +111,14 @@ test("unsupported driver methods fail explicitly", async () => {
   await assert.rejects(driver.type({ text: "hello", mode: "content" }), /not supported/);
   await assert.rejects(driver.navigate("https://example.test/"), /not supported/);
   await assert.rejects(driver.click(clickArgs({ mode: "debugger" })), /only supports content delivery/);
+});
+
+test("driver guard prevents native input after invalidation", async () => {
+  const { driver, events } = driverFixture({
+    beforeInput: () => { throw new Error("page changed since observation"); },
+  });
+  await assert.rejects(driver.click(clickArgs()), /page changed since observation/);
+  assert.deepEqual(events, [{ kind: "release" }]);
 });
 
 function runtimeFixture() {

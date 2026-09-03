@@ -45,13 +45,18 @@ export class BrowserAgentRuntime {
   private latestObservation: AgentObservation | null = null;
   private readonly epoch = 1;
   private actionService: Promise<AgentActionService> | null = null;
+  private operationQueue: Promise<void> = Promise.resolve();
+  private documentGeneration = 0;
+  private activeClick: { observationId: string; documentGeneration: number } | null = null;
 
   constructor(
     private readonly target: AgentBrowserTarget,
     options: BrowserAgentRuntimeOptions = {},
   ) {
     this.observer = options.observer ?? new PageObserver(target);
-    this.driver = options.driver ?? new TerminalBrowserDriver(target, this.observer);
+    this.driver = options.driver ?? new TerminalBrowserDriver(target, this.observer, {
+      beforeInput: () => this.assertClickInput(),
+    });
     this.actionServiceFactory = options.actionServiceFactory ?? defaultActionServiceFactory;
     this.observationId = options.observationId ?? randomUUID;
   }
@@ -61,45 +66,103 @@ export class BrowserAgentRuntime {
   }
 
   async observe(maxElements = 200, includeText = true): Promise<AgentObservation> {
-    const page = await this.observer.observe(maxElements, includeText);
-    const observation: AgentObservation = {
-      observationId: this.observationId(),
-      documentId: page.documentId,
-      controlEpoch: this.epoch,
-      snapshot: page.snapshot,
-    };
-    this.latestObservation = observation;
-    return observation;
+    return this.enqueue(async () => {
+      const documentGeneration = this.documentGeneration;
+      const page = await this.observer.observe(maxElements, includeText);
+      if (documentGeneration !== this.documentGeneration) {
+        throw new Error("page changed during observation");
+      }
+      const observation: AgentObservation = {
+        observationId: this.observationId(),
+        documentId: page.documentId,
+        controlEpoch: this.epoch,
+        snapshot: page.snapshot,
+      };
+      this.latestObservation = observation;
+      return observation;
+    });
   }
 
   invalidateDocument(): void {
+    this.documentGeneration += 1;
     this.latestObservation = null;
   }
 
   async click(request: AgentClickRequest): Promise<AgentClickResult> {
-    const observation = this.latestObservation;
-    if (!observation || observation.observationId !== request.observationId) {
+    return this.enqueue(async () => {
+      const observation = this.latestObservation;
+      this.assertObservation(observation, request);
+      const action = await this.actionServiceInstance();
+      this.assertObservation(observation, request);
+      const documentId = await this.observer.currentDocumentId();
+      this.assertObservation(observation, request);
+      if (documentId !== observation.documentId) {
+        throw new Error("page changed since observation");
+      }
+      const click = {
+        observationId: observation.observationId,
+        documentGeneration: this.documentGeneration,
+      };
+      this.activeClick = click;
+      try {
+        this.assertClickInput();
+        const point: Point = await action.click({ ref: request.ref });
+        this.assertObservation(observation, request);
+        const finalDocumentId = await this.observer.currentDocumentId();
+        this.assertObservation(observation, request);
+        if (finalDocumentId !== observation.documentId) {
+          throw new Error("page changed since observation");
+        }
+        return {
+          ref: request.ref,
+          point,
+          documentId: finalDocumentId,
+          controlEpoch: this.epoch,
+          url: this.target.currentUrl(),
+        };
+      } finally {
+        if (this.activeClick === click) this.activeClick = null;
+      }
+    });
+  }
+
+  private actionServiceInstance(): Promise<AgentActionService> {
+    return (this.actionService ??= this.actionServiceFactory(this.driver));
+  }
+
+  private assertObservation(
+    observation: AgentObservation | null,
+    request: AgentClickRequest,
+  ): asserts observation is AgentObservation {
+    if (
+      !observation ||
+      this.latestObservation !== observation ||
+      observation.observationId !== request.observationId
+    ) {
       throw new Error("stale or unknown observation");
     }
     if (request.expectedControlEpoch !== this.epoch) {
       throw new Error("stale control epoch");
     }
-    const documentId = await this.observer.currentDocumentId();
-    if (documentId !== observation.documentId) {
-      throw new Error("page changed since observation");
-    }
-    const action = await this.actionServiceInstance();
-    const point: Point = await action.click({ ref: request.ref });
-    return {
-      ref: request.ref,
-      point,
-      documentId,
-      controlEpoch: this.epoch,
-      url: this.target.currentUrl(),
-    };
   }
 
-  private actionServiceInstance(): Promise<AgentActionService> {
-    return (this.actionService ??= this.actionServiceFactory(this.driver));
+  private assertClickInput(): void {
+    const click = this.activeClick;
+    if (
+      !click ||
+      this.documentGeneration !== click.documentGeneration ||
+      this.latestObservation?.observationId !== click.observationId
+    ) {
+      throw new Error("page changed since observation");
+    }
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.operationQueue;
+    let release!: () => void;
+    this.operationQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return previous.then(operation).finally(release);
   }
 }

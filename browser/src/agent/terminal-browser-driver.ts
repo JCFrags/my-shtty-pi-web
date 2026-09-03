@@ -19,10 +19,12 @@ type ResolveLocatorArgs = Parameters<BrowserDriver["resolveLocator"]>;
 
 export interface TerminalBrowserDriverOptions {
   sleep?: (ms: number) => Promise<void>;
+  beforeInput?: () => void;
 }
 
 export class TerminalBrowserDriver implements BrowserDriver {
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly beforeInput: (() => void) | undefined;
   private lastPosition: Point | null = null;
 
   constructor(
@@ -31,6 +33,7 @@ export class TerminalBrowserDriver implements BrowserDriver {
     options: TerminalBrowserDriverOptions = {},
   ) {
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    this.beforeInput = options.beforeInput;
   }
 
   snapshot(maxElements: number, includeText: boolean) {
@@ -53,7 +56,7 @@ export class TerminalBrowserDriver implements BrowserDriver {
   async click(args: ClickArgs): Promise<void> {
     this.assertContentMode(args.mode);
     try {
-      await this.replayMove(args.samples);
+      await this.replayMove(args.samples, true);
       if (args.preClickDwellMs > 0) await this.sleep(args.preClickDwellMs);
       await this.clickCycle(args.target, args.button, args.pressMs);
       if (args.dblclick) await this.clickCycle(args.target, args.button, args.pressMs);
@@ -113,18 +116,20 @@ export class TerminalBrowserDriver implements BrowserDriver {
     this.unsupported("resolveLocator");
   }
 
-  private async replayMove(samples: CursorSample[]): Promise<void> {
+  private async replayMove(samples: CursorSample[], guard = false): Promise<void> {
     let previousAt = 0;
     for (const sample of samples) {
       const at = Number.isFinite(sample.t) ? Math.max(previousAt, sample.t) : previousAt;
       const delay = at - previousAt;
       if (delay > 0) await this.sleep(delay);
+      if (guard) this.beforeInput?.();
       this.target.agentPointer({ kind: "move", x: sample.x, y: sample.y });
       previousAt = at;
     }
   }
 
   private async clickCycle(point: Point, button: ClickArgs["button"], pressMs: number) {
+    this.beforeInput?.();
     this.target.agentPointer({ kind: "down", x: point.x, y: point.y, button });
     try {
       if (pressMs > 0) await this.sleep(pressMs);
