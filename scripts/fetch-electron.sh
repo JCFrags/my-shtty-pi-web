@@ -17,6 +17,17 @@ MIRROR="https://github.com/zenbu-labs/electron-releases/releases/download/v$VERS
 ZIP="electron-v$VERSION-$PLATFORM.zip"
 MARKER="$DEST/.zenbu-electron-sha256"
 
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | cut -d' ' -f1
+  else
+    echo "fetch-electron: sha256sum or shasum is required to verify $1" >&2
+    return 1
+  fi
+}
+
 expected="$(curl -fsL --retry 3 "$MIRROR/SHASUMS256.txt" | awk -v zip="*$ZIP" '$2 == zip {print $1}')"
 if [ -z "$expected" ]; then
   echo "fetch-electron: $ZIP is missing from the mirror's SHASUMS256.txt" >&2
@@ -30,7 +41,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 echo "fetch-electron: downloading patched electron v$VERSION ($PLATFORM)" >&2
 curl -fL --retry 3 --progress-bar "$MIRROR/$ZIP" -o "$TMP/$ZIP"
-actual="$(shasum -a 256 "$TMP/$ZIP" | cut -d' ' -f1)"
+actual="$(sha256_file "$TMP/$ZIP")"
 if [ "$actual" != "$expected" ]; then
   echo "fetch-electron: $ZIP does not match the mirror's SHASUMS256.txt" >&2
   echo "  expected: $expected" >&2
