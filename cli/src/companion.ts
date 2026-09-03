@@ -53,6 +53,13 @@ export interface CompanionOpenResult {
   tabs: NonNullable<BrowserTargets["tabs"]>;
 }
 
+export interface CompanionTabsRequest {
+  action: "list" | "activate" | "open" | "close";
+  tab?: number;
+  url?: string;
+  cwd?: string;
+}
+
 export function currentBrowserOwner(environment: NodeJS.ProcessEnv, projectDir: string): BrowserOwner {
   const explicit = environment[BROWSER_OWNER_ENV.paneId];
   if (explicit) {
@@ -258,4 +265,24 @@ export async function ownedBrowser(owner: BrowserOwner): Promise<InstanceRow> {
   if (found.length === 0) throw new Error("no browser companion for this Pi pane; call browser_open first");
   if (found.length > 1) throw new Error("multiple browsers claim this Pi pane");
   return found[0]!.record;
+}
+
+export async function companionTabs(owner: BrowserOwner, request: CompanionTabsRequest): Promise<BrowserTargets> {
+  const browser = await ownedBrowser(owner);
+  if (request.action === "list") {
+    return control(browser.socket, { cmd: "targets" }) as Promise<BrowserTargets>;
+  }
+  if (request.action === "open") {
+    return control(browser.socket, {
+      cmd: "open-tab",
+      ...(request.url ? { url: request.url, cwd: request.cwd ?? owner.projectDir } : {}),
+    }) as Promise<BrowserTargets>;
+  }
+  if (!request.tab || !Number.isSafeInteger(request.tab) || request.tab < 1) {
+    throw new Error(`browser tabs ${request.action} needs a valid tab id`);
+  }
+  return control(browser.socket, {
+    cmd: request.action === "activate" ? "activate-tab" : "close-tab",
+    tab: request.tab,
+  }) as Promise<BrowserTargets>;
 }

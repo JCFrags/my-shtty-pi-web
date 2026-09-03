@@ -26,7 +26,7 @@ import {
 import type { Direction, Terminal, TerminalCheck } from "pixel-terminals";
 import { actionCommand } from "./action";
 import { agentCommand } from "./agent";
-import { currentBrowserOwner, openCompanion } from "./companion";
+import { companionTabs, currentBrowserOwner, openCompanion } from "./companion";
 import { control } from "./control";
 import { setupCommand } from "./editors";
 import { ensureSetup, linkSkills, markSetupDone } from "./setup";
@@ -589,15 +589,29 @@ async function tryAdopt(args: string[]): Promise<boolean> {
 
 async function companionCommand(args: string[]): Promise<number> {
   const subcommand = args.shift();
-  if (subcommand !== "open") fail("companion needs open");
-  const newTab = takeBoolFlag(args, "--new-tab");
-  const noFocus = takeBoolFlag(args, "--no-focus");
-  const url = args.shift();
-  if (url?.startsWith("-")) fail(`unknown option ${url}`);
-  if (args.length > 0) fail(`unexpected ${args[0]}`);
   const owner = currentBrowserOwner(process.env, process.cwd());
-  print(await openCompanion(owner, { url, newTab, focus: !noFocus }, process.env));
-  return 0;
+  if (subcommand === "open") {
+    const newTab = takeBoolFlag(args, "--new-tab");
+    const noFocus = takeBoolFlag(args, "--no-focus");
+    const url = args.shift();
+    if (url?.startsWith("-")) fail(`unknown option ${url}`);
+    if (args.length > 0) fail(`unexpected ${args[0]}`);
+    print(await openCompanion(owner, { url, newTab, focus: !noFocus }, process.env));
+    return 0;
+  }
+  if (subcommand === "tabs") {
+    const action = takeFlag(args, "--action") ?? "list";
+    if (action !== "list" && action !== "activate" && action !== "open" && action !== "close") {
+      fail("companion tabs --action must be list, activate, open, or close");
+    }
+    const tabValue = takeFlag(args, "--tab");
+    const url = takeFlag(args, "--url");
+    if (args.length > 0) fail(`unexpected ${args[0]}`);
+    const tab = tabValue === undefined ? undefined : Number(tabValue.replace(/^t/, ""));
+    print(await companionTabs(owner, { action, tab, url, cwd: process.cwd() }));
+    return 0;
+  }
+  fail("companion needs open or tabs");
 }
 
 async function openCommand(args: string[]) {
