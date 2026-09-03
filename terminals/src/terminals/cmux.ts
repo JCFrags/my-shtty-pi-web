@@ -1,10 +1,21 @@
 import { paneById, shellQuote } from "../shared";
-import type { Detect, Pane } from "../terminal";
+import type { Detect, Pane, PaneDetails } from "../terminal";
 
 interface Listed {
   id?: string;
   ref?: string;
   title?: string;
+}
+
+interface CmuxTree {
+  windows?: {
+    workspaces?: {
+      id: string;
+      panes?: {
+        surfaces?: { id: string; type?: string; tty?: string | null }[];
+      }[];
+    }[];
+  }[];
 }
 
 export const cmux: Detect = (env, run) => {
@@ -31,9 +42,37 @@ export const cmux: Detect = (env, run) => {
     return found;
   }
 
+  async function listPanes(): Promise<PaneDetails[]> {
+    const tree = (await asked(["tree", "--all"])) as CmuxTree;
+    const found: PaneDetails[] = [];
+    for (const window of tree.windows ?? []) {
+      for (const workspace of window.workspaces ?? []) {
+        for (const pane of workspace.panes ?? []) {
+          for (const surface of pane.surfaces ?? []) {
+            if (surface.type !== undefined && surface.type !== "terminal") continue;
+            found.push({
+              id: surface.id,
+              tab: workspace.id,
+              tty: surface.tty || null,
+              command: null,
+            });
+          }
+        }
+      }
+    }
+    return found;
+  }
+
   return {
     name: "cmux",
     getCurrentPane: () => paneById(panes, env.CMUX_SURFACE_ID),
+    listPanes,
+    async sendText(pane, text) {
+      await cmux(["rpc", "terminal.paste", JSON.stringify({ text, surface_id: pane, submit_key: "none" })]);
+    },
+    async focusPane(pane) {
+      await cmux(["focus-panel", "--panel", pane]);
+    },
     async split({ from, direction, command }) {
       const created = await asked(["new-split", direction, "--surface", from.id, "--focus", "true"]);
       const opened = created.surface_id ?? created.surface_ref;

@@ -1,11 +1,12 @@
-import { paneById, shellQuote } from "../shared";
-import type { Detect, Pane } from "../terminal";
+import { bracketedPaste, paneById, shellQuote } from "../shared";
+import type { Detect, Pane, PaneDetails } from "../terminal";
 
 interface Tty7Pane {
   pane: number;
   workspace?: string | null;
   tab?: string;
   title?: string;
+  live?: boolean | null;
 }
 
 export const tty7: Detect = (env, run) => {
@@ -31,9 +32,30 @@ export const tty7: Detect = (env, run) => {
       }));
   }
 
+  async function listPanes(): Promise<PaneDetails[]> {
+    const [placed, running] = await Promise.all([
+      list(["pane", "ls", "--json"]),
+      list(["pane", "ls", "--all", "--json"]),
+    ]);
+    // tty7 reports the foreground process name as the pane title
+    const commands = new Map(running.filter((pane) => pane.live).map((pane) => [pane.pane, pane.title]));
+    return placed
+      .filter((pane) => commands.has(pane.pane))
+      .map((pane) => ({
+        id: String(pane.pane),
+        tab: `${pane.workspace ?? ""}:${pane.tab ?? ""}`,
+        tty: null,
+        command: commands.get(pane.pane) || null,
+      }));
+  }
+
   return {
     name: "tty7",
     getCurrentPane: () => paneById(panes, selfId()),
+    listPanes,
+    async sendText(pane, text) {
+      await tty7(["send", `%${pane}`, bracketedPaste(text)]);
+    },
     async split({ from, direction, command, size }) {
       if (direction !== "right" && direction !== "down") {
         throw new Error("tty7 only splits right and down");
