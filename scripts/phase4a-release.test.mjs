@@ -139,7 +139,9 @@ test("production Node bundles have a closed syntax-checked dependency and licens
       execFileSync(process.execPath, ["--check", path], { cwd: tmpdir(), stdio: "pipe" });
       assert.equal((await readFile(path)).includes(Buffer.from(sourceRoot)), false, `${relativePath} contains the source checkout path`);
     }
-    releaseInternals.validateFixedQualificationRunner(await readFile(join(temporaryRoot, "bin/pi-web-qualification-runner.mjs"), "utf8"));
+    const qualificationRunner = await readFile(join(temporaryRoot, "bin/pi-web-qualification-runner.mjs"), "utf8");
+    releaseInternals.validateFixedQualificationRunner(qualificationRunner);
+    assert.match(qualificationRunner, /--qualification-fixture/u, "the local qualification fixture must run outside the workload event loop");
     const extension = await readFile(join(temporaryRoot, "share/pi-webx/extension.mjs"), "utf8");
     assert.match(extension, /from "@earendil-works\/pi-ai"/u);
     assert.match(extension, /from "@earendil-works\/pi-tui"/u);

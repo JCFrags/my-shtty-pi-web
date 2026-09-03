@@ -1,6 +1,6 @@
 import { fork, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createConnection } from "node:net";
 import { lstat, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
@@ -99,61 +99,103 @@ function initializeQualification(): void {
   if (basename(releaseRoot) !== releaseId || releaseId !== `phase4a-${gitSha}` || workspaceBinary !== join(releaseRoot, "bin/pi-browser-workspace-qualification") || webxPath !== join(qualificationRoot, "webxd.sock")) fail("qualification release binding is invalid");
 }
 
+// Workspace, AT-SPI, and service probes intentionally use fixed host helpers. Keep
+// the loopback fixture in a child so those synchronous probes cannot starve the
+// health requests that the workload is checking.
 class LocalServiceFixture {
-  #server: Server | undefined;
+  #child: ChildProcess | undefined;
 
   async start(): Promise<void> {
-    if (this.#server !== undefined) fail("qualification local fixture is already running");
-    const server = createServer((request, response) => { void this.handle(request, response); });
-    this.#server = server;
-    await new Promise<void>((resolveStart, rejectStart) => {
-      const onError = (error: Error) => { server.off("listening", onListening); rejectStart(error); };
-      const onListening = () => { server.off("error", onError); resolveStart(); };
-      server.once("error", onError);
-      server.once("listening", onListening);
-      server.listen(LOCAL_SERVICE_PORT, LOCAL_SERVICE_HOST);
+    if (this.#child !== undefined) fail("qualification local fixture is already running");
+    const child = fork(fileURLToPath(import.meta.url), ["--qualification-fixture"], {
+      env: { ...process.env },
+      execArgv: [],
+      stdio: ["ignore", "ignore", "ignore", "ipc"],
     });
+    let childError = false;
+    child.once("error", () => { childError = true; });
+    this.#child = child;
+    await waitForLocalServiceFixture(child, () => childError);
   }
 
   async stop(): Promise<void> {
-    const server = this.#server;
-    if (server === undefined) return;
-    this.#server = undefined;
-    await new Promise<void>((resolveStop, rejectStop) => server.close((error) => error === undefined ? resolveStop() : rejectStop(error)));
+    const child = this.#child;
+    if (child === undefined) return;
+    this.#child = undefined;
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    await waitExit(child, 10_000).catch(async () => {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      await waitExit(child, 5_000).catch(() => undefined);
+    });
   }
+}
 
-  private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+async function waitForLocalServiceFixture(child: ChildProcess, hasError: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
+    if (hasError() || child.exitCode !== null || child.signalCode !== null) fail("qualification local fixture exited");
     try {
-      const url = new URL(request.url ?? "", `http://${LOCAL_SERVICE_HOST}:${LOCAL_SERVICE_PORT}`);
-      if (request.method === "GET" && url.pathname === "/config" && url.search === "") return jsonResponse(response, 200, {});
-      if (request.method === "GET" && url.pathname === "/health" && url.search === "") return jsonResponse(response, 200, { ok: true });
-      if (request.method === "GET" && url.pathname === "/search") {
-        const keys = [...url.searchParams.keys()].sort();
-        if (JSON.stringify(keys) !== JSON.stringify(["format", "q", "safesearch"]) || url.searchParams.get("q") !== SEARCH_QUERY || url.searchParams.get("format") !== "json" || url.searchParams.get("safesearch") !== "0") return jsonResponse(response, 403, { error: "denied" });
-        return jsonResponse(response, 200, { results: [
-          { url: `${FIXTURE_BASE}/alpha`, title: "Actor Alpha", content: "Phase4A qualification fixture alpha" },
-          { url: `${FIXTURE_BASE}/beta`, title: "Actor Beta", content: "Phase4A qualification fixture beta" },
-        ], unresponsive_engines: [] });
-      }
-      if (request.method === "POST" && url.pathname === "/v1/read" && url.search === "") {
-        const body = await requestJson(request);
-        const requestedUrl = typeof body.url === "string" ? body.url : "";
-        const actor = requestedUrl === `${FIXTURE_BASE}/alpha` ? "alpha" : requestedUrl === `${FIXTURE_BASE}/beta` ? "beta" : undefined;
-        if (actor === undefined) return jsonResponse(response, 403, { error: "denied" });
-        return jsonResponse(response, 200, {
-          url: requestedUrl,
-          title: actor === "alpha" ? "Actor Alpha" : "Actor Beta",
-          content: `# ${actor === "alpha" ? "Actor Alpha" : "Actor Beta"}\n\nPhase4A deterministic qualification content for ${actor}.`,
-          mediaType: "text/markdown",
-          source: "qualification-fixture",
-          truncated: false,
-          metadata: { complete: true },
-        });
-      }
-      jsonResponse(response, 403, { error: "denied" });
+      const response = await fetch(`http://${LOCAL_SERVICE_HOST}:${LOCAL_SERVICE_PORT}/config`, { signal: AbortSignal.timeout(500), headers: { accept: "application/json" } });
+      if (response.status === 200 && await response.text() === "{}") return;
     } catch {
-      jsonResponse(response, 400, { error: "invalid" });
+      // The child fixture may still be binding its fixed loopback port.
     }
+    await sleep(50);
+  }
+  fail("qualification local fixture readiness timed out");
+}
+
+async function runQualificationFixture(): Promise<void> {
+  const server = createServer((request, response) => { void handleLocalFixtureRequest(request, response); });
+  await new Promise<void>((resolveStart, rejectStart) => {
+    const onError = (error: Error) => { server.off("listening", onListening); rejectStart(error); };
+    const onListening = () => { server.off("error", onError); resolveStart(); };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(LOCAL_SERVICE_PORT, LOCAL_SERVICE_HOST);
+  });
+  await new Promise<void>((resolveStop) => {
+    let stopping = false;
+    const stop = () => {
+      if (stopping) return;
+      stopping = true;
+      server.close(() => resolveStop());
+    };
+    process.once("SIGTERM", stop);
+    process.once("SIGINT", stop);
+  });
+}
+
+async function handleLocalFixtureRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  try {
+    const url = new URL(request.url ?? "", `http://${LOCAL_SERVICE_HOST}:${LOCAL_SERVICE_PORT}`);
+    if (request.method === "GET" && url.pathname === "/config" && url.search === "") return jsonResponse(response, 200, {});
+    if (request.method === "GET" && url.pathname === "/health" && url.search === "") return jsonResponse(response, 200, { ok: true });
+    if (request.method === "GET" && url.pathname === "/search") {
+      const keys = [...url.searchParams.keys()].sort();
+      if (JSON.stringify(keys) !== JSON.stringify(["format", "q", "safesearch"]) || url.searchParams.get("q") !== SEARCH_QUERY || url.searchParams.get("format") !== "json" || url.searchParams.get("safesearch") !== "0") return jsonResponse(response, 403, { error: "denied" });
+      return jsonResponse(response, 200, { results: [
+        { url: `${FIXTURE_BASE}/alpha`, title: "Actor Alpha", content: "Phase4A qualification fixture alpha" },
+        { url: `${FIXTURE_BASE}/beta`, title: "Actor Beta", content: "Phase4A qualification fixture beta" },
+      ], unresponsive_engines: [] });
+    }
+    if (request.method === "POST" && url.pathname === "/v1/read" && url.search === "") {
+      const body = await requestJson(request);
+      const requestedUrl = typeof body.url === "string" ? body.url : "";
+      const actor = requestedUrl === `${FIXTURE_BASE}/alpha` ? "alpha" : requestedUrl === `${FIXTURE_BASE}/beta` ? "beta" : undefined;
+      if (actor === undefined) return jsonResponse(response, 403, { error: "denied" });
+      return jsonResponse(response, 200, {
+        url: requestedUrl,
+        title: actor === "alpha" ? "Actor Alpha" : "Actor Beta",
+        content: `# ${actor === "alpha" ? "Actor Alpha" : "Actor Beta"}\n\nPhase4A deterministic qualification content for ${actor}.`,
+        mediaType: "text/markdown",
+        source: "qualification-fixture",
+        truncated: false,
+        metadata: { complete: true },
+      });
+    }
+    jsonResponse(response, 403, { error: "denied" });
+  } catch {
+    jsonResponse(response, 400, { error: "invalid" });
   }
 }
 
@@ -1318,7 +1360,10 @@ function publishFailureOutput(error: unknown): void {
   process.stdout.write(`${JSON.stringify({ schemaVersion: 1, ok: false, failure })}\n`);
   process.exitCode = 1;
 }
-process.once("uncaughtException", publishFailureOutput);
-process.once("unhandledRejection", publishFailureOutput);
-
-main().catch((error: unknown) => { publishFailureOutput(error); });
+if (process.argv[2] === "--qualification-fixture") {
+  runQualificationFixture().catch(() => { process.exitCode = 1; });
+} else {
+  process.once("uncaughtException", publishFailureOutput);
+  process.once("unhandledRejection", publishFailureOutput);
+  main().catch((error: unknown) => { publishFailureOutput(error); });
+}
