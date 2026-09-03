@@ -496,6 +496,12 @@ class Session {
       agentObserve: (id, maxElements, includeText) =>
         this.tabs.agentObserve(id, maxElements, includeText),
       agentClick: (id, request) => this.tabs.agentClick(id, request),
+      agentType: (id, request) => this.tabs.agentType(id, request),
+      agentPressKey: (id, request) => this.tabs.agentPressKey(id, request),
+      agentScroll: (id, request) => this.tabs.agentScroll(id, request),
+      agentNavigate: (id, request) => this.tabs.agentNavigate(id, request),
+      agentGetUrl: (id, request) => this.tabs.agentGetUrl(id, request),
+      agentWaitFor: (id, request) => this.tabs.agentWaitFor(id, request),
       closeTab: (id) => {
         if (!this.tabs.has(id)) return false;
         this.tabs.close(id);

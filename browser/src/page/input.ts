@@ -1,6 +1,7 @@
 import { clipboard, nativeImage } from "electron";
 import type { WebContents } from "electron";
 import type { EngineKeyEvent, PastedImage, PointerEvent, WheelEvent } from "pixel-react";
+import type { AgentKey } from "../agent/key";
 
 export interface ProgrammaticPointerEvent {
   kind: "move" | "down" | "up";
@@ -31,6 +32,8 @@ export class PageInput {
   private wheelRemainderX = 0;
   private wheelRemainderY = 0;
   private sentKeys = new Set<string>();
+  private programmaticKeys = new Map<string, AgentKey>();
+  private programmaticInputGeneration = 0;
   private superHeld = false;
   private focusGate: Promise<void> | null = null;
 
@@ -49,11 +52,15 @@ export class PageInput {
     return gate;
   }
 
-  private send(event: SendableInputEvent) {
+  private send(event: SendableInputEvent, programmaticGeneration?: number) {
     const contents = this.target.contents();
     const deliver = () => {
+      if (
+        programmaticGeneration !== undefined &&
+        programmaticGeneration !== this.programmaticInputGeneration
+      ) return;
       try {
-        contents.sendInputEvent(event);
+        void Promise.resolve(contents.sendInputEvent(event)).catch(() => {});
       } catch {}
     };
     if (this.focusGate) void this.focusGate.then(deliver, () => {});
@@ -90,6 +97,7 @@ export class PageInput {
 
   programmaticPointer(event: ProgrammaticPointerEvent) {
     if (event.kind === "up" && event.button && !this.programmaticPressed.has(event.button)) return;
+    const generation = this.programmaticInputGeneration;
     this.syncFocus();
     const x = Math.max(0, Math.round(event.x));
     const y = Math.max(0, Math.round(event.y));
@@ -97,6 +105,7 @@ export class PageInput {
       { kind: event.kind, x, y, button: event.button },
       [],
       this.programmaticPressed,
+      generation,
     );
   }
 
@@ -114,16 +123,104 @@ export class PageInput {
   }
 
   releaseProgrammaticButtons() {
+    this.programmaticInputGeneration += 1;
+    this.releaseProgrammaticButtonsNow();
+  }
+
+  private releaseProgrammaticButtonsNow() {
     for (const button of [...this.programmaticPressed]) {
       try {
         this.dispatchPointer(
           { kind: "up", x: this.lastX, y: this.lastY, button },
           [],
           this.programmaticPressed,
+          this.programmaticInputGeneration,
         );
       } catch {}
     }
     this.programmaticPressed.clear();
+  }
+
+  async programmaticKeyDown(key: AgentKey): Promise<void> {
+    const generation = this.programmaticInputGeneration;
+    const focus = this.syncFocus();
+    if (focus) await focus;
+    if (generation !== this.programmaticInputGeneration) throw new Error("agent input was released");
+    if (this.programmaticKeys.has(key.identity)) return;
+    this.programmaticKeys.set(key.identity, key);
+    try {
+      await this.sendAgentKey({ type: "rawKeyDown", key });
+    } catch (error) {
+      this.programmaticKeys.delete(key.identity);
+      throw error;
+    }
+  }
+
+  async programmaticKeyChar(key: AgentKey): Promise<void> {
+    if (!key.character || !this.programmaticKeys.has(key.identity)) return;
+    await this.sendAgentKey({ type: "char", key, character: key.character });
+  }
+
+  programmaticKeyUp(key: AgentKey): void {
+    if (!this.programmaticKeys.delete(key.identity)) return;
+    try {
+      void Promise.resolve(this.sendAgentKey({ type: "keyUp", key })).catch(() => {});
+    } catch {}
+  }
+
+  releaseProgrammaticKeys() {
+    this.programmaticInputGeneration += 1;
+    this.releaseProgrammaticKeysNow();
+  }
+
+  private releaseProgrammaticKeysNow() {
+    for (const key of [...this.programmaticKeys.values()]) {
+      this.programmaticKeys.delete(key.identity);
+      try {
+        void this.sendAgentKey({ type: "keyUp", key }).catch(() => {});
+      } catch {}
+    }
+  }
+
+  releaseProgrammaticInput() {
+    this.programmaticInputGeneration += 1;
+    this.releaseProgrammaticButtonsNow();
+    this.releaseProgrammaticKeysNow();
+  }
+
+  async selectAllProgrammatic(): Promise<void> {
+    const generation = this.programmaticInputGeneration;
+    const focus = this.syncFocus();
+    if (focus) await focus;
+    if (generation !== this.programmaticInputGeneration) throw new Error("agent input was released");
+    this.target.contents().selectAll();
+  }
+
+  async insertTextProgrammatic(text: string): Promise<void> {
+    const generation = this.programmaticInputGeneration;
+    const focus = this.syncFocus();
+    if (focus) await focus;
+    if (generation !== this.programmaticInputGeneration) throw new Error("agent input was released");
+    await this.target.contents().insertText(text);
+  }
+
+  async programmaticWheel(x: number, y: number, deltaX: number, deltaY: number): Promise<void> {
+    const generation = this.programmaticInputGeneration;
+    const focus = this.syncFocus();
+    if (focus) await focus;
+    if (generation !== this.programmaticInputGeneration) throw new Error("agent input was released");
+    await this.target.contents().sendInputEvent({
+      type: "mouseWheel",
+      x: Math.max(0, Math.round(x)),
+      y: Math.max(0, Math.round(y)),
+      deltaX,
+      deltaY,
+      wheelTicksX: deltaX / 40,
+      wheelTicksY: deltaY / 40,
+      hasPreciseScrollingDeltas: true,
+      canScroll: true,
+      modifiers: [],
+    });
   }
 
   releasePhysicalInput() {
@@ -134,13 +231,25 @@ export class PageInput {
 
   releaseAllInput() {
     this.releasePhysicalInput();
-    this.releaseProgrammaticButtons();
+    this.releaseProgrammaticInput();
+  }
+
+  private async sendAgentKey(event: { type: "rawKeyDown" | "keyUp" | "char"; key: AgentKey; character?: string }): Promise<void> {
+    const modifiers: Electron.InputEvent["modifiers"] = event.key.modifiers.map((modifier) =>
+      modifier === "ctrl" ? "ctrl" : modifier === "meta" ? "meta" : modifier,
+    );
+    await Promise.resolve(this.target.contents().sendInputEvent({
+      type: event.type,
+      keyCode: event.type === "char" ? event.character! : event.key.keyCode,
+      modifiers,
+    }));
   }
 
   private dispatchPointer(
     event: ProgrammaticPointerEvent,
     baseModifiers: Electron.InputEvent["modifiers"],
     originPressed: Set<"left" | "middle" | "right">,
+    programmaticGeneration?: number,
   ) {
     this.lastX = event.x;
     this.lastY = event.y;
@@ -166,7 +275,7 @@ export class PageInput {
       button: event.button,
       clickCount: event.kind === "move" ? 0 : this.activeClickCount,
       modifiers,
-    });
+    }, programmaticGeneration);
     if (event.kind === "up" && event.button) originPressed.delete(event.button);
     this.lastSentX = event.x;
     this.lastSentY = event.y;

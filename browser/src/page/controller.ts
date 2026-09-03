@@ -14,6 +14,7 @@ import type { DevtoolsAction } from "./devtools";
 import type { DevtoolsDock } from "pixel-store";
 import { FaviconCache } from "./favicon";
 import { frameRate } from "./frame-rate";
+import type { AgentKey } from "../agent/key";
 import { PageInput } from "./input";
 import type { ProgrammaticPointerEvent } from "./input";
 import { offscreenPreferences } from "./offscreen";
@@ -250,6 +251,12 @@ export class BrowserController {
 
   navigate(value: string) {
     void this.window.webContents.loadURL(normalizeUrl(value, this.cwd));
+  }
+
+  async agentNavigate(value: string): Promise<string> {
+    if (this.stopped) throw new Error("browser is stopped");
+    await this.window.webContents.loadURL(normalizeUrl(value, this.cwd));
+    return this.currentUrl();
   }
 
   back() {
@@ -489,6 +496,43 @@ export class BrowserController {
   agentPointer(event: ProgrammaticPointerEvent) {
     if (this.stopped) return;
     this.input.programmaticPointer(event);
+  }
+
+  agentKeyDown(key: AgentKey): Promise<void> {
+    if (this.stopped) return Promise.reject(new Error("browser is stopped"));
+    return this.input.programmaticKeyDown(key);
+  }
+
+  agentKeyChar(key: AgentKey): Promise<void> {
+    if (this.stopped) return Promise.resolve();
+    return this.input.programmaticKeyChar(key);
+  }
+
+  agentKeyUp(key: AgentKey): void {
+    if (this.stopped) return;
+    this.input.programmaticKeyUp(key);
+  }
+
+  agentSelectAll(): Promise<void> {
+    if (this.stopped) return Promise.reject(new Error("browser is stopped"));
+    return this.input.selectAllProgrammatic();
+  }
+
+  agentInsertText(text: string): Promise<void> {
+    if (this.stopped) return Promise.reject(new Error("browser is stopped"));
+    return this.input.insertTextProgrammatic(text);
+  }
+
+  agentWheel(x: number, y: number, deltaX: number, deltaY: number): Promise<void> {
+    if (this.stopped) return Promise.reject(new Error("browser is stopped"));
+    return this.input.programmaticWheel(x, y, deltaX, deltaY);
+  }
+
+  releaseAgentInput() {
+    if (this.stopped) return;
+    this.input.releaseProgrammaticInput();
+    for (const popup of this.popups) popup.input.releaseProgrammaticInput();
+    this.devtools?.input.releaseProgrammaticInput();
   }
 
   releasePhysicalInput() {

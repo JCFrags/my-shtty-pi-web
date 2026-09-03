@@ -14,7 +14,31 @@ import {
 import type { InstanceRow, OpenResult, OpenSpec } from "pixel-store";
 
 import type { AgentControlSnapshot } from "./agent/control";
-import type { AgentClickRequest, AgentClickResult, AgentObservation } from "./agent/types";
+import {
+  parseGetUrlRequest,
+  parseNavigateRequest,
+  parsePressKeyRequest,
+  parseScrollRequest,
+  parseTypeRequest,
+  parseWaitForRequest,
+} from "./agent/protocol";
+import type {
+  AgentClickRequest,
+  AgentClickResult,
+  AgentGetUrlRequest,
+  AgentGetUrlResult,
+  AgentNavigateRequest,
+  AgentNavigateResult,
+  AgentObservation,
+  AgentPressKeyRequest,
+  AgentPressKeyResult,
+  AgentScrollRequest,
+  AgentScrollResult,
+  AgentTypeRequest,
+  AgentTypeResult,
+  AgentWaitForRequest,
+  AgentWaitForResult,
+} from "./agent/types";
 import type { BrowserState } from "./page/types";
 import { INSTANCES_DIR } from "pixel-store";
 
@@ -45,6 +69,12 @@ export interface ControlHost {
   agentResume(expectedEpoch: number): AgentControlSnapshot;
   agentObserve(id: number, maxElements: number, includeText: boolean): Promise<AgentObservation>;
   agentClick(id: number, request: AgentClickRequest): Promise<AgentClickResult>;
+  agentType(id: number, request: AgentTypeRequest): Promise<AgentTypeResult>;
+  agentPressKey(id: number, request: AgentPressKeyRequest): Promise<AgentPressKeyResult>;
+  agentScroll(id: number, request: AgentScrollRequest): Promise<AgentScrollResult>;
+  agentNavigate(id: number, request: AgentNavigateRequest): Promise<AgentNavigateResult>;
+  agentGetUrl(id: number, request: AgentGetUrlRequest): Promise<AgentGetUrlResult>;
+  agentWaitFor(id: number, request: AgentWaitForRequest): Promise<AgentWaitForResult>;
   closeTab(id: number): boolean;
   agentTouch(id: number): boolean;
   agentRelease(): void;
@@ -64,7 +94,16 @@ interface ControlRequest {
   ref?: unknown;
   observationId?: unknown;
   expectedControlEpoch?: unknown;
+  key?: unknown;
+  text?: unknown;
+  replace?: unknown;
+  dx?: unknown;
+  dy?: unknown;
+  condition?: unknown;
+  timeoutMs?: unknown;
 }
+
+export const MAX_CONTROL_LINE_BYTES = 256 * 1024;
 
 export class Registry {
   private readonly host: ControlHost;
@@ -140,17 +179,34 @@ export class Registry {
 
   private serve(connection: net.Socket) {
     let buffer = "";
+    let closed = false;
+    const tooLarge = () => {
+      if (closed) return;
+      closed = true;
+      buffer = "";
+      connection.end(`${JSON.stringify({ id: null, ok: false, error: "request too large" })}\n`);
+    };
     connection.setEncoding("utf8");
     connection.on("error", () => {});
+    connection.on("close", () => {
+      closed = true;
+    });
     connection.on("data", (chunk: string) => {
+      if (closed) return;
       buffer += chunk;
       let newline = buffer.indexOf("\n");
       while (newline >= 0) {
         const line = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);
-        newline = buffer.indexOf("\n");
+        if (Buffer.byteLength(line, "utf8") > MAX_CONTROL_LINE_BYTES) {
+          tooLarge();
+          return;
+        }
         if (line.trim()) void this.dispatch(line, connection);
+        if (closed) return;
+        newline = buffer.indexOf("\n");
       }
+      if (Buffer.byteLength(buffer, "utf8") > MAX_CONTROL_LINE_BYTES) tooLarge();
     });
   }
 
@@ -215,6 +271,30 @@ export class Registry {
       case "agent.click": {
         const parsed = clickRequest(request);
         return this.host.agentClick(parsed.tab, parsed.request);
+      }
+      case "agent.type": {
+        const parsed = parseTypeRequest(request);
+        return this.host.agentType(parsed.tab, parsed.request);
+      }
+      case "agent.press-key": {
+        const parsed = parsePressKeyRequest(request);
+        return this.host.agentPressKey(parsed.tab, parsed.request);
+      }
+      case "agent.scroll": {
+        const parsed = parseScrollRequest(request);
+        return this.host.agentScroll(parsed.tab, parsed.request);
+      }
+      case "agent.navigate": {
+        const parsed = parseNavigateRequest(request);
+        return this.host.agentNavigate(parsed.tab, parsed.request);
+      }
+      case "agent.get-url": {
+        const parsed = parseGetUrlRequest(request);
+        return this.host.agentGetUrl(parsed.tab, parsed.request);
+      }
+      case "agent.wait-for": {
+        const parsed = parseWaitForRequest(request);
+        return this.host.agentWaitFor(parsed.tab, parsed.request);
       }
       case "agent-touch": {
         if (request.tab === undefined) throw new Error("agent-touch needs a tab id");

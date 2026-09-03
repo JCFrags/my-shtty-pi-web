@@ -7,26 +7,41 @@ import type {
   "resolution-mode": "import",
 };
 
-import type { AgentBrowserTarget, AgentPageObserver } from "./types";
+import { parseAgentKey } from "./key";
+import type { AgentKey } from "./key";
+import type { AgentBrowserTarget, AgentPageObserver, AgentPageProbe } from "./types";
 import type { ProgrammaticPointerEvent } from "../page/input";
 
 type ClickArgs = Parameters<BrowserDriver["click"]>[0];
 type TypeArgs = Parameters<BrowserDriver["type"]>[0];
 type ScrollArgs = Parameters<BrowserDriver["scroll"]>[0];
-type WaitForArgs = Parameters<BrowserDriver["waitFor"]>[0];
+type WaitArgs = Parameters<BrowserDriver["waitFor"]>[0];
 type HoverArgs = Parameters<BrowserDriver["hover"]>[0];
 type DragArgs = Parameters<BrowserDriver["drag"]>[0];
 type ResolveLocatorArgs = Parameters<BrowserDriver["resolveLocator"]>;
 
 export interface TerminalBrowserDriverOptions {
   sleep?: (ms: number) => Promise<void>;
+  random?: () => number;
+  now?: () => number;
   beforeInput?: () => void;
   onPointer?: (event: ProgrammaticPointerEvent) => void;
   onTarget?: (point: Point) => void;
 }
 
+const SCROLL_STEP_DELAY_MS = 12;
+const WAIT_POLL_MS = 100;
+const MAX_SCROLL_STEPS = 240;
+const MIN_SCROLL_STEPS = 1;
+const MAX_TEXT = 32_768;
+const MAX_NATURAL_TEXT = 4_096;
+const MAX_SCROLL_DELTA = 20_000;
+const MAX_WAIT_TEXT = 1_024;
+
 export class TerminalBrowserDriver implements BrowserDriver {
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly random: () => number;
+  private readonly now: () => number;
   private readonly beforeInput: (() => void) | undefined;
   private readonly onPointer: ((event: ProgrammaticPointerEvent) => void) | undefined;
   private readonly onTarget: ((point: Point) => void) | undefined;
@@ -38,6 +53,8 @@ export class TerminalBrowserDriver implements BrowserDriver {
     options: TerminalBrowserDriverOptions = {},
   ) {
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    this.random = options.random ?? Math.random;
+    this.now = options.now ?? Date.now;
     this.beforeInput = options.beforeInput;
     this.onPointer = options.onPointer;
     this.onTarget = options.onTarget;
@@ -55,7 +72,7 @@ export class TerminalBrowserDriver implements BrowserDriver {
 
   async move(samples: CursorSample[], mode: DeliveryMode): Promise<void> {
     this.assertContentMode(mode);
-    await this.replayMove(samples);
+    await this.replayMove(samples, true);
     const last = samples.at(-1);
     if (last) this.lastPosition = { x: last.x, y: last.y };
   }
@@ -69,10 +86,7 @@ export class TerminalBrowserDriver implements BrowserDriver {
       if (args.dblclick) await this.clickCycle(args.target, args.button, args.pressMs);
       this.lastPosition = { ...args.target };
     } catch (error) {
-      try {
-        this.target.releaseAgentPointer();
-      } catch {}
-      throw error;
+      this.releaseAndRethrow(error);
     }
   }
 
@@ -80,24 +94,97 @@ export class TerminalBrowserDriver implements BrowserDriver {
     return ref ? this.observer.ensureVisible(ref) : Promise.resolve(null);
   }
 
-  async type(_args: TypeArgs): Promise<void> {
-    this.unsupported("type");
+  async type(args: TypeArgs): Promise<void> {
+    this.assertContentMode(args.mode);
+    validateTypeArgs(args);
+    try {
+      if (args.replace) {
+        this.beforeInput?.();
+        await this.target.agentSelectAll();
+        this.beforeInput?.();
+        await this.target.agentInsertText(args.text);
+        return;
+      }
+      if (args.schedule) {
+        for (const operation of normalizeSchedule(args.schedule)) {
+          const delay = operation.delayMs;
+          if (!Number.isFinite(delay) || delay < 0) throw new Error("invalid typing schedule");
+          await this.sleep(delay);
+          if (operation.t === "back") await this.dispatchKeyCycle(parseAgentKey("Backspace"));
+          else await this.dispatchTextKey(operation.ch);
+        }
+        return;
+      }
+      for (const character of args.text) {
+        const range = boundedDelay(args.perKeyMinMs, args.perKeyMaxMs, this.random);
+        await this.sleep(range);
+        await this.dispatchTextKey(character);
+      }
+    } catch (error) {
+      this.releaseAndRethrow(error);
+    }
   }
 
-  async scroll(_args: ScrollArgs): Promise<void> {
-    this.unsupported("scroll");
+  async scroll(args: ScrollArgs): Promise<void> {
+    this.assertContentMode(args.mode);
+    validateScrollArgs(args);
+    const steps = boundedSteps(args.steps);
+    const position = await this.cursorState();
+    this.lastPosition = { ...position };
+    const totalX = Math.round(args.dx);
+    const totalY = Math.round(args.dy);
+    let previousX = 0;
+    let previousY = 0;
+    try {
+      for (let step = 1; step <= steps; step++) {
+        if (step > 1) {
+          await this.sleep(SCROLL_STEP_DELAY_MS);
+        }
+        this.beforeInput?.();
+        const nextX = Math.round((totalX * step) / steps);
+        const nextY = Math.round((totalY * step) / steps);
+        const deltaX = nextX - previousX;
+        const deltaY = nextY - previousY;
+        previousX = nextX;
+        previousY = nextY;
+        if (deltaX === 0 && deltaY === 0) continue;
+        await this.target.agentWheel(position.x, position.y, deltaX, deltaY);
+      }
+    } catch (error) {
+      this.releaseAndRethrow(error);
+    }
   }
 
-  async navigate(_url: string): Promise<void> {
-    this.unsupported("navigate");
+  async navigate(url: string): Promise<void> {
+    if (!this.target.agentNavigate) this.unsupported("navigate");
+    this.beforeInput?.();
+    await this.target.agentNavigate(url);
   }
 
   async getUrl(): Promise<string> {
-    this.unsupported("getUrl");
+    this.beforeInput?.();
+    return this.target.currentUrl();
   }
 
-  async waitFor(_args: WaitForArgs): Promise<boolean> {
-    this.unsupported("waitFor");
+  async waitFor(args: WaitArgs): Promise<boolean> {
+    validateWaitArgs(args);
+    const condition = args.condition ?? (args.ref ? "visible" : "text");
+    const text = args.text === undefined ? null : normalizeSearchText(args.text);
+    const started = this.now();
+    try {
+      while (true) {
+        this.beforeInput?.();
+        const probe = await this.observer.probe(args.ref, text ?? undefined);
+        this.beforeInput?.();
+        if (matchesProbe(probe, condition, args.ref, text)) return true;
+        const elapsed = Math.max(0, this.now() - started);
+        if (elapsed >= args.timeoutMs) return false;
+        await this.sleep(Math.min(WAIT_POLL_MS, args.timeoutMs - elapsed));
+        this.beforeInput?.();
+      }
+    } catch (error) {
+      this.releaseAndRethrow(error);
+    }
   }
 
   async screenshot(_format?: "png" | "jpeg"): Promise<string> {
@@ -112,8 +199,13 @@ export class TerminalBrowserDriver implements BrowserDriver {
     this.unsupported("drag");
   }
 
-  async pressKey(_key: string, _mode: DeliveryMode): Promise<void> {
-    this.unsupported("pressKey");
+  async pressKey(key: string, mode: DeliveryMode): Promise<void> {
+    this.assertContentMode(mode);
+    try {
+      await this.dispatchKeyCycle(parseAgentKey(key));
+    } catch (error) {
+      this.releaseAndRethrow(error);
+    }
   }
 
   async resolveLocator(
@@ -121,6 +213,39 @@ export class TerminalBrowserDriver implements BrowserDriver {
     _opts: ResolveLocatorArgs[1],
   ): Promise<Awaited<ReturnType<BrowserDriver["resolveLocator"]>>> {
     this.unsupported("resolveLocator");
+  }
+
+  private async dispatchTextKey(character: string): Promise<void> {
+    const key = parseAgentKey(
+      character === "\n" || character === "\r"
+        ? "Enter"
+        : character === "\t"
+          ? "Tab"
+          : character,
+    );
+    await this.dispatchKeyCycle(key);
+  }
+
+  private async dispatchKeyCycle(key: AgentKey): Promise<void> {
+    let held = false;
+    try {
+      this.beforeInput?.();
+      await this.target.agentKeyDown(key);
+      held = true;
+      if (key.character) {
+        this.beforeInput?.();
+        await this.target.agentKeyChar(key);
+      }
+      this.beforeInput?.();
+      this.target.agentKeyUp(key);
+      held = false;
+    } finally {
+      if (held) {
+        try {
+          this.target.agentKeyUp(key);
+        } catch {}
+      }
+    }
   }
 
   private async replayMove(samples: CursorSample[], guard = false): Promise<void> {
@@ -152,6 +277,18 @@ export class TerminalBrowserDriver implements BrowserDriver {
     }
   }
 
+  private releaseAndRethrow(error: unknown): never {
+    try {
+      this.target.releaseAgentInput();
+    } catch {}
+    try {
+      this.beforeInput?.();
+    } catch (guardError) {
+      throw guardError;
+    }
+    throw error;
+  }
+
   private assertContentMode(mode: DeliveryMode) {
     if (mode !== "content") {
       throw new Error("terminal-browser agent only supports content delivery");
@@ -161,4 +298,95 @@ export class TerminalBrowserDriver implements BrowserDriver {
   private unsupported(operation: string): never {
     throw new Error(`terminal-browser agent ${operation} is not supported in this slice`);
   }
+}
+
+function validateTypeArgs(args: TypeArgs) {
+  const max = args.replace ? MAX_TEXT : MAX_NATURAL_TEXT;
+  if (args.text.length > max) throw new Error("text is too long");
+  if (args.text.includes("\0")) throw new Error("text contains NUL");
+  if (!args.replace && args.text.length === 0) throw new Error("text must not be empty");
+}
+
+function validateScrollArgs(args: ScrollArgs) {
+  if (!Number.isFinite(args.dx) || !Number.isFinite(args.dy)) {
+    throw new Error("scroll deltas must be finite");
+  }
+  if (Math.abs(args.dx) > MAX_SCROLL_DELTA || Math.abs(args.dy) > MAX_SCROLL_DELTA) {
+    throw new Error("scroll delta is too large");
+  }
+  if (args.dx === 0 && args.dy === 0) throw new Error("scroll needs a nonzero delta");
+  if (!Number.isFinite(args.steps)) throw new Error("scroll steps must be finite");
+}
+
+function validateWaitArgs(args: WaitArgs) {
+  if (!args.ref && args.text === undefined) throw new Error("wait needs a ref or text");
+  const condition = args.condition ?? (args.ref ? "visible" : "text");
+  if (condition === "exists" && !args.ref) throw new Error("exists wait needs a ref");
+  if (condition === "visible" && !args.ref) throw new Error("visible wait needs a ref");
+  if (condition === "text" && args.text === undefined) throw new Error("text wait needs text");
+  if (args.text !== undefined) {
+    if (args.text.length === 0) throw new Error("wait text must not be empty");
+    if (args.text.length > MAX_WAIT_TEXT) throw new Error("wait text is too long");
+    if (args.text.includes("\0")) throw new Error("wait text contains NUL");
+  }
+  if (!Number.isSafeInteger(args.timeoutMs) || args.timeoutMs < 0 || args.timeoutMs > 60_000) {
+    throw new Error("wait timeout must be an integer from 0 to 60000");
+  }
+}
+
+function boundedDelay(min: number, max: number, random: () => number): number {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max < min) {
+    throw new Error("invalid typing delay");
+  }
+  const value = random();
+  const sample = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+  return Math.round(min + (max - min) * sample);
+}
+
+function boundedSteps(steps: number): number {
+  return Math.max(MIN_SCROLL_STEPS, Math.min(MAX_SCROLL_STEPS, Math.round(steps)));
+}
+
+function normalizeSchedule(schedule: NonNullable<TypeArgs["schedule"]>): NonNullable<TypeArgs["schedule"]> {
+  const result: NonNullable<TypeArgs["schedule"]> = [];
+  for (let index = 0; index < schedule.length; index += 1) {
+    const current = schedule[index]!;
+    const next = schedule[index + 1];
+    if (
+      current.t === "key" &&
+      next?.t === "key" &&
+      current.ch.length === 1 &&
+      next.ch.length === 1 &&
+      current.ch.charCodeAt(0) >= 0xd800 &&
+      current.ch.charCodeAt(0) <= 0xdbff &&
+      next.ch.charCodeAt(0) >= 0xdc00 &&
+      next.ch.charCodeAt(0) <= 0xdfff
+    ) {
+      result.push({
+        t: "key",
+        ch: current.ch + next.ch,
+        delayMs: current.delayMs + next.delayMs,
+      });
+      index += 1;
+    } else {
+      result.push(current);
+    }
+  }
+  return result;
+}
+
+function normalizeSearchText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function matchesProbe(
+  probe: AgentPageProbe,
+  condition: "exists" | "visible" | "text",
+  ref: string | undefined,
+  text: string | null,
+): boolean {
+  if (condition === "exists") return probe.exists;
+  if (condition === "visible") return probe.visible;
+  const haystack = ref ? probe.refText : probe.documentText;
+  return text !== null && normalizeSearchText(haystack).includes(text);
 }

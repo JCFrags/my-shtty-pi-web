@@ -141,33 +141,39 @@ close all open browsers.
 `,
   },
   agent: {
-    summary: "Observe, click, and control the open browser through native AgentCursor",
-    usage: "terminal-browser agent <observe|click|status|pause|resume> [options]",
+    summary: "Observe, control, and act through native AgentCursor",
+    usage: "terminal-browser agent <observe|click|type|press-key|scroll|navigate|get-url|wait-for|status|pause|resume> [options]",
     body: `
-Reads the active terminal-browser tab and can click one ref returned by a fresh
-observation. Responses are JSON. An observation is invalid after a newer
-observation, a document navigation, or a control handoff.
+Reads a fresh observation and performs native actions on the selected tab.
+Responses are JSON. Observation-bound actions require the latest observation
+and control epoch; navigation invalidates earlier observations.
 
 Commands:
   terminal-browser agent observe [options]
   terminal-browser agent click <ref> --observation <id> --control-epoch <n> [options]
+  terminal-browser agent type <ref> (--text <text> | --stdin) --observation <id> --control-epoch <n> [--replace] [options]
+  terminal-browser agent press-key <key> --observation <id> --control-epoch <n> [options]
+  terminal-browser agent scroll --dy <n> [--dx <n>] --observation <id> --control-epoch <n> [options]
+  terminal-browser agent navigate <url> --control-epoch <n> [options]
+  terminal-browser agent get-url --control-epoch <n> [options]
+  terminal-browser agent wait-for (--ref <ref> | --text <text>) [--condition exists|visible|text] [--timeout-ms <n>] --observation <id> --control-epoch <n> [options]
   terminal-browser agent status [--browser <key>]
   terminal-browser agent pause --control-epoch <n> [--browser <key>]
   terminal-browser agent resume --control-epoch <n> [--browser <key>]
 
-Options for observe:
-  --browser <key>       Select a browser from terminal-browser ls --all
-  --tab <id>            Select a tab (for example t1)
-  --max-elements <n>    Return 1 to 500 elements (default 200)
-  --no-text             Omit visible page text
-
-Options for click:
+Common options:
   --browser <key>       Select a browser from terminal-browser ls --all
   --tab <id>            Select a tab (for example t1)
   --observation <id>    Observation id returned by observe
   --control-epoch <n>   Expected control epoch
 
-Status, pause, and resume are browser-wide and do not accept --tab.
+Options for observe:
+  --max-elements <n>    Return 1 to 500 elements (default 200)
+  --no-text             Omit visible page text
+
+Type reads stdin only with --stdin. Use --replace to select all and insert
+text as one native edit. Status, pause, and resume are browser-wide and do not
+accept --tab.
 `,
   },
   action: {

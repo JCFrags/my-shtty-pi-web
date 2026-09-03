@@ -6,15 +6,28 @@ import type { Browser } from "./instances";
 
 const DEFAULT_MAX_ELEMENTS = 200;
 const MAX_ELEMENTS = 500;
+const MAX_AGENT_STRING = 256;
+const MAX_KEY = 128;
+const MAX_NATURAL_TEXT = 4_096;
+const MAX_REPLACE_TEXT = 32_768;
+const MAX_SCROLL_DELTA = 20_000;
+const ACTION_TIMEOUT_MS = 10_000;
+const MAX_ACTION_TIMEOUT_MS = 300_000;
 
 export async function agentCommand(terminal: Terminal | null, args: string[]): Promise<number> {
   const subcommand = args.shift();
   if (subcommand === "observe") return observeCommand(terminal, args);
   if (subcommand === "click") return clickCommand(terminal, args);
+  if (subcommand === "type") return typeCommand(terminal, args);
+  if (subcommand === "press-key") return pressKeyCommand(terminal, args);
+  if (subcommand === "scroll") return scrollCommand(terminal, args);
+  if (subcommand === "navigate") return navigateCommand(terminal, args);
+  if (subcommand === "get-url") return getUrlCommand(terminal, args);
+  if (subcommand === "wait-for") return waitForCommand(terminal, args);
   if (subcommand === "status") return statusCommand(terminal, args);
   if (subcommand === "pause") return transitionCommand(terminal, args, "agent.pause");
   if (subcommand === "resume") return transitionCommand(terminal, args, "agent.resume");
-  throw new Error("agent needs observe, click, status, pause, or resume (terminal-browser agent --help)");
+  throw new Error("agent needs observe, click, type, press-key, scroll, navigate, get-url, wait-for, status, pause, or resume (terminal-browser agent --help)");
 }
 
 async function statusCommand(terminal: Terminal | null, args: string[]): Promise<number> {
@@ -72,22 +85,189 @@ async function clickCommand(terminal: Terminal | null, args: string[]): Promise<
   if (!ref || ref.startsWith("-")) {
     throw new Error("agent click needs a ref (terminal-browser agent click --help)");
   }
+  validateAgentString(ref, "agent click ref");
   if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent click --help)`);
   const browser = await selectBrowser(terminal, browserKey);
   const tab = await selectTab(browser, parseTab(tabValue));
-  if (!observationId || observationId.trim().length === 0 || observationId.length > 256) {
-    throw new Error("agent click needs --observation <id>");
-  }
+  const observation = parseObservation(observationId, "agent.click");
   const expectedControlEpoch = parseEpoch(epochValue, "agent.click");
   print(
     await control(browser.socket, {
       cmd: "agent.click",
       tab,
       ref,
-      observationId,
+      observationId: observation,
       expectedControlEpoch,
     }),
   );
+  return 0;
+}
+
+async function typeCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const observationId = takeValue(args, "--observation");
+  const epochValue = takeValue(args, "--control-epoch");
+  const textFlag = takeValue(args, "--text");
+  const stdin = takeBoolean(args, "--stdin");
+  const replace = takeBoolean(args, "--replace");
+  const ref = args.shift();
+  if (!ref || ref.startsWith("-")) {
+    throw new Error("agent type needs a ref (terminal-browser agent type --help)");
+  }
+  validateAgentString(ref, "agent type ref");
+  if ((textFlag === undefined && !stdin) || (textFlag !== undefined && stdin)) {
+    throw new Error("agent type needs exactly one of --text or --stdin");
+  }
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent type --help)`);
+  const text = stdin
+    ? await readStdin(replace ? MAX_REPLACE_TEXT : MAX_NATURAL_TEXT)
+    : textFlag!;
+  validateTypeText(text, replace);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  const observation = parseObservation(observationId, "agent.type");
+  const expectedControlEpoch = parseEpoch(epochValue, "agent.type");
+  const timeout = replace
+    ? ACTION_TIMEOUT_MS
+    : Math.min(MAX_ACTION_TIMEOUT_MS, ACTION_TIMEOUT_MS + text.length * 250);
+  print(
+    await control(browser.socket, {
+      cmd: "agent.type",
+      tab,
+      ref,
+      text,
+      replace,
+      observationId: observation,
+      expectedControlEpoch,
+    }, timeout),
+  );
+  return 0;
+}
+
+async function pressKeyCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const observationId = takeValue(args, "--observation");
+  const epochValue = takeValue(args, "--control-epoch");
+  const key = args.shift();
+  if (!key) {
+    throw new Error("agent press-key needs a key (terminal-browser agent press-key --help)");
+  }
+  if (key.length > MAX_KEY) throw new Error("agent press-key key is too long");
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent press-key --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  const observation = parseObservation(observationId, "agent.press-key");
+  const expectedControlEpoch = parseEpoch(epochValue, "agent.press-key");
+  print(await control(browser.socket, {
+    cmd: "agent.press-key",
+    tab,
+    key,
+    observationId: observation,
+    expectedControlEpoch,
+  }, ACTION_TIMEOUT_MS));
+  return 0;
+}
+
+async function scrollCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const observationId = takeValue(args, "--observation");
+  const epochValue = takeValue(args, "--control-epoch");
+  const dyValue = takeValue(args, "--dy");
+  const dxValue = takeValue(args, "--dx");
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent scroll --help)`);
+  const dy = parseScrollNumber(dyValue, "--dy");
+  const dx = dxValue === undefined ? 0 : parseScrollNumber(dxValue, "--dx");
+  validateScroll(dx, dy);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  const observation = parseObservation(observationId, "agent.scroll");
+  const expectedControlEpoch = parseEpoch(epochValue, "agent.scroll");
+  print(await control(browser.socket, {
+    cmd: "agent.scroll",
+    tab,
+    dx,
+    dy,
+    observationId: observation,
+    expectedControlEpoch,
+  }, ACTION_TIMEOUT_MS));
+  return 0;
+}
+
+async function navigateCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const epochValue = takeValue(args, "--control-epoch");
+  const url = args.shift();
+  if (!url || url.startsWith("-")) {
+    throw new Error("agent navigate needs a URL (terminal-browser agent navigate --help)");
+  }
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent navigate --help)`);
+  validateNavigation(url);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  const expectedControlEpoch = parseEpoch(epochValue, "agent.navigate");
+  print(await control(browser.socket, {
+    cmd: "agent.navigate",
+    tab,
+    url,
+    expectedControlEpoch,
+  }, ACTION_TIMEOUT_MS));
+  return 0;
+}
+
+async function getUrlCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const epochValue = takeValue(args, "--control-epoch");
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent get-url --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  const expectedControlEpoch = parseEpoch(epochValue, "agent.get-url");
+  print(await control(browser.socket, {
+    cmd: "agent.get-url",
+    tab,
+    expectedControlEpoch,
+  }, ACTION_TIMEOUT_MS));
+  return 0;
+}
+
+async function waitForCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const observationId = takeValue(args, "--observation");
+  const epochValue = takeValue(args, "--control-epoch");
+  const ref = takeValue(args, "--ref");
+  const text = takeValue(args, "--text");
+  const condition = takeValue(args, "--condition");
+  const timeoutValue = takeValue(args, "--timeout-ms");
+  if (ref === undefined && text === undefined) throw new Error("agent wait-for needs --ref or --text");
+  if (ref !== undefined) validateAgentString(ref, "agent wait-for ref");
+  if (condition !== undefined && condition !== "exists" && condition !== "visible" && condition !== "text") {
+    throw new Error("agent wait-for --condition must be exists, visible, or text");
+  }
+  if (condition === "exists" && ref === undefined) throw new Error("agent wait-for exists needs --ref");
+  if (condition === "visible" && ref === undefined) throw new Error("agent wait-for visible needs --ref");
+  if (condition === "text" && text === undefined) throw new Error("agent wait-for text needs --text");
+  if (text !== undefined) validateWaitText(text);
+  const timeoutMs = parseWaitTimeout(timeoutValue);
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent wait-for --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  const observation = parseObservation(observationId, "agent.wait-for");
+  const expectedControlEpoch = parseEpoch(epochValue, "agent.wait-for");
+  print(await control(browser.socket, {
+    cmd: "agent.wait-for",
+    tab,
+    ...(ref === undefined ? {} : { ref }),
+    ...(text === undefined ? {} : { text }),
+    ...(condition === undefined ? {} : { condition }),
+    timeoutMs,
+    observationId: observation,
+    expectedControlEpoch,
+  }, Math.min(MAX_ACTION_TIMEOUT_MS, timeoutMs + 5_000)));
   return 0;
 }
 
@@ -171,6 +351,78 @@ function parseEpoch(value: string | undefined, command: string): number {
     throw new Error(`${command} --control-epoch must be a positive integer`);
   }
   return epoch;
+}
+
+function parseObservation(value: string | undefined, command: string): string {
+  if (value === undefined) throw new Error(`${command} needs --observation <id>`);
+  validateAgentString(value, `${command} observationId`);
+  return value;
+}
+
+function validateAgentString(value: string, name: string): void {
+  if (value.trim().length === 0 || value.length > MAX_AGENT_STRING) {
+    throw new Error(`${name} must be a non-empty string of at most ${MAX_AGENT_STRING} characters`);
+  }
+}
+
+function parseScrollNumber(value: string | undefined, name: string): number {
+  if (value === undefined) throw new Error(`agent scroll needs ${name} <n>`);
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new Error(`agent scroll ${name} must be finite`);
+  return parsed;
+}
+
+function validateScroll(dx: number, dy: number) {
+  if (Math.abs(dx) > MAX_SCROLL_DELTA || Math.abs(dy) > MAX_SCROLL_DELTA) {
+    throw new Error("agent scroll delta is too large");
+  }
+  if (dx === 0 && dy === 0) throw new Error("agent scroll needs a nonzero delta");
+}
+
+function validateTypeText(text: string, replace: boolean) {
+  const max = replace ? MAX_REPLACE_TEXT : MAX_NATURAL_TEXT;
+  if (text.length > max) throw new Error(`agent type text must be at most ${max} characters`);
+  if (text.includes("\0")) throw new Error("agent type text contains NUL");
+  if (!replace && text.length === 0) throw new Error("agent type text must not be empty unless --replace is used");
+}
+
+function validateWaitText(text: string) {
+  if (text.length === 0 || text.length > 1_024) throw new Error("agent wait-for text must be non-empty and at most 1024 characters");
+  if (text.includes("\0")) throw new Error("agent wait-for text contains NUL");
+}
+
+function validateNavigation(url: string) {
+  if (url.trim().length === 0 || url.length > 8_192) throw new Error("agent navigate URL must be non-empty and at most 8192 characters");
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(url)) throw new Error("agent navigate URL contains control characters");
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(url.trim())?.[1]?.toLowerCase();
+  if (scheme && scheme !== "http" && scheme !== "https" && scheme !== "file" && scheme !== "about") {
+    throw new Error("agent navigate URL scheme is not allowed");
+  }
+  if (scheme === "about" && url.trim().toLowerCase() !== "about:blank") {
+    throw new Error("agent navigate only allows about:blank");
+  }
+}
+
+function parseWaitTimeout(value: string | undefined): number {
+  if (value === undefined) return 10_000;
+  const timeout = Number(value);
+  if (!Number.isSafeInteger(timeout) || timeout < 0 || timeout > 60_000) {
+    throw new Error("agent wait-for --timeout-ms must be an integer from 0 to 60000");
+  }
+  return timeout;
+}
+
+async function readStdin(maxLength: number): Promise<string> {
+  process.stdin.setEncoding("utf8");
+  const chunks: string[] = [];
+  let length = 0;
+  for await (const chunk of process.stdin) {
+    const value = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    length += value.length;
+    if (length > maxLength) throw new Error(`agent type stdin must be at most ${maxLength} characters`);
+    chunks.push(value);
+  }
+  return chunks.join("");
 }
 
 function print(value: unknown) {

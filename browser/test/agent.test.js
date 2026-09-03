@@ -6,14 +6,22 @@ const { test } = require("node:test");
 const { BrowserAgentRuntime } = require("../dist/agent/runtime.js");
 const { BrowserControl } = require("../dist/agent/control.js");
 const { TerminalBrowserDriver } = require("../dist/agent/terminal-browser-driver.js");
-const { Registry } = require("../dist/registry.js");
+const { MAX_CONTROL_LINE_BYTES, Registry } = require("../dist/registry.js");
 
 function driverFixture(driverOptions = {}) {
   const events = [];
   const sleeps = [];
   const target = {
     agentPointer: (event) => events.push(event),
-    releaseAgentPointer: () => events.push({ kind: "release" }),
+    releaseAgentPointer: () => events.push({ kind: "release-pointer" }),
+    releaseAgentInput: () => events.push({ kind: "release" }),
+    agentKeyDown: (key) => events.push({ kind: "key-down", key: key.canonical }),
+    agentKeyChar: (key) => events.push({ kind: "char", key: key.character }),
+    agentKeyUp: (key) => events.push({ kind: "key-up", key: key.canonical }),
+    agentSelectAll: async () => events.push({ kind: "select-all" }),
+    agentInsertText: async (text) => events.push({ kind: "insert-text", length: text.length }),
+    agentWheel: async (x, y, deltaX, deltaY) => events.push({ kind: "wheel", x, y, deltaX, deltaY }),
+    agentNavigate: async (url) => url,
     viewportSize: () => ({ width: 100, height: 80 }),
     currentUrl: () => "https://example.test/",
     runJs: async () => null,
@@ -25,6 +33,8 @@ function driverFixture(driverOptions = {}) {
     }),
     currentDocumentId: async () => "document-1",
     ensureVisible: async () => ({ x: 1, y: 2, width: 3, height: 4 }),
+    refState: async () => ({ exists: true, connected: true, editable: true }),
+    probe: async () => ({ exists: true, visible: true, refText: "", documentText: "" }),
   };
   const driver = new TerminalBrowserDriver(target, observer, {
     sleep: async (ms) => sleeps.push(ms),
@@ -122,10 +132,11 @@ test("ensureVisible returns the observer result", async () => {
   assert.deepEqual(await observer.ensureVisible("e1"), expected);
 });
 
-test("unsupported driver methods fail explicitly", async () => {
+test("driver content delivery rejects debugger input", async () => {
   const { driver } = driverFixture();
-  await assert.rejects(driver.type({ text: "hello", mode: "content" }), /not supported/);
-  await assert.rejects(driver.navigate("https://example.test/"), /not supported/);
+  await assert.rejects(driver.type({ text: "hello", mode: "debugger", perKeyMinMs: 0, perKeyMaxMs: 0 }), /only supports content delivery/);
+  await assert.rejects(driver.pressKey("Enter", "debugger"), /only supports content delivery/);
+  await assert.rejects(driver.scroll({ dx: 0, dy: 10, steps: 1, mode: "debugger" }), /only supports content delivery/);
   await assert.rejects(driver.click(clickArgs({ mode: "debugger" })), /only supports content delivery/);
 });
 
@@ -160,7 +171,15 @@ function runtimeFixture(options = {}) {
   const target = {
     runJs: async () => null,
     agentPointer: () => {},
-    releaseAgentPointer: () => { released += 1; },
+    releaseAgentPointer: () => {},
+    releaseAgentInput: () => { released += 1; },
+    agentKeyDown: async () => {},
+    agentKeyChar: () => {},
+    agentKeyUp: () => {},
+    agentSelectAll: async () => {},
+    agentInsertText: async () => {},
+    agentWheel: async () => {},
+    agentNavigate: async () => "https://example.test/",
     viewportSize: () => ({ width: 100, height: 80 }),
     currentUrl: () => "https://example.test/",
   };
@@ -419,6 +438,77 @@ test("socket request parsing rejects malformed observe and click requests", asyn
     });
     assert.equal(stale.ok, false);
     assert.match(stale.error, /stale control epoch/);
+  } finally {
+    registry.dispose();
+  }
+});
+
+function registryHost(key, calls = []) {
+  const control = new BrowserControl();
+  return {
+    key,
+    tty: null,
+    splitDir: null,
+    parentTty: null,
+    state: () => ({ url: "about:blank", title: "", favicon: null, loading: false, canGoBack: false, canGoForward: false, findMatches: null, zoom: 1 }),
+    interop: () => ({ mode: "browser" }),
+    where: async () => ({ terminal: null, tab: null, pane: null }),
+    openAppTab: () => ({ tab: 1 }),
+    openTab: () => 1,
+    activateTab: () => true,
+    agentTabSwitchAllowed: () => true,
+    agentStatus: () => control.snapshot,
+    agentPause: (epoch) => control.pause(epoch),
+    agentResume: (epoch) => control.resume(epoch),
+    agentObserve: async () => ({}),
+    agentClick: async () => ({}),
+    agentType: async (_id, request) => { calls.push(["type", request]); return { operation: "type" }; },
+    agentPressKey: async (_id, request) => { calls.push(["press-key", request]); return { operation: "press-key" }; },
+    agentScroll: async (_id, request) => { calls.push(["scroll", request]); return { operation: "scroll" }; },
+    agentNavigate: async (_id, request) => { calls.push(["navigate", request]); return { operation: "navigate" }; },
+    agentGetUrl: async (_id, request) => { calls.push(["get-url", request]); return { operation: "get-url" }; },
+    agentWaitFor: async (_id, request) => { calls.push(["wait-for", request]); return { operation: "wait-for" }; },
+    closeTab: () => true,
+    agentTouch: () => true,
+    agentRelease: () => {},
+    tabs: () => [],
+    targets: async () => [],
+    viewport: () => ({ width: 100, height: 80 }),
+  };
+}
+
+test("socket dispatches native action requests and enforces the 256 KiB line bound", async () => {
+  const key = `d-${randomUUID()}`;
+  const calls = [];
+  const registry = new Registry(registryHost(key, calls));
+  try {
+    const requests = [
+      { id: "type", cmd: "agent.type", tab: 1, ref: "e1", text: "Ada", observationId: "obs", expectedControlEpoch: 1 },
+      { id: "press", cmd: "agent.press-key", tab: 1, key: "Enter", observationId: "obs", expectedControlEpoch: 1 },
+      { id: "scroll", cmd: "agent.scroll", tab: 1, dy: 10, observationId: "obs", expectedControlEpoch: 1 },
+      { id: "navigate", cmd: "agent.navigate", tab: 1, url: "about:blank", expectedControlEpoch: 1 },
+      { id: "url", cmd: "agent.get-url", tab: 1, expectedControlEpoch: 1 },
+      { id: "wait", cmd: "agent.wait-for", tab: 1, text: "ready", timeoutMs: 0, observationId: "obs", expectedControlEpoch: 1 },
+    ];
+    for (const request of requests) {
+      const response = await registryRequest(registry.socketPath, request);
+      assert.equal(response.ok, true);
+    }
+    assert.deepEqual(calls.map(([kind]) => kind), ["type", "press-key", "scroll", "navigate", "get-url", "wait-for"]);
+    assert.equal(calls[0][1].replace, false);
+
+    const tooLarge = await registryRequest(registry.socketPath, {
+      id: "large",
+      cmd: "agent.type",
+      tab: 1,
+      ref: "e1",
+      text: "x".repeat(MAX_CONTROL_LINE_BYTES),
+      observationId: "obs",
+      expectedControlEpoch: 1,
+    });
+    assert.equal(tooLarge.id, null);
+    assert.equal(tooLarge.ok, false);
+    assert.equal(tooLarge.error, "request too large");
   } finally {
     registry.dispose();
   }

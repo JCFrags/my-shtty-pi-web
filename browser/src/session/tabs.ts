@@ -1,6 +1,22 @@
 import { BrowserAgentRuntime } from "../agent/runtime";
 import type { BrowserControl } from "../agent/control";
-import type { AgentClickRequest, AgentClickResult, AgentObservation } from "../agent/types";
+import type {
+  AgentClickRequest,
+  AgentClickResult,
+  AgentGetUrlRequest,
+  AgentGetUrlResult,
+  AgentNavigateRequest,
+  AgentNavigateResult,
+  AgentObservation,
+  AgentPressKeyRequest,
+  AgentPressKeyResult,
+  AgentScrollRequest,
+  AgentScrollResult,
+  AgentTypeRequest,
+  AgentTypeResult,
+  AgentWaitForRequest,
+  AgentWaitForResult,
+} from "../agent/types";
 import type { BrowserController } from "../page/controller";
 import type { DevtoolsAction } from "../page/devtools";
 import { initialBrowserState } from "../page/types";
@@ -194,7 +210,97 @@ export class TabManager {
       try {
         return await tab.agentRuntime.click(request);
       } finally {
-        tab.controller.releaseAgentPointer();
+        tab.controller.releaseAgentInput();
+      }
+    });
+  }
+
+  async agentType(id: number, request: AgentTypeRequest): Promise<AgentTypeResult> {
+    const tab = this.tabs.find((candidate) => candidate.id === id);
+    if (!tab) throw new Error(`no tab ${id}`);
+    return this.control.runMutation(request.expectedControlEpoch, async () => {
+      if (!this.agentActivate(id)) {
+        throw new Error("cannot activate a tab while terminal-browser is in a modal state");
+      }
+      try {
+        return await tab.agentRuntime.type(request);
+      } finally {
+        tab.controller.releaseAgentInput();
+      }
+    });
+  }
+
+  async agentPressKey(id: number, request: AgentPressKeyRequest): Promise<AgentPressKeyResult> {
+    const tab = this.tabs.find((candidate) => candidate.id === id);
+    if (!tab) throw new Error(`no tab ${id}`);
+    return this.control.runMutation(request.expectedControlEpoch, async () => {
+      if (!this.agentActivate(id)) {
+        throw new Error("cannot activate a tab while terminal-browser is in a modal state");
+      }
+      try {
+        return await tab.agentRuntime.pressKey(request);
+      } finally {
+        tab.controller.releaseAgentInput();
+      }
+    });
+  }
+
+  async agentScroll(id: number, request: AgentScrollRequest): Promise<AgentScrollResult> {
+    const tab = this.tabs.find((candidate) => candidate.id === id);
+    if (!tab) throw new Error(`no tab ${id}`);
+    return this.control.runMutation(request.expectedControlEpoch, async () => {
+      if (!this.agentActivate(id)) {
+        throw new Error("cannot activate a tab while terminal-browser is in a modal state");
+      }
+      try {
+        return await tab.agentRuntime.scroll(request);
+      } finally {
+        tab.controller.releaseAgentInput();
+      }
+    });
+  }
+
+  async agentNavigate(id: number, request: AgentNavigateRequest): Promise<AgentNavigateResult> {
+    const tab = this.tabs.find((candidate) => candidate.id === id);
+    if (!tab) throw new Error(`no tab ${id}`);
+    return this.control.runMutation(request.expectedControlEpoch, async () => {
+      if (!this.agentActivate(id)) {
+        throw new Error("cannot activate a tab while terminal-browser is in a modal state");
+      }
+      try {
+        return await tab.agentRuntime.navigate(request);
+      } finally {
+        tab.controller.releaseAgentInput();
+      }
+    });
+  }
+
+  async agentGetUrl(id: number, request: AgentGetUrlRequest): Promise<AgentGetUrlResult> {
+    const tab = this.tabs.find((candidate) => candidate.id === id);
+    if (!tab) throw new Error(`no tab ${id}`);
+    return this.control.runMutation(request.expectedControlEpoch, async () => {
+      if (!this.agentActivate(id)) {
+        throw new Error("cannot activate a tab while terminal-browser is in a modal state");
+      }
+      try {
+        return await tab.agentRuntime.getUrl(request);
+      } finally {
+        tab.controller.releaseAgentInput();
+      }
+    });
+  }
+
+  async agentWaitFor(id: number, request: AgentWaitForRequest): Promise<AgentWaitForResult> {
+    const tab = this.tabs.find((candidate) => candidate.id === id);
+    if (!tab) throw new Error(`no tab ${id}`);
+    return this.control.runMutation(request.expectedControlEpoch, async () => {
+      if (!this.agentActivate(id)) {
+        throw new Error("cannot activate a tab while terminal-browser is in a modal state");
+      }
+      try {
+        return await tab.agentRuntime.waitFor(request);
+      } finally {
+        tab.controller.releaseAgentInput();
       }
     });
   }

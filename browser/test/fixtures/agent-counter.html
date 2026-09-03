@@ -3,14 +3,38 @@
   <head>
     <meta charset="utf-8">
     <title>Agent counter</title>
+    <style>
+      body { font: 16px sans-serif; margin: 24px; }
+      #scrollbox { border: 1px solid #888; height: 80px; overflow: auto; width: 280px; }
+      #scroll-content { height: 480px; padding: 12px; background: linear-gradient(#fff, #ddd); }
+    </style>
   </head>
   <body>
     <button id="increment" type="button">Increment</button>
     <p id="status">Count: 0</p>
+    <label for="name">Name</label>
+    <input id="name" name="name" type="text" value="old">
+    <div id="editor" contenteditable="true">editable</div>
+    <div id="scrollbox" aria-label="Scroll area">
+      <div id="scroll-content">
+        <p id="top-marker">Top marker</p>
+        <p id="bottom-marker">Bottom marker</p>
+      </div>
+    </div>
     <script>
+      const status = document.getElementById("status");
       document.getElementById("increment").addEventListener("click", () => {
-        document.getElementById("status").textContent = "Count: 1";
+        status.textContent = "Count: 1";
       });
+      document.getElementById("name").addEventListener("input", (event) => {
+        status.textContent = "Name: " + event.target.value;
+      });
+      setTimeout(() => {
+        const ready = document.createElement("p");
+        ready.id = "ready-marker";
+        ready.textContent = "Content ready";
+        document.body.appendChild(ready);
+      }, 50);
     </script>
   </body>
 </html>

@@ -2,7 +2,12 @@ import type { PageSnapshot, Rect } from "agentcursor" with {
   "resolution-mode": "import",
 };
 
-import type { AgentBrowserTarget, AgentPageObserver, ObservedPage } from "./types";
+import type {
+  AgentBrowserTarget,
+  AgentPageObserver,
+  AgentPageProbe,
+  ObservedPage,
+} from "./types";
 
 const DEFAULT_MAX_ELEMENTS = 200;
 const MAX_ELEMENTS = 500;
@@ -220,6 +225,81 @@ ${REGISTRY_SETUP}
 return registry.documentId;
 })()`;
 
+function refStateSource(ref: string): string {
+  return String.raw`(() => {
+${REGISTRY_SETUP}
+const element = registry.elements.get(${JSON.stringify(ref)});
+if (!element) return { exists: false, connected: false, editable: false };
+const tag = element.tagName.toLowerCase();
+const type = (element.getAttribute("type") || "text").toLowerCase();
+const contentEditable = element.isContentEditable === true ||
+  (element.getAttribute("contenteditable") || "").toLowerCase() !== "false" &&
+  element.hasAttribute("contenteditable");
+const editable = contentEditable ||
+  (tag === "textarea" && !element.disabled && !element.readOnly) ||
+  (tag === "input" && type !== "hidden" && !element.disabled && !element.readOnly);
+return { exists: true, connected: element.isConnected === true, editable };
+})()`;
+}
+
+const PROBE_SOURCE = String.raw`(() => {
+${REGISTRY_SETUP}
+const clean = (value, max) => String(value ?? "")
+  .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+  .replace(/\s+/g, " ")
+  .trim()
+  .slice(0, max);
+const rectVisible = (element) => {
+  if (!element || !element.isConnected) return false;
+  const rect = element.getBoundingClientRect();
+  const style = getComputedStyle(element);
+  const opacity = Number.parseFloat(style.opacity || "1");
+  return style.display !== "none" && style.visibility !== "hidden" &&
+    style.visibility !== "collapse" && Number.isFinite(opacity) && opacity > 0 &&
+    rect.width > 0 && rect.height > 0;
+};
+const visibleText = (element) => {
+  try { return element.innerText || element.textContent || ""; }
+  catch { return element.textContent || ""; }
+};
+const contentEditable = (element) => element.isContentEditable === true ||
+  (element.getAttribute("contenteditable") || "").toLowerCase() !== "false" &&
+  element.hasAttribute("contenteditable");
+const valueOf = (element) => {
+  const tag = element.tagName.toLowerCase();
+  const type = (element.getAttribute("type") || "text").toLowerCase();
+  if (tag === "input" && type === "password") return "";
+  if (tag === "input" || tag === "textarea") return element.value;
+  if (contentEditable(element)) return element.textContent;
+  return "";
+};
+const ref = registry.elements.get(${JSON.stringify("__REF__")});
+const parts = [];
+const visit = (node) => {
+  if (node instanceof Element && node.shadowRoot) {
+    parts.push(node.shadowRoot.textContent || "");
+    visit(node.shadowRoot);
+  }
+  for (const child of node.children || []) visit(child);
+};
+if (document.documentElement) visit(document.documentElement);
+const normalText = document.body?.innerText || document.body?.textContent || "";
+const connected = !!ref && ref.isConnected === true;
+const refText = connected
+  ? clean([visibleText(ref), valueOf(ref)].join(" "), 20000)
+  : "";
+return {
+  exists: connected,
+  visible: rectVisible(ref),
+  refText,
+  documentText: clean([normalText, ...parts].join("\n"), 20000),
+};
+})()`;
+
+function probeSource(ref?: string): string {
+  return PROBE_SOURCE.replace(JSON.stringify("__REF__"), JSON.stringify(ref ?? ""));
+}
+
 function ensureVisibleSource(ref: string): string {
   return String.raw`(() => {
 ${REGISTRY_SETUP}
@@ -267,6 +347,40 @@ export class PageObserver implements AgentPageObserver {
       y: rect.y as number,
       width: rect.width as number,
       height: rect.height as number,
+    };
+  }
+
+  async refState(ref: string): Promise<{ exists: boolean; connected: boolean; editable: boolean }> {
+    const result = await this.target.runJs(refStateSource(ref));
+    if (!result || typeof result !== "object") {
+      throw new Error("page observer returned an invalid ref state");
+    }
+    const state = result as Record<string, unknown>;
+    if (![state.exists, state.connected, state.editable].every((value) => typeof value === "boolean")) {
+      throw new Error("page observer returned an invalid ref state");
+    }
+    return {
+      exists: state.exists as boolean,
+      connected: state.connected as boolean,
+      editable: state.editable as boolean,
+    };
+  }
+
+  async probe(ref?: string, _text?: string): Promise<AgentPageProbe> {
+    const result = await this.target.runJs(probeSource(ref));
+    if (!result || typeof result !== "object") {
+      throw new Error("page observer returned an invalid wait probe");
+    }
+    const probe = result as Record<string, unknown>;
+    if (typeof probe.exists !== "boolean" || typeof probe.visible !== "boolean" ||
+        typeof probe.refText !== "string" || typeof probe.documentText !== "string") {
+      throw new Error("page observer returned an invalid wait probe");
+    }
+    return {
+      exists: probe.exists,
+      visible: probe.visible,
+      refText: probe.refText,
+      documentText: probe.documentText,
     };
   }
 }
