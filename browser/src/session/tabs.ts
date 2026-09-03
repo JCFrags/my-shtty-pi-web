@@ -1,4 +1,5 @@
 import { BrowserAgentRuntime } from "../agent/runtime";
+import type { BrowserControl } from "../agent/control";
 import type { AgentClickRequest, AgentClickResult, AgentObservation } from "../agent/types";
 import type { BrowserController } from "../page/controller";
 import type { DevtoolsAction } from "../page/devtools";
@@ -73,9 +74,8 @@ export class TabManager {
   constructor(
     private readonly host: TabHost,
     private readonly fallbackUrl: string,
-  ) {
-
-  }
+    private readonly control: BrowserControl,
+  ) {}
 
   get active(): Tab | null {
     return this.tabs.find((tab) => tab.id === this.activeId) ?? null;
@@ -116,7 +116,7 @@ export class TabManager {
       if (tab.id === this.activeId) this.host.onActiveState(state, urlChanged);
       this.host.requestRender();
     }, { ...options, tabId: tab.id });
-    tab.agentRuntime = new BrowserAgentRuntime(tab.controller);
+    tab.agentRuntime = new BrowserAgentRuntime(tab.controller, { control: this.control });
     tab.controller.onMainFrameNavigationStart = () => tab.agentRuntime.invalidateDocument();
     tab.controller.onCursorChange = () => {
       if (tab.id === this.activeId) this.host.onCursorChanged();
@@ -168,13 +168,19 @@ export class TabManager {
   async agentClick(id: number, request: AgentClickRequest): Promise<AgentClickResult> {
     const tab = this.tabs.find((candidate) => candidate.id === id);
     if (!tab) throw new Error(`no tab ${id}`);
-    if (!this.host.agentTabSwitchAllowed()) {
-      throw new Error("cannot activate a tab while terminal-browser is in a modal state");
-    }
-    if (!this.activate(id)) {
-      throw new Error("cannot activate a tab while terminal-browser is in a modal state");
-    }
-    return tab.agentRuntime.click(request);
+    return this.control.runMutation(request.expectedControlEpoch, async () => {
+      if (!this.host.agentTabSwitchAllowed()) {
+        throw new Error("cannot activate a tab while terminal-browser is in a modal state");
+      }
+      if (!this.activate(id)) {
+        throw new Error("cannot activate a tab while terminal-browser is in a modal state");
+      }
+      try {
+        return await tab.agentRuntime.click(request);
+      } finally {
+        tab.controller.releaseAgentPointer();
+      }
+    });
   }
 
   close(id: number) {
@@ -310,6 +316,13 @@ export class TabManager {
 
   eachController(fn: (controller: BrowserController) => void) {
     for (const tab of this.tabs) fn(tab.controller);
+  }
+
+  invalidateAgentControl() {
+    for (const tab of this.tabs) {
+      tab.controller.releaseAllInput();
+      tab.agentRuntime.invalidateControl();
+    }
   }
 
   stopAll() {

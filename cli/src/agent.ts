@@ -11,7 +11,36 @@ export async function agentCommand(terminal: Terminal | null, args: string[]): P
   const subcommand = args.shift();
   if (subcommand === "observe") return observeCommand(terminal, args);
   if (subcommand === "click") return clickCommand(terminal, args);
-  throw new Error("agent needs observe or click (terminal-browser agent --help)");
+  if (subcommand === "status") return statusCommand(terminal, args);
+  if (subcommand === "pause") return transitionCommand(terminal, args, "agent.pause");
+  if (subcommand === "resume") return transitionCommand(terminal, args, "agent.resume");
+  throw new Error("agent needs observe, click, status, pause, or resume (terminal-browser agent --help)");
+}
+
+async function statusCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  rejectTabOption(args);
+  const browserKey = takeValue(args, "--browser");
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  print(await control(browser.socket, { cmd: "agent.status" }));
+  return 0;
+}
+
+async function transitionCommand(
+  terminal: Terminal | null,
+  args: string[],
+  cmd: "agent.pause" | "agent.resume",
+): Promise<number> {
+  rejectTabOption(args);
+  const browserKey = takeValue(args, "--browser");
+  const epochValue = takeValue(args, "--control-epoch");
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  print(await control(browser.socket, {
+    cmd,
+    expectedControlEpoch: parseEpoch(epochValue, cmd),
+  }));
+  return 0;
 }
 
 async function observeCommand(terminal: Terminal | null, args: string[]): Promise<number> {
@@ -49,7 +78,7 @@ async function clickCommand(terminal: Terminal | null, args: string[]): Promise<
   if (!observationId || observationId.trim().length === 0 || observationId.length > 256) {
     throw new Error("agent click needs --observation <id>");
   }
-  const expectedControlEpoch = parseEpoch(epochValue);
+  const expectedControlEpoch = parseEpoch(epochValue, "agent.click");
   print(
     await control(browser.socket, {
       cmd: "agent.click",
@@ -88,6 +117,12 @@ async function selectTab(browser: Browser, requested: number | undefined): Promi
   if (selected) return selected.id;
   if (requested === undefined) throw new Error(`browser ${recordKey(browser)} has no active tab`);
   throw new Error(`browser ${recordKey(browser)} has no tab ${requested}`);
+}
+
+function rejectTabOption(args: string[]) {
+  if (args.some((arg) => arg === "--tab" || arg.startsWith("--tab="))) {
+    throw new Error("agent status, pause, and resume do not accept --tab");
+  }
 }
 
 function takeValue(args: string[], name: string): string | undefined {
@@ -129,11 +164,11 @@ function parseMaxElements(value: string | undefined): number {
   return maxElements;
 }
 
-function parseEpoch(value: string | undefined): number {
-  if (value === undefined) throw new Error("agent click needs --control-epoch <n>");
+function parseEpoch(value: string | undefined, command: string): number {
+  if (value === undefined) throw new Error(`${command} needs --control-epoch <n>`);
   const epoch = Number(value);
   if (!Number.isSafeInteger(epoch) || epoch < 1) {
-    throw new Error("--control-epoch must be a positive integer");
+    throw new Error(`${command} --control-epoch must be a positive integer`);
   }
   return epoch;
 }

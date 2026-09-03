@@ -13,6 +13,7 @@ import {
 } from "pixel-store";
 import type { InstanceRow, OpenResult, OpenSpec } from "pixel-store";
 
+import type { AgentControlSnapshot } from "./agent/control";
 import type { AgentClickRequest, AgentClickResult, AgentObservation } from "./agent/types";
 import type { BrowserState } from "./page/types";
 import { INSTANCES_DIR } from "pixel-store";
@@ -39,6 +40,9 @@ export interface ControlHost {
   openTab(url?: string, cwd?: string): number;
   activateTab(id: number): boolean;
   agentTabSwitchAllowed(): boolean;
+  agentStatus(): AgentControlSnapshot;
+  agentPause(expectedEpoch: number): AgentControlSnapshot;
+  agentResume(expectedEpoch: number): AgentControlSnapshot;
   agentObserve(id: number, maxElements: number, includeText: boolean): Promise<AgentObservation>;
   agentClick(id: number, request: AgentClickRequest): Promise<AgentClickResult>;
   closeTab(id: number): boolean;
@@ -198,6 +202,12 @@ export class Registry {
         if (!this.host.closeTab(request.tab)) throw new Error(`no tab ${request.tab}`);
         return { ...this.record(), tabs: await this.host.targets() };
       }
+      case "agent.status":
+        return this.host.agentStatus();
+      case "agent.pause":
+        return this.host.agentPause(requiredEpoch(request.expectedControlEpoch, "agent.pause"));
+      case "agent.resume":
+        return this.host.agentResume(requiredEpoch(request.expectedControlEpoch, "agent.resume"));
       case "agent.observe": {
         const parsed = observeRequest(request);
         return this.host.agentObserve(parsed.tab, parsed.maxElements, parsed.includeText);
@@ -265,7 +275,7 @@ function clickRequest(request: ControlRequest): {
     request: {
       ref: requiredAgentString(request.ref, "ref"),
       observationId: requiredAgentString(request.observationId, "observationId"),
-      expectedControlEpoch: requiredEpoch(request.expectedControlEpoch),
+      expectedControlEpoch: requiredEpoch(request.expectedControlEpoch, "agent.click"),
     },
   };
 }
@@ -277,9 +287,9 @@ function requiredAgentString(value: unknown, name: string): string {
   return value;
 }
 
-function requiredEpoch(value: unknown): number {
+function requiredEpoch(value: unknown, command: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
-    throw new Error("agent.click expectedControlEpoch must be a positive integer");
+    throw new Error(`${command} expectedControlEpoch must be a positive integer`);
   }
   return value;
 }

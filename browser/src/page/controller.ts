@@ -470,7 +470,7 @@ export class BrowserController {
 
   blurContent() {
     if (!this.contentFocused) return;
-    this.input.releaseKeys();
+    this.input.releasePhysicalInput();
     this.window.blurWebView();
     this.contentFocused = false;
     void this.setFocusEmulation(false).catch(() => {});
@@ -491,9 +491,23 @@ export class BrowserController {
     this.input.programmaticPointer(event);
   }
 
+  releasePhysicalInput() {
+    this.input.releasePhysicalInput();
+    for (const popup of this.popups) popup.input.releasePhysicalInput();
+    this.devtools?.input.releasePhysicalInput();
+  }
+
+  releaseAllInput() {
+    this.input.releaseAllInput();
+    for (const popup of this.popups) popup.input.releaseAllInput();
+    this.devtools?.input.releaseAllInput();
+  }
+
   releaseAgentPointer() {
     if (this.stopped) return;
     this.input.releaseProgrammaticButtons();
+    for (const popup of this.popups) popup.input.releaseProgrammaticButtons();
+    this.devtools?.input.releaseProgrammaticButtons();
   }
 
   wheel(event: WheelEvent) {
@@ -526,6 +540,7 @@ export class BrowserController {
 
   setActive(active: boolean) {
     if (!active) {
+      this.releasePhysicalInput();
       this.blurContent();
       this.input.releaseModifiers();
     }
@@ -533,6 +548,7 @@ export class BrowserController {
 
   stop() {
     if (this.stopped) return;
+    this.releaseAllInput();
     this.stopped = true;
     this.teardown();
     this.window.destroy();
@@ -549,6 +565,7 @@ export class BrowserController {
 
   private readonly onWindowClosed = () => {
     if (this.stopped) return;
+    this.releaseAllInput();
     this.stopped = true;
     this.teardown();
     this.onClosed?.();

@@ -6,6 +6,7 @@ import type { ActionService, BrowserDriver, Point } from "agentcursor" with {
 
 import { PageObserver } from "./page-observer";
 import { TerminalBrowserDriver } from "./terminal-browser-driver";
+import type { BrowserControl } from "./control";
 import type {
   AgentActionService,
   AgentBrowserTarget,
@@ -16,6 +17,7 @@ import type {
 } from "./types";
 
 export interface BrowserAgentRuntimeOptions {
+  control: BrowserControl;
   observer?: AgentPageObserver;
   driver?: BrowserDriver;
   actionServiceFactory?: (driver: BrowserDriver) => Promise<AgentActionService>;
@@ -37,22 +39,26 @@ async function defaultActionServiceFactory(driver: BrowserDriver): Promise<Agent
 }
 
 export class BrowserAgentRuntime {
-  readonly controlState = "agent" as const;
   readonly observer: AgentPageObserver;
   readonly driver: BrowserDriver;
+  private readonly control: BrowserControl;
   private readonly actionServiceFactory: (driver: BrowserDriver) => Promise<AgentActionService>;
   private readonly observationId: () => string;
   private latestObservation: AgentObservation | null = null;
-  private readonly epoch = 1;
   private actionService: Promise<AgentActionService> | null = null;
   private operationQueue: Promise<void> = Promise.resolve();
   private documentGeneration = 0;
-  private activeClick: { observationId: string; documentGeneration: number } | null = null;
+  private activeClick: {
+    observationId: string;
+    documentGeneration: number;
+    controlEpoch: number;
+  } | null = null;
 
   constructor(
     private readonly target: AgentBrowserTarget,
-    options: BrowserAgentRuntimeOptions = {},
+    options: BrowserAgentRuntimeOptions,
   ) {
+    this.control = options.control;
     this.observer = options.observer ?? new PageObserver(target);
     this.driver = options.driver ?? new TerminalBrowserDriver(target, this.observer, {
       beforeInput: () => this.assertClickInput(),
@@ -62,20 +68,22 @@ export class BrowserAgentRuntime {
   }
 
   get controlEpoch(): number {
-    return this.epoch;
+    return this.control.snapshot.controlEpoch;
   }
 
   async observe(maxElements = 200, includeText = true): Promise<AgentObservation> {
     return this.enqueue(async () => {
+      const controlEpoch = this.control.assertAgent().controlEpoch;
       const documentGeneration = this.documentGeneration;
       const page = await this.observer.observe(maxElements, includeText);
+      this.control.assertAgent(controlEpoch);
       if (documentGeneration !== this.documentGeneration) {
         throw new Error("page changed during observation");
       }
       const observation: AgentObservation = {
         observationId: this.observationId(),
         documentId: page.documentId,
-        controlEpoch: this.epoch,
+        controlEpoch,
         snapshot: page.snapshot,
       };
       this.latestObservation = observation;
@@ -91,10 +99,16 @@ export class BrowserAgentRuntime {
     } catch {}
   }
 
+  invalidateControl(): void {
+    this.documentGeneration += 1;
+    this.latestObservation = null;
+  }
+
   async click(request: AgentClickRequest): Promise<AgentClickResult> {
     return this.enqueue(async () => {
       const observation = this.latestObservation;
       this.assertObservation(observation, request);
+      const controlEpoch = request.expectedControlEpoch;
       const action = await this.actionServiceInstance();
       this.assertObservation(observation, request);
       const documentId = await this.observer.currentDocumentId();
@@ -105,6 +119,7 @@ export class BrowserAgentRuntime {
       const click = {
         observationId: observation.observationId,
         documentGeneration: this.documentGeneration,
+        controlEpoch,
       };
       this.activeClick = click;
       try {
@@ -120,7 +135,7 @@ export class BrowserAgentRuntime {
           ref: request.ref,
           point,
           documentId: finalDocumentId,
-          controlEpoch: this.epoch,
+          controlEpoch,
           url: this.target.currentUrl(),
         };
       } finally {
@@ -144,15 +159,14 @@ export class BrowserAgentRuntime {
     ) {
       throw new Error("stale or unknown observation");
     }
-    if (request.expectedControlEpoch !== this.epoch) {
-      throw new Error("stale control epoch");
-    }
+    this.control.assertAgent(request.expectedControlEpoch);
   }
 
   private assertClickInput(): void {
     const click = this.activeClick;
+    if (!click) throw new Error("page changed since observation");
+    this.control.assertAgent(click.controlEpoch);
     if (
-      !click ||
       this.documentGeneration !== click.documentGeneration ||
       this.latestObservation?.observationId !== click.observationId
     ) {

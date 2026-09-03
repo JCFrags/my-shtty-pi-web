@@ -4,6 +4,7 @@ const { randomUUID } = require("node:crypto");
 const { test } = require("node:test");
 
 const { BrowserAgentRuntime } = require("../dist/agent/runtime.js");
+const { BrowserControl } = require("../dist/agent/control.js");
 const { TerminalBrowserDriver } = require("../dist/agent/terminal-browser-driver.js");
 const { Registry } = require("../dist/registry.js");
 
@@ -121,8 +122,9 @@ test("driver guard prevents native input after invalidation", async () => {
   assert.deepEqual(events, [{ kind: "release" }]);
 });
 
-function runtimeFixture() {
+function runtimeFixture(options = {}) {
   let documentId = "document-1";
+  const control = options.control || new BrowserControl();
   let nextObservation = 0;
   let clickedRef = null;
   let released = 0;
@@ -147,19 +149,21 @@ function runtimeFixture() {
     viewportSize: () => ({ width: 100, height: 80 }),
     currentUrl: () => "https://example.test/",
   };
-  const actionServiceFactory = async () => ({
+  const actionServiceFactory = options.actionServiceFactory || (async () => ({
     click: async ({ ref }) => {
       clickedRef = ref;
       return { x: 12, y: 14 };
     },
-  });
+  }));
   const runtime = new BrowserAgentRuntime(target, {
+    control,
     observer,
     actionServiceFactory,
     observationId: () => `observation-${++nextObservation}`,
   });
   return {
     runtime,
+    control,
     observer,
     setDocumentId: (value) => { documentId = value; },
     clickedRef: () => clickedRef,
@@ -220,6 +224,31 @@ test("BrowserAgentRuntime delegates a valid click to ActionService", async () =>
   });
 });
 
+test("BrowserAgentRuntime stops an active click after control takeover", async () => {
+  let started = false;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const { runtime, control } = runtimeFixture({
+    actionServiceFactory: async () => ({
+      click: async () => {
+        started = true;
+        await gate;
+        return { x: 12, y: 14 };
+      },
+    }),
+  });
+  const observation = await runtime.observe();
+  const click = runtime.click({
+    ref: "e1",
+    observationId: observation.observationId,
+    expectedControlEpoch: 1,
+  });
+  while (!started) await new Promise((resolve) => setImmediate(resolve));
+  control.takeHuman("pointer");
+  release();
+  await assert.rejects(click, /stale control epoch|agent control is human/);
+});
+
 function registryRequest(socketPath, request) {
   return new Promise((resolve, reject) => {
     const socket = net.connect(socketPath);
@@ -251,6 +280,7 @@ function registryRequest(socketPath, request) {
 
 test("socket request parsing rejects malformed observe and click requests", async () => {
   const key = `agent-test-${randomUUID()}`;
+  const hostControl = new BrowserControl();
   const host = {
     key,
     tty: null,
@@ -263,6 +293,9 @@ test("socket request parsing rejects malformed observe and click requests", asyn
     openTab: () => 1,
     activateTab: () => true,
     agentTabSwitchAllowed: () => true,
+    agentStatus: () => hostControl.snapshot,
+    agentPause: (epoch) => hostControl.pause(epoch),
+    agentResume: (epoch) => hostControl.resume(epoch),
     agentObserve: async () => ({}),
     agentClick: async () => ({}),
     closeTab: () => true,
@@ -288,6 +321,37 @@ test("socket request parsing rejects malformed observe and click requests", asyn
       assert.equal(typeof response.error, "string");
       assert.equal(response.error.includes("\n"), false);
     }
+    assert.deepEqual(
+      (await registryRequest(registry.socketPath, { id: "6", cmd: "agent.status" })).data,
+      { state: "agent", controlEpoch: 1, reason: null, busy: false },
+    );
+    assert.deepEqual(
+      (await registryRequest(registry.socketPath, {
+        id: "7",
+        cmd: "agent.pause",
+        expectedControlEpoch: 1,
+      })).data,
+      { state: "paused", controlEpoch: 2, reason: "manual-pause", busy: false },
+    );
+    assert.deepEqual(
+      (await registryRequest(registry.socketPath, { id: "8", cmd: "agent.status" })).data,
+      { state: "paused", controlEpoch: 2, reason: "manual-pause", busy: false },
+    );
+    assert.deepEqual(
+      (await registryRequest(registry.socketPath, {
+        id: "9",
+        cmd: "agent.resume",
+        expectedControlEpoch: 2,
+      })).data,
+      { state: "agent", controlEpoch: 3, reason: "manual-resume", busy: false },
+    );
+    const stale = await registryRequest(registry.socketPath, {
+      id: "10",
+      cmd: "agent.pause",
+      expectedControlEpoch: 2,
+    });
+    assert.equal(stale.ok, false);
+    assert.match(stale.error, /stale control epoch/);
   } finally {
     registry.dispose();
   }

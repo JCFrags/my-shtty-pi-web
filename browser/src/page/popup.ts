@@ -90,7 +90,9 @@ export class PopupWindow {
   }
 
   close() {
-    if (!this.destroyed) this.window.destroy();
+    if (this.destroyed) return;
+    this.input.releaseAllInput();
+    this.window.destroy();
   }
 
   zoom(direction: ZoomDirection): number {

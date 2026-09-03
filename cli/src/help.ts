@@ -141,16 +141,19 @@ close all open browsers.
 `,
   },
   agent: {
-    summary: "Observe and click the open browser through native AgentCursor",
-    usage: "terminal-browser agent <observe|click> [options]",
+    summary: "Observe, click, and control the open browser through native AgentCursor",
+    usage: "terminal-browser agent <observe|click|status|pause|resume> [options]",
     body: `
 Reads the active terminal-browser tab and can click one ref returned by a fresh
 observation. Responses are JSON. An observation is invalid after a newer
-observation or a document navigation.
+observation, a document navigation, or a control handoff.
 
 Commands:
   terminal-browser agent observe [options]
   terminal-browser agent click <ref> --observation <id> --control-epoch <n> [options]
+  terminal-browser agent status [--browser <key>]
+  terminal-browser agent pause --control-epoch <n> [--browser <key>]
+  terminal-browser agent resume --control-epoch <n> [--browser <key>]
 
 Options for observe:
   --browser <key>       Select a browser from terminal-browser ls --all
@@ -163,6 +166,8 @@ Options for click:
   --tab <id>            Select a tab (for example t1)
   --observation <id>    Observation id returned by observe
   --control-epoch <n>   Expected control epoch
+
+Status, pause, and resume are browser-wide and do not accept --tab.
 `,
   },
   action: {

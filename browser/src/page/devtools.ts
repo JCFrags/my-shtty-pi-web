@@ -206,7 +206,7 @@ export class DevtoolsWindow {
   blur() {
     if (!this.focused || this.destroyed) return;
     this.focused = false;
-    this.input.releaseKeys();
+    this.input.releasePhysicalInput();
     this.window.blurWebView();
     void this.cdp("Emulation.setFocusEmulationEnabled", { enabled: false }).catch(() => {});
   }

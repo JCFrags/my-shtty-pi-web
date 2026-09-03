@@ -10,6 +10,7 @@ import type { DragEvent, EngineKeyEvent, PixelRoot, Surface } from "pixel-react"
 import { detect } from "pixel-terminals";
 import type { Pane, Terminal } from "pixel-terminals";
 
+import { BrowserControl } from "../agent/control";
 import {
   browserSession,
   configureBrowserSession,
@@ -218,6 +219,7 @@ class Session {
   private consoleBinding: KeyBinding[] = [];
   private noSuper = false;
   private readonly tabs: TabManager;
+  private readonly control: BrowserControl;
   private readonly fallbackState: BrowserState;
 
   private root: PixelRoot | null = null;
@@ -314,6 +316,14 @@ class Session {
       configureBrowserSession(this.partition, (progress) => this.showDownload(progress)),
       reactGrabPreloadPath(),
     );
+    this.control = new BrowserControl({
+      beforeResume: () => this.releaseBrowserInput(),
+      onTransition: () => this.invalidateAgentControl(),
+      onChange: () => {
+        this.registry?.update();
+        this.render();
+      },
+    });
     this.tabs = new TabManager(
       {
         createController: (url, visible, onState, options) =>
@@ -345,6 +355,7 @@ class Session {
         },
         onDevtoolsChanged: () => this.syncDevtoolsLayout(),
         onDevtoolsAction: (action) => {
+          this.control.takeHuman("devtools");
           if (action === "close") this.tabs.activeController?.closeDevtools();
           else this.setDevtoolsDockSide(action === "dock-bottom" ? "bottom" : "right");
         },
@@ -373,7 +384,17 @@ class Session {
         requestRender: () => this.render(),
       },
       DEFAULT_URL,
+      this.control,
     );
+  }
+
+  private releaseBrowserInput() {
+    this.tabs.eachController((controller) => controller.releaseAllInput());
+  }
+
+  private invalidateAgentControl() {
+    this.tabs.invalidateAgentControl();
+    this.syncCursor();
   }
 
   async start(): Promise<void> {
@@ -389,6 +410,7 @@ class Session {
       keyEventTypes: true,
       onKey: (event) => this.handleKey(event),
       onPaste: (text) => {
+        this.control.takeHuman("paste");
         const browser = this.tabs.activeController;
         if (browser?.popup) browser.popup.input.paste(text);
         else if (this.browserFocused && browser?.devtoolsFocused) {
@@ -396,6 +418,7 @@ class Session {
         } else if (this.browserFocused) browser?.paste(text);
       },
       onPasteImage: (image) => {
+        this.control.takeHuman("paste");
         const browser = this.tabs.activeController;
         if (browser?.popup) browser.popup.input.pasteImage(image);
         else if (this.browserFocused && browser?.devtoolsFocused) {
@@ -460,6 +483,9 @@ class Session {
         return this.tabs.activate(id);
       },
       agentTabSwitchAllowed: () => this.agentTabSwitchAllowed(),
+      agentStatus: () => this.control.snapshot,
+      agentPause: (expectedEpoch) => this.control.pause(expectedEpoch),
+      agentResume: (expectedEpoch) => this.control.resume(expectedEpoch),
       agentObserve: (id, maxElements, includeText) =>
         this.tabs.agentObserve(id, maxElements, includeText),
       agentClick: (id, request) => this.tabs.agentClick(id, request),
@@ -764,33 +790,54 @@ class Session {
   }
 
   private readonly actions: ChromeActions = {
-    back: () => this.tabs.activeController?.back(),
-    forward: () => this.tabs.activeController?.forward(),
+    back: () => {
+      this.control.takeHuman("navigation");
+      this.tabs.activeController?.back();
+    },
+    forward: () => {
+      this.control.takeHuman("navigation");
+      this.tabs.activeController?.forward();
+    },
     reload: () => {
+      this.control.takeHuman("navigation");
       this.activeRecord()?.reloaded();
       this.tabs.activeController?.reload();
     },
-    urlEdit: () => this.openUrlEdit(),
+    urlEdit: () => {
+      this.control.takeHuman("navigation");
+      this.openUrlEdit();
+    },
     urlEditCancel: () => this.closeUrlEdit(),
     urlSubmit: (text) => {
+      this.control.takeHuman("navigation");
       this.closeUrlEdit();
       if (text.trim()) this.tabs.activeController?.navigate(searchOrUrl(text, this.ctx.cwd));
     },
     pointer: (event) => {
       this.browserFocused = true;
+      if (event.kind === "down") this.control.takeHuman("pointer");
+      else if (this.control.snapshot.state === "agent" && this.control.snapshot.busy) return;
       this.activeRecord()?.pointerSample(event);
       this.tabs.activeController?.pointer(event);
     },
     wheel: (event) => {
       this.browserFocused = true;
+      if (event.deltaX !== 0 || event.deltaY !== 0) this.control.takeHuman("wheel");
+      if (this.control.snapshot.state === "agent" && this.control.snapshot.busy) return;
       this.tabs.activeController?.wheel(event);
     },
     pageHover: (hovering) => {
       this.pageHover = hovering;
       this.syncCursor();
     },
-    findChange: (text) => this.tabs.activeController?.find(text),
-    findNext: (forward) => this.tabs.activeController?.findNext(forward),
+    findChange: (text) => {
+      this.control.takeHuman("keyboard");
+      this.tabs.activeController?.find(text);
+    },
+    findNext: (forward) => {
+      this.control.takeHuman("keyboard");
+      this.tabs.activeController?.findNext(forward);
+    },
     findClose: () => this.closeFind(),
     paletteQuery: (text) => {
       if (!this.palette) return;
@@ -798,22 +845,55 @@ class Session {
       this.palette.index = 0;
       this.render();
     },
-    paletteRun: (index) => this.runPalette(index),
+    paletteRun: (index) => {
+      this.control.takeHuman("pointer");
+      this.runPalette(index);
+    },
     paletteClose: () => this.closePalette(),
-    tabSwitch: (id) => this.tabs.activate(id),
-    tabClose: (id) => this.closeOrShutdown(id),
-    tabNew: () => this.openNewTabModal(),
-    tabMenu: () => this.toggleToolbarMenu(),
-    newTabQuery: (text) => this.newTabQuery(text),
+    tabSwitch: (id) => {
+      this.control.takeHuman("tabs");
+      this.tabs.activate(id);
+    },
+    tabClose: (id) => {
+      this.control.takeHuman("tabs");
+      this.closeOrShutdown(id);
+    },
+    tabNew: () => {
+      this.control.takeHuman("tabs");
+      this.openNewTabModal();
+    },
+    tabMenu: () => {
+      this.control.takeHuman("pointer");
+      this.toggleToolbarMenu();
+    },
+    newTabQuery: (text) => {
+      this.control.takeHuman("keyboard");
+      this.newTabQuery(text);
+    },
     newTabSubmit: (text) => {
+      this.control.takeHuman("tabs");
       this.closeNewTabModal();
       if (text.trim()) this.tabs.create(searchOrUrl(text, this.ctx.cwd));
     },
-    newTabPick: (index) => this.pickNewTab(index),
+    newTabPick: (index) => {
+      this.control.takeHuman("pointer");
+      this.pickNewTab(index);
+    },
     newTabCancel: () => this.closeNewTabModal(),
-    popupPointer: (event) => this.tabs.activeController?.popup?.input.pointer(event),
-    popupWheel: (event) => this.tabs.activeController?.popup?.input.wheel(event),
-    popupClose: () => this.tabs.activeController?.popup?.close(),
+    popupPointer: (event) => {
+      if (event.kind === "down") this.control.takeHuman("pointer");
+      else if (this.control.snapshot.state === "agent" && this.control.snapshot.busy) return;
+      this.tabs.activeController?.popup?.input.pointer(event);
+    },
+    popupWheel: (event) => {
+      if (event.deltaX !== 0 || event.deltaY !== 0) this.control.takeHuman("wheel");
+      if (this.control.snapshot.state === "agent" && this.control.snapshot.busy) return;
+      this.tabs.activeController?.popup?.input.wheel(event);
+    },
+    popupClose: () => {
+      this.control.takeHuman("pointer");
+      this.tabs.activeController?.popup?.close();
+    },
     popupHover: (hovering) => {
       this.popupHover = hovering;
       this.syncCursor();
@@ -822,6 +902,8 @@ class Session {
       const browser = this.tabs.activeController;
       if (!browser?.devtools) return;
       this.browserFocused = true;
+      if (event.kind === "down") this.control.takeHuman("devtools");
+      else if (this.control.snapshot.state === "agent" && this.control.snapshot.busy) return;
       browser.focusDevtools();
       browser.devtools.input.pointer(event);
     },
@@ -829,6 +911,8 @@ class Session {
       const browser = this.tabs.activeController;
       if (!browser?.devtools) return;
       this.browserFocused = true;
+      if (event.deltaX !== 0 || event.deltaY !== 0) this.control.takeHuman("devtools");
+      if (this.control.snapshot.state === "agent" && this.control.snapshot.busy) return;
       browser.focusDevtools();
       browser.devtools.input.wheel(event);
     },
@@ -842,6 +926,8 @@ class Session {
       this.render();
     },
     devtoolsDividerDrag: (event) => {
+      if (event.phase === "start") this.control.takeHuman("devtools");
+      else if (this.control.snapshot.state === "agent" && this.control.snapshot.busy) return;
       const page = this.layout?.page;
       const devtools = this.layout?.devtools;
       if (!page || !devtools) return;
@@ -865,7 +951,10 @@ class Session {
         this.syncDevtoolsLayout({ keepFrame: true });
       }
     },
-    pageMenuAction: (id) => this.runPageMenu(id),
+    pageMenuAction: (id) => {
+      this.control.takeHuman("pointer");
+      this.runPageMenu(id);
+    },
     pageMenuClose: () => this.closePageMenu(),
     record: this.recordActions(),
   };
@@ -982,6 +1071,7 @@ class Session {
   }
 
   private handleKey(event: EngineKeyEvent) {
+    if (event.kind !== "release") this.control.takeHuman("keyboard");
     const noShortcuts = this.sessionFlags.noShortcuts || this.appTabActive();
     const browser = this.tabs.activeController;
     if (browser?.popup) {

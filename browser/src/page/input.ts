@@ -51,8 +51,13 @@ export class PageInput {
 
   private send(event: SendableInputEvent) {
     const contents = this.target.contents();
-    if (this.focusGate) void this.focusGate.then(() => contents.sendInputEvent(event));
-    else contents.sendInputEvent(event);
+    const deliver = () => {
+      try {
+        contents.sendInputEvent(event);
+      } catch {}
+    };
+    if (this.focusGate) void this.focusGate.then(deliver, () => {});
+    else deliver();
   }
 
   releaseModifiers() {
@@ -95,8 +100,21 @@ export class PageInput {
     );
   }
 
+  releasePhysicalButtons() {
+    for (const button of [...this.pressed]) {
+      try {
+        this.dispatchPointer(
+          { kind: "up", x: this.lastX, y: this.lastY, button },
+          [],
+          this.pressed,
+        );
+      } catch {}
+    }
+    this.pressed.clear();
+  }
+
   releaseProgrammaticButtons() {
-    for (const button of this.programmaticPressed) {
+    for (const button of [...this.programmaticPressed]) {
       try {
         this.dispatchPointer(
           { kind: "up", x: this.lastX, y: this.lastY, button },
@@ -106,6 +124,17 @@ export class PageInput {
       } catch {}
     }
     this.programmaticPressed.clear();
+  }
+
+  releasePhysicalInput() {
+    this.releasePhysicalButtons();
+    this.releaseKeys();
+    this.releaseModifiers();
+  }
+
+  releaseAllInput() {
+    this.releasePhysicalInput();
+    this.releaseProgrammaticButtons();
   }
 
   private dispatchPointer(
@@ -294,7 +323,9 @@ export class PageInput {
       const modifiers: Electron.InputEvent["modifiers"] = [];
       if (key.startsWith("left")) modifiers.push("left");
       if (key.startsWith("right")) modifiers.push("right");
-      this.send({ type: "keyUp", keyCode, modifiers });
+      try {
+        this.send({ type: "keyUp", keyCode, modifiers });
+      } catch {}
     }
     this.sentKeys.clear();
   }
