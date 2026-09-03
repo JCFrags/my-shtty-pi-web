@@ -153,6 +153,7 @@ export class TabManager {
     if (!tab || (id !== this.activeId && !this.host.tabSwitchAllowed())) return false;
     if (this.activeId !== id) {
       const previous = this.tabs.find((t) => t.id === this.activeId);
+      previous?.agentRuntime.clearActivity();
       previous?.controller.setVisible(false);
     }
     this.activeId = id;

@@ -123,6 +123,16 @@ export class BrowserAgentRuntime {
     this.clearActivity();
   }
 
+  clearActivity(): void {
+    if (this.pulseTimer) {
+      clearTimeout(this.pulseTimer);
+      this.pulseTimer = null;
+    }
+    if (!this.activityValue) return;
+    this.activityValue = null;
+    this.emitActivity();
+  }
+
   async click(request: AgentClickRequest): Promise<AgentClickResult> {
     return this.enqueue(async () => {
       const observation = this.latestObservation;
@@ -231,16 +241,6 @@ export class BrowserAgentRuntime {
       this.activityValue = { ...this.activityValue, pulse: false };
       this.emitActivity();
     }, 450);
-  }
-
-  private clearActivity() {
-    if (this.pulseTimer) {
-      clearTimeout(this.pulseTimer);
-      this.pulseTimer = null;
-    }
-    if (!this.activityValue) return;
-    this.activityValue = null;
-    this.emitActivity();
   }
 
   private emitActivity() {
