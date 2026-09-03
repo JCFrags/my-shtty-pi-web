@@ -57,7 +57,7 @@ export interface TabHost {
 }
 
 const parsedTtl = Number(process.env.TERMINAL_BROWSER_AGENT_CONTROL_MS);
-const AGENT_CONTROL_TTL_MS = Number.isFinite(parsedTtl) && parsedTtl > 0 ? parsedTtl : 20_000;
+const AGENT_CONTROL_TTL_MS = Number.isFinite(parsedTtl) && parsedTtl > 0 ? parsedTtl : 10_000;
 const AGENT_CONTROL_SWEEP_MS = 500;
 
 export class TabManager {
