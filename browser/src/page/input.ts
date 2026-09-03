@@ -84,6 +84,7 @@ export class PageInput {
   }
 
   programmaticPointer(event: ProgrammaticPointerEvent) {
+    if (event.kind === "up" && event.button && !this.programmaticPressed.has(event.button)) return;
     this.syncFocus();
     const x = Math.max(0, Math.round(event.x));
     const y = Math.max(0, Math.round(event.y));

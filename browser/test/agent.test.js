@@ -125,6 +125,7 @@ function runtimeFixture() {
   let documentId = "document-1";
   let nextObservation = 0;
   let clickedRef = null;
+  let released = 0;
   const observer = {
     observe: async () => ({
       documentId,
@@ -142,7 +143,7 @@ function runtimeFixture() {
   const target = {
     runJs: async () => null,
     agentPointer: () => {},
-    releaseAgentPointer: () => {},
+    releaseAgentPointer: () => { released += 1; },
     viewportSize: () => ({ width: 100, height: 80 }),
     currentUrl: () => "https://example.test/",
   };
@@ -162,8 +163,15 @@ function runtimeFixture() {
     observer,
     setDocumentId: (value) => { documentId = value; },
     clickedRef: () => clickedRef,
+    released: () => released,
   };
 }
+
+test("BrowserAgentRuntime releases the pointer on document invalidation", () => {
+  const { runtime, released } = runtimeFixture();
+  runtime.invalidateDocument();
+  assert.equal(released(), 1);
+});
 
 test("BrowserAgentRuntime rejects an old observationId", async () => {
   const { runtime } = runtimeFixture();

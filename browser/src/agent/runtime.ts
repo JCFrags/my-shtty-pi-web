@@ -86,6 +86,9 @@ export class BrowserAgentRuntime {
   invalidateDocument(): void {
     this.documentGeneration += 1;
     this.latestObservation = null;
+    try {
+      this.target.releaseAgentPointer();
+    } catch {}
   }
 
   async click(request: AgentClickRequest): Promise<AgentClickResult> {
