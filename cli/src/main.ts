@@ -25,6 +25,7 @@ import {
 } from "pixel-terminals";
 import type { Direction, Terminal, TerminalCheck } from "pixel-terminals";
 import { actionCommand } from "./action";
+import { agentCommand } from "./agent";
 import { control } from "./control";
 import { setupCommand } from "./editors";
 import { ensureSetup, linkSkills, markSetupDone } from "./setup";
@@ -748,6 +749,10 @@ async function main(): Promise<number> {
     requirePaneAccess();
     const key = takeFlag(args, "--browser");
     return newTabCommand(args.find((arg) => !arg.startsWith("-")), key);
+  }
+  if (command === "agent") {
+    requirePaneAccess();
+    return agentCommand((await currentTerminal()).terminal, args);
   }
   if (command === "action") {
     requirePaneAccess();

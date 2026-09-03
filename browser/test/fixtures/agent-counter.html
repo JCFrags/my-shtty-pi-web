@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Agent counter</title>
+  </head>
+  <body>
+    <button id="increment" type="button">Increment</button>
+    <p id="status">Count: 0</p>
+    <script>
+      document.getElementById("increment").addEventListener("click", () => {
+        document.getElementById("status").textContent = "Count: 1";
+      });
+    </script>
+  </body>
+</html>

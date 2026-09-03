@@ -13,6 +13,7 @@ import {
 } from "pixel-store";
 import type { InstanceRow, OpenResult, OpenSpec } from "pixel-store";
 
+import type { AgentClickRequest, AgentClickResult, AgentObservation } from "./agent/types";
 import type { BrowserState } from "./page/types";
 import { INSTANCES_DIR } from "pixel-store";
 
@@ -37,6 +38,9 @@ export interface ControlHost {
   openAppTab(spec: OpenSpec, app: NonNullable<OpenSpec["app"]>): OpenResult;
   openTab(url?: string, cwd?: string): number;
   activateTab(id: number): boolean;
+  agentTabSwitchAllowed(): boolean;
+  agentObserve(id: number, maxElements: number, includeText: boolean): Promise<AgentObservation>;
+  agentClick(id: number, request: AgentClickRequest): Promise<AgentClickResult>;
   closeTab(id: number): boolean;
   agentTouch(id: number): boolean;
   agentRelease(): void;
@@ -51,6 +55,11 @@ interface ControlRequest {
   url?: string;
   cwd?: string;
   tab?: number;
+  maxElements?: unknown;
+  includeText?: unknown;
+  ref?: unknown;
+  observationId?: unknown;
+  expectedControlEpoch?: unknown;
 }
 
 export class Registry {
@@ -189,6 +198,14 @@ export class Registry {
         if (!this.host.closeTab(request.tab)) throw new Error(`no tab ${request.tab}`);
         return { ...this.record(), tabs: await this.host.targets() };
       }
+      case "agent.observe": {
+        const parsed = observeRequest(request);
+        return this.host.agentObserve(parsed.tab, parsed.maxElements, parsed.includeText);
+      }
+      case "agent.click": {
+        const parsed = clickRequest(request);
+        return this.host.agentClick(parsed.tab, parsed.request);
+      }
       case "agent-touch": {
         if (request.tab === undefined) throw new Error("agent-touch needs a tab id");
         if (!this.host.agentTouch(request.tab)) throw new Error(`no tab ${request.tab}`);
@@ -202,4 +219,67 @@ export class Registry {
         throw new Error(`unknown command: ${request.cmd}`);
     }
   }
+}
+
+const DEFAULT_MAX_ELEMENTS = 200;
+const MAX_ELEMENTS = 500;
+const MAX_AGENT_STRING = 256;
+
+function requiredTab(request: ControlRequest, command: string): number {
+  if (request.tab === undefined) throw new Error(`${command} needs a tab id`);
+  if (typeof request.tab !== "number" || !Number.isSafeInteger(request.tab) || request.tab < 1) {
+    throw new Error(`${command} needs a valid tab id`);
+  }
+  return request.tab;
+}
+
+function observeRequest(request: ControlRequest): {
+  tab: number;
+  maxElements: number;
+  includeText: boolean;
+} {
+  const tab = requiredTab(request, "agent.observe");
+  const maxElements = request.maxElements === undefined ? DEFAULT_MAX_ELEMENTS : request.maxElements;
+  if (
+    typeof maxElements !== "number" ||
+    !Number.isSafeInteger(maxElements) ||
+    maxElements < 1 ||
+    maxElements > MAX_ELEMENTS
+  ) {
+    throw new Error("agent.observe maxElements must be an integer from 1 to 500");
+  }
+  const includeText = request.includeText === undefined ? true : request.includeText;
+  if (typeof includeText !== "boolean") {
+    throw new Error("agent.observe includeText must be boolean");
+  }
+  return { tab, maxElements, includeText };
+}
+
+function clickRequest(request: ControlRequest): {
+  tab: number;
+  request: AgentClickRequest;
+} {
+  const tab = requiredTab(request, "agent.click");
+  return {
+    tab,
+    request: {
+      ref: requiredAgentString(request.ref, "ref"),
+      observationId: requiredAgentString(request.observationId, "observationId"),
+      expectedControlEpoch: requiredEpoch(request.expectedControlEpoch),
+    },
+  };
+}
+
+function requiredAgentString(value: unknown, name: string): string {
+  if (typeof value !== "string" || value.trim().length === 0 || value.length > MAX_AGENT_STRING) {
+    throw new Error(`agent.click ${name} must be a non-empty string of at most ${MAX_AGENT_STRING} characters`);
+  }
+  return value;
+}
+
+function requiredEpoch(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new Error("agent.click expectedControlEpoch must be a positive integer");
+  }
+  return value;
 }

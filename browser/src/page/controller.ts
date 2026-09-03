@@ -15,6 +15,7 @@ import type { DevtoolsDock } from "pixel-store";
 import { FaviconCache } from "./favicon";
 import { frameRate } from "./frame-rate";
 import { PageInput } from "./input";
+import type { ProgrammaticPointerEvent } from "./input";
 import { offscreenPreferences } from "./offscreen";
 import { BitmapPresenter, presentPaint, shmFrameOf } from "./paint";
 import { PopupWindow } from "./popup";
@@ -85,6 +86,7 @@ export class BrowserController {
   onDevtoolsAction: ((action: DevtoolsAction) => void) | null = null;
   onContextMenu: ((params: Electron.ContextMenuParams) => void) | null = null;
   onClosed: (() => void) | null = null;
+  onMainFrameNavigationStart: (() => void) | null = null;
 
   constructor(
     surface: Surface,
@@ -186,7 +188,9 @@ export class BrowserController {
     this.window.webContents.on(
       "did-start-navigation",
       (_event, _url, isInPlace, isMainFrame) => {
-        if (isMainFrame && !isInPlace) this.updateState({ loading: true });
+        if (!isMainFrame || isInPlace) return;
+        this.onMainFrameNavigationStart?.();
+        this.updateState({ loading: true });
       },
     );
     this.window.webContents.on("did-stop-loading", () => this.updateNavigation(false));
@@ -375,6 +379,14 @@ export class BrowserController {
     return this.window.webContents.executeJavaScript(source, true);
   }
 
+  currentUrl(): string {
+    return this.window.webContents.getURL();
+  }
+
+  viewportSize(): { width: number; height: number } {
+    return this.contentSize(this.layout);
+  }
+
   find(text: string) {
     this.findText = text;
     if (!text) {
@@ -472,6 +484,16 @@ export class BrowserController {
   pointer(event: PointerEvent) {
     if (this.stopped) return;
     this.input.pointer(event);
+  }
+
+  agentPointer(event: ProgrammaticPointerEvent) {
+    if (this.stopped) return;
+    this.input.programmaticPointer(event);
+  }
+
+  releaseAgentPointer() {
+    if (this.stopped) return;
+    this.input.releaseProgrammaticButtons();
   }
 
   wheel(event: WheelEvent) {

@@ -2,6 +2,13 @@ import { clipboard, nativeImage } from "electron";
 import type { WebContents } from "electron";
 import type { EngineKeyEvent, PastedImage, PointerEvent, WheelEvent } from "pixel-react";
 
+export interface ProgrammaticPointerEvent {
+  kind: "move" | "down" | "up";
+  x: number;
+  y: number;
+  button?: "left" | "middle" | "right";
+}
+
 export interface InputTarget {
   contents(): WebContents;
   scale(): number;
@@ -18,6 +25,7 @@ export class PageInput {
   private lastSentX = 0;
   private lastSentY = 0;
   private pressed = new Set<"left" | "middle" | "right">();
+  private programmaticPressed = new Set<"left" | "middle" | "right">();
   private click = { button: "none", at: 0, x: 0, y: 0, count: 0 };
   private activeClickCount = 1;
   private wheelRemainderX = 0;
@@ -67,16 +75,53 @@ export class PageInput {
     const scale = this.target.scale();
     const x = Math.max(0, Math.round(event.x / scale));
     const y = Math.max(0, Math.round(event.y / scale));
-    this.lastX = x;
-    this.lastY = y;
     const button = event.button === "none" ? undefined : event.button;
-    if (event.kind === "down" && button) {
-      this.pressed.add(button);
-      this.activeClickCount = this.nextClickCount(button, x, y);
+    this.dispatchPointer(
+      { kind: event.kind, x, y, button },
+      this.pointerModifiers(event.mods),
+      this.pressed,
+    );
+  }
+
+  programmaticPointer(event: ProgrammaticPointerEvent) {
+    this.syncFocus();
+    const x = Math.max(0, Math.round(event.x));
+    const y = Math.max(0, Math.round(event.y));
+    this.dispatchPointer(
+      { kind: event.kind, x, y, button: event.button },
+      [],
+      this.programmaticPressed,
+    );
+  }
+
+  releaseProgrammaticButtons() {
+    for (const button of this.programmaticPressed) {
+      try {
+        this.dispatchPointer(
+          { kind: "up", x: this.lastX, y: this.lastY, button },
+          [],
+          this.programmaticPressed,
+        );
+      } catch {}
     }
-    if (event.kind === "up" && button) this.pressed.delete(button);
-    const modifiers = this.pointerModifiers(event.mods);
-    for (const pressed of this.pressed) modifiers.push(`${pressed}buttondown`);
+    this.programmaticPressed.clear();
+  }
+
+  private dispatchPointer(
+    event: ProgrammaticPointerEvent,
+    baseModifiers: Electron.InputEvent["modifiers"],
+    originPressed: Set<"left" | "middle" | "right">,
+  ) {
+    this.lastX = event.x;
+    this.lastY = event.y;
+    if (event.kind === "down" && event.button) {
+      originPressed.add(event.button);
+      this.activeClickCount = this.nextClickCount(event.button, event.x, event.y);
+    }
+    const modifiers = [...(baseModifiers ?? [])];
+    const held = new Set([...this.pressed, ...this.programmaticPressed]);
+    if (event.kind === "up" && event.button) held.delete(event.button);
+    for (const pressed of held) modifiers.push(`${pressed}buttondown`);
     this.send({
       type:
         event.kind === "down"
@@ -84,16 +129,17 @@ export class PageInput {
           : event.kind === "up"
             ? "mouseUp"
             : "mouseMove",
-      x,
-      y,
-      movementX: x - this.lastSentX,
-      movementY: y - this.lastSentY,
-      button,
+      x: event.x,
+      y: event.y,
+      movementX: event.x - this.lastSentX,
+      movementY: event.y - this.lastSentY,
+      button: event.button,
       clickCount: event.kind === "move" ? 0 : this.activeClickCount,
       modifiers,
     });
-    this.lastSentX = x;
-    this.lastSentY = y;
+    if (event.kind === "up" && event.button) originPressed.delete(event.button);
+    this.lastSentX = event.x;
+    this.lastSentY = event.y;
   }
 
   wheel(event: WheelEvent) {

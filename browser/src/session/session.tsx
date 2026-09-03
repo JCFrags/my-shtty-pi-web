@@ -352,6 +352,7 @@ class Session {
         onTabOpened: (opener, url) => this.records.get(opener)?.linkOpened(url),
         onTabClosed: (id) => this.closeOrShutdown(id),
         tabSwitchAllowed: () => !this.activeRecord()?.reviewing,
+        agentTabSwitchAllowed: () => this.agentTabSwitchAllowed(),
         onTabsChanged: () => {
           this.syncChromeComposition();
           this.registry?.update();
@@ -456,9 +457,12 @@ class Session {
       openTab: (url, cwd) => this.tabs.create(url ? normalizeUrl(url, cwd) : DEFAULT_URL).id,
       activateTab: (id) => {
         if (!this.tabs.has(id) || this.activeRecord()?.reviewing) return false;
-        this.tabs.activate(id);
-        return true;
+        return this.tabs.activate(id);
       },
+      agentTabSwitchAllowed: () => this.agentTabSwitchAllowed(),
+      agentObserve: (id, maxElements, includeText) =>
+        this.tabs.agentObserve(id, maxElements, includeText),
+      agentClick: (id, request) => this.tabs.agentClick(id, request),
       closeTab: (id) => {
         if (!this.tabs.has(id)) return false;
         this.tabs.close(id);
@@ -870,6 +874,18 @@ class Session {
   private activeRecord(): RecordSession | null {
     const controller = this.tabs.activeController;
     return controller ? this.records.get(controller) ?? null : null;
+  }
+
+  private agentTabSwitchAllowed(): boolean {
+    const browser = this.tabs.activeController;
+    return !this.activeRecord()?.reviewing &&
+      !this.palette &&
+      !this.newTab &&
+      !this.urlEditOpen &&
+      !this.findOpen &&
+      !this.pageMenu &&
+      !browser?.popup &&
+      !browser?.devtoolsFocused;
   }
 
   private reconcileRecord() {

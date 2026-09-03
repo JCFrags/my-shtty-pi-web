@@ -140,6 +140,31 @@ fully quit terminal-browser operations, you can use this shutdown command. This 
 close all open browsers.
 `,
   },
+  agent: {
+    summary: "Observe and click the open browser through native AgentCursor",
+    usage: "terminal-browser agent <observe|click> [options]",
+    body: `
+Reads the active terminal-browser tab and can click one ref returned by a fresh
+observation. Responses are JSON. An observation is invalid after a newer
+observation or a document navigation.
+
+Commands:
+  terminal-browser agent observe [options]
+  terminal-browser agent click <ref> --observation <id> --control-epoch <n> [options]
+
+Options for observe:
+  --browser <key>       Select a browser from terminal-browser ls --all
+  --tab <id>            Select a tab (for example t1)
+  --max-elements <n>    Return 1 to 500 elements (default 200)
+  --no-text             Omit visible page text
+
+Options for click:
+  --browser <key>       Select a browser from terminal-browser ls --all
+  --tab <id>            Select a tab (for example t1)
+  --observation <id>    Observation id returned by observe
+  --control-epoch <n>   Expected control epoch
+`,
+  },
   action: {
     summary: "Use the open browser through the agent-browser CLI",
     usage: "terminal-browser action [selectors] -- <command>",

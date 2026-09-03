@@ -1,3 +1,5 @@
+import { BrowserAgentRuntime } from "../agent/runtime";
+import type { AgentClickRequest, AgentClickResult, AgentObservation } from "../agent/types";
 import type { BrowserController } from "../page/controller";
 import type { DevtoolsAction } from "../page/devtools";
 import { initialBrowserState } from "../page/types";
@@ -19,6 +21,7 @@ export interface Tab {
   readonly id: number;
   state: BrowserState;
   controller: BrowserController;
+  agentRuntime: BrowserAgentRuntime;
   targetId: string | null;
   app: TabApp | null;
   agentControlAt: number | null;
@@ -53,6 +56,7 @@ export interface TabHost {
   onTabOpened(opener: BrowserController, url: string): void;
   onTabClosed(id: number): void;
   tabSwitchAllowed(): boolean;
+  agentTabSwitchAllowed(): boolean;
   requestRender(): void;
 }
 
@@ -112,6 +116,8 @@ export class TabManager {
       if (tab.id === this.activeId) this.host.onActiveState(state, urlChanged);
       this.host.requestRender();
     }, { ...options, tabId: tab.id });
+    tab.agentRuntime = new BrowserAgentRuntime(tab.controller);
+    tab.controller.onMainFrameNavigationStart = () => tab.agentRuntime.invalidateDocument();
     tab.controller.onCursorChange = () => {
       if (tab.id === this.activeId) this.host.onCursorChanged();
     };
@@ -138,9 +144,9 @@ export class TabManager {
     });
   }
 
-  activate(id: number) {
+  activate(id: number): boolean {
     const tab = this.tabs.find((t) => t.id === id);
-    if (!tab || (id !== this.activeId && !this.host.tabSwitchAllowed())) return;
+    if (!tab || (id !== this.activeId && !this.host.tabSwitchAllowed())) return false;
     if (this.activeId !== id) {
       const previous = this.tabs.find((t) => t.id === this.activeId);
       previous?.controller.setVisible(false);
@@ -150,6 +156,25 @@ export class TabManager {
     tab.controller.focusContent();
     this.host.onActivated();
     this.host.requestRender();
+    return true;
+  }
+
+  async agentObserve(id: number, maxElements: number, includeText: boolean): Promise<AgentObservation> {
+    const tab = this.tabs.find((candidate) => candidate.id === id);
+    if (!tab) throw new Error(`no tab ${id}`);
+    return tab.agentRuntime.observe(maxElements, includeText);
+  }
+
+  async agentClick(id: number, request: AgentClickRequest): Promise<AgentClickResult> {
+    const tab = this.tabs.find((candidate) => candidate.id === id);
+    if (!tab) throw new Error(`no tab ${id}`);
+    if (!this.host.agentTabSwitchAllowed()) {
+      throw new Error("cannot activate a tab while terminal-browser is in a modal state");
+    }
+    if (!this.activate(id)) {
+      throw new Error("cannot activate a tab while terminal-browser is in a modal state");
+    }
+    return tab.agentRuntime.click(request);
   }
 
   close(id: number) {
