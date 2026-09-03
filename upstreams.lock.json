@@ -1,0 +1,22 @@
+{
+  "terminalBrowser": {
+    "repository": "https://github.com/zenbu-labs/terminal-browser.git",
+    "baseSha": "8bf4675e4b146b971e735263eaf455ec366b426f"
+  },
+  "agentcursor": {
+    "repository": "https://github.com/kumard3/agentcursor.git",
+    "inspectedSha": "b23c633c66fd240f836f5edd1034f6fcf678e237",
+    "releasedPackageVersion": null
+  },
+  "pi": {
+    "repository": "https://github.com/earendil-works/pi.git",
+    "defaultBranch": "main",
+    "inspectedSha": "4e69b0c28060f0f02fbe38bfa7c21a2e2eb25057"
+  },
+  "herdr": {
+    "repository": "https://github.com/herdrdev/herdr.git",
+    "defaultBranch": "master",
+    "inspectedSha": "94f6d9c0d9bb9cf9ffae99d8bbfb09e9bf2fc9e0"
+  },
+  "captureDate": "2026-09-02T23:19:00-07:00"
+}
