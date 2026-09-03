@@ -754,7 +754,7 @@ class Session {
     if (!this.devtoolsSurface) return;
     const pageSurface = this.tabs.activeController?.surface;
     if (!pageSurface) return;
-    const noOverlays = this.sessionFlags.noOverlays || this.appIdentity != null;
+    const noOverlays = this.sessionFlags.noOverlays || this.appIdentity != null || this.appTabActive();
     this.root.render(
       <Chrome
         state={this.tabs.activeState ?? this.fallbackState}
