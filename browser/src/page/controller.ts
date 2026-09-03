@@ -203,7 +203,9 @@ export class BrowserController {
       void this.loadFavicon(favicons);
     });
     this.window.webContents.on("did-navigate-in-page", (_event, url, mainFrame) => {
-      if (mainFrame) this.updateNavigation(this.state.loading, url);
+      if (!mainFrame) return;
+      this.onMainFrameNavigationStart?.();
+      this.updateNavigation(this.state.loading, url);
     });
     this.window.webContents.on("page-title-updated", (_event, title) => {
       this.updateState({ title });
