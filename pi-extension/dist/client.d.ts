@@ -72,6 +72,7 @@ interface ControlStatus {
     controlEpoch: number;
     reason: string | null;
     busy: boolean;
+    interactionStyle: "slow-natural";
 }
 export declare class PiBrowserClient {
     private readonly runner;
@@ -138,6 +139,7 @@ export declare class PiBrowserClient {
         controlEpoch: number;
         reason: string | null;
         busy: boolean;
+        interactionStyle: "slow-natural";
     }>;
     act(context: ToolContext, request: BrowserAction): Promise<{
         url: string;

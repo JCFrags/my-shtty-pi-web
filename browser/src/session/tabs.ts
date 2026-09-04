@@ -1,5 +1,9 @@
 import { BrowserAgentRuntime } from "../agent/runtime";
 import type { BrowserControl } from "../agent/control";
+import {
+  createSlowNaturalPersonaProvider,
+  type AgentPersonaProvider,
+} from "../agent/interaction-profile";
 import type {
   AgentClickRequest,
   AgentClickResult,
@@ -97,6 +101,7 @@ export class TabManager {
     private readonly host: TabHost,
     private readonly fallbackUrl: string,
     private readonly control: BrowserControl,
+    private readonly personaProvider: AgentPersonaProvider = createSlowNaturalPersonaProvider(),
   ) {}
 
   get active(): Tab | null {
@@ -140,6 +145,7 @@ export class TabManager {
     }, { ...options, tabId: tab.id });
     tab.agentRuntime = new BrowserAgentRuntime(tab.controller, {
       control: this.control,
+      personaProvider: this.personaProvider,
       onActivityChange: () => this.host.requestAgentRender(),
     });
     tab.controller.onMainFrameNavigationStart = () => tab.agentRuntime.invalidateDocument();

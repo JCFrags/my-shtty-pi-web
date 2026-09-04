@@ -118,6 +118,7 @@ interface ControlStatus {
   controlEpoch: number;
   reason: string | null;
   busy: boolean;
+  interactionStyle: "slow-natural";
 }
 
 function boundedTabs(value: unknown) {

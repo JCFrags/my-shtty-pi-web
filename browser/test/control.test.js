@@ -12,6 +12,7 @@ test("BrowserControl starts in agent state at epoch one", () => {
     controlEpoch: 1,
     reason: null,
     busy: false,
+    interactionStyle: "slow-natural",
   });
 });
 
@@ -26,30 +27,35 @@ test("BrowserControl changes epoch only for real transitions", () => {
     controlEpoch: 2,
     reason: "pointer",
     busy: false,
+    interactionStyle: "slow-natural",
   });
   assert.deepEqual(control.takeHuman("keyboard"), {
     state: "human",
     controlEpoch: 2,
     reason: "pointer",
     busy: false,
+    interactionStyle: "slow-natural",
   });
   assert.deepEqual(control.pause(2), {
     state: "paused",
     controlEpoch: 3,
     reason: "manual-pause",
     busy: false,
+    interactionStyle: "slow-natural",
   });
   assert.deepEqual(control.pause(3), {
     state: "paused",
     controlEpoch: 3,
     reason: "manual-pause",
     busy: false,
+    interactionStyle: "slow-natural",
   });
   assert.deepEqual(control.resume(3), {
     state: "agent",
     controlEpoch: 4,
     reason: "manual-resume",
     busy: false,
+    interactionStyle: "slow-natural",
   });
   assert.deepEqual(order, ["transition", "transition", "release", "transition"]);
   assert.deepEqual(control.resume(4), {
@@ -57,6 +63,7 @@ test("BrowserControl changes epoch only for real transitions", () => {
     controlEpoch: 4,
     reason: "manual-resume",
     busy: false,
+    interactionStyle: "slow-natural",
   });
   assert.throws(() => control.pause(3), /stale control epoch/);
 });

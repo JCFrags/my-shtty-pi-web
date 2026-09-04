@@ -1,9 +1,13 @@
 import { randomUUID } from "node:crypto";
 
-import type { ActionService, BrowserDriver, Point } from "agentcursor" with {
+import type { ActionService, BrowserDriver, Persona, Point } from "agentcursor" with {
   "resolution-mode": "import",
 };
 
+import {
+  createSlowNaturalPersonaProvider,
+  type AgentPersonaProvider,
+} from "./interaction-profile";
 import { PageObserver } from "./page-observer";
 import { parseAgentKey } from "./key";
 import { TerminalBrowserDriver } from "./terminal-browser-driver";
@@ -40,7 +44,11 @@ export interface BrowserAgentRuntimeOptions {
   onActivityChange?: (activity: AgentActivity | null) => void;
   observer?: AgentPageObserver;
   driver?: BrowserDriver;
-  actionServiceFactory?: (driver: BrowserDriver) => Promise<AgentActionService>;
+  personaProvider?: AgentPersonaProvider;
+  actionServiceFactory?: (
+    driver: BrowserDriver,
+    persona: Persona,
+  ) => Promise<AgentActionService>;
   observationId?: () => string;
 }
 
@@ -53,9 +61,12 @@ function loadAgentCursor(): Promise<AgentCursorModule> {
   return (agentCursorModule ??= import("agentcursor"));
 }
 
-async function defaultActionServiceFactory(driver: BrowserDriver): Promise<AgentActionService> {
+async function defaultActionServiceFactory(
+  driver: BrowserDriver,
+  persona: Persona,
+): Promise<AgentActionService> {
   const { ActionService } = await loadAgentCursor();
-  return new ActionService(driver);
+  return new ActionService(driver, persona);
 }
 
 type AgentOperationKind =
@@ -82,7 +93,11 @@ export class BrowserAgentRuntime {
   readonly driver: BrowserDriver;
   private readonly control: BrowserControl;
   private readonly onActivityChange: (activity: AgentActivity | null) => void;
-  private readonly actionServiceFactory: (driver: BrowserDriver) => Promise<AgentActionService>;
+  private readonly personaProvider: AgentPersonaProvider;
+  private readonly actionServiceFactory: (
+    driver: BrowserDriver,
+    persona: Persona,
+  ) => Promise<AgentActionService>;
   private readonly observationId: () => string;
   private latestObservation: AgentObservation | null = null;
   private actionService: Promise<AgentActionService> | null = null;
@@ -104,6 +119,7 @@ export class BrowserAgentRuntime {
       onPointer: (event) => this.updateActivity(event),
       onTarget: (point) => this.updateTarget(point),
     });
+    this.personaProvider = options.personaProvider ?? createSlowNaturalPersonaProvider();
     this.actionServiceFactory = options.actionServiceFactory ?? defaultActionServiceFactory;
     this.observationId = options.observationId ?? randomUUID;
   }
@@ -177,6 +193,7 @@ export class BrowserAgentRuntime {
   invalidateDocument(): void {
     this.documentGeneration += 1;
     this.latestObservation = null;
+    this.actionService = null;
     try {
       this.target.releaseAgentInput();
     } catch {}
@@ -186,6 +203,7 @@ export class BrowserAgentRuntime {
   invalidateControl(): void {
     this.documentGeneration += 1;
     this.latestObservation = null;
+    this.actionService = null;
     try {
       this.target.releaseAgentInput();
     } catch {}
@@ -321,6 +339,7 @@ export class BrowserAgentRuntime {
         this.rethrowOperationError(operation, error);
       } finally {
         this.clearOperation(operation);
+        this.actionService = null;
         try {
           this.target.releaseAgentPointer();
         } catch {}
@@ -563,7 +582,13 @@ export class BrowserAgentRuntime {
   }
 
   private actionServiceInstance(): Promise<AgentActionService> {
-    return (this.actionService ??= this.actionServiceFactory(this.driver));
+    return (this.actionService ??= this.createActionService());
+  }
+
+  private async createActionService(): Promise<AgentActionService> {
+    const persona = await this.personaProvider();
+    if (this.driver instanceof TerminalBrowserDriver) this.driver.usePersona(persona);
+    return this.actionServiceFactory(this.driver, persona);
   }
 
   private assertObservation(

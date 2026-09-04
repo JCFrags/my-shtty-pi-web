@@ -139,21 +139,33 @@ test("pressKey releases a held key after takeover and ignores the duplicate up",
   assert.deepEqual(events.map((event) => event.kind), ["key-down", "key-up", "release"]);
 });
 
-test("scroll distributes exact signed deltas at the viewport center", async () => {
-  const { driver, events } = driverFixture();
+test("scroll distributes exact signed deltas with gradual easing", async () => {
+  const { driver, events, sleeps } = driverFixture();
   await driver.scroll({ dx: 10, dy: 20, steps: 4, mode: "content" });
   const wheels = events.filter((event) => event.kind === "wheel");
-  assert.equal(wheels.length, 4);
+  assert.equal(wheels.length, 6);
   assert.equal(wheels.reduce((sum, event) => sum + event.dx, 0), 10);
   assert.equal(wheels.reduce((sum, event) => sum + event.dy, 0), 20);
-  assert.deepEqual(wheels[0], { kind: "wheel", x: 50, y: 40, dx: 3, dy: 5 });
-  assert.ok(wheels.every((event) => event.dy >= 0));
+  assert.deepEqual(wheels[0], { kind: "wheel", x: 50, y: 40, dx: 0, dy: 1 });
+  assert.deepEqual(wheels.map((event) => event.dy), [1, 3, 6, 6, 3, 1]);
+  assert.deepEqual(sleeps, [24, 24, 24, 24, 24]);
+});
+
+test("medium scrolls use a visible eased schedule", async () => {
+  const { driver, events, sleeps } = driverFixture();
+  await driver.scroll({ dx: 0, dy: 1200, steps: 3, mode: "content" });
+  const deltas = events.filter((event) => event.kind === "wheel").map((event) => event.dy);
+  assert.equal(deltas.length, 20);
+  assert.equal(deltas.reduce((sum, delta) => sum + delta, 0), 1200);
+  assert.equal(sleeps.reduce((sum, delay) => sum + delay, 0), 456);
+  assert.ok(deltas[0] < deltas[Math.floor(deltas.length / 2)]);
+  assert.ok(deltas.at(-1) < deltas[Math.floor(deltas.length / 2)]);
 });
 
 test("scroll clamps steps and rejects invalid bounds", async () => {
   const { driver, events } = driverFixture();
   await driver.scroll({ dx: 0, dy: 240, steps: 999, mode: "content" });
-  assert.ok(events.filter((event) => event.kind === "wheel").length <= 240);
+  assert.ok(events.filter((event) => event.kind === "wheel").length <= 80);
   await assert.rejects(driver.scroll({ dx: 0, dy: 0, steps: 1, mode: "content" }), /nonzero/);
   await assert.rejects(driver.scroll({ dx: 20_001, dy: 0, steps: 1, mode: "content" }), /too large/);
 });

@@ -2,6 +2,7 @@ import type {
   BrowserDriver,
   CursorSample,
   DeliveryMode,
+  Persona,
   Point,
 } from "agentcursor" with {
   "resolution-mode": "import",
@@ -19,6 +20,15 @@ type WaitArgs = Parameters<BrowserDriver["waitFor"]>[0];
 type HoverArgs = Parameters<BrowserDriver["hover"]>[0];
 type DragArgs = Parameters<BrowserDriver["drag"]>[0];
 type ResolveLocatorArgs = Parameters<BrowserDriver["resolveLocator"]>;
+type AgentCursorModule = typeof import("agentcursor", {
+  with: { "resolution-mode": "import" },
+});
+
+let agentCursorModule: Promise<AgentCursorModule> | null = null;
+
+function loadAgentCursor(): Promise<AgentCursorModule> {
+  return (agentCursorModule ??= import("agentcursor"));
+}
 
 export interface TerminalBrowserDriverOptions {
   sleep?: (ms: number) => Promise<void>;
@@ -29,10 +39,11 @@ export interface TerminalBrowserDriverOptions {
   onTarget?: (point: Point) => void;
 }
 
-const SCROLL_STEP_DELAY_MS = 12;
+const SCROLL_STEP_DELAY_MS = 24;
+const SCROLL_DELTA_PER_STEP = 60;
 const WAIT_POLL_MS = 100;
-const MAX_SCROLL_STEPS = 240;
-const MIN_SCROLL_STEPS = 1;
+const MAX_SCROLL_STEPS = 80;
+const MIN_SCROLL_STEPS = 6;
 const MAX_TEXT = 32_768;
 const MAX_NATURAL_TEXT = 4_096;
 const MAX_SCROLL_DELTA = 20_000;
@@ -46,6 +57,7 @@ export class TerminalBrowserDriver implements BrowserDriver {
   private readonly onPointer: ((event: ProgrammaticPointerEvent) => void) | undefined;
   private readonly onTarget: ((point: Point) => void) | undefined;
   private lastPosition: Point | null = null;
+  private persona: Persona | null = null;
 
   constructor(
     private readonly target: AgentBrowserTarget,
@@ -62,6 +74,13 @@ export class TerminalBrowserDriver implements BrowserDriver {
 
   snapshot(maxElements: number, includeText: boolean) {
     return this.observer.observe(maxElements, includeText).then(({ snapshot }) => snapshot);
+  }
+
+  usePersona(persona: Persona): void {
+    if (this.persona && this.persona !== persona) {
+      throw new Error("terminal-browser driver persona cannot change");
+    }
+    this.persona = persona;
   }
 
   async cursorState(): Promise<Point> {
@@ -128,11 +147,11 @@ export class TerminalBrowserDriver implements BrowserDriver {
   async scroll(args: ScrollArgs): Promise<void> {
     this.assertContentMode(args.mode);
     validateScrollArgs(args);
-    const steps = boundedSteps(args.steps);
-    const position = await this.cursorState();
-    this.lastPosition = { ...position };
     const totalX = Math.round(args.dx);
     const totalY = Math.round(args.dy);
+    const steps = boundedSteps(args.steps, totalX, totalY);
+    const position = await this.cursorState();
+    this.lastPosition = { ...position };
     let previousX = 0;
     let previousY = 0;
     try {
@@ -141,8 +160,9 @@ export class TerminalBrowserDriver implements BrowserDriver {
           await this.sleep(SCROLL_STEP_DELAY_MS);
         }
         this.beforeInput?.();
-        const nextX = Math.round((totalX * step) / steps);
-        const nextY = Math.round((totalY * step) / steps);
+        const progress = smootherstep(step / steps);
+        const nextX = Math.round(totalX * progress);
+        const nextY = Math.round(totalY * progress);
         const deltaX = nextX - previousX;
         const deltaY = nextY - previousY;
         previousX = nextX;
@@ -203,6 +223,7 @@ export class TerminalBrowserDriver implements BrowserDriver {
     let held = false;
     let failure: unknown;
     try {
+      await this.approachDragSource(start);
       this.beforeInput?.();
       this.target.agentPointer(down);
       this.onPointer?.(down);
@@ -213,7 +234,8 @@ export class TerminalBrowserDriver implements BrowserDriver {
       failure = error;
     } finally {
       if (held) {
-        const up = { kind: "up" as const, x: args.target.x, y: args.target.y, button: args.button };
+        const releasePoint = this.lastPosition ?? start;
+        const up = { kind: "up" as const, x: releasePoint.x, y: releasePoint.y, button: args.button };
         try {
           this.target.agentPointer(up);
           this.onPointer?.(up);
@@ -237,6 +259,27 @@ export class TerminalBrowserDriver implements BrowserDriver {
     _opts: ResolveLocatorArgs[1],
   ): Promise<Awaited<ReturnType<BrowserDriver["resolveLocator"]>>> {
     this.unsupported("resolveLocator");
+  }
+
+  private async approachDragSource(start: Point): Promise<void> {
+    const persona = this.persona;
+    if (!persona) throw new Error("slow-natural persona is not configured");
+    const current = await this.cursorState();
+    if (current.x === start.x && current.y === start.y) return;
+    const traits = persona.traits();
+    const { generateMove } = await loadAgentCursor();
+    const samples = generateMove(current, start, {
+      rng: persona.rng,
+      targetWidth: 24,
+      speedFactor: traits.speedFactor,
+      curviness: traits.curviness,
+      jitterPx: traits.jitterPx,
+      overshootProb: traits.overshootProb,
+      overshootMag: traits.overshootMag,
+      handedness: traits.handedness,
+    });
+    await this.replayMove(samples, true);
+    this.lastPosition = { ...start };
   }
 
   private async dispatchTextKey(character: string): Promise<void> {
@@ -281,6 +324,7 @@ export class TerminalBrowserDriver implements BrowserDriver {
       if (guard) this.beforeInput?.();
       const move = { kind: "move" as const, x: sample.x, y: sample.y };
       this.target.agentPointer(move);
+      this.lastPosition = { x: sample.x, y: sample.y };
       this.onPointer?.(move);
       previousAt = at;
     }
@@ -367,8 +411,15 @@ function boundedDelay(min: number, max: number, random: () => number): number {
   return Math.round(min + (max - min) * sample);
 }
 
-function boundedSteps(steps: number): number {
-  return Math.max(MIN_SCROLL_STEPS, Math.min(MAX_SCROLL_STEPS, Math.round(steps)));
+function boundedSteps(steps: number, dx: number, dy: number): number {
+  const requested = Math.round(steps);
+  const natural = Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / SCROLL_DELTA_PER_STEP);
+  return Math.min(MAX_SCROLL_STEPS, Math.max(MIN_SCROLL_STEPS, requested, natural));
+}
+
+function smootherstep(value: number): number {
+  const t = Math.max(0, Math.min(1, value));
+  return t * t * t * (t * (t * 6 - 15) + 10);
 }
 
 function normalizeSchedule(schedule: NonNullable<TypeArgs["schedule"]>): NonNullable<TypeArgs["schedule"]> {

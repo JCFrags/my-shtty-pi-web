@@ -1,3 +1,5 @@
+import { INTERACTION_STYLE } from "./interaction-profile";
+
 export type AgentControlState = "agent" | "human" | "paused";
 
 export type AgentControlReason =
@@ -16,6 +18,7 @@ export interface AgentControlSnapshot {
   controlEpoch: number;
   reason: AgentControlReason | null;
   busy: boolean;
+  interactionStyle: typeof INTERACTION_STYLE;
 }
 
 export interface AgentControlTransition {
@@ -35,6 +38,7 @@ export class BrowserControl {
     controlEpoch: 1,
     reason: null,
     busy: false,
+    interactionStyle: INTERACTION_STYLE,
   };
   private mutationTail: Promise<void> = Promise.resolve();
   private readonly listeners = new Set<(snapshot: AgentControlSnapshot) => void>();

@@ -5,6 +5,7 @@ const { test } = require("node:test");
 
 const { BrowserAgentRuntime } = require("../dist/agent/runtime.js");
 const { BrowserControl } = require("../dist/agent/control.js");
+const { createSlowNaturalPersona } = require("../dist/agent/interaction-profile.js");
 const { TerminalBrowserDriver } = require("../dist/agent/terminal-browser-driver.js");
 const { MAX_CONTROL_LINE_BYTES, Registry } = require("../dist/registry.js");
 
@@ -91,20 +92,46 @@ test("driver click produces move, down, and up in order", async () => {
   assert.deepEqual(sleeps, [3, 7]);
 });
 
-test("driver drag holds through movement and always releases", async () => {
-  const { driver, events } = driverFixture();
+test("driver naturally approaches a drag source before holding and releases", async () => {
+  const { driver, events, sleeps } = driverFixture();
+  driver.usePersona(await createSlowNaturalPersona({ seed: 42, now: () => 0 }));
   await driver.drag({
     samples: [{ x: 5, y: 6, t: 0 }, { x: 15, y: 16, t: 0 }],
     target: { x: 15, y: 16 },
     button: "left",
     mode: "content",
   });
-  assert.deepEqual(events, [
+  const downAt = events.findIndex((event) => event.kind === "down");
+  assert.ok(downAt > 8);
+  assert.deepEqual(events[0], { kind: "move", x: 50, y: 40 });
+  assert.deepEqual(events[downAt - 1], { kind: "move", x: 5, y: 6 });
+  assert.deepEqual(events.slice(downAt), [
     { kind: "down", x: 5, y: 6, button: "left" },
     { kind: "move", x: 5, y: 6 },
     { kind: "move", x: 15, y: 16 },
     { kind: "up", x: 15, y: 16, button: "left" },
   ]);
+  assert.ok(sleeps.reduce((sum, delay) => sum + delay, 0) >= 300);
+});
+
+test("takeover during the natural drag approach prevents button-down", async () => {
+  let guards = 0;
+  const { driver, events } = driverFixture({
+    beforeInput: () => {
+      guards += 1;
+      if (guards === 4) throw new Error("agent control is human");
+    },
+  });
+  driver.usePersona(await createSlowNaturalPersona({ seed: 42, now: () => 0 }));
+  await assert.rejects(driver.drag({
+    samples: [{ x: 5, y: 6, t: 0 }, { x: 15, y: 16, t: 0 }],
+    target: { x: 15, y: 16 },
+    button: "left",
+    mode: "content",
+  }), /agent control is human/);
+  assert.equal(events.some((event) => event.kind === "down"), false);
+  assert.equal(events.some((event) => event.kind === "up"), false);
+  assert.equal(events.at(-1).kind, "release");
 });
 
 test("driver drag releases before reporting an invalidated operation", async () => {
@@ -115,16 +142,18 @@ test("driver drag releases before reporting an invalidated operation", async () 
       if (guards === 3) throw new Error("page changed since observation");
     },
   });
+  driver.usePersona(await createSlowNaturalPersona({ seed: 42, now: () => 0 }));
   await assert.rejects(driver.drag({
-    samples: [{ x: 5, y: 6, t: 0 }, { x: 15, y: 16, t: 0 }],
+    samples: [{ x: 50, y: 40, t: 0 }, { x: 15, y: 16, t: 0 }],
     target: { x: 15, y: 16 },
     button: "left",
     mode: "content",
   }), /page changed since observation/);
   assert.deepEqual(events.slice(-2), [
-    { kind: "up", x: 15, y: 16, button: "left" },
+    { kind: "up", x: 50, y: 40, button: "left" },
     { kind: "release" },
   ]);
+  assert.deepEqual(await driver.cursorState(), { x: 50, y: 40 });
 });
 
 test("driver double-click produces two complete click cycles", async () => {
@@ -350,6 +379,33 @@ test("BrowserAgentRuntime requires visual state for coordinate drag", async () =
   assert.deepEqual(calls, [{ from: { x: 1, y: 2 }, to: { x: 10, y: 12 }, button: "left" }]);
 });
 
+test("BrowserAgentRuntime resets stale ActionService cursor state after drag", async () => {
+  let factories = 0;
+  const { runtime } = runtimeFixture({
+    actionServiceFactory: async () => {
+      factories += 1;
+      return {
+        drag: async () => {},
+        hover: async () => {},
+      };
+    },
+  });
+  const observation = await runtime.observe({ view: "visual" });
+  await runtime.drag({
+    from: { x: 10, y: 10 },
+    to: { x: 20, y: 20 },
+    button: "left",
+    observationId: observation.observationId,
+    expectedControlEpoch: observation.controlEpoch,
+  });
+  await runtime.hover({
+    target: { x: 30, y: 30 },
+    observationId: observation.observationId,
+    expectedControlEpoch: observation.controlEpoch,
+  });
+  assert.equal(factories, 2);
+});
+
 test("BrowserAgentRuntime rejects an old observationId", async () => {
   const { runtime } = runtimeFixture();
   const first = await runtime.observe();
@@ -446,6 +502,7 @@ test("BrowserAgentRuntime does not recreate activity after control takeover", as
   );
   assert.equal(runtime.activity, null);
   assert.equal(activity.at(-1), null);
+  assert.equal(runtime.actionService, null);
 });
 
 test("BrowserAgentRuntime stops an active click after control takeover", async () => {
@@ -575,7 +632,7 @@ test("socket request parsing rejects malformed observe and click requests", asyn
     }
     assert.deepEqual(
       (await registryRequest(registry.socketPath, { id: "6", cmd: "agent.status" })).data,
-      { state: "agent", controlEpoch: 1, reason: null, busy: false },
+      { state: "agent", controlEpoch: 1, reason: null, busy: false, interactionStyle: "slow-natural" },
     );
     assert.deepEqual(
       (await registryRequest(registry.socketPath, {
@@ -583,11 +640,11 @@ test("socket request parsing rejects malformed observe and click requests", asyn
         cmd: "agent.pause",
         expectedControlEpoch: 1,
       })).data,
-      { state: "paused", controlEpoch: 2, reason: "manual-pause", busy: false },
+      { state: "paused", controlEpoch: 2, reason: "manual-pause", busy: false, interactionStyle: "slow-natural" },
     );
     assert.deepEqual(
       (await registryRequest(registry.socketPath, { id: "8", cmd: "agent.status" })).data,
-      { state: "paused", controlEpoch: 2, reason: "manual-pause", busy: false },
+      { state: "paused", controlEpoch: 2, reason: "manual-pause", busy: false, interactionStyle: "slow-natural" },
     );
     assert.deepEqual(
       (await registryRequest(registry.socketPath, {
@@ -595,7 +652,7 @@ test("socket request parsing rejects malformed observe and click requests", asyn
         cmd: "agent.resume",
         expectedControlEpoch: 2,
       })).data,
-      { state: "agent", controlEpoch: 3, reason: "manual-resume", busy: false },
+      { state: "agent", controlEpoch: 3, reason: "manual-resume", busy: false, interactionStyle: "slow-natural" },
     );
     const stale = await registryRequest(registry.socketPath, {
       id: "10",
