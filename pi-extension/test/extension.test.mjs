@@ -3,14 +3,16 @@ import test from "node:test";
 
 import extension from "../dist/extension.js";
 
-function registeredTools() {
+process.env.PI_WEB_SEARCH_READ_EXTENSION = "/nonexistent/pi-web-research-extension.mjs";
+
+async function registeredTools() {
   const tools = [];
-  extension({ registerTool(tool) { tools.push(tool); } });
+  await extension({ registerTool(tool) { tools.push(tool); } });
   return tools;
 }
 
-test("extension registers only the five compact browser tools", () => {
-  assert.deepEqual(registeredTools().map((tool) => tool.name), [
+test("extension registers only the five compact browser tools", async () => {
+  assert.deepEqual((await registeredTools()).map((tool) => tool.name), [
     "browser_open",
     "browser_tabs",
     "browser_observe",
@@ -19,12 +21,13 @@ test("extension registers only the five compact browser tools", () => {
   ]);
 });
 
-test("tool schemas do not expose browser keys, sockets, epochs, or observation ids", () => {
-  const text = JSON.stringify(registeredTools().map((tool) => tool.parameters));
+test("tool schemas do not expose browser keys, sockets, epochs, or observation ids", async () => {
+  const tools = await registeredTools();
+  const text = JSON.stringify(tools.map((tool) => tool.parameters));
   for (const hidden of ["browser_key", "socket", "control_epoch", "observation_id"]) {
     assert.equal(text.includes(hidden), false);
   }
-  const act = registeredTools().find((tool) => tool.name === "browser_act");
+  const act = tools.find((tool) => tool.name === "browser_act");
   assert.deepEqual(act.parameters.properties.action.enum, [
     "click", "type", "press_key", "scroll", "navigate", "get_url", "wait_for",
   ]);

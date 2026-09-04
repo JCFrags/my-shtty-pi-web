@@ -47,11 +47,12 @@ test("exact owner selection prevents cross-agent routing", () => {
 
 test("pane launch passes complete owner metadata and exact placement", () => {
   const args = paneOpenArgs(ownerA, { url: "file:///tmp/a.html", focus: false });
-  assert.deepEqual(args.slice(0, 14), [
+  assert.deepEqual(args.slice(0, 12), [
     "plugin", "pane", "open", "--plugin", "zenbu-labs.terminal-browser",
-    "--entrypoint", "companion", "--placement", "split", "--workspace", "w1",
+    "--entrypoint", "companion", "--placement", "split",
     "--target-pane", "w1:p1", "--direction",
   ]);
+  assert.equal(args.includes("--workspace"), false);
   assert.equal(args.includes("right"), true);
   assert.equal(args.includes("TERMINAL_BROWSER_OWNER_PANE_ID=w1:p1"), true);
   assert.equal(args.includes("TERMINAL_BROWSER_OWNER_PROJECT_DIR=/tmp/a"), true);

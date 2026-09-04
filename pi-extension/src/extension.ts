@@ -3,6 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import { PiBrowserClient } from "./client.js";
 import type { BrowserAction, ToolContext } from "./client.js";
+import { loadWebResearch } from "./web-research.js";
 
 function context(ctx: ExtensionContext, signal?: AbortSignal): ToolContext {
   return {
@@ -96,7 +97,8 @@ function browserAction(params: {
   };
 }
 
-export default function terminalBrowserExtension(pi: ExtensionAPI): void {
+export default async function terminalBrowserExtension(pi: ExtensionAPI): Promise<void> {
+  await loadWebResearch(pi);
   const client = new PiBrowserClient();
 
   pi.registerTool({

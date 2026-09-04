@@ -1,5 +1,6 @@
 import { StringEnum, Type } from "@earendil-works/pi-ai";
 import { PiBrowserClient } from "./client.js";
+import { loadWebResearch } from "./web-research.js";
 function context(ctx, signal) {
     return {
         cwd: ctx.cwd,
@@ -80,7 +81,8 @@ function browserAction(params) {
         timeoutMs: params.timeout_ms,
     };
 }
-export default function terminalBrowserExtension(pi) {
+export default async function terminalBrowserExtension(pi) {
+    await loadWebResearch(pi);
     const client = new PiBrowserClient();
     pi.registerTool({
         name: "browser_open",

@@ -215,7 +215,6 @@ export function paneOpenArgs(owner: BrowserOwner, options: CompanionOpenOptions)
     "--plugin", PLUGIN_ID,
     "--entrypoint", ENTRYPOINT_ID,
     "--placement", "split",
-    "--workspace", owner.workspaceId,
     "--target-pane", owner.paneId,
     "--direction", "right",
   ];
