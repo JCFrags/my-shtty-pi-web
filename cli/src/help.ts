@@ -170,6 +170,10 @@ Common options:
 Options for observe:
   --max-elements <n>    Return 1 to 500 elements (default 200)
   --no-text             Omit visible page text
+  --view <kind>         semantic (default), visual, or both
+  --scope <kind>        viewport (default) or element
+  --ref <ref>           Crop an element visual observation to this ref
+  --image-output <path> Write visual PNG bytes to a new file with mode 0600
 
 Type reads stdin only with --stdin. Use --replace to select all and insert
 text as one native edit. Status, pause, and resume are browser-wide and do not

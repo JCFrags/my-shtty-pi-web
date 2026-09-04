@@ -31,6 +31,7 @@ import type {
   AgentNavigateRequest,
   AgentNavigateResult,
   AgentObservation,
+  AgentObserveRequest,
   AgentPressKeyRequest,
   AgentPressKeyResult,
   AgentScrollRequest,
@@ -69,7 +70,7 @@ export interface ControlHost {
   agentStatus(): AgentControlSnapshot;
   agentPause(expectedEpoch: number): AgentControlSnapshot;
   agentResume(expectedEpoch: number): AgentControlSnapshot;
-  agentObserve(id: number, maxElements: number, includeText: boolean): Promise<AgentObservation>;
+  agentObserve(id: number, request: AgentObserveRequest): Promise<AgentObservation>;
   agentClick(id: number, request: AgentClickRequest): Promise<AgentClickResult>;
   agentType(id: number, request: AgentTypeRequest): Promise<AgentTypeResult>;
   agentPressKey(id: number, request: AgentPressKeyRequest): Promise<AgentPressKeyResult>;
@@ -93,6 +94,8 @@ interface ControlRequest {
   tab?: number;
   maxElements?: unknown;
   includeText?: unknown;
+  view?: unknown;
+  scope?: unknown;
   ref?: unknown;
   observationId?: unknown;
   expectedControlEpoch?: unknown;
@@ -231,7 +234,10 @@ export class Registry {
         return;
       }
       const data = await this.handle(request);
-      connection.end(`${JSON.stringify({ id, ok: true, data })}\n`);
+      const response = binaryResponse(id, data);
+      connection.write(`${JSON.stringify(response.header)}\n`);
+      if (response.binary) connection.end(response.binary);
+      else connection.end();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       try {
@@ -270,7 +276,7 @@ export class Registry {
         return this.host.agentResume(requiredEpoch(request.expectedControlEpoch, "agent.resume"));
       case "agent.observe": {
         const parsed = observeRequest(request);
-        return this.host.agentObserve(parsed.tab, parsed.maxElements, parsed.includeText);
+        return this.host.agentObserve(parsed.tab, parsed.request);
       }
       case "agent.click": {
         const parsed = clickRequest(request);
@@ -329,8 +335,7 @@ function requiredTab(request: ControlRequest, command: string): number {
 
 function observeRequest(request: ControlRequest): {
   tab: number;
-  maxElements: number;
-  includeText: boolean;
+  request: AgentObserveRequest;
 } {
   const tab = requiredTab(request, "agent.observe");
   const maxElements = request.maxElements === undefined ? DEFAULT_MAX_ELEMENTS : request.maxElements;
@@ -346,7 +351,58 @@ function observeRequest(request: ControlRequest): {
   if (typeof includeText !== "boolean") {
     throw new Error("agent.observe includeText must be boolean");
   }
-  return { tab, maxElements, includeText };
+  const view = request.view === undefined ? "semantic" : request.view;
+  if (view !== "semantic" && view !== "visual" && view !== "both") {
+    throw new Error("agent.observe view must be semantic, visual, or both");
+  }
+  const scope = request.scope === undefined ? "viewport" : request.scope;
+  if (scope !== "viewport" && scope !== "element") {
+    throw new Error("agent.observe scope must be viewport or element");
+  }
+  const ref = request.ref === undefined ? undefined : requiredObserveRef(request.ref);
+  if (scope === "element" && view === "semantic") {
+    throw new Error("agent.observe element scope requires a visual view");
+  }
+  if (scope === "element" && ref === undefined) {
+    throw new Error("agent.observe element scope requires ref");
+  }
+  if (scope === "viewport" && ref !== undefined) {
+    throw new Error("agent.observe ref requires element scope");
+  }
+  return {
+    tab,
+    request: { maxElements, includeText, view, scope, ...(ref ? { ref } : {}) },
+  };
+}
+
+function requiredObserveRef(value: unknown): string {
+  if (typeof value !== "string" || value.trim().length === 0 || value.length > MAX_AGENT_STRING) {
+    throw new Error(`agent.observe ref must be a non-empty string of at most ${MAX_AGENT_STRING} characters`);
+  }
+  return value;
+}
+
+function binaryResponse(id: string, data: unknown): {
+  header: { id: string; ok: true; data: unknown; binaryBytes?: number };
+  binary?: Buffer;
+} {
+  if (!data || typeof data !== "object") return { header: { id, ok: true, data } };
+  const observation = data as AgentObservation;
+  if (!observation.visual?.data || !Buffer.isBuffer(observation.visual.data)) {
+    return { header: { id, ok: true, data } };
+  }
+  const binary = observation.visual.data;
+  const visual = { ...observation.visual };
+  delete (visual as Partial<typeof visual>).data;
+  return {
+    header: {
+      id,
+      ok: true,
+      data: { ...observation, visual },
+      binaryBytes: binary.byteLength,
+    },
+    binary,
+  };
 }
 
 function clickRequest(request: ControlRequest): {

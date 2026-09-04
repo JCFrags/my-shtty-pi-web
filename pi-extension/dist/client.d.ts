@@ -81,13 +81,30 @@ export declare class PiBrowserClient {
     observe(context: ToolContext, options?: {
         maxElements?: number;
         includeText?: boolean;
+        view?: "semantic" | "visual" | "both";
+        scope?: "viewport" | "element";
+        ref?: string;
     }): Promise<{
+        image?: {
+            data: string;
+            mimeType: "image/png";
+        } | undefined;
+        visual?: Record<string, unknown> | undefined;
         truncated: boolean;
         text?: string | undefined;
         url: string;
         title: string;
         viewport: unknown;
         elements: any[];
+    } | {
+        image?: {
+            data: string;
+            mimeType: "image/png";
+        } | undefined;
+        visual?: Record<string, unknown> | undefined;
+        url: string;
+        title: string;
+        viewport: unknown;
     }>;
     private status;
     control(context: ToolContext, action: "status" | "pause" | "resume"): Promise<ControlStatus | {

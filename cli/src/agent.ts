@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+
 import type { Terminal } from "pixel-terminals";
 
 import { currentBrowserOwner } from "./companion";
@@ -61,19 +64,38 @@ async function observeCommand(terminal: Terminal | null, args: string[]): Promis
   const browserKey = takeValue(args, "--browser");
   const tabValue = takeValue(args, "--tab");
   const maxValue = takeValue(args, "--max-elements");
+  const view = parseObservationView(takeValue(args, "--view"));
+  const scope = parseObservationScope(takeValue(args, "--scope"));
+  const ref = takeValue(args, "--ref");
+  const imageOutput = takeValue(args, "--image-output");
   const noText = takeBoolean(args, "--no-text");
+  if (scope === "element" && !ref) throw new Error("agent observe element scope needs --ref");
+  if (scope === "viewport" && ref) throw new Error("agent observe --ref needs element scope");
+  if (scope === "element" && view === "semantic") throw new Error("agent observe element scope needs a visual view");
+  if (view !== "semantic" && !imageOutput) throw new Error("agent observe visual views need --image-output");
+  if (view === "semantic" && imageOutput) throw new Error("agent observe --image-output needs a visual view");
+  if (ref) validateAgentString(ref, "agent observe ref");
   if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent observe --help)`);
   const browser = await selectBrowser(terminal, browserKey);
   const tab = await selectTab(browser, parseTab(tabValue));
   const maxElements = parseMaxElements(maxValue);
-  print(
-    await control(browser.socket, {
-      cmd: "agent.observe",
-      tab,
-      maxElements,
-      includeText: !noText,
-    }),
-  );
+  const value = await control(browser.socket, {
+    cmd: "agent.observe",
+    tab,
+    maxElements,
+    includeText: !noText,
+    view,
+    scope,
+    ...(ref ? { ref } : {}),
+  }) as Record<string, unknown>;
+  const visual = value.visual as Record<string, unknown> | undefined;
+  if (view !== "semantic") {
+    if (!visual || !Buffer.isBuffer(visual.data)) throw new Error("browser returned no visual image");
+    await fs.writeFile(path.resolve(imageOutput!), visual.data, { flag: "wx", mode: 0o600 });
+    const { data: _data, ...metadata } = visual;
+    value.visual = metadata;
+  }
+  print(value);
   return 0;
 }
 
@@ -339,6 +361,22 @@ function parseTab(value: string | undefined): number | undefined {
   const tab = Number(normalized);
   if (!Number.isSafeInteger(tab) || tab < 1) throw new Error(`invalid --tab ${value}`);
   return tab;
+}
+
+function parseObservationView(value: string | undefined): "semantic" | "visual" | "both" {
+  if (value === undefined) return "semantic";
+  if (value !== "semantic" && value !== "visual" && value !== "both") {
+    throw new Error("--view must be semantic, visual, or both");
+  }
+  return value;
+}
+
+function parseObservationScope(value: string | undefined): "viewport" | "element" {
+  if (value === undefined) return "viewport";
+  if (value !== "viewport" && value !== "element") {
+    throw new Error("--scope must be viewport or element");
+  }
+  return value;
 }
 
 function parseMaxElements(value: string | undefined): number {

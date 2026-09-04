@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { writeFile } from "node:fs/promises";
 import test from "node:test";
 
 import { PiBrowserClient } from "../dist/client.js";
@@ -34,6 +35,26 @@ test("open and tab results are bounded and hide browser implementation identifie
   assert.equal(JSON.stringify(value).includes("secret-key"), false);
   assert.equal(JSON.stringify(value).includes("target-"), false);
   assert.equal(JSON.stringify(value).includes("w1:p9"), false);
+});
+
+test("visual observations use a private image file and return native image data separately", async () => {
+  const calls = [];
+  const client = new PiBrowserClient(async ({ args }) => {
+    calls.push(args);
+    if (args[0] === "companion") return { tabs: [{ id: 7, active: true, url: "about:blank", title: "" }] };
+    const outputAt = args.indexOf("--image-output");
+    assert.notEqual(outputAt, -1);
+    await writeFile(args[outputAt + 1], Buffer.from("png-bytes"));
+    return {
+      ...fixtureObservation(),
+      visual: { mimeType: "image/png", width: 10, height: 8, bytes: 9, scope: "viewport" },
+    };
+  });
+  const value = await client.observe(context, { view: "both" });
+  assert.equal(value.image.mimeType, "image/png");
+  assert.equal(value.image.data, Buffer.from("png-bytes").toString("base64"));
+  assert.equal(JSON.stringify({ ...value, image: undefined }).includes(value.image.data), false);
+  assert.equal(calls[0].includes(value.image.data), false);
 });
 
 test("observation and epoch are supplied automatically and invalidated after mutation", async () => {

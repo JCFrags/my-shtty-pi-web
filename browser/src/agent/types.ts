@@ -18,6 +18,7 @@ export interface AgentBrowserTarget {
   agentNavigate(url: string): Promise<string>;
   viewportSize(): { width: number; height: number };
   currentUrl(): string;
+  capturePage(rect?: Rect): Promise<Buffer>;
 }
 
 export interface ObservedPage {
@@ -40,11 +41,33 @@ export interface AgentPageObserver {
   probe(ref?: string, text?: string): Promise<AgentPageProbe>;
 }
 
+export type AgentObservationView = "semantic" | "visual" | "both";
+export type AgentObservationScope = "viewport" | "element";
+
+export interface AgentVisualObservation {
+  mimeType: "image/png";
+  width: number;
+  height: number;
+  bytes: number;
+  scope: AgentObservationScope;
+  rect: Rect;
+  data: Buffer;
+}
+
+export interface AgentObserveRequest {
+  maxElements: number;
+  includeText: boolean;
+  view: AgentObservationView;
+  scope: AgentObservationScope;
+  ref?: string;
+}
+
 export interface AgentObservation {
   observationId: string;
   documentId: string;
   controlEpoch: number;
   snapshot: PageSnapshot;
+  visual?: AgentVisualObservation;
 }
 
 export interface AgentActivity {

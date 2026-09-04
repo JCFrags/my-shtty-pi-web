@@ -14,6 +14,15 @@ function result(value) {
         details: value,
     };
 }
+export function observationResult(value) {
+    const image = value.image;
+    const { image: _image, ...details } = value;
+    const content = [{ type: "text", text: JSON.stringify(details) }];
+    if (typeof image?.data === "string" && image.mimeType === "image/png") {
+        content.push({ type: "image", data: image.data, mimeType: image.mimeType });
+    }
+    return { content, details };
+}
 const openParameters = Type.Object({
     url: Type.Optional(Type.String({ maxLength: 8192, description: "Optional URL or local HTML path" })),
     new_tab: Type.Optional(Type.Boolean({ description: "Open the URL in a new tab when reusing the companion" })),
@@ -27,6 +36,9 @@ const tabsParameters = Type.Object({
 const observeParameters = Type.Object({
     max_elements: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
     include_text: Type.Optional(Type.Boolean()),
+    view: Type.Optional(StringEnum(["semantic", "visual", "both"])),
+    scope: Type.Optional(StringEnum(["viewport", "element"])),
+    ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
 }, { additionalProperties: false });
 const actParameters = Type.Object({
     action: StringEnum(["click", "type", "press_key", "scroll", "navigate", "get_url", "wait_for"]),
@@ -118,14 +130,26 @@ export default async function terminalBrowserExtension(pi) {
     pi.registerTool({
         name: "browser_observe",
         label: "Browser Observe",
-        description: "Read a bounded accessibility observation from the active companion tab. Element refs remain internal to the current page observation.",
+        description: "Read a bounded semantic, visual, or combined observation from the active companion tab. Visual captures cover the viewport or one referenced element.",
         promptSnippet: "Observe the active companion browser tab before acting",
         promptGuidelines: ["Use browser_observe after browser_open and after each page-changing browser_act call. Then use one browser_act action."],
         parameters: observeParameters,
         async execute(_id, params, signal, _update, ctx) {
-            return result(await client.observe(context(ctx, signal), {
+            if ((params.scope ?? "viewport") === "element" && !params.ref) {
+                throw new Error("element scope requires ref from browser_observe");
+            }
+            if ((params.scope ?? "viewport") === "viewport" && params.ref) {
+                throw new Error("ref requires element scope");
+            }
+            if ((params.scope ?? "viewport") === "element" && (params.view ?? "semantic") === "semantic") {
+                throw new Error("element scope requires visual or both view");
+            }
+            return observationResult(await client.observe(context(ctx, signal), {
                 maxElements: params.max_elements,
                 includeText: params.include_text,
+                view: params.view,
+                scope: params.scope,
+                ref: params.ref,
             }));
         },
     });

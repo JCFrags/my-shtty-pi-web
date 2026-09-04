@@ -494,8 +494,7 @@ class Session {
       agentStatus: () => this.control.snapshot,
       agentPause: (expectedEpoch) => this.control.pause(expectedEpoch),
       agentResume: (expectedEpoch) => this.control.resume(expectedEpoch),
-      agentObserve: (id, maxElements, includeText) =>
-        this.tabs.agentObserve(id, maxElements, includeText),
+      agentObserve: (id, request) => this.tabs.agentObserve(id, request),
       agentClick: (id, request) => this.tabs.agentClick(id, request),
       agentType: (id, request) => this.tabs.agentType(id, request),
       agentPressKey: (id, request) => this.tabs.agentPressKey(id, request),

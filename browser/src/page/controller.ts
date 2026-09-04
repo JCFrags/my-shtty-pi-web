@@ -25,6 +25,9 @@ import type { BrowserState, BrowserSurfaceLayout } from "./types";
 import { scaleZoom, stepZoom } from "./zoom";
 import type { ZoomDirection } from "./zoom";
 
+const MAX_CAPTURE_DIMENSION = 1_600;
+const MAX_CAPTURE_BYTES = 2 * 1024 * 1024;
+
 export interface ControllerOptions {
   cwd: string;
   background: string;
@@ -390,6 +393,36 @@ export class BrowserController {
 
   currentUrl(): string {
     return this.window.webContents.getURL();
+  }
+
+  async capturePage(rect?: { x: number; y: number; width: number; height: number }): Promise<Buffer> {
+    if (this.stopped) throw new Error("browser is stopped");
+    const viewport = this.viewportSize();
+    const captureRect = rect ? boundedCaptureRect(rect, viewport) : undefined;
+    let image = await this.window.webContents.capturePage(captureRect);
+    let size = image.getSize();
+    const initialScale = Math.min(1, MAX_CAPTURE_DIMENSION / size.width, MAX_CAPTURE_DIMENSION / size.height);
+    if (initialScale < 1) {
+      image = image.resize({
+        width: Math.max(1, Math.floor(size.width * initialScale)),
+        height: Math.max(1, Math.floor(size.height * initialScale)),
+        quality: "best",
+      });
+      size = image.getSize();
+    }
+    let png = image.toPNG();
+    while (png.byteLength > MAX_CAPTURE_BYTES && size.width > 1 && size.height > 1) {
+      const scale = Math.max(0.5, Math.min(0.9, Math.sqrt(MAX_CAPTURE_BYTES / png.byteLength) * 0.9));
+      image = image.resize({
+        width: Math.max(1, Math.floor(size.width * scale)),
+        height: Math.max(1, Math.floor(size.height * scale)),
+        quality: "best",
+      });
+      size = image.getSize();
+      png = image.toPNG();
+    }
+    if (png.byteLength > MAX_CAPTURE_BYTES) throw new Error("visual observation exceeds the safe image limit");
+    return png;
   }
 
   viewportSize(): { width: number; height: number } {
@@ -776,6 +809,21 @@ export class BrowserController {
       height: clamp(requested("height"), Math.round(content.height * 0.68), Math.round(content.height * 0.8)),
     };
   }
+}
+
+function boundedCaptureRect(
+  rect: { x: number; y: number; width: number; height: number },
+  viewport: { width: number; height: number },
+): Electron.Rectangle {
+  if (![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) || rect.width <= 0 || rect.height <= 0) {
+    throw new Error("visual observation has an invalid element rectangle");
+  }
+  const left = Math.max(0, Math.floor(rect.x));
+  const top = Math.max(0, Math.floor(rect.y));
+  const right = Math.min(viewport.width, Math.ceil(rect.x + rect.width));
+  const bottom = Math.min(viewport.height, Math.ceil(rect.y + rect.height));
+  if (right <= left || bottom <= top) throw new Error("element is outside the current viewport");
+  return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
 function browserRenderScale(layout: BrowserSurfaceLayout) {

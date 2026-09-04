@@ -154,6 +154,7 @@ function runtimeFixture(options = {}) {
   let nextObservation = 0;
   let clickedRef = null;
   let released = 0;
+  let capturedRect = null;
   const observer = {
     observe: async () => ({
       documentId,
@@ -182,6 +183,14 @@ function runtimeFixture(options = {}) {
     agentNavigate: async () => "https://example.test/",
     viewportSize: () => ({ width: 100, height: 80 }),
     currentUrl: () => "https://example.test/",
+    capturePage: options.capturePage || (async (rect) => {
+      capturedRect = rect ?? null;
+      const png = Buffer.alloc(24);
+      png.set(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      png.writeUInt32BE(rect ? 20 : 100, 16);
+      png.writeUInt32BE(rect ? 10 : 80, 20);
+      return png;
+    }),
   };
   const actionServiceFactory = options.actionServiceFactory || (async () => ({
     click: async ({ ref }) => {
@@ -203,6 +212,7 @@ function runtimeFixture(options = {}) {
     setDocumentId: (value) => { documentId = value; },
     clickedRef: () => clickedRef,
     released: () => released,
+    capturedRect: () => capturedRect,
   };
 }
 
@@ -210,6 +220,57 @@ test("BrowserAgentRuntime releases the pointer on document invalidation", () => 
   const { runtime, released } = runtimeFixture();
   runtime.invalidateDocument();
   assert.equal(released(), 1);
+});
+
+test("BrowserAgentRuntime returns bounded visual metadata and keeps image bytes out of JSON", async () => {
+  const { runtime, capturedRect } = runtimeFixture();
+  const observation = await runtime.observe({ view: "both", scope: "element", ref: "e1" });
+  assert.deepEqual(capturedRect(), { x: 1, y: 2, width: 20, height: 10 });
+  assert.deepEqual(
+    { ...observation.visual, data: undefined },
+    {
+      mimeType: "image/png",
+      width: 20,
+      height: 10,
+      bytes: 24,
+      scope: "element",
+      rect: { x: 1, y: 2, width: 20, height: 10 },
+      data: undefined,
+    },
+  );
+  assert.equal(Buffer.isBuffer(observation.visual.data), true);
+});
+
+test("BrowserAgentRuntime rejects oversized or stale visual captures", async () => {
+  const oversized = Buffer.alloc(24);
+  oversized.set(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  oversized.writeUInt32BE(1601, 16);
+  oversized.writeUInt32BE(80, 20);
+  const invalid = runtimeFixture({ capturePage: async () => oversized });
+  await assert.rejects(
+    invalid.runtime.observe({ view: "visual" }),
+    /invalid dimensions/,
+  );
+
+  let started = false;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const stale = runtimeFixture({
+    capturePage: async () => {
+      started = true;
+      await gate;
+      const png = Buffer.alloc(24);
+      png.set(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      png.writeUInt32BE(100, 16);
+      png.writeUInt32BE(80, 20);
+      return png;
+    },
+  });
+  const observation = stale.runtime.observe({ view: "visual" });
+  while (!started) await new Promise((resolve) => setImmediate(resolve));
+  stale.runtime.invalidateDocument();
+  release();
+  await assert.rejects(observation, /page changed during observation/);
 });
 
 test("BrowserAgentRuntime rejects an old observationId", async () => {
@@ -364,6 +425,34 @@ function registryRequest(socketPath, request) {
   });
 }
 
+function registryBinaryRequest(socketPath, request) {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(socketPath);
+    let buffer = Buffer.alloc(0);
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("registry binary request timed out"));
+    }, 2000);
+    socket.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    socket.on("data", (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      const newline = buffer.indexOf(10);
+      if (newline < 0) return;
+      const headerText = buffer.subarray(0, newline).toString("utf8");
+      const header = JSON.parse(headerText);
+      const bytes = header.binaryBytes ?? 0;
+      if (buffer.byteLength - newline - 1 < bytes) return;
+      clearTimeout(timer);
+      socket.destroy();
+      resolve({ header, headerText, binary: buffer.subarray(newline + 1, newline + 1 + bytes) });
+    });
+    socket.on("connect", () => socket.write(`${JSON.stringify(request)}\n`));
+  });
+}
+
 test("socket request parsing rejects malformed observe and click requests", async () => {
   const key = `agent-test-${randomUUID()}`;
   const hostControl = new BrowserControl();
@@ -505,6 +594,44 @@ test("registry publishes complete browser owner metadata", () => {
         ownerProjectDir: "/tmp/project",
       },
     );
+  } finally {
+    registry.dispose();
+  }
+});
+
+test("socket sends visual image bytes after bounded JSON metadata", async () => {
+  const key = `visual-${randomUUID()}`;
+  const host = registryHost(key);
+  const image = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]);
+  host.agentObserve = async () => ({
+    observationId: "obs",
+    documentId: "doc",
+    controlEpoch: 1,
+    snapshot: { url: "about:blank", title: "", viewport: { width: 2, height: 2 }, elements: [], text: "" },
+    visual: {
+      mimeType: "image/png",
+      width: 2,
+      height: 2,
+      bytes: image.byteLength,
+      scope: "viewport",
+      rect: { x: 0, y: 0, width: 2, height: 2 },
+      data: image,
+    },
+  });
+  const registry = new Registry(host);
+  try {
+    const response = await registryBinaryRequest(registry.socketPath, {
+      id: "visual",
+      cmd: "agent.observe",
+      tab: 1,
+      view: "visual",
+      scope: "viewport",
+    });
+    assert.equal(response.header.ok, true);
+    assert.equal(response.header.binaryBytes, image.byteLength);
+    assert.deepEqual(response.binary, image);
+    assert.equal(response.headerText.includes(image.toString("base64")), false);
+    assert.equal(response.headerText.includes('"type":"Buffer"'), false);
   } finally {
     registry.dispose();
   }

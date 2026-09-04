@@ -8,6 +8,7 @@ import type {
   AgentNavigateRequest,
   AgentNavigateResult,
   AgentObservation,
+  AgentObserveRequest,
   AgentPressKeyRequest,
   AgentPressKeyResult,
   AgentScrollRequest,
@@ -180,10 +181,10 @@ export class TabManager {
     return true;
   }
 
-  async agentObserve(id: number, maxElements: number, includeText: boolean): Promise<AgentObservation> {
+  async agentObserve(id: number, request: AgentObserveRequest): Promise<AgentObservation> {
     const tab = this.tabs.find((candidate) => candidate.id === id);
     if (!tab) throw new Error(`no tab ${id}`);
-    return tab.agentRuntime.observe(maxElements, includeText);
+    return tab.agentRuntime.observe(request);
   }
 
   agentActivate(id: number): boolean {

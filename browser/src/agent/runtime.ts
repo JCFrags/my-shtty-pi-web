@@ -19,6 +19,7 @@ import type {
   AgentNavigateRequest,
   AgentNavigateResult,
   AgentObservation,
+  AgentObserveRequest,
   AgentPageObserver,
   AgentPressKeyRequest,
   AgentPressKeyResult,
@@ -114,20 +115,53 @@ export class BrowserAgentRuntime {
     };
   }
 
-  async observe(maxElements = 200, includeText = true): Promise<AgentObservation> {
+  async observe(options: Partial<AgentObserveRequest> = {}): Promise<AgentObservation> {
     return this.enqueue(async () => {
       const controlEpoch = this.control.assertAgent().controlEpoch;
       const documentGeneration = this.documentGeneration;
+      const maxElements = options.maxElements ?? 200;
+      const includeText = options.includeText ?? true;
+      const view = options.view ?? "semantic";
+      const scope = options.scope ?? "viewport";
       const page = await this.observer.observe(maxElements, includeText);
       this.control.assertAgent(controlEpoch);
       if (documentGeneration !== this.documentGeneration) {
         throw new Error("page changed during observation");
+      }
+      let visual: AgentObservation["visual"];
+      if (view !== "semantic") {
+        const viewport = page.snapshot.viewport;
+        let rect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
+        if (scope === "element") {
+          if (!options.ref) throw new Error("element visual observation needs a ref");
+          const element = page.snapshot.elements.find((candidate) => candidate.ref === options.ref);
+          if (!element) throw new Error("stale or unknown ref");
+          if (!element.visible || !element.inViewport) throw new Error("element is outside the current viewport");
+          rect = clipRect(element.rect, viewport);
+        }
+        const data = await this.target.capturePage(scope === "element" ? rect : undefined);
+        this.control.assertAgent(controlEpoch);
+        if (documentGeneration !== this.documentGeneration ||
+            await this.observer.currentDocumentId() !== page.documentId) {
+          throw new Error("page changed during observation");
+        }
+        const dimensions = pngDimensions(data);
+        visual = {
+          mimeType: "image/png",
+          width: dimensions.width,
+          height: dimensions.height,
+          bytes: data.byteLength,
+          scope,
+          rect,
+          data,
+        };
       }
       const observation: AgentObservation = {
         observationId: this.observationId(),
         documentId: page.documentId,
         controlEpoch,
         snapshot: page.snapshot,
+        ...(visual ? { visual } : {}),
       };
       this.latestObservation = observation;
       return observation;
@@ -563,4 +597,28 @@ export class BrowserAgentRuntime {
     });
     return previous.then(operation).finally(release);
   }
+}
+
+function clipRect(
+  rect: { x: number; y: number; width: number; height: number },
+  viewport: { width: number; height: number },
+) {
+  const left = Math.max(0, rect.x);
+  const top = Math.max(0, rect.y);
+  const right = Math.min(viewport.width, rect.x + rect.width);
+  const bottom = Math.min(viewport.height, rect.y + rect.height);
+  if (right <= left || bottom <= top) throw new Error("element is outside the current viewport");
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function pngDimensions(data: Buffer): { width: number; height: number } {
+  if (data.byteLength < 24 || data.toString("ascii", 1, 4) !== "PNG") {
+    throw new Error("visual observation returned an invalid PNG");
+  }
+  const width = data.readUInt32BE(16);
+  const height = data.readUInt32BE(20);
+  if (width < 1 || height < 1 || width > 1_600 || height > 1_600) {
+    throw new Error("visual observation returned invalid dimensions");
+  }
+  return { width, height };
 }

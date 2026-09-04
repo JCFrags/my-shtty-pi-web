@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "../../cli/dist/main.js");
 const OUTPUT_LIMIT = 256 * 1024;
@@ -118,29 +120,64 @@ export class PiBrowserClient {
         return { tabs: boundedTabs(value) };
     }
     async observe(context, options = {}) {
-        const args = ["agent", "observe", "--max-elements", String(options.maxElements ?? 120)];
+        const view = options.view ?? "semantic";
+        const scope = options.scope ?? "viewport";
+        const args = [
+            "agent", "observe",
+            "--max-elements", String(options.maxElements ?? 120),
+            "--view", view,
+            "--scope", scope,
+        ];
         if (options.includeText === false)
             args.push("--no-text");
-        const value = await this.runner({ args, context });
-        const snapshot = value.snapshot;
-        const elements = Array.isArray(snapshot?.elements) ? snapshot.elements.slice(0, options.maxElements ?? 120) : [];
-        this.observation = {
-            tabId: Number(snapshot.tabId ?? value.tabId ?? 0),
-            observationId: String(value.observationId),
-            controlEpoch: Number(value.controlEpoch),
-        };
-        if (!this.observation.tabId) {
-            const tabs = await this.tabs(context, { action: "list" });
-            this.observation.tabId = Number(tabs.tabs.find((tab) => tab.active)?.id ?? 0);
+        if (options.ref)
+            args.push("--ref", options.ref);
+        let directory = null;
+        let imagePath = null;
+        if (view !== "semantic") {
+            directory = await mkdtemp(join(tmpdir(), "pi-terminal-browser-"));
+            imagePath = join(directory, "observation.png");
+            args.push("--image-output", imagePath);
         }
-        return {
-            url: typeof snapshot.url === "string" ? snapshot.url.slice(0, 8192) : "",
-            title: typeof snapshot.title === "string" ? snapshot.title.slice(0, 512) : "",
-            viewport: snapshot.viewport,
-            elements,
-            ...(typeof snapshot.text === "string" ? { text: snapshot.text.slice(0, 12_000) } : {}),
-            truncated: typeof snapshot.text === "string" && snapshot.text.length > 12_000,
-        };
+        try {
+            const value = await this.runner({ args, context });
+            const snapshot = value.snapshot;
+            const elements = Array.isArray(snapshot?.elements) ? snapshot.elements.slice(0, options.maxElements ?? 120) : [];
+            this.observation = {
+                tabId: Number(snapshot.tabId ?? value.tabId ?? 0),
+                observationId: String(value.observationId),
+                controlEpoch: Number(value.controlEpoch),
+            };
+            if (!this.observation.tabId) {
+                const tabs = await this.tabs(context, { action: "list" });
+                this.observation.tabId = Number(tabs.tabs.find((tab) => tab.active)?.id ?? 0);
+            }
+            const semantic = {
+                url: typeof snapshot.url === "string" ? snapshot.url.slice(0, 8192) : "",
+                title: typeof snapshot.title === "string" ? snapshot.title.slice(0, 512) : "",
+                viewport: snapshot.viewport,
+                elements,
+                ...(typeof snapshot.text === "string" ? { text: snapshot.text.slice(0, 12_000) } : {}),
+                truncated: typeof snapshot.text === "string" && snapshot.text.length > 12_000,
+            };
+            const visual = value.visual && typeof value.visual === "object"
+                ? value.visual
+                : undefined;
+            const image = imagePath ? await readFile(imagePath) : null;
+            return {
+                ...(view === "visual" ? {
+                    url: semantic.url,
+                    title: semantic.title,
+                    viewport: semantic.viewport,
+                } : semantic),
+                ...(visual ? { visual } : {}),
+                ...(image ? { image: { data: image.toString("base64"), mimeType: "image/png" } } : {}),
+            };
+        }
+        finally {
+            if (directory)
+                await rm(directory, { recursive: true, force: true });
+        }
     }
     async status(context) {
         return this.runner({ args: ["agent", "status"], context });
