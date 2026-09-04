@@ -41,7 +41,7 @@ test("tool schemas do not expose browser keys, sockets, epochs, or observation i
   }
   const act = tools.find((tool) => tool.name === "browser_act");
   assert.deepEqual(act.parameters.properties.action.enum, [
-    "click", "type", "press_key", "scroll", "navigate", "get_url", "wait_for",
+    "click", "hover", "drag", "type", "press_key", "scroll", "navigate", "get_url", "wait_for",
   ]);
   const observe = tools.find((tool) => tool.name === "browser_observe");
   assert.deepEqual(observe.parameters.properties.view.enum, ["semantic", "visual", "both"]);

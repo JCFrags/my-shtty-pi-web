@@ -16,7 +16,9 @@ import type { BrowserOwner, InstanceRow, OpenResult, OpenSpec } from "pixel-stor
 
 import type { AgentControlSnapshot } from "./agent/control";
 import {
+  parseDragRequest,
   parseGetUrlRequest,
+  parseHoverRequest,
   parseNavigateRequest,
   parsePressKeyRequest,
   parseScrollRequest,
@@ -26,8 +28,12 @@ import {
 import type {
   AgentClickRequest,
   AgentClickResult,
+  AgentDragRequest,
+  AgentDragResult,
   AgentGetUrlRequest,
   AgentGetUrlResult,
+  AgentHoverRequest,
+  AgentHoverResult,
   AgentNavigateRequest,
   AgentNavigateResult,
   AgentObservation,
@@ -72,6 +78,8 @@ export interface ControlHost {
   agentResume(expectedEpoch: number): AgentControlSnapshot;
   agentObserve(id: number, request: AgentObserveRequest): Promise<AgentObservation>;
   agentClick(id: number, request: AgentClickRequest): Promise<AgentClickResult>;
+  agentHover(id: number, request: AgentHoverRequest): Promise<AgentHoverResult>;
+  agentDrag(id: number, request: AgentDragRequest): Promise<AgentDragResult>;
   agentType(id: number, request: AgentTypeRequest): Promise<AgentTypeResult>;
   agentPressKey(id: number, request: AgentPressKeyRequest): Promise<AgentPressKeyResult>;
   agentScroll(id: number, request: AgentScrollRequest): Promise<AgentScrollResult>;
@@ -97,6 +105,15 @@ interface ControlRequest {
   view?: unknown;
   scope?: unknown;
   ref?: unknown;
+  x?: unknown;
+  y?: unknown;
+  fromRef?: unknown;
+  fromX?: unknown;
+  fromY?: unknown;
+  toRef?: unknown;
+  toX?: unknown;
+  toY?: unknown;
+  button?: unknown;
   observationId?: unknown;
   expectedControlEpoch?: unknown;
   key?: unknown;
@@ -281,6 +298,14 @@ export class Registry {
       case "agent.click": {
         const parsed = clickRequest(request);
         return this.host.agentClick(parsed.tab, parsed.request);
+      }
+      case "agent.hover": {
+        const parsed = parseHoverRequest(request);
+        return this.host.agentHover(parsed.tab, parsed.request);
+      }
+      case "agent.drag": {
+        const parsed = parseDragRequest(request);
+        return this.host.agentDrag(parsed.tab, parsed.request);
       }
       case "agent.type": {
         const parsed = parseTypeRequest(request);

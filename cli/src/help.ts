@@ -142,7 +142,7 @@ close all open browsers.
   },
   agent: {
     summary: "Observe, control, and act through native AgentCursor",
-    usage: "terminal-browser agent <observe|click|type|press-key|scroll|navigate|get-url|wait-for|status|pause|resume> [options]",
+    usage: "terminal-browser agent <observe|click|hover|drag|type|press-key|scroll|navigate|get-url|wait-for|status|pause|resume> [options]",
     body: `
 Reads a fresh observation and performs native actions on the selected tab.
 Responses are JSON. Observation-bound actions require the latest observation
@@ -151,6 +151,8 @@ and control epoch; navigation invalidates earlier observations.
 Commands:
   terminal-browser agent observe [options]
   terminal-browser agent click <ref> --observation <id> --control-epoch <n> [options]
+  terminal-browser agent hover (<ref> | --x <n> --y <n>) --observation <id> --control-epoch <n> [options]
+  terminal-browser agent drag (--from-ref <ref> | --from-x <n> --from-y <n>) (--to-ref <ref> | --to-x <n> --to-y <n>) --observation <id> --control-epoch <n> [options]
   terminal-browser agent type <ref> (--text <text> | --stdin) --observation <id> --control-epoch <n> [--replace] [options]
   terminal-browser agent press-key <key> --observation <id> --control-epoch <n> [options]
   terminal-browser agent scroll --dy <n> [--dx <n>] --observation <id> --control-epoch <n> [options]

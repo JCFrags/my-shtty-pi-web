@@ -47,7 +47,7 @@ test("visual observations use a private image file and return native image data 
     await writeFile(args[outputAt + 1], Buffer.from("png-bytes"));
     return {
       ...fixtureObservation(),
-      visual: { mimeType: "image/png", width: 10, height: 8, bytes: 9, scope: "viewport" },
+      visual: { mimeType: "image/png", width: 10, height: 8, bytes: 9, scope: "viewport", rect: { x: 100, y: 50, width: 200, height: 80 } },
     };
   });
   const value = await client.observe(context, { view: "both" });
@@ -55,6 +55,30 @@ test("visual observations use a private image file and return native image data 
   assert.equal(value.image.data, Buffer.from("png-bytes").toString("base64"));
   assert.equal(JSON.stringify({ ...value, image: undefined }).includes(value.image.data), false);
   assert.equal(calls[0].includes(value.image.data), false);
+});
+
+test("visual image coordinates are mapped to current CSS geometry for drag", async () => {
+  const calls = [];
+  const client = new PiBrowserClient(async ({ args }) => {
+    calls.push(args);
+    if (args[0] === "companion") return { tabs: [{ id: 7, active: true }] };
+    if (args[1] === "status") return { state: "agent", controlEpoch: 4, reason: null, busy: false };
+    if (args[1] === "observe") {
+      const outputAt = args.indexOf("--image-output");
+      await writeFile(args[outputAt + 1], Buffer.from("png"));
+      return {
+        ...fixtureObservation(),
+        visual: { mimeType: "image/png", width: 100, height: 50, bytes: 3, scope: "element", rect: { x: 20, y: 30, width: 200, height: 100 } },
+      };
+    }
+    return { operation: "drag" };
+  });
+  await client.observe(context, { view: "visual", scope: "element", ref: "e1" });
+  await client.act(context, {
+    action: "drag", from: { x: 0, y: 0 }, to: { x: 100, y: 50 }, button: "left",
+  });
+  const drag = calls.find((args) => args[1] === "drag");
+  assert.deepEqual(drag.slice(2, 10), ["--from-x", "20", "--from-y", "30", "--to-x", "220", "--to-y", "130"]);
 });
 
 test("observation and epoch are supplied automatically and invalidated after mutation", async () => {

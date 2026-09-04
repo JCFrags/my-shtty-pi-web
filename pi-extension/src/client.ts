@@ -93,10 +93,19 @@ export interface BrowserStateCache {
   tabId: number;
   observationId: string;
   controlEpoch: number;
+  visual?: {
+    width: number;
+    height: number;
+    rect: { x: number; y: number; width: number; height: number };
+  };
 }
+
+export type BrowserActionTarget = { ref: string } | { x: number; y: number };
 
 export type BrowserAction =
   | { action: "click"; ref: string }
+  | { action: "hover"; target: BrowserActionTarget }
+  | { action: "drag"; from: BrowserActionTarget; to: BrowserActionTarget; button?: "left" | "middle" | "right" }
   | { action: "type"; ref: string; text: string; replace?: boolean }
   | { action: "press_key"; key: string }
   | { action: "scroll"; dy: number; dx?: number }
@@ -123,6 +132,42 @@ function boundedTabs(value: unknown) {
       active: tab.active === true,
     };
   });
+}
+
+function parseVisualState(value: Record<string, unknown>): NonNullable<BrowserStateCache["visual"]> {
+  const rect = value.rect as Record<string, unknown> | undefined;
+  const width = Number(value.width);
+  const height = Number(value.height);
+  const parsedRect = {
+    x: Number(rect?.x),
+    y: Number(rect?.y),
+    width: Number(rect?.width),
+    height: Number(rect?.height),
+  };
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0 ||
+      !Object.values(parsedRect).every(Number.isFinite) || parsedRect.width <= 0 || parsedRect.height <= 0) {
+    throw new Error("Browser returned invalid visual geometry.");
+  }
+  return { width, height, rect: parsedRect };
+}
+
+function targetArguments(
+  observation: BrowserStateCache,
+  target: BrowserActionTarget,
+  prefix?: "from" | "to",
+): string[] {
+  if ("ref" in target) return prefix ? [`--${prefix}-ref`, target.ref] : [target.ref];
+  const visual = observation.visual;
+  if (!visual) throw new Error("Coordinate actions require the latest visual browser_observe result.");
+  if (!Number.isFinite(target.x) || !Number.isFinite(target.y) ||
+      target.x < 0 || target.y < 0 || target.x > visual.width || target.y > visual.height) {
+    throw new Error("Action coordinates are outside the latest visual observation.");
+  }
+  const x = visual.rect.x + target.x * visual.rect.width / visual.width;
+  const y = visual.rect.y + target.y * visual.rect.height / visual.height;
+  return prefix
+    ? [`--${prefix}-x`, String(x), `--${prefix}-y`, String(y)]
+    : ["--x", String(x), "--y", String(y)];
 }
 
 export class PiBrowserClient {
@@ -177,10 +222,14 @@ export class PiBrowserClient {
       const value = await this.runner({ args, context }) as Record<string, unknown>;
       const snapshot = value.snapshot as Record<string, unknown>;
       const elements = Array.isArray(snapshot?.elements) ? snapshot.elements.slice(0, options.maxElements ?? 120) : [];
+      const visual = value.visual && typeof value.visual === "object"
+        ? value.visual as Record<string, unknown>
+        : undefined;
       this.observation = {
         tabId: Number((snapshot as { tabId?: number }).tabId ?? (value as { tabId?: number }).tabId ?? 0),
         observationId: String(value.observationId),
         controlEpoch: Number(value.controlEpoch),
+        ...(visual ? { visual: parseVisualState(visual) } : {}),
       };
       if (!this.observation.tabId) {
         const tabs = await this.tabs(context, { action: "list" });
@@ -194,9 +243,6 @@ export class PiBrowserClient {
         ...(typeof snapshot.text === "string" ? { text: snapshot.text.slice(0, 12_000) } : {}),
         truncated: typeof snapshot.text === "string" && snapshot.text.length > 12_000,
       };
-      const visual = value.visual && typeof value.visual === "object"
-        ? value.visual as Record<string, unknown>
-        : undefined;
       const image = imagePath ? await readFile(imagePath) : null;
       return {
         ...(view === "visual" ? {
@@ -247,6 +293,14 @@ export class PiBrowserClient {
       }
     }
     if (request.action === "click") args.push("click", request.ref);
+    if (request.action === "hover") {
+      args.push("hover", ...targetArguments(this.observation!, request.target));
+    }
+    if (request.action === "drag") {
+      args.push("drag", ...targetArguments(this.observation!, request.from, "from"),
+        ...targetArguments(this.observation!, request.to, "to"));
+      if (request.button) args.push("--button", request.button);
+    }
     if (request.action === "type") args.push("type", request.ref, "--stdin", ...(request.replace ? ["--replace"] : []));
     if (request.action === "press_key") args.push("press-key", request.key);
     if (request.action === "scroll") args.push("scroll", "--dy", String(request.dy), "--dx", String(request.dx ?? 0));

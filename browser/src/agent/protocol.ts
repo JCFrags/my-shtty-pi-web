@@ -1,6 +1,8 @@
 import { parseAgentKey } from "./key";
 import type {
+  AgentDragRequest,
   AgentGetUrlRequest,
+  AgentHoverRequest,
   AgentNavigateRequest,
   AgentPressKeyRequest,
   AgentScrollRequest,
@@ -18,6 +20,15 @@ export const MAX_AGENT_WAIT_TEXT = 1_024;
 export interface AgentWireRequest {
   tab?: unknown;
   ref?: unknown;
+  x?: unknown;
+  y?: unknown;
+  fromRef?: unknown;
+  fromX?: unknown;
+  fromY?: unknown;
+  toRef?: unknown;
+  toX?: unknown;
+  toY?: unknown;
+  button?: unknown;
   text?: unknown;
   replace?: unknown;
   key?: unknown;
@@ -43,6 +54,40 @@ export function requiredEpoch(value: unknown, command: string): number {
     throw new Error(`${command} expectedControlEpoch must be a positive integer`);
   }
   return value;
+}
+
+export function parseHoverRequest(request: AgentWireRequest): {
+  tab: number;
+  request: AgentHoverRequest;
+} {
+  return {
+    tab: requiredTab(request, "agent.hover"),
+    request: {
+      target: parseActionTarget(request.ref, request.x, request.y, "agent.hover"),
+      observationId: requiredAgentString(request.observationId, "agent.hover", "observationId"),
+      expectedControlEpoch: requiredEpoch(request.expectedControlEpoch, "agent.hover"),
+    },
+  };
+}
+
+export function parseDragRequest(request: AgentWireRequest): {
+  tab: number;
+  request: AgentDragRequest;
+} {
+  const button = request.button === undefined ? "left" : request.button;
+  if (button !== "left" && button !== "middle" && button !== "right") {
+    throw new Error("agent.drag button must be left, middle, or right");
+  }
+  return {
+    tab: requiredTab(request, "agent.drag"),
+    request: {
+      from: parseActionTarget(request.fromRef, request.fromX, request.fromY, "agent.drag from"),
+      to: parseActionTarget(request.toRef, request.toX, request.toY, "agent.drag to"),
+      button,
+      observationId: requiredAgentString(request.observationId, "agent.drag", "observationId"),
+      expectedControlEpoch: requiredEpoch(request.expectedControlEpoch, "agent.drag"),
+    },
+  };
 }
 
 export function parseTypeRequest(request: AgentWireRequest): { tab: number; request: AgentTypeRequest } {
@@ -175,6 +220,24 @@ export function validateNavigationValue(value: string): void {
   if (scheme === "about" && value.trim().toLowerCase() !== "about:blank") {
     throw new Error("agent.navigate only allows about:blank");
   }
+}
+
+function parseActionTarget(
+  refValue: unknown,
+  xValue: unknown,
+  yValue: unknown,
+  command: string,
+): { ref: string } | { x: number; y: number } {
+  const hasRef = refValue !== undefined;
+  const hasCoordinates = xValue !== undefined || yValue !== undefined;
+  if (hasRef === hasCoordinates) throw new Error(`${command} needs exactly one ref or x/y pair`);
+  if (hasRef) return { ref: requiredAgentString(refValue, command, "ref") };
+  if (typeof xValue !== "number" || typeof yValue !== "number" ||
+      !Number.isFinite(xValue) || !Number.isFinite(yValue) ||
+      Math.abs(xValue) > 20_000 || Math.abs(yValue) > 20_000) {
+    throw new Error(`${command} x and y must be finite coordinates within 20000`);
+  }
+  return { x: xValue, y: yValue };
 }
 
 function requiredAgentString(value: unknown, command: string, name: string): string {

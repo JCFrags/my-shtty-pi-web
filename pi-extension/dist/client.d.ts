@@ -15,10 +15,34 @@ export interface BrowserStateCache {
     tabId: number;
     observationId: string;
     controlEpoch: number;
+    visual?: {
+        width: number;
+        height: number;
+        rect: {
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+        };
+    };
 }
+export type BrowserActionTarget = {
+    ref: string;
+} | {
+    x: number;
+    y: number;
+};
 export type BrowserAction = {
     action: "click";
     ref: string;
+} | {
+    action: "hover";
+    target: BrowserActionTarget;
+} | {
+    action: "drag";
+    from: BrowserActionTarget;
+    to: BrowserActionTarget;
+    button?: "left" | "middle" | "right";
 } | {
     action: "type";
     ref: string;
@@ -128,7 +152,7 @@ export declare class PiBrowserClient {
         action?: undefined;
         completed?: undefined;
     } | {
-        action: "click" | "type" | "press_key" | "scroll" | "navigate";
+        action: "click" | "hover" | "drag" | "type" | "press_key" | "scroll" | "navigate";
         completed: boolean;
         url?: undefined;
         matched?: undefined;

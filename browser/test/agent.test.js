@@ -91,6 +91,42 @@ test("driver click produces move, down, and up in order", async () => {
   assert.deepEqual(sleeps, [3, 7]);
 });
 
+test("driver drag holds through movement and always releases", async () => {
+  const { driver, events } = driverFixture();
+  await driver.drag({
+    samples: [{ x: 5, y: 6, t: 0 }, { x: 15, y: 16, t: 0 }],
+    target: { x: 15, y: 16 },
+    button: "left",
+    mode: "content",
+  });
+  assert.deepEqual(events, [
+    { kind: "down", x: 5, y: 6, button: "left" },
+    { kind: "move", x: 5, y: 6 },
+    { kind: "move", x: 15, y: 16 },
+    { kind: "up", x: 15, y: 16, button: "left" },
+  ]);
+});
+
+test("driver drag releases before reporting an invalidated operation", async () => {
+  let guards = 0;
+  const { driver, events } = driverFixture({
+    beforeInput: () => {
+      guards += 1;
+      if (guards === 3) throw new Error("page changed since observation");
+    },
+  });
+  await assert.rejects(driver.drag({
+    samples: [{ x: 5, y: 6, t: 0 }, { x: 15, y: 16, t: 0 }],
+    target: { x: 15, y: 16 },
+    button: "left",
+    mode: "content",
+  }), /page changed since observation/);
+  assert.deepEqual(events.slice(-2), [
+    { kind: "up", x: 15, y: 16, button: "left" },
+    { kind: "release" },
+  ]);
+});
+
 test("driver double-click produces two complete click cycles", async () => {
   const { driver, events } = driverFixture();
   await driver.click(clickArgs({ dblclick: true }));
@@ -271,6 +307,47 @@ test("BrowserAgentRuntime rejects oversized or stale visual captures", async () 
   stale.runtime.invalidateDocument();
   release();
   await assert.rejects(observation, /page changed during observation/);
+});
+
+test("BrowserAgentRuntime hover does not emit a click pulse", async () => {
+  const activity = [];
+  const { runtime } = runtimeFixture({
+    onActivityChange: (value) => activity.push(value),
+    actionServiceFactory: async (driver) => ({
+      hover: async () => {
+        await driver.move([{ x: 12, y: 14, t: 0 }], "content");
+        await driver.hover({ x: 12, y: 14 });
+      },
+    }),
+  });
+  const observation = await runtime.observe();
+  const result = await runtime.hover({
+    target: { ref: "e1" },
+    observationId: observation.observationId,
+    expectedControlEpoch: 1,
+  });
+  assert.deepEqual(result.point, { x: 12, y: 14 });
+  assert.equal(activity.some((value) => value?.pulse === true), false);
+});
+
+test("BrowserAgentRuntime requires visual state for coordinate drag", async () => {
+  const calls = [];
+  const { runtime } = runtimeFixture({
+    actionServiceFactory: async () => ({
+      drag: async (from, to, button) => calls.push({ from, to, button }),
+    }),
+  });
+  const semantic = await runtime.observe();
+  await assert.rejects(runtime.drag({
+    from: { x: 1, y: 2 }, to: { x: 10, y: 12 }, button: "left",
+    observationId: semantic.observationId, expectedControlEpoch: 1,
+  }), /latest visual observation/);
+  const visual = await runtime.observe({ view: "visual" });
+  await runtime.drag({
+    from: { x: 1, y: 2 }, to: { x: 10, y: 12 }, button: "left",
+    observationId: visual.observationId, expectedControlEpoch: 1,
+  });
+  assert.deepEqual(calls, [{ from: { x: 1, y: 2 }, to: { x: 10, y: 12 }, button: "left" }]);
 });
 
 test("BrowserAgentRuntime rejects an old observationId", async () => {
@@ -552,6 +629,8 @@ function registryHost(key, calls = []) {
     agentResume: (epoch) => control.resume(epoch),
     agentObserve: async () => ({}),
     agentClick: async () => ({}),
+    agentHover: async (_id, request) => { calls.push(["hover", request]); return { operation: "hover" }; },
+    agentDrag: async (_id, request) => { calls.push(["drag", request]); return { operation: "drag" }; },
     agentType: async (_id, request) => { calls.push(["type", request]); return { operation: "type" }; },
     agentPressKey: async (_id, request) => { calls.push(["press-key", request]); return { operation: "press-key" }; },
     agentScroll: async (_id, request) => { calls.push(["scroll", request]); return { operation: "scroll" }; },
@@ -643,6 +722,8 @@ test("socket dispatches native action requests and enforces the 256 KiB line bou
   const registry = new Registry(registryHost(key, calls));
   try {
     const requests = [
+      { id: "hover", cmd: "agent.hover", tab: 1, ref: "e1", observationId: "obs", expectedControlEpoch: 1 },
+      { id: "drag", cmd: "agent.drag", tab: 1, fromRef: "e1", toX: 10, toY: 20, observationId: "obs", expectedControlEpoch: 1 },
       { id: "type", cmd: "agent.type", tab: 1, ref: "e1", text: "Ada", observationId: "obs", expectedControlEpoch: 1 },
       { id: "press", cmd: "agent.press-key", tab: 1, key: "Enter", observationId: "obs", expectedControlEpoch: 1 },
       { id: "scroll", cmd: "agent.scroll", tab: 1, dy: 10, observationId: "obs", expectedControlEpoch: 1 },
@@ -654,8 +735,8 @@ test("socket dispatches native action requests and enforces the 256 KiB line bou
       const response = await registryRequest(registry.socketPath, request);
       assert.equal(response.ok, true);
     }
-    assert.deepEqual(calls.map(([kind]) => kind), ["type", "press-key", "scroll", "navigate", "get-url", "wait-for"]);
-    assert.equal(calls[0][1].replace, false);
+    assert.deepEqual(calls.map(([kind]) => kind), ["hover", "drag", "type", "press-key", "scroll", "navigate", "get-url", "wait-for"]);
+    assert.equal(calls[2][1].replace, false);
 
     const tooLarge = await registryRequest(registry.socketPath, {
       id: "large",

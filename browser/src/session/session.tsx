@@ -496,6 +496,8 @@ class Session {
       agentResume: (expectedEpoch) => this.control.resume(expectedEpoch),
       agentObserve: (id, request) => this.tabs.agentObserve(id, request),
       agentClick: (id, request) => this.tabs.agentClick(id, request),
+      agentHover: (id, request) => this.tabs.agentHover(id, request),
+      agentDrag: (id, request) => this.tabs.agentDrag(id, request),
       agentType: (id, request) => this.tabs.agentType(id, request),
       agentPressKey: (id, request) => this.tabs.agentPressKey(id, request),
       agentScroll: (id, request) => this.tabs.agentScroll(id, request),

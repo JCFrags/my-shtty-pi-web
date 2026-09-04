@@ -192,11 +192,35 @@ export class TerminalBrowserDriver implements BrowserDriver {
   }
 
   async hover(_opts: HoverArgs): Promise<void> {
-    this.unsupported("hover");
+    this.beforeInput?.();
   }
 
-  async drag(_args: DragArgs): Promise<void> {
-    this.unsupported("drag");
+  async drag(args: DragArgs): Promise<void> {
+    this.assertContentMode(args.mode);
+    const start = args.samples[0];
+    if (!start) throw new Error("drag needs a movement path");
+    const down = { kind: "down" as const, x: start.x, y: start.y, button: args.button };
+    let held = false;
+    let failure: unknown;
+    try {
+      this.beforeInput?.();
+      this.target.agentPointer(down);
+      this.onPointer?.(down);
+      held = true;
+      await this.replayMove(args.samples, true);
+      this.lastPosition = { ...args.target };
+    } catch (error) {
+      failure = error;
+    } finally {
+      if (held) {
+        const up = { kind: "up" as const, x: args.target.x, y: args.target.y, button: args.button };
+        try {
+          this.target.agentPointer(up);
+          this.onPointer?.(up);
+        } catch {}
+      }
+    }
+    if (failure !== undefined) this.releaseAndRethrow(failure);
   }
 
   async pressKey(key: string, mode: DeliveryMode): Promise<void> {

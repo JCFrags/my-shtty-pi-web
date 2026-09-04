@@ -22,6 +22,8 @@ export async function agentCommand(terminal: Terminal | null, args: string[]): P
   const subcommand = args.shift();
   if (subcommand === "observe") return observeCommand(terminal, args);
   if (subcommand === "click") return clickCommand(terminal, args);
+  if (subcommand === "hover") return hoverCommand(terminal, args);
+  if (subcommand === "drag") return dragCommand(terminal, args);
   if (subcommand === "type") return typeCommand(terminal, args);
   if (subcommand === "press-key") return pressKeyCommand(terminal, args);
   if (subcommand === "scroll") return scrollCommand(terminal, args);
@@ -31,7 +33,7 @@ export async function agentCommand(terminal: Terminal | null, args: string[]): P
   if (subcommand === "status") return statusCommand(terminal, args);
   if (subcommand === "pause") return transitionCommand(terminal, args, "agent.pause");
   if (subcommand === "resume") return transitionCommand(terminal, args, "agent.resume");
-  throw new Error("agent needs observe, click, type, press-key, scroll, navigate, get-url, wait-for, status, pause, or resume (terminal-browser agent --help)");
+  throw new Error("agent needs observe, click, hover, drag, type, press-key, scroll, navigate, get-url, wait-for, status, pause, or resume (terminal-browser agent --help)");
 }
 
 async function statusCommand(terminal: Terminal | null, args: string[]): Promise<number> {
@@ -123,6 +125,64 @@ async function clickCommand(terminal: Terminal | null, args: string[]): Promise<
       expectedControlEpoch,
     }),
   );
+  return 0;
+}
+
+async function hoverCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const observationId = takeValue(args, "--observation");
+  const epochValue = takeValue(args, "--control-epoch");
+  const xValue = takeValue(args, "--x");
+  const yValue = takeValue(args, "--y");
+  const ref = args.shift();
+  const target = parseCliTarget(ref, xValue, yValue, "agent hover");
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent hover --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  print(await control(browser.socket, {
+    cmd: "agent.hover",
+    tab,
+    ...target,
+    observationId: parseObservation(observationId, "agent.hover"),
+    expectedControlEpoch: parseEpoch(epochValue, "agent.hover"),
+  }, ACTION_TIMEOUT_MS));
+  return 0;
+}
+
+async function dragCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const observationId = takeValue(args, "--observation");
+  const epochValue = takeValue(args, "--control-epoch");
+  const from = parseCliTarget(
+    takeValue(args, "--from-ref"),
+    takeValue(args, "--from-x"),
+    takeValue(args, "--from-y"),
+    "agent drag from",
+  );
+  const to = parseCliTarget(
+    takeValue(args, "--to-ref"),
+    takeValue(args, "--to-x"),
+    takeValue(args, "--to-y"),
+    "agent drag to",
+  );
+  const button = takeValue(args, "--button") ?? "left";
+  if (button !== "left" && button !== "middle" && button !== "right") {
+    throw new Error("agent drag --button must be left, middle, or right");
+  }
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent drag --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  print(await control(browser.socket, {
+    cmd: "agent.drag",
+    tab,
+    ...prefixTarget("from", from),
+    ...prefixTarget("to", to),
+    button,
+    observationId: parseObservation(observationId, "agent.drag"),
+    expectedControlEpoch: parseEpoch(epochValue, "agent.drag"),
+  }, MAX_ACTION_TIMEOUT_MS));
   return 0;
 }
 
@@ -407,6 +467,32 @@ function validateAgentString(value: string, name: string): void {
   if (value.trim().length === 0 || value.length > MAX_AGENT_STRING) {
     throw new Error(`${name} must be a non-empty string of at most ${MAX_AGENT_STRING} characters`);
   }
+}
+
+function parseCliTarget(
+  ref: string | undefined,
+  xValue: string | undefined,
+  yValue: string | undefined,
+  command: string,
+): { ref: string } | { x: number; y: number } {
+  const hasCoordinates = xValue !== undefined || yValue !== undefined;
+  if ((ref !== undefined) === hasCoordinates) throw new Error(`${command} needs exactly one ref or x/y pair`);
+  if (ref !== undefined) {
+    validateAgentString(ref, `${command} ref`);
+    return { ref };
+  }
+  const x = Number(xValue);
+  const y = Number(yValue);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || Math.abs(x) > 20_000 || Math.abs(y) > 20_000) {
+    throw new Error(`${command} x and y must be finite coordinates within 20000`);
+  }
+  return { x, y };
+}
+
+function prefixTarget(prefix: "from" | "to", target: { ref: string } | { x: number; y: number }) {
+  return "ref" in target
+    ? { [`${prefix}Ref`]: target.ref }
+    : { [`${prefix}X`]: target.x, [`${prefix}Y`]: target.y };
 }
 
 function parseScrollNumber(value: string | undefined, name: string): number {

@@ -2,7 +2,9 @@ const assert = require("node:assert/strict");
 const { test } = require("node:test");
 
 const {
+  parseDragRequest,
   parseGetUrlRequest,
+  parseHoverRequest,
   parseNavigateRequest,
   parsePressKeyRequest,
   parseScrollRequest,
@@ -39,6 +41,19 @@ test("agent protocol parses bounded type, key, and scroll requests", () => {
     dy: -40,
     ...observation,
   }).request, { dx: 0, dy: -40, ...observation });
+});
+
+test("agent protocol parses hover and drag targets", () => {
+  assert.deepEqual(parseHoverRequest({ tab: 1, ref: "e1", ...observation }).request, {
+    target: { ref: "e1" }, ...observation,
+  });
+  assert.deepEqual(parseDragRequest({
+    tab: 1, fromRef: "e1", toX: 20, toY: 30, button: "right", ...observation,
+  }).request, {
+    from: { ref: "e1" }, to: { x: 20, y: 30 }, button: "right", ...observation,
+  });
+  assert.throws(() => parseHoverRequest({ tab: 1, ref: "e1", x: 2, y: 3, ...observation }), /exactly one/);
+  assert.throws(() => parseDragRequest({ tab: 1, fromX: 1, toRef: "e2", ...observation }), /x and y/);
 });
 
 test("agent protocol rejects malformed input bounds", () => {

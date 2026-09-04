@@ -1,4 +1,4 @@
-import type { ActionService, PageSnapshot, Point, Rect } from "agentcursor" with {
+import type { ActionService, MouseButton, PageSnapshot, Point, Rect } from "agentcursor" with {
   "resolution-mode": "import",
 };
 import type { AgentKey } from "./key";
@@ -90,6 +90,38 @@ export interface AgentClickResult {
   url: string;
 }
 
+export type AgentActionTarget = { ref: string } | { x: number; y: number };
+
+export interface AgentHoverRequest {
+  target: AgentActionTarget;
+  observationId: string;
+  expectedControlEpoch: number;
+}
+
+export interface AgentHoverResult {
+  point: Point;
+  documentId: string;
+  controlEpoch: number;
+  url: string;
+}
+
+export interface AgentDragRequest {
+  from: AgentActionTarget;
+  to: AgentActionTarget;
+  button: MouseButton;
+  observationId: string;
+  expectedControlEpoch: number;
+}
+
+export interface AgentDragResult {
+  from: AgentActionTarget;
+  to: AgentActionTarget;
+  button: MouseButton;
+  documentId: string;
+  controlEpoch: number;
+  url: string;
+}
+
 export interface AgentTypeRequest {
   ref: string;
   text: string;
@@ -174,5 +206,5 @@ export interface AgentWaitForResult {
 
 export type AgentActionService = Pick<
   ActionService,
-  "click" | "type" | "pressKey" | "scroll" | "navigate" | "getUrl" | "waitFor"
+  "click" | "type" | "pressKey" | "scroll" | "navigate" | "getUrl" | "waitFor" | "hover" | "drag"
 >;

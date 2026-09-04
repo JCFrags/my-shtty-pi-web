@@ -41,8 +41,17 @@ const observeParameters = Type.Object({
     ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
 }, { additionalProperties: false });
 const actParameters = Type.Object({
-    action: StringEnum(["click", "type", "press_key", "scroll", "navigate", "get_url", "wait_for"]),
+    action: StringEnum(["click", "hover", "drag", "type", "press_key", "scroll", "navigate", "get_url", "wait_for"]),
     ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    x: Type.Optional(Type.Number({ minimum: 0, maximum: 20000 })),
+    y: Type.Optional(Type.Number({ minimum: 0, maximum: 20000 })),
+    from_ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    from_x: Type.Optional(Type.Number({ minimum: 0, maximum: 20000 })),
+    from_y: Type.Optional(Type.Number({ minimum: 0, maximum: 20000 })),
+    to_ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    to_x: Type.Optional(Type.Number({ minimum: 0, maximum: 20000 })),
+    to_y: Type.Optional(Type.Number({ minimum: 0, maximum: 20000 })),
+    button: Type.Optional(StringEnum(["left", "middle", "right"])),
     text: Type.Optional(Type.String({ maxLength: 32768 })),
     replace: Type.Optional(Type.Boolean()),
     key: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
@@ -60,6 +69,15 @@ function browserAction(params) {
         if (!params.ref)
             throw new Error("click requires ref from browser_observe");
         return { action: "click", ref: params.ref };
+    }
+    if (params.action === "hover") {
+        const target = actionTarget(params.ref, params.x, params.y, "hover");
+        return { action: "hover", target };
+    }
+    if (params.action === "drag") {
+        const from = actionTarget(params.from_ref, params.from_x, params.from_y, "drag from");
+        const to = actionTarget(params.to_ref, params.to_x, params.to_y, "drag to");
+        return { action: "drag", from, to, button: params.button };
     }
     if (params.action === "type") {
         if (!params.ref || params.text === undefined)
@@ -92,6 +110,13 @@ function browserAction(params) {
         condition: params.condition,
         timeoutMs: params.timeout_ms,
     };
+}
+function actionTarget(ref, x, y, name) {
+    const hasCoordinates = x !== undefined || y !== undefined;
+    if ((ref !== undefined) === hasCoordinates || (hasCoordinates && (x === undefined || y === undefined))) {
+        throw new Error(`${name} requires exactly one ref or x/y pair`);
+    }
+    return ref !== undefined ? { ref } : { x: x, y: y };
 }
 export default async function terminalBrowserExtension(pi) {
     await loadWebResearch(pi);
@@ -156,7 +181,7 @@ export default async function terminalBrowserExtension(pi) {
     pi.registerTool({
         name: "browser_act",
         label: "Browser Act",
-        description: "Perform one native action in this Pi pane's companion browser: click, type, press_key, scroll, navigate, get_url, or wait_for. Observation and control identifiers are managed internally.",
+        description: "Perform one native action in this Pi pane's companion browser: click, hover, drag, type, press_key, scroll, navigate, get_url, or wait_for. Coordinates require the latest visual observation.",
         promptSnippet: "Perform one native companion-browser action",
         promptGuidelines: ["Use browser_act for exactly one action per call, then use browser_observe again when the page may have changed."],
         parameters: actParameters,

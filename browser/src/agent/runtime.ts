@@ -14,8 +14,12 @@ import type {
   AgentBrowserTarget,
   AgentClickRequest,
   AgentClickResult,
+  AgentDragRequest,
+  AgentDragResult,
   AgentGetUrlRequest,
   AgentGetUrlResult,
+  AgentHoverRequest,
+  AgentHoverResult,
   AgentNavigateRequest,
   AgentNavigateResult,
   AgentObservation,
@@ -56,6 +60,8 @@ async function defaultActionServiceFactory(driver: BrowserDriver): Promise<Agent
 
 type AgentOperationKind =
   | "click"
+  | "hover"
+  | "drag"
   | "type"
   | "press-key"
   | "scroll"
@@ -235,6 +241,89 @@ export class BrowserAgentRuntime {
       } finally {
         this.clearOperation(operation);
         this.clearTarget();
+      }
+    });
+  }
+
+  async hover(request: AgentHoverRequest): Promise<AgentHoverResult> {
+    return this.enqueue(async () => {
+      const observation = this.latestObservation;
+      this.assertObservation(observation, request.observationId, request.expectedControlEpoch);
+      this.assertActionTarget(observation, request.target);
+      const action = await this.actionServiceInstance();
+      this.assertObservation(observation, request.observationId, request.expectedControlEpoch);
+      const documentId = await this.observer.currentDocumentId();
+      this.assertObservation(observation, request.observationId, request.expectedControlEpoch);
+      if (documentId !== observation.documentId) throw new Error("page changed since observation");
+      const operation = this.installOperation({
+        kind: "hover",
+        controlEpoch: request.expectedControlEpoch,
+        documentGeneration: this.documentGeneration,
+        observationId: observation.observationId,
+        allowDocumentChange: false,
+      });
+      try {
+        this.resetPulse();
+        this.assertOperationInput();
+        await action.hover(request.target);
+        this.assertOperation(operation);
+        const finalDocumentId = await this.observer.currentDocumentId();
+        this.assertOperation(operation);
+        if (finalDocumentId !== observation.documentId) throw new Error("page changed since observation");
+        return {
+          point: await this.driver.cursorState(),
+          documentId: finalDocumentId,
+          controlEpoch: request.expectedControlEpoch,
+          url: this.target.currentUrl(),
+        };
+      } catch (error) {
+        this.rethrowOperationError(operation, error);
+      } finally {
+        this.clearOperation(operation);
+      }
+    });
+  }
+
+  async drag(request: AgentDragRequest): Promise<AgentDragResult> {
+    return this.enqueue(async () => {
+      const observation = this.latestObservation;
+      this.assertObservation(observation, request.observationId, request.expectedControlEpoch);
+      this.assertActionTarget(observation, request.from);
+      this.assertActionTarget(observation, request.to);
+      const action = await this.actionServiceInstance();
+      this.assertObservation(observation, request.observationId, request.expectedControlEpoch);
+      const documentId = await this.observer.currentDocumentId();
+      this.assertObservation(observation, request.observationId, request.expectedControlEpoch);
+      if (documentId !== observation.documentId) throw new Error("page changed since observation");
+      const operation = this.installOperation({
+        kind: "drag",
+        controlEpoch: request.expectedControlEpoch,
+        documentGeneration: this.documentGeneration,
+        observationId: observation.observationId,
+        allowDocumentChange: false,
+      });
+      try {
+        this.assertOperationInput();
+        await action.drag(request.from, request.to, request.button);
+        this.assertOperation(operation);
+        const finalDocumentId = await this.observer.currentDocumentId();
+        this.assertOperation(operation);
+        if (finalDocumentId !== observation.documentId) throw new Error("page changed since observation");
+        return {
+          from: request.from,
+          to: request.to,
+          button: request.button,
+          documentId: finalDocumentId,
+          controlEpoch: request.expectedControlEpoch,
+          url: this.target.currentUrl(),
+        };
+      } catch (error) {
+        this.rethrowOperationError(operation, error);
+      } finally {
+        this.clearOperation(operation);
+        try {
+          this.target.releaseAgentPointer();
+        } catch {}
       }
     });
   }
@@ -493,6 +582,28 @@ export class BrowserAgentRuntime {
     }
   }
 
+  private assertActionTarget(
+    observation: AgentObservation,
+    target: { ref: string } | { x: number; y: number },
+  ): void {
+    if ("ref" in target) {
+      if (!observation.snapshot.elements.some((element) => element.ref === target.ref)) {
+        throw new Error("stale or unknown ref");
+      }
+      return;
+    }
+    if (!Number.isFinite(target.x) || !Number.isFinite(target.y)) {
+      throw new Error("action coordinates must be finite");
+    }
+    const visual = observation.visual;
+    if (!visual) throw new Error("coordinate actions require the latest visual observation");
+    const right = visual.rect.x + visual.rect.width;
+    const bottom = visual.rect.y + visual.rect.height;
+    if (target.x < visual.rect.x || target.y < visual.rect.y || target.x > right || target.y > bottom) {
+      throw new Error("action coordinates are outside the latest visual observation");
+    }
+  }
+
   private rethrowOperationError(operation: AgentOperation, error: unknown): never {
     try {
       this.assertOperation(operation);
@@ -561,12 +672,23 @@ export class BrowserAgentRuntime {
     const operation = this.activeOperation;
     return (
       !!operation &&
-      (operation.kind === "click" || operation.kind === "type" || operation.kind === "wait-for") &&
+      (operation.kind === "click" || operation.kind === "hover" || operation.kind === "drag" ||
+        operation.kind === "type" || operation.kind === "wait-for") &&
       operation.controlEpoch === this.control.snapshot.controlEpoch &&
       this.control.state === "agent" &&
       (operation.allowDocumentChange || operation.documentGeneration === this.documentGeneration) &&
       (!operation.observationId || this.latestObservation?.observationId === operation.observationId)
     );
+  }
+
+  private resetPulse() {
+    if (this.pulseTimer) {
+      clearTimeout(this.pulseTimer);
+      this.pulseTimer = null;
+    }
+    if (!this.activityValue?.pulse) return;
+    this.activityValue = { ...this.activityValue, pulse: false };
+    this.emitActivity();
   }
 
   private clearTarget() {

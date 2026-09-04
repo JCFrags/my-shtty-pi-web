@@ -3,8 +3,12 @@ import type { BrowserControl } from "../agent/control";
 import type {
   AgentClickRequest,
   AgentClickResult,
+  AgentDragRequest,
+  AgentDragResult,
   AgentGetUrlRequest,
   AgentGetUrlResult,
+  AgentHoverRequest,
+  AgentHoverResult,
   AgentNavigateRequest,
   AgentNavigateResult,
   AgentObservation,
@@ -210,6 +214,36 @@ export class TabManager {
       }
       try {
         return await tab.agentRuntime.click(request);
+      } finally {
+        tab.controller.releaseAgentInput();
+      }
+    });
+  }
+
+  async agentHover(id: number, request: AgentHoverRequest): Promise<AgentHoverResult> {
+    const tab = this.tabs.find((candidate) => candidate.id === id);
+    if (!tab) throw new Error(`no tab ${id}`);
+    return this.control.runMutation(request.expectedControlEpoch, async () => {
+      if (!this.agentActivate(id)) {
+        throw new Error("cannot activate a tab while terminal-browser is in a modal state");
+      }
+      try {
+        return await tab.agentRuntime.hover(request);
+      } finally {
+        tab.controller.releaseAgentInput();
+      }
+    });
+  }
+
+  async agentDrag(id: number, request: AgentDragRequest): Promise<AgentDragResult> {
+    const tab = this.tabs.find((candidate) => candidate.id === id);
+    if (!tab) throw new Error(`no tab ${id}`);
+    return this.control.runMutation(request.expectedControlEpoch, async () => {
+      if (!this.agentActivate(id)) {
+        throw new Error("cannot activate a tab while terminal-browser is in a modal state");
+      }
+      try {
+        return await tab.agentRuntime.drag(request);
       } finally {
         tab.controller.releaseAgentInput();
       }
