@@ -18,10 +18,10 @@ export interface BrowserDownload {
 
 type Entry = { value: BrowserDownload; item?: DownloadItem; terminal: boolean; cleanup: () => void };
 const HISTORY_BYTES = 128 * 1024;
-type Source = { tracker: BrowserDownloads; contextId: number };
+type Source = { tracker: BrowserDownloads; contextId: number; onStart?: () => void };
 const dispatchers = new WeakMap<Session, Map<WebContents, Source>>();
 
-export function registerDownloadSource(contents: WebContents, tracker: BrowserDownloads, contextId: number): void {
+export function registerDownloadSource(contents: WebContents, tracker: BrowserDownloads, contextId: number, onStart?: () => void): void {
   let sources = dispatchers.get(contents.session);
   if (!sources) {
     sources = new Map();
@@ -30,12 +30,42 @@ export function registerDownloadSource(contents: WebContents, tracker: BrowserDo
     contents.session.on("will-download", (event, item, source) => {
       const route = routes.get(source);
       if (!route) { event.preventDefault(); return; }
-      route.tracker.start(item, route.contextId);
+      if (route.tracker.start(item, route.contextId)) route.onStart?.();
     });
   }
-  sources.set(contents, { tracker, contextId });
+  sources.set(contents, { tracker, contextId, onStart });
   const routes = sources;
   contents.once("destroyed", () => { routes.delete(contents); tracker.interruptContext(contextId); });
+}
+
+export function waitForDownloadStart(contents: WebContents, hasStarted: () => boolean, signal: AbortSignal): Promise<boolean> {
+  if (contents.isDestroyed() || signal.aborted) return Promise.resolve(false);
+  if (hasStarted()) return Promise.resolve(true);
+  const session = contents.session;
+  return new Promise(resolve => {
+    const finish = (started: boolean) => {
+      clearTimeout(timer);
+      session.off("will-download", downloaded);
+      contents.off("did-navigate", stopped);
+      contents.off("did-fail-load", failed);
+      contents.off("destroyed", stopped);
+      signal.removeEventListener("abort", stopped);
+      resolve(started);
+    };
+    const stopped = () => finish(false);
+    const downloaded = (_event: Electron.Event, _item: DownloadItem, source: WebContents) => {
+      if (source === contents) finish(hasStarted());
+    };
+    const failed = (_event: Electron.Event, _code: number, _description: string, _url: string, mainFrame: boolean) => {
+      if (mainFrame) finish(false);
+    };
+    const timer = setTimeout(stopped, 500);
+    session.on("will-download", downloaded);
+    contents.on("did-navigate", stopped);
+    contents.on("did-fail-load", failed);
+    contents.on("destroyed", stopped);
+    signal.addEventListener("abort", stopped, { once: true });
+  });
 }
 
 export class BrowserDownloads {
@@ -134,8 +164,8 @@ export class BrowserDownloads {
     }
   }
 
-  start(item: DownloadItem, contextId: number): void {
-    if (this.stopped || !this.projectRoot || !this.historyFile || [...this.entries.values()].filter(entry => !entry.terminal).length >= 32) { item.cancel(); return; }
+  start(item: DownloadItem, contextId: number): boolean {
+    if (this.stopped || !this.projectRoot || !this.historyFile || [...this.entries.values()].filter(entry => !entry.terminal).length >= 32) { item.cancel(); return false; }
     const entry: Entry = {
       value: { id: randomUUID(), contextId, name: downloadFilename(item.getFilename()), savePath: "", received: 0, total: 0, state: "progressing" },
       item, terminal: false, cleanup: () => {},
@@ -162,9 +192,11 @@ export class BrowserDownloads {
       entry.value.savePath = path.relative(fs.realpathSync(this.projectRoot), savePath);
       item.setSavePath(savePath);
       update("progressing", true);
+      return true;
     } catch {
       update("failed");
       try { item.cancel(); } catch {}
+      return true;
     }
   }
 

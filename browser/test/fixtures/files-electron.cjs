@@ -71,10 +71,17 @@ async function observed(manager, id, name) {
   assert(element, `missing fixture control ${name}`);
   return { ref: element.ref, observationId: observation.observationId, expectedControlEpoch: manager.control.controlEpoch };
 }
+async function downloadClick(manager, id, name) {
+  const before = manager.tabs.downloads.list(id).length;
+  const result = await click(manager, id, name);
+  assert.equal(result.completed, undefined);
+  assert.ok(result.point);
+  await until(() => manager.tabs.downloads.list(id).length > before);
+  assert.equal(manager.tabs.downloads.list(id).length, before + 1);
+  return result;
+}
 async function click(manager, id, name) {
-  return manager.tabs.agentClick(id, await observed(manager, id, name)).catch(error => {
-    if (!name.toLowerCase().includes('download') || !/page changed/.test(error.message)) throw error;
-  });
+  return manager.tabs.agentClick(id, await observed(manager, id, name));
 }
 (async () => {
   assert.equal(process.versions.electron, '43.3.0');
@@ -155,12 +162,12 @@ async function click(manager, id, name) {
   await until(async () => (await popupController.runJs('document.readyState')) === 'complete');
   await a.tabs.agentUpload(popup.id, { ...await observed(a, popup.id, 'Direct'), files: ['sample.txt'] });
   await until(() => uploadCount === 4);
-  await click(a, popup.id, 'Download');
+  await downloadClick(a, popup.id, 'Download');
   await until(() => a.tabs.downloads.list(popup.id)[0]?.state === 'completed');
   a.tabs.close(popup.id);
   await until(() => !a.tabs.has(popup.id));
   assert.equal(a.tabs.downloads.list(popup.id)[0].state, 'completed');
-  await Promise.all([click(a, tab.id, 'Download'), click(b, other.id, 'Download')]);
+  await Promise.all([downloadClick(a, tab.id, 'Download'), downloadClick(b, other.id, 'Download')]);
   await until(() => a.tabs.downloads.list(tab.id)[0]?.state === 'completed' && b.tabs.downloads.list(other.id)[0]?.state === 'completed');
   const own = a.tabs.downloads.list(tab.id)[0];
   const foreign = b.tabs.downloads.list()[0];
@@ -174,7 +181,7 @@ async function click(manager, id, name) {
   assert.equal(b.tabs.downloads.list().some(item => item.id === own.id), false);
   assert.throws(() => a.tabs.downloads.cancel(foreign.id), /unknown/);
   assert.throws(() => b.tabs.downloads.cancel(own.id), /unknown/);
-  await click(a, tab.id, 'Slow download');
+  await downloadClick(a, tab.id, 'Slow download');
   let slow = await until(() => a.tabs.downloads.list().find(item => item.state === 'progressing'));
   assert(slow);
   assert.equal(b.tabs.downloads.list().some(item => item.id === slow.id), false);
@@ -183,9 +190,9 @@ async function click(manager, id, name) {
   const waiting = a.tabs.downloads.wait(slow.id, 5000, a.control, a.control.controlEpoch);
   a.tabs.downloads.cancel(slow.id);
   assert.equal((await waiting).state, 'cancelled');
-  await click(a, tab.id, 'Failed download');
+  await downloadClick(a, tab.id, 'Failed download');
   await until(() => a.tabs.downloads.list().some(item => item.state === 'interrupted'));
-  await click(a, tab.id, 'Slow download');
+  await downloadClick(a, tab.id, 'Slow download');
   slow = await until(() => a.tabs.downloads.list().find(item => item.state === 'progressing'));
   const takeoverWait = a.tabs.downloads.wait(slow.id, 5000, a.control, a.control.controlEpoch);
   a.control.takeHuman('keyboard');

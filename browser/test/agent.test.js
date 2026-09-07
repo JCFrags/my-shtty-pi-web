@@ -235,6 +235,7 @@ function runtimeFixture(options = {}) {
     ensureVisible: async () => null,
   };
   const target = {
+    downloadStartSequence: 0,
     runJs: async () => null,
     agentPointer: () => {},
     releaseAgentPointer: () => {},
@@ -273,6 +274,7 @@ function runtimeFixture(options = {}) {
   return {
     runtime,
     control,
+    target,
     observer,
     setDocumentId: (value) => { documentId = value; },
     clickedRef: () => clickedRef,
@@ -836,4 +838,102 @@ test('socket upload and download variants validate identity and expose no projec
       assert.equal((await registryRequest(registry.socketPath, { id: "files", cmd: 'agent.downloads', expectedControlEpoch: 1, ...invalid })).ok, false);
     }
   } finally { registry.dispose(); }
+});
+
+for (const scenario of ['accepted', 'unrelated', 'old-start', 'navigation', 'takeover', 'pre-input', 'incomplete']) {
+  test(`BrowserAgentRuntime download completion: ${scenario}`, async () => {
+    const events = [];
+    const otherTarget = { downloadStartSequence: 0 };
+    const fixture = runtimeFixture({
+      actionServiceFactory: async driver => ({
+        click: async () => {
+          if (scenario === 'pre-input') {
+            fixture.target.downloadStartSequence += 1;
+            fixture.runtime.invalidateDocument();
+          }
+          await driver.click(clickArgs({ pressMs: 0 }));
+          if (scenario === 'unrelated') otherTarget.downloadStartSequence += 1;
+          if (!['unrelated', 'old-start'].includes(scenario)) fixture.target.downloadStartSequence += 1;
+          fixture.runtime.invalidateDocument();
+          if (scenario === 'navigation') fixture.setDocumentId('document-2');
+          if (scenario === 'takeover') fixture.control.takeHuman('keyboard');
+          if (scenario === 'incomplete') throw new Error('click did not complete');
+          return { x: 20, y: 24 };
+        },
+      }),
+    });
+    fixture.target.agentPointer = event => events.push(event.kind);
+    fixture.target.downloadStartSequence = 1;
+    const observation = await fixture.runtime.observe();
+    const pending = fixture.runtime.click({ ref: 'e1', observationId: observation.observationId, expectedControlEpoch: 1 });
+    if (scenario === 'accepted') {
+      assert.equal((await pending).documentId, observation.documentId);
+      await assert.rejects(fixture.runtime.click({ ref: 'e1', observationId: observation.observationId, expectedControlEpoch: 1 }), /stale or unknown observation/);
+    } else {
+      await assert.rejects(pending, /page changed|stale|human/);
+    }
+    assert.deepEqual(events, scenario === 'pre-input' ? [] : ['move', 'down', 'up']);
+  });
+}
+
+test('BrowserAgentRuntime stale document does not dispatch even with an earlier download', async () => {
+  const fixture = runtimeFixture();
+  const observation = await fixture.runtime.observe();
+  fixture.target.downloadStartSequence += 1;
+  fixture.setDocumentId('document-2');
+  await assert.rejects(fixture.runtime.click({ ref: 'e1', observationId: observation.observationId, expectedControlEpoch: 1 }), /page changed/);
+  assert.equal(fixture.clickedRef(), null);
+});
+
+for (const outcome of ['accepted', 'timeout', 'navigation', 'takeover', 'late-start-after-failure']) {
+  test(`BrowserAgentRuntime post-click download race: ${outcome}`, async () => {
+    const fixture = runtimeFixture({
+      actionServiceFactory: async driver => ({
+        click: async () => {
+          await driver.click(clickArgs({ pressMs: 0 }));
+          fixture.runtime.invalidateDocument();
+          return { x: 20, y: 24 };
+        },
+      }),
+    });
+    let waited = false;
+    fixture.target.waitForDownloadStart = async (sequence, signal) => {
+      waited = true;
+      assert.equal(sequence, 0);
+      assert.equal(signal.aborted, false);
+      if (outcome === 'takeover') {
+        fixture.control.takeHuman('keyboard');
+        assert.equal(signal.aborted, true);
+      }
+      if (outcome === 'navigation') fixture.setDocumentId('document-2');
+      if (outcome !== 'timeout') fixture.target.downloadStartSequence += 1;
+      return outcome !== 'timeout' && outcome !== 'late-start-after-failure';
+    };
+    const observation = await fixture.runtime.observe();
+    const pending = fixture.runtime.click({ ref: 'e1', observationId: observation.observationId, expectedControlEpoch: 1 });
+    if (outcome === 'accepted') assert.equal((await pending).documentId, observation.documentId);
+    else await assert.rejects(pending, /page changed|stale|human/);
+    assert.equal(waited, true);
+  });
+}
+
+test('BrowserAgentRuntime rejects a closed click target before another document evaluation', async () => {
+  const fixture = runtimeFixture({
+    actionServiceFactory: async () => ({
+      click: async () => {
+        fixture.runtime.invalidateDocument();
+        return { x: 20, y: 24 };
+      },
+    }),
+  });
+  let documentReads = 0;
+  fixture.observer.currentDocumentId = async () => {
+    documentReads += 1;
+    assert.equal(documentReads, 1);
+    return 'document-1';
+  };
+  fixture.target.waitForDownloadStart = async () => false;
+  const observation = await fixture.runtime.observe();
+  await assert.rejects(fixture.runtime.click({ ref: 'e1', observationId: observation.observationId, expectedControlEpoch: 1 }), /page changed/);
+  assert.equal(documentReads, 1);
 });

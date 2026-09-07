@@ -34,12 +34,16 @@ test('one session dispatcher routes each source to exact owner and context, not 
   const session = new EventEmitter();
   const sources = [new EventEmitter(), new EventEmitter(), new EventEmitter()];
   for (const source of sources) source.session = session;
-  registerDownloadSource(sources[0], tracker, 1);
-  registerDownloadSource(sources[1], other, 1);
-  registerDownloadSource(sources[2], tracker, 2);
+  const starts = [0, 0, 0];
+  registerDownloadSource(sources[0], tracker, 1, () => starts[0]++);
+  registerDownloadSource(sources[1], other, 1, () => starts[1]++);
+  registerDownloadSource(sources[2], tracker, 2, () => starts[2]++);
   assert.equal(session.listenerCount('will-download'), 1);
   const items = [new Item(), new Item(), new Item()];
-  sources.forEach((source, i) => session.emit('will-download', {}, items[i], source));
+  sources.forEach((source, i) => {
+    session.emit('will-download', {}, items[i], source);
+    assert.deepEqual(starts, sources.map((_, index) => index <= i ? 1 : 0));
+  });
   assert.deepEqual(tracker.list().map(item => item.contextId), [1, 2]);
   assert.equal(other.list().length, 1);
   assert.notEqual(items[0].path, items[1].path);
@@ -52,6 +56,15 @@ test('one session dispatcher routes each source to exact owner and context, not 
   sources[2].emit('destroyed');
   assert.equal(tracker.list(2)[0].state, 'interrupted');
   assert.equal(tracker.list(1)[0].state, 'progressing');
+  assert.deepEqual(starts, [1, 1, 1]);
+  const bad = new Item();
+  bad.setSavePath = () => { throw new Error('disk failure'); };
+  session.emit('will-download', {}, bad, sources[0]);
+  assert.deepEqual(starts, [2, 1, 1]);
+  assert.equal(tracker.list(1).at(-1).state, 'failed');
+  tracker.stop();
+  session.emit('will-download', {}, new Item(), sources[0]);
+  assert.deepEqual(starts, [2, 1, 1]);
 });
 
 test('event-driven waits preserve progress and completed history across callers', async t => {
@@ -307,3 +320,32 @@ test('same-project owners have isolated persisted IDs across every owner tuple f
   assert.equal(rejected.cancelled, true);
   assert.deepEqual(unowned.list(), []);
 });
+
+for (const outcome of ['accepted', 'foreign', 'rejected', 'navigation', 'failure', 'destroyed', 'abort', 'timeout']) {
+  test(`download start classification: ${outcome}`, async () => {
+    const { waitForDownloadStart } = require('../dist/agent/downloads.js');
+    const contents = new EventEmitter();
+    contents.session = new EventEmitter();
+    contents.isDestroyed = () => false;
+    const abort = new AbortController();
+    let started = false;
+    const pending = waitForDownloadStart(contents, () => started, abort.signal);
+    if (outcome === 'accepted') {
+      started = true;
+      contents.session.emit('will-download', {}, {}, contents);
+    } else if (outcome === 'foreign') {
+      started = true;
+      contents.session.emit('will-download', {}, {}, new EventEmitter());
+    } else if (outcome === 'rejected') {
+      contents.session.emit('will-download', {}, {}, contents);
+    } else if (outcome === 'navigation') contents.emit('did-navigate');
+    else if (outcome === 'failure') contents.emit('did-fail-load', {}, -2, 'failed', 'https://example.test/', true);
+    else if (outcome === 'destroyed') contents.emit('destroyed');
+    else if (outcome === 'abort') abort.abort();
+    assert.equal(await pending, outcome === 'accepted');
+    assert.equal(contents.session.listenerCount('will-download'), 0);
+    assert.equal(contents.listenerCount('did-navigate'), 0);
+    assert.equal(contents.listenerCount('did-fail-load'), 0);
+    assert.equal(contents.listenerCount('destroyed'), 0);
+  });
+}

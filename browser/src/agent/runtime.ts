@@ -243,13 +243,16 @@ export class BrowserAgentRuntime {
       });
       try {
         this.assertOperationInput();
+        const downloadStartSequence = this.target.downloadStartSequence;
         const point: Point = await action.click({ ref: request.ref });
-        this.assertOperation(operation);
+        await this.assertClickCompletion(operation, downloadStartSequence);
         const finalDocumentId = await this.observer.currentDocumentId();
-        this.assertOperation(operation);
-        if (finalDocumentId !== observation.documentId) {
+        const downloadStarted = await this.assertClickCompletion(operation, downloadStartSequence);
+        if (finalDocumentId !== observation.documentId ||
+          (downloadStarted && await this.observer.currentDocumentId() !== observation.documentId)) {
           throw new Error("page changed since observation");
         }
+        this.control.assertAgent(operation.controlEpoch);
         return {
           ref: request.ref,
           point,
@@ -699,6 +702,32 @@ export class BrowserAgentRuntime {
 
   private clearOperation(operation: AgentOperation): void {
     if (this.activeOperation === operation) this.activeOperation = null;
+  }
+
+  private async assertClickCompletion(operation: AgentOperation, sequence: number | undefined): Promise<boolean> {
+    this.control.assertAgent(operation.controlEpoch);
+    let downloadStarted = sequence !== undefined &&
+      this.target.downloadStartSequence !== undefined && this.target.downloadStartSequence > sequence;
+    if (!downloadStarted && sequence !== undefined && this.target.waitForDownloadStart &&
+      this.documentGeneration !== operation.documentGeneration) {
+      const abort = new AbortController();
+      const unsubscribe = this.control.subscribe(() => {
+        if (this.control.state !== "agent" || this.control.controlEpoch !== operation.controlEpoch) abort.abort();
+      });
+      try {
+        downloadStarted = await this.target.waitForDownloadStart(sequence, abort.signal) &&
+          this.target.downloadStartSequence !== undefined && this.target.downloadStartSequence > sequence;
+      } finally {
+        unsubscribe();
+        abort.abort();
+      }
+    }
+    if (downloadStarted && this.activeOperation === operation) {
+      this.control.assertAgent(operation.controlEpoch);
+    } else {
+      this.assertOperation(operation);
+    }
+    return downloadStarted;
   }
 
   private assertOperation(operation: AgentOperation): void {

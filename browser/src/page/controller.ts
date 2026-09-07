@@ -1,5 +1,5 @@
 import { BrowserUploads } from "../agent/uploads";
-import { registerDownloadSource, type BrowserDownloads } from "../agent/downloads";
+import { registerDownloadSource, waitForDownloadStart, type BrowserDownloads } from "../agent/downloads";
 import { BrowserWindow, screen } from "electron";
 import { BrowserDialogs } from "../agent/dialogs";
 import type {
@@ -256,7 +256,17 @@ export class BrowserController {
     this.onPopupChange?.();
   }
 
-  trackDownloads(tracker: BrowserDownloads, contextId: number) { registerDownloadSource(this.window.webContents, tracker, contextId); }
+  private acceptedDownloadStarts = 0;
+
+  get downloadStartSequence(): number { return this.acceptedDownloadStarts; }
+
+  waitForDownloadStart(sequence: number, signal: AbortSignal): Promise<boolean> {
+    return waitForDownloadStart(this.window.webContents, () => this.acceptedDownloadStarts > sequence, signal);
+  }
+
+  trackDownloads(tracker: BrowserDownloads, contextId: number) {
+    registerDownloadSource(this.window.webContents, tracker, contextId, () => { this.acceptedDownloadStarts += 1; });
+  }
 
   get contentsId(): number { return this.window.webContents.id; }
 

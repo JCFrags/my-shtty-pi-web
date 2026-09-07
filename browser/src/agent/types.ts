@@ -9,6 +9,8 @@ import type { AgentKey } from "./key";
 import type { ProgrammaticPointerEvent } from "../page/input";
 
 export interface AgentBrowserTarget {
+  readonly downloadStartSequence?: number;
+  waitForDownloadStart?(sequence: number, signal: AbortSignal): Promise<boolean>;
   uploads?: import("./uploads").BrowserUploads;
   runJs(source: string): Promise<unknown>;
   agentPointer(event: ProgrammaticPointerEvent): void;
