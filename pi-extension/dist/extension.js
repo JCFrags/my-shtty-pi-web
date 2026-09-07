@@ -29,11 +29,14 @@ const openParameters = Type.Object({
     focus: Type.Optional(Type.Boolean({ description: "Focus the companion pane; defaults to true" })),
 }, { additionalProperties: false });
 const tabsParameters = Type.Object({
-    action: StringEnum(["list", "activate", "open", "close"]),
-    tab_id: Type.Optional(Type.Integer({ minimum: 1 })),
+    action: StringEnum(["list", "activate", "open", "close", "wait"]),
+    context_id: Type.Optional(Type.Integer({ minimum: 1 })),
+    after_context_id: Type.Optional(Type.Integer({ minimum: 0 })),
+    timeout_ms: Type.Optional(Type.Integer({ minimum: 0, maximum: 60000 })),
     url: Type.Optional(Type.String({ maxLength: 8192 })),
 }, { additionalProperties: false });
 const observeParameters = Type.Object({
+    context_id: Type.Optional(Type.Integer({ minimum: 1 })),
     max_elements: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
     include_text: Type.Optional(Type.Boolean()),
     view: Type.Optional(StringEnum(["semantic", "visual", "both"])),
@@ -41,7 +44,10 @@ const observeParameters = Type.Object({
     ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
 }, { additionalProperties: false });
 const actParameters = Type.Object({
-    action: StringEnum(["click", "hover", "drag", "type", "press_key", "scroll", "navigate", "get_url", "wait_for"]),
+    context_id: Type.Optional(Type.Integer({ minimum: 1 })),
+    dialog_id: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    accept: Type.Optional(Type.Boolean()),
+    action: StringEnum(["click", "hover", "drag", "type", "press_key", "scroll", "navigate", "get_url", "wait_for", "dialog"]),
     ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
     x: Type.Optional(Type.Number({ minimum: 0, maximum: 20000 })),
     y: Type.Optional(Type.Number({ minimum: 0, maximum: 20000 })),
@@ -65,6 +71,11 @@ const controlParameters = Type.Object({
     action: StringEnum(["status", "pause", "resume"]),
 }, { additionalProperties: false });
 function browserAction(params) {
+    if (params.action === "dialog") {
+        if (!params.dialog_id || params.accept === undefined)
+            throw new Error("dialog requires dialog_id and accept");
+        return { action: "dialog", contextId: params.context_id, dialogId: params.dialog_id, accept: params.accept, text: params.text };
+    }
     if (params.action === "click") {
         if (!params.ref)
             throw new Error("click requires ref from browser_observe");
@@ -139,15 +150,19 @@ export default async function terminalBrowserExtension(pi) {
     pi.registerTool({
         name: "browser_tabs",
         label: "Browser Tabs",
-        description: "List, activate, open, or close tabs in this Pi pane's companion browser. Results are limited to 32 tabs.",
+        description: "List, wait for, activate, open, or close native tab and popup contexts. Use context_id; wait returns contexts newer than after_context_id without holding the action lane. Results are limited to 32 contexts.",
         parameters: tabsParameters,
         async execute(_id, params, signal, _update, ctx) {
-            if ((params.action === "activate" || params.action === "close") && params.tab_id === undefined) {
-                throw new Error(`${params.action} requires tab_id`);
+            if ((params.action === "activate" || params.action === "close") && params.context_id === undefined) {
+                throw new Error(`${params.action} requires context_id`);
             }
+            if (params.action === "wait" && params.after_context_id === undefined)
+                throw new Error("wait requires after_context_id from the last context list");
             return result(await client.tabs(context(ctx, signal), {
                 action: params.action,
-                tabId: params.tab_id,
+                afterId: params.after_context_id,
+                timeoutMs: params.timeout_ms,
+                contextId: params.context_id,
                 url: params.url,
             }));
         },
@@ -170,6 +185,7 @@ export default async function terminalBrowserExtension(pi) {
                 throw new Error("element scope requires visual or both view");
             }
             return observationResult(await client.observe(context(ctx, signal), {
+                contextId: params.context_id,
                 maxElements: params.max_elements,
                 includeText: params.include_text,
                 view: params.view,
@@ -181,7 +197,7 @@ export default async function terminalBrowserExtension(pi) {
     pi.registerTool({
         name: "browser_act",
         label: "Browser Act",
-        description: "Perform one native action in this Pi pane's companion browser: click, hover, drag, type, press_key, scroll, navigate, get_url, or wait_for. Coordinates require the latest visual observation.",
+        description: "Perform one native action in this Pi pane's companion browser: click, hover, drag, type, press_key, scroll, navigate, get_url, wait_for, or dialog. Dialog responses require the exact dialog_id returned by observe, tabs, resume, or an interrupted action and an explicit accept decision. Optional context_id must match that dialog. Never assume acceptance. Coordinates require the latest visual observation.",
         promptSnippet: "Perform one native companion-browser action",
         promptGuidelines: ["Use browser_act for exactly one action per call, then use browser_observe again when the page may have changed."],
         parameters: actParameters,

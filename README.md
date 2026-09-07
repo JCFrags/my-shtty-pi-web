@@ -138,3 +138,34 @@ located here https://github.com/zenbu-labs/terminal-browser/tree/main/terminals/
 ### Acknowledgments
 - the [kitty](https://github.com/kovidgoyal/kitty) project for developing the kitty graphics protocol
 - [awrit](https://github.com/chase/awrit) - the first attempt to embed chromium inside a terminal
+
+### Native browser contexts and dialogs
+
+The five Pi browser tools include native popup contexts. `browser_tabs` lists
+stable `context_id` values, opener IDs, URLs, titles, and active state. Activate or
+close a context by ID. Use `action: "wait"` with `after_context_id` from the last
+list to wait for a new popup without holding the action queue. Native popups keep
+`window.opener`, so OAuth-style `postMessage` and `window.close()` work.
+
+`browser_observe` and interrupted actions return pending dialogs without running
+page JavaScript. Use `browser_act` with `action: "dialog"`, the exact `dialog_id`,
+an optional matching `context_id`, and explicit `accept`. Pi manages the control
+epoch internally. Prompt responses can include `text`. Dialogs time out by dismissal
+after 60 seconds; they never auto-accept.
+Human users can use the terminal dialog card, Enter, or Escape. Switching context,
+closing it, or releasing control invalidates previous observations and input.
+
+Prompt uses a CDP debugger pause, not a network request. Its configurable accessor
+ignores ordinary assignment because Electron initializes child-window prompt
+after the first CDP injection. Messages and defaults are limited to 4096 characters;
+response text is limited to 32768. Beforeunload cancels first and replays only a
+known navigation, reload, history, or close request after explicit acceptance.
+The canceled load must finish and the renderer must answer a round-trip before
+replay. Unknown beforeunload requests can only be dismissed.
+
+Run `pnpm --filter terminal-browser test:electron` for the pinned Electron native
+fixtures. Linux requires an X11 display: the native Wayland dialog backend can
+fail on hidden windows. The fixtures exercise the real controller and popup
+runtime, opener communication, strict CSP prompts, native dialogs, stale replies,
+timeouts, and beforeunload replay. The terminal dialog card is build-checked but
+still needs a visual check in a live terminal session.

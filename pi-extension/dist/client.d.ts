@@ -12,7 +12,7 @@ export interface CommandRequest {
 export type CommandRunner = (request: CommandRequest) => Promise<unknown>;
 export declare const defaultCommandRunner: CommandRunner;
 export interface BrowserStateCache {
-    tabId: number;
+    contextId: number;
     observationId: string;
     controlEpoch: number;
     visual?: {
@@ -33,6 +33,12 @@ export type BrowserActionTarget = {
     y: number;
 };
 export type BrowserAction = {
+    action: "dialog";
+    contextId?: number;
+    dialogId: string;
+    accept: boolean;
+    text?: string;
+} | {
     action: "click";
     ref: string;
 } | {
@@ -67,16 +73,12 @@ export type BrowserAction = {
     condition?: "exists" | "visible" | "text";
     timeoutMs?: number;
 };
-interface ControlStatus {
-    state: "agent" | "human" | "paused";
-    controlEpoch: number;
-    reason: string | null;
-    busy: boolean;
-    interactionStyle: "slow-natural";
-}
 export declare class PiBrowserClient {
     private readonly runner;
     private observation;
+    private contextId;
+    private pendingDialog;
+    private cacheDialog;
     constructor(runner?: CommandRunner);
     open(context: ToolContext, options: {
         url?: string;
@@ -86,30 +88,50 @@ export declare class PiBrowserClient {
         action: unknown;
         tabs: {
             id: unknown;
+            contextId: unknown;
+            openerId: unknown;
+            kind: unknown;
             url: string;
             title: string;
             active: boolean;
         }[];
     }>;
     tabs(context: ToolContext, request: {
-        action: "list" | "activate" | "open" | "close";
-        tabId?: number;
+        action: "list" | "activate" | "open" | "close" | "wait";
+        contextId?: number;
         url?: string;
+        afterId?: number;
+        timeoutMs?: number;
     }): Promise<{
+        matched?: boolean | undefined;
+        dialog?: {
+            [x: string]: unknown;
+        } | undefined;
+        completed?: boolean | undefined;
         tabs: {
             id: unknown;
+            contextId: unknown;
+            openerId: unknown;
+            kind: unknown;
             url: string;
             title: string;
             active: boolean;
         }[];
     }>;
     observe(context: ToolContext, options?: {
+        contextId?: number;
         maxElements?: number;
         includeText?: boolean;
         view?: "semantic" | "visual" | "both";
         scope?: "viewport" | "element";
         ref?: string;
     }): Promise<{
+        contextId: unknown;
+        dialog: {
+            [x: string]: unknown;
+        };
+        completed: boolean;
+    } | {
         image?: {
             data: string;
             mimeType: "image/png";
@@ -121,6 +143,9 @@ export declare class PiBrowserClient {
         title: string;
         viewport: unknown;
         elements: any[];
+        contextId: number;
+        dialog?: undefined;
+        completed?: undefined;
     } | {
         image?: {
             data: string;
@@ -130,35 +155,82 @@ export declare class PiBrowserClient {
         url: string;
         title: string;
         viewport: unknown;
+        contextId: number;
+        dialog?: undefined;
+        completed?: undefined;
     }>;
     private status;
-    control(context: ToolContext, action: "status" | "pause" | "resume"): Promise<ControlStatus | {
-        observationReady: boolean;
-        url: string;
+    control(context: ToolContext, action: "status" | "pause" | "resume"): Promise<{
         state: "agent" | "human" | "paused";
-        controlEpoch: number;
+        reason: string | null;
+        busy: boolean;
+        interactionStyle: "slow-natural";
+    } | {
+        dialog?: {
+            [x: string]: unknown;
+        } | undefined;
+        observationReady: boolean;
+        url: string | undefined;
+        state: "agent" | "human" | "paused";
         reason: string | null;
         busy: boolean;
         interactionStyle: "slow-natural";
     }>;
     act(context: ToolContext, request: BrowserAction): Promise<{
-        url: string;
+        contextId: number;
+        completed: boolean;
+        action?: undefined;
+        dialog?: undefined;
+        openedContextId?: undefined;
+        url?: undefined;
         matched?: undefined;
         condition?: undefined;
-        action?: undefined;
+    } | {
+        action: "click" | "hover" | "drag" | "type" | "press_key" | "scroll" | "navigate" | "get_url" | "wait_for";
+        completed: boolean;
+        contextId: unknown;
+        dialog: {
+            [x: string]: unknown;
+        };
+        openedContextId?: undefined;
+        url?: undefined;
+        matched?: undefined;
+        condition?: undefined;
+    } | {
+        action: "click" | "hover" | "drag" | "type" | "press_key" | "scroll" | "navigate" | "get_url" | "wait_for";
+        completed: boolean;
+        openedContextId: {};
+        contextId?: undefined;
+        dialog?: undefined;
+        url?: undefined;
+        matched?: undefined;
+        condition?: undefined;
+    } | {
+        url: string;
+        contextId?: undefined;
         completed?: undefined;
+        action?: undefined;
+        dialog?: undefined;
+        openedContextId?: undefined;
+        matched?: undefined;
+        condition?: undefined;
     } | {
         matched: boolean;
         condition: unknown;
-        url?: undefined;
-        action?: undefined;
+        contextId?: undefined;
         completed?: undefined;
+        action?: undefined;
+        dialog?: undefined;
+        openedContextId?: undefined;
+        url?: undefined;
     } | {
         action: "click" | "hover" | "drag" | "type" | "press_key" | "scroll" | "navigate";
         completed: boolean;
+        contextId?: undefined;
+        dialog?: undefined;
+        openedContextId?: undefined;
         url?: undefined;
         matched?: undefined;
         condition?: undefined;
     }>;
 }
-export {};

@@ -54,7 +54,9 @@ export interface CompanionOpenResult {
 }
 
 export interface CompanionTabsRequest {
-  action: "list" | "activate" | "open" | "close";
+  action: "list" | "activate" | "open" | "close" | "wait";
+  afterId?: number;
+  timeoutMs?: number;
   tab?: number;
   url?: string;
   cwd?: string;
@@ -184,9 +186,11 @@ async function reuseBrowser(
 ): Promise<CompanionOpenResult> {
   let tabs = found.tabs;
   if (options.url) {
+    const status = await control(found.record.socket, { cmd: "agent.status" }) as { state?: string; controlEpoch?: number };
+    if (status.state !== "agent") throw new Error("browser control is with the user; return control before navigating");
     if (options.newTab) {
       const response = await control(found.record.socket, {
-        cmd: "open-tab",
+        cmd: "agent.context", action: "open", expectedControlEpoch: status.controlEpoch,
         url: options.url,
         cwd: found.record.ownerProjectDir ?? process.cwd(),
       }) as BrowserTargets;
@@ -194,8 +198,6 @@ async function reuseBrowser(
     } else {
       const active = tabs.find((tab) => tab.active);
       if (!active) throw new Error("browser companion has no active tab");
-      const status = await control(found.record.socket, { cmd: "agent.status" }) as { state?: string; controlEpoch?: number };
-      if (status.state !== "agent") throw new Error("browser control is with the user; return control before navigating");
       await control(found.record.socket, {
         cmd: "agent.navigate",
         tab: active.id,
@@ -271,9 +273,16 @@ export async function companionTabs(owner: BrowserOwner, request: CompanionTabsR
   if (request.action === "list") {
     return control(browser.socket, { cmd: "targets" }) as Promise<BrowserTargets>;
   }
+  const status = await control(browser.socket, { cmd: "agent.status" }) as { controlEpoch: number };
+  if (request.action === "wait") {
+    const afterId = request.afterId;
+    const timeoutMs = request.timeoutMs ?? 10000;
+    if (!Number.isSafeInteger(afterId) || afterId! < 0 || !Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > 60000) throw new Error("invalid context wait");
+    return control(browser.socket, { cmd: "wait-contexts", afterId, timeoutMs, expectedControlEpoch: status.controlEpoch }, timeoutMs + 5000) as Promise<BrowserTargets>;
+  }
   if (request.action === "open") {
     return control(browser.socket, {
-      cmd: "open-tab",
+      cmd: "agent.context", action: "open", expectedControlEpoch: status.controlEpoch,
       ...(request.url ? { url: request.url, cwd: request.cwd ?? owner.projectDir } : {}),
     }) as Promise<BrowserTargets>;
   }
@@ -281,7 +290,7 @@ export async function companionTabs(owner: BrowserOwner, request: CompanionTabsR
     throw new Error(`browser tabs ${request.action} needs a valid tab id`);
   }
   return control(browser.socket, {
-    cmd: request.action === "activate" ? "activate-tab" : "close-tab",
+    cmd: "agent.context", action: request.action, expectedControlEpoch: status.controlEpoch,
     tab: request.tab,
   }) as Promise<BrowserTargets>;
 }

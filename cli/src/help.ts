@@ -142,7 +142,7 @@ close all open browsers.
   },
   agent: {
     summary: "Observe, control, and act through native AgentCursor",
-    usage: "terminal-browser agent <observe|click|hover|drag|type|press-key|scroll|navigate|get-url|wait-for|status|pause|resume> [options]",
+    usage: "terminal-browser agent <observe|click|hover|drag|type|press-key|scroll|navigate|get-url|wait-for|dialog|status|pause|resume> [options]",
     body: `
 Reads a fresh observation and performs native actions on the selected tab.
 Responses are JSON. Observation-bound actions require the latest observation
@@ -156,6 +156,7 @@ Commands:
   terminal-browser agent type <ref> (--text <text> | --stdin) --observation <id> --control-epoch <n> [--replace] [options]
   terminal-browser agent press-key <key> --observation <id> --control-epoch <n> [options]
   terminal-browser agent scroll --dy <n> [--dx <n>] --observation <id> --control-epoch <n> [options]
+  terminal-browser agent dialog --tab <context-id> --dialog-id <id> --control-epoch <n> (--accept | --dismiss) [--text <text> | --stdin]
   terminal-browser agent navigate <url> --control-epoch <n> [options]
   terminal-browser agent get-url --control-epoch <n> [options]
   terminal-browser agent wait-for (--ref <ref> | --text <text>) [--condition exists|visible|text] [--timeout-ms <n>] --observation <id> --control-epoch <n> [options]
@@ -163,9 +164,14 @@ Commands:
   terminal-browser agent pause --control-epoch <n> [--browser <key>]
   terminal-browser agent resume --control-epoch <n> [--browser <key>]
 
+Context waits: companion tabs --action wait --after-id <last-context-id> [--timeout-ms <0..60000>].
+Use companion tabs --action list to read context IDs and opener IDs.
+Dialogs never auto-accept. Use the exact dialog ID, context, and epoch returned by
+observe or an interrupted action. A response can run while that action is blocked.
+
 Common options:
   --browser <key>       Select a browser from terminal-browser ls --all
-  --tab <id>            Select a tab (for example t1)
+  --tab <id>            Select a stable tab or native popup context ID
   --observation <id>    Observation id returned by observe
   --control-epoch <n>   Expected control epoch
 

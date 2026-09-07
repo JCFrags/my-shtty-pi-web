@@ -1,4 +1,5 @@
 import { BrowserWindow, screen } from "electron";
+import { BrowserDialogs } from "../agent/dialogs";
 import type {
   EngineKeyEvent,
   PastedImage,
@@ -41,6 +42,9 @@ export interface ControllerOptions {
 
 export class BrowserController {
   readonly surface: Surface;
+  readonly dialogs: BrowserDialogs;
+  onPopupCreated: ((popup: PopupWindow, openerContentsId: number) => void) | null = null;
+  onPopupClosed: ((popup: PopupWindow) => void) | null = null;
   private readonly popupSurface: Surface;
   private readonly devtoolsSurface: Surface;
   private readonly window: BrowserWindow;
@@ -81,9 +85,8 @@ export class BrowserController {
   onOpenTab: ((url: string, activate: boolean) => void) | null = null;
   private readonly popups: PopupWindow[] = [];
   onPopupChange: (() => void) | null = null;
-  get popup(): PopupWindow | null {
-    return this.popups[this.popups.length - 1] ?? null;
-  }
+  private selectedPopup: PopupWindow | null = null;
+  get popup(): PopupWindow | null { return this.selectedPopup; }
   devtools: DevtoolsWindow | null = null;
   devtoolsFocused = false;
   onDevtoolsChange: (() => void) | null = null;
@@ -137,11 +140,12 @@ export class BrowserController {
         // with sandbox true this is safe, we enable so a users preload script runs inside iframes/webviews
         nodeIntegrationInSubFrames: true,
         contextIsolation: true,
-        disableDialogs: true,
+        disableDialogs: false,
         backgroundThrottling: false,
         additionalArguments: this.preloadArgv(),
       },
     });
+    this.dialogs = new BrowserDialogs(this.window.webContents, (method, params) => this.cdp(method, params));
     if (this.clipboardRead) allowClipboardRead(this.window.webContents);
     this.input = new PageInput({
       contents: () => this.window.webContents,
@@ -231,8 +235,27 @@ export class BrowserController {
       this.handleWindowOpen(details, this.window.webContents),
     );
     this.window.webContents.on("did-create-window", (child) => this.adoptPopup(child));
-    void this.window.loadURL(normalizeUrl(initialUrl, this.cwd));
+    void this.initialize(initialUrl).catch(() => this.updateState({ loading: false }));
     this.onState(this.state);
+  }
+
+  private async initialize(initialUrl: string) {
+    await this.window.loadURL("about:blank");
+    await this.attachCdp();
+    await this.dialogs.initialize();
+    if (!this.stopped) await this.window.loadURL(normalizeUrl(initialUrl, this.cwd));
+  }
+
+  selectPopup(popup: PopupWindow | null) {
+    for (const child of this.popups) child.setVisible(child === popup);
+    this.selectedPopup = popup;
+    this.onPopupChange?.();
+  }
+
+  get contentsId(): number { return this.window.webContents.id; }
+
+  requestClose() {
+    this.dialogs.runIntent({ type: "close" }, () => this.window.close(), () => this.window.close());
   }
 
   resize(layout: BrowserSurfaceLayout, options?: { keepFrame?: boolean }) {
@@ -255,30 +278,35 @@ export class BrowserController {
   }
 
   navigate(value: string) {
-    void this.window.webContents.loadURL(normalizeUrl(value, this.cwd));
+    void this.agentNavigate(value).catch(() => {});
   }
 
   async agentNavigate(value: string): Promise<string> {
     if (this.stopped) throw new Error("browser is stopped");
-    await this.window.webContents.loadURL(normalizeUrl(value, this.cwd));
+    const url = normalizeUrl(value, this.cwd);
+    await this.dialogs.runIntent({ type: "navigate", url }, () => { void this.window.webContents.loadURL(url).catch(() => {}); }, () => this.window.webContents.loadURL(url));
     return this.currentUrl();
   }
 
   back() {
     if (this.window.webContents.navigationHistory.canGoBack()) {
-      this.window.webContents.navigationHistory.goBack();
+      const history = this.window.webContents.navigationHistory;
+      const index = history.getActiveIndex() - 1;
+      this.dialogs.runIntent({ type: "history", url: history.getEntryAtIndex(index).url }, () => history.goToIndex(index), () => history.goToIndex(index));
     }
   }
 
   forward() {
     if (this.window.webContents.navigationHistory.canGoForward()) {
-      this.window.webContents.navigationHistory.goForward();
+      const history = this.window.webContents.navigationHistory;
+      const index = history.getActiveIndex() + 1;
+      this.dialogs.runIntent({ type: "history", url: history.getEntryAtIndex(index).url }, () => history.goToIndex(index), () => history.goToIndex(index));
     }
   }
 
   reload() {
     if (this.state.loading) this.window.webContents.stop();
-    else this.window.webContents.reload();
+    else this.dialogs.runIntent({ type: "reload", url: this.currentUrl() }, () => this.window.webContents.reload(), () => this.window.webContents.reload());
   }
 
   zoom(direction: ZoomDirection): number {
@@ -362,9 +390,10 @@ export class BrowserController {
   }
 
   cdp(method: string, params?: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.window.webContents.debugger.sendCommand(method, params) as Promise<
-      Record<string, unknown>
-    >;
+    try {
+      if (this.stopped) throw new Error("browser is stopped");
+      return this.window.webContents.debugger.sendCommand(method, params) as Promise<Record<string, unknown>>;
+    } catch (error) { return Promise.reject(error); }
   }
 
   onEmit(channel: string, handler: ((data: unknown) => void) | null) {
@@ -634,7 +663,8 @@ export class BrowserController {
   }
 
   private teardown() {
-    for (const popup of [...this.popups]) popup.close();
+    this.dialogs.dispose();
+    for (const popup of [...this.popups]) popup.destroy();
     this.devtools?.close();
     screen.off("display-added", this.onDisplayChange);
     screen.off("display-removed", this.onDisplayChange);
@@ -706,7 +736,7 @@ export class BrowserController {
   private quitLink(url: string): boolean {
     if (!url.startsWith("terminal-browser://quit")) return false;
     setImmediate(() => {
-      if (!this.stopped) this.window.close();
+      if (!this.stopped) this.requestClose();
     });
     return true;
   }
@@ -717,15 +747,16 @@ export class BrowserController {
   ): Electron.WindowOpenHandlerResponse {
     if (this.quitLink(url)) return { action: "deny" };
     const wantsTab = disposition === "foreground-tab" || disposition === "background-tab";
-    if (wantsTab && !this.tabsAsPopups && this.onOpenTab) {
-      this.onOpenTab(url, disposition === "foreground-tab");
-      return { action: "deny" };
-    }
-    if (disposition === "new-window" || (wantsTab && this.tabsAsPopups)) {
+    if (disposition === "new-window" || wantsTab || disposition === "default") {
       const size = wantsTab ? this.tabPopupSize() : this.popupSize(features);
       this.pendingPopupSize = size;
       return {
         action: "allow",
+        createWindow: (options) => {
+          const child = new BrowserWindow(options);
+          this.adoptPopup(child, opener.id);
+          return child.webContents;
+        },
         overrideBrowserWindowOptions: {
           width: size.width,
           height: size.height,
@@ -742,7 +773,7 @@ export class BrowserController {
             nodeIntegration: false,
             nodeIntegrationInSubFrames: true,
             contextIsolation: true,
-            disableDialogs: true,
+            disableDialogs: false,
             backgroundThrottling: false,
             additionalArguments: this.preloadArgv(),
           },
@@ -753,14 +784,10 @@ export class BrowserController {
     return { action: "deny" };
   }
 
-  private adoptPopup(child: Electron.BrowserWindow) {
+  private adoptPopup(child: Electron.BrowserWindow, openerContentsId = this.window.webContents.id) {
     if (this.clipboardRead) allowClipboardRead(child.webContents);
-    if (!this.tabsAsPopups) this.popup?.close();
     const size = this.pendingPopupSize ?? { width: 480, height: 360 };
     this.pendingPopupSize = null;
-    if (this.tabsAsPopups) {
-      child.webContents.on("did-create-window", (grandchild) => this.adoptPopup(grandchild));
-    }
     const popup = new PopupWindow(
       child,
       this.popupSurface,
@@ -773,18 +800,20 @@ export class BrowserController {
         if (at < 0) return;
         const wasTop = at === this.popups.length - 1;
         this.popups.splice(at, 1);
+        if (this.selectedPopup === popup) this.selectedPopup = null;
+        this.onPopupClosed?.(popup);
         if (wasTop && this.visible) this.popup?.setVisible(true);
         this.onPopupChange?.();
       },
-      this.tabsAsPopups
-        ? (details) => this.handleWindowOpen(details, child.webContents)
-        : undefined,
+      (details) => this.handleWindowOpen(details, child.webContents),
     );
     popup.onCursorChange = () => {
       if (this.popup === popup) this.onCursorChange?.(popup.cursorShape);
     };
     this.popup?.setVisible(false);
     this.popups.push(popup);
+    this.selectedPopup = popup;
+    this.onPopupCreated?.(popup, openerContentsId);
     this.onPopupChange?.();
   }
 

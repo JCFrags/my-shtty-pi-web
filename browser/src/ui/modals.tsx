@@ -1,3 +1,4 @@
+import type { BrowserDialog } from "../agent/dialogs";
 import { useEffect, useRef, useState } from "react";
 import { Box, Input, Text } from "pixel-react";
 import type { NodeHandle } from "pixel-react";
@@ -283,3 +284,28 @@ export function NewTabCard({
   );
 }
 
+
+export function BrowserDialogCard({ dialog, answer, layout, theme }: {
+  dialog: BrowserDialog;
+  answer(id: string, accept: boolean, text?: string): void;
+  layout: ChromeLayout;
+  theme: Theme;
+}) {
+  const [text, setText] = useState(dialog.defaultValue);
+  const safe = (value: string) => value.replace(/[\x00-\x1f\x7f]/g, " ");
+  return (
+    <ModalCard layout={layout} theme={theme} width={Math.min(layout.width - 20, layout.rem * 36)} onClose={() => {}}>
+      <Box style={{ padding: layout.rem, flexDirection: "column", gap: layout.rem * 0.6 }}>
+        <Text style={{ color: theme.accent, fontSize: layout.rem }}>{dialog.type} · context {dialog.contextId}</Text>
+        <Text style={{ color: theme.muted, fontSize: layout.rem * 0.8 }}>{safe(dialog.url).slice(0, 160)}</Text>
+        <Text style={{ color: theme.fg, fontSize: layout.rem }}>{safe(dialog.message).slice(0, 512)}</Text>
+        {dialog.intent && <Text style={{ color: theme.muted, fontSize: layout.rem * 0.8 }}>{dialog.intent.type} {safe(dialog.intent.url ?? "").slice(0, 160)}</Text>}
+        {dialog.type === "prompt" && <Input autoFocus value={text} onChange={setText} onSubmit={value => answer(dialog.id, true, value)} style={{ fontSize: layout.rem, background: theme.field }} />}
+        <Box style={{ flexDirection: "row", gap: layout.rem }}>
+          <Box onClick={() => answer(dialog.id, false)}><Text style={{ color: theme.fg, fontSize: layout.rem }}>Dismiss (Esc)</Text></Box>
+          {dialog.canAccept && <Box onClick={() => answer(dialog.id, true, dialog.type === "prompt" ? text : undefined)}><Text style={{ color: theme.accent, fontSize: layout.rem }}>Accept (Enter)</Text></Box>}
+        </Box>
+      </Box>
+    </ModalCard>
+  );
+}

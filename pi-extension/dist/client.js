@@ -84,6 +84,9 @@ function boundedTabs(value) {
         const tab = item;
         return {
             id: tab.id,
+            contextId: tab.contextId,
+            openerId: tab.openerId,
+            kind: tab.kind,
             url: typeof tab.url === "string" ? tab.url.slice(0, 8192) : "",
             title: typeof tab.title === "string" ? tab.title.slice(0, 512) : "",
             active: tab.active === true,
@@ -125,6 +128,21 @@ function targetArguments(observation, target, prefix) {
 export class PiBrowserClient {
     runner;
     observation = null;
+    contextId = null;
+    pendingDialog = null;
+    cacheDialog(value) {
+        this.pendingDialog = null;
+        this.observation = null;
+        const { controlEpoch, ...dialog } = value;
+        if (typeof dialog.id !== "string" || !dialog.id ||
+            typeof dialog.contextId !== "number" || !Number.isSafeInteger(dialog.contextId) || dialog.contextId < 1 ||
+            typeof controlEpoch !== "number" || !Number.isSafeInteger(controlEpoch) || controlEpoch < 1) {
+            throw new Error("Browser returned invalid dialog identity. Call browser_observe again.");
+        }
+        this.pendingDialog = { id: dialog.id, contextId: dialog.contextId, controlEpoch };
+        this.contextId = dialog.contextId;
+        return dialog;
+    }
     constructor(runner = defaultCommandRunner) {
         this.runner = runner;
     }
@@ -138,18 +156,30 @@ export class PiBrowserClient {
             args.push(options.url);
         const value = await this.runner({ args, context, timeoutMs: 30_000 });
         this.observation = null;
-        return { action: value.action, tabs: boundedTabs(value) };
+        this.pendingDialog = null;
+        const tabs = boundedTabs(value);
+        this.contextId = Number(tabs.find(tab => tab.active)?.id) || null;
+        return { action: value.action, tabs };
     }
     async tabs(context, request) {
         const args = ["companion", "tabs", "--action", request.action];
-        if (request.tabId !== undefined)
-            args.push("--tab", String(request.tabId));
+        if (request.contextId !== undefined)
+            args.push("--tab", String(request.contextId));
+        if (request.afterId !== undefined)
+            args.push("--after-id", String(request.afterId));
+        if (request.timeoutMs !== undefined)
+            args.push("--timeout-ms", String(request.timeoutMs));
         if (request.url !== undefined)
             args.push("--url", request.url);
-        const value = await this.runner({ args, context });
-        if (request.action !== "list")
+        const value = await this.runner({ args, context, timeoutMs: request.action === "wait" ? (request.timeoutMs ?? 10000) + 5000 : 30000 });
+        const tabs = boundedTabs(value);
+        const active = Number(tabs.find(tab => tab.active)?.id) || null;
+        if (active !== this.contextId || (request.action !== "list" && request.action !== "wait")) {
             this.observation = null;
-        return { tabs: boundedTabs(value) };
+            this.pendingDialog = null;
+        }
+        this.contextId = active;
+        return { tabs, ...(value.dialog ? { dialog: this.cacheDialog(value.dialog), completed: false } : {}), ...(request.action === "wait" ? { matched: value.matched === true } : {}) };
     }
     async observe(context, options = {}) {
         const view = options.view ?? "semantic";
@@ -160,6 +190,9 @@ export class PiBrowserClient {
             "--view", view,
             "--scope", scope,
         ];
+        const contextId = options.contextId ?? this.contextId;
+        if (contextId !== null)
+            args.push("--tab", String(contextId));
         if (options.includeText === false)
             args.push("--no-text");
         if (options.ref)
@@ -173,21 +206,25 @@ export class PiBrowserClient {
         }
         try {
             const value = await this.runner({ args, context });
+            if (value.dialog) {
+                const dialog = this.cacheDialog(value.dialog);
+                return { contextId: dialog.contextId, dialog, completed: false };
+            }
+            this.pendingDialog = null;
             const snapshot = value.snapshot;
             const elements = Array.isArray(snapshot?.elements) ? snapshot.elements.slice(0, options.maxElements ?? 120) : [];
             const visual = value.visual && typeof value.visual === "object"
                 ? value.visual
                 : undefined;
             this.observation = {
-                tabId: Number(snapshot.tabId ?? value.tabId ?? 0),
+                contextId: Number(value.contextId),
                 observationId: String(value.observationId),
                 controlEpoch: Number(value.controlEpoch),
                 ...(visual ? { visual: parseVisualState(visual) } : {}),
             };
-            if (!this.observation.tabId) {
-                const tabs = await this.tabs(context, { action: "list" });
-                this.observation.tabId = Number(tabs.tabs.find((tab) => tab.active)?.id ?? 0);
-            }
+            if (!Number.isSafeInteger(this.observation.contextId) || this.observation.contextId < 1)
+                throw new Error("Browser returned no context ID.");
+            this.contextId = this.observation.contextId;
             const semantic = {
                 url: typeof snapshot.url === "string" ? snapshot.url.slice(0, 8192) : "",
                 title: typeof snapshot.title === "string" ? snapshot.title.slice(0, 512) : "",
@@ -198,6 +235,7 @@ export class PiBrowserClient {
             };
             const image = imagePath ? await readFile(imagePath) : null;
             return {
+                contextId: this.contextId,
                 ...(view === "visual" ? {
                     url: semantic.url,
                     title: semantic.title,
@@ -213,29 +251,56 @@ export class PiBrowserClient {
         }
     }
     async status(context) {
-        return this.runner({ args: ["agent", "status"], context });
+        const status = await this.runner({ args: ["agent", "status"], context });
+        if (status.state !== "agent" || (this.pendingDialog && this.pendingDialog.controlEpoch !== status.controlEpoch)) {
+            this.pendingDialog = null;
+            this.observation = null;
+        }
+        return status;
     }
     async control(context, action) {
         const before = await this.status(context);
+        const { controlEpoch: _epoch, ...visibleBefore } = before;
         if (action === "status")
-            return before;
+            return visibleBefore;
         if (action === "pause") {
             const result = await this.runner({
                 args: ["agent", "pause", "--control-epoch", String(before.controlEpoch)], context,
             });
             this.observation = null;
-            return result;
+            this.pendingDialog = null;
+            const { controlEpoch: _epoch, ...visibleResult } = result;
+            return visibleResult;
         }
         const result = before.state === "agent" ? before : await this.runner({
             args: ["agent", "resume", "--control-epoch", String(before.controlEpoch)], context,
         });
+        this.pendingDialog = null;
         const observation = await this.observe(context);
-        return { ...result, observationReady: true, url: observation.url };
+        const { controlEpoch: _resultEpoch, ...visibleResult } = result;
+        return { ...visibleResult, observationReady: !observation.dialog, url: "url" in observation ? observation.url : undefined, ...(observation.dialog ? { dialog: observation.dialog } : {}) };
     }
     async act(context, request) {
         const status = await this.status(context);
         if (status.state !== "agent") {
             throw new Error("Browser control is with the user. Wait for control to be returned, or call browser_control with resume when asked.");
+        }
+        if (request.action === "dialog") {
+            const dialog = this.pendingDialog;
+            if (!dialog || dialog.id !== request.dialogId ||
+                (request.contextId !== undefined && request.contextId !== dialog.contextId)) {
+                throw new Error("Stale or unknown dialog. Call browser_observe before responding.");
+            }
+            await this.runner({
+                args: ["agent", "dialog", "--tab", String(dialog.contextId), "--dialog-id", dialog.id,
+                    "--control-epoch", String(dialog.controlEpoch), request.accept ? "--accept" : "--dismiss",
+                    ...(request.text !== undefined ? ["--stdin"] : [])],
+                context, ...(request.text !== undefined ? { stdin: request.text } : {}),
+            });
+            this.observation = null;
+            if (this.pendingDialog === dialog)
+                this.pendingDialog = null;
+            return { contextId: dialog.contextId, completed: true };
         }
         const args = ["agent"];
         const needsObservation = request.action !== "navigate" && request.action !== "get_url";
@@ -279,6 +344,9 @@ export class PiBrowserClient {
         if (this.observation && needsObservation) {
             args.push("--observation", this.observation.observationId);
         }
+        const targetContext = this.observation?.contextId ?? this.contextId;
+        if (targetContext !== null)
+            args.push("--tab", String(targetContext));
         args.push("--control-epoch", String(status.controlEpoch));
         const value = await this.runner({
             args,
@@ -286,6 +354,17 @@ export class PiBrowserClient {
             ...(request.action === "type" ? { stdin: request.text } : {}),
             timeoutMs: request.action === "wait_for" ? (request.timeoutMs ?? 10_000) + 5_000 : 300_000,
         });
+        if (value.dialog) {
+            const dialog = this.cacheDialog(value.dialog);
+            return { action: request.action, completed: false, contextId: dialog.contextId, dialog };
+        }
+        if (value.openedContextId) {
+            this.observation = null;
+            this.pendingDialog = null;
+            return { action: request.action, completed: false, openedContextId: value.openedContextId };
+        }
+        if (request.action !== "get_url")
+            this.pendingDialog = null;
         if (request.action !== "get_url" && request.action !== "wait_for")
             this.observation = null;
         if (request.action === "get_url")

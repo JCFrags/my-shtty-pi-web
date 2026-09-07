@@ -1,3 +1,4 @@
+import type { BrowserDialog } from "../agent/dialogs";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text } from "pixel-react";
 import type { EngineInfo, Surface } from "pixel-react";
@@ -9,7 +10,7 @@ import { Icon } from "./icons";
 import type { IconName } from "./icons";
 import { PageContextMenu } from "./context-menu";
 import { MarkupCanvas } from "./markup-canvas";
-import { NewTabCard, PaletteCard, UrlCard } from "./modals";
+import { BrowserDialogCard, NewTabCard, PaletteCard, UrlCard } from "./modals";
 import { DownloadHud, FindBar, Toast, ZoomHud } from "./overlays";
 import { PopupModal } from "./popup-modal";
 import {
@@ -47,6 +48,8 @@ export function Chrome({
   urlEdit,
   noOverlays,
   popup,
+  dialog,
+  answerDialog,
   zoomHud,
   download,
   toast,
@@ -73,6 +76,8 @@ export function Chrome({
   urlEdit: boolean;
   noOverlays: boolean;
   popup: PopupView | null;
+  dialog: BrowserDialog | null;
+  answerDialog(id: string, accept: boolean, text?: string): void;
   zoomHud: number | null;
   download: DownloadView | null;
   toast: { text: string; detail?: string; failed: boolean; alert: boolean } | null;
@@ -178,6 +183,7 @@ export function Chrome({
           surface={popupSurface}
         />
       )}
+      {dialog && <BrowserDialogCard key={dialog.id} dialog={dialog} answer={answerDialog} layout={layout} theme={theme} />}
       {progress != null && (
         <Box
           style={{

@@ -1,4 +1,9 @@
 import { nativeImage } from "electron";
+import { BrowserDialogs } from "../agent/dialogs";
+import type { AgentBrowserTarget } from "../agent/types";
+import type { AgentKey } from "../agent/key";
+import type { ProgrammaticPointerEvent } from "./input";
+import { normalizeUrl } from "../url";
 import type { BrowserWindow } from "electron";
 import type { Surface } from "pixel-react";
 import { cursorShapeFor } from "./cursor";
@@ -14,7 +19,9 @@ export interface PopupState {
   height: number;
 }
 
-export class PopupWindow {
+export class PopupWindow implements AgentBrowserTarget {
+  readonly dialogs: BrowserDialogs;
+  onMainFrameNavigationStart: (() => void) | null = null;
   readonly input: PageInput;
   cursorShape = "default";
   onCursorChange: (() => void) | null = null;
@@ -39,6 +46,7 @@ export class PopupWindow {
     openWindow?: (details: Electron.HandlerDetails) => Electron.WindowOpenHandlerResponse,
   ) {
     this.window = window;
+    this.dialogs = new BrowserDialogs(window.webContents, (method, params) => this.cdp(method, params));
     this.surface = surface;
     this.onChange = onChange;
     this.renderScale = renderScale;
@@ -61,6 +69,9 @@ export class PopupWindow {
     contents.on("did-navigate-in-page", (_event, url, mainFrame) => {
       if (mainFrame) this.update({ url });
     });
+    contents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => {
+      if (mainFrame && !inPlace) this.onMainFrameNavigationStart?.();
+    });
     contents.on("did-start-loading", () => this.update({ loading: true }));
     contents.on("did-stop-loading", () => this.update({ loading: false }));
     contents.on("cursor-changed", (_event, type) => {
@@ -77,11 +88,13 @@ export class PopupWindow {
         }),
     );
     window.on("closed", () => {
+      this.dialogs.dispose();
       this.destroyed = true;
       this.surface.clear();
       onClosed();
     });
-    void this.startStreaming(size, renderScale).catch(() => {});
+    void this.dialogs.initialize().catch(() => {});
+    contents.once("did-finish-load", () => { void this.startStreaming(size, renderScale).catch(() => {}); });
     this.focus();
   }
 
@@ -91,7 +104,14 @@ export class PopupWindow {
 
   close() {
     if (this.destroyed) return;
+    this.releaseAgentInput();
+    this.dialogs.runIntent({ type: "close" }, () => this.window.close(), () => this.window.close());
+  }
+
+  destroy() {
+    if (this.destroyed) return;
     this.input.releaseAllInput();
+    this.dialogs.dispose();
     this.window.destroy();
   }
 
@@ -142,7 +162,7 @@ export class PopupWindow {
     await this.cdp("Page.startScreencast", this.screencastParams());
   }
 
-  private focus(): Promise<void> | undefined {
+  focus(): Promise<void> | undefined {
     if (this.focused || this.destroyed) return;
     this.focused = true;
     this.window.focus();
@@ -153,15 +173,61 @@ export class PopupWindow {
     );
   }
 
-  private async attachCdp() {
+  private attachCdp() {
     if (this.cdpAttached) return;
     this.window.webContents.debugger.attach("1.3");
     this.cdpAttached = true;
   }
 
-  private async cdp(method: string, params?: Record<string, unknown>): Promise<unknown> {
-    await this.attachCdp();
-    return this.window.webContents.debugger.sendCommand(method, params);
+  private cdp(method: string, params?: Record<string, unknown>): Promise<unknown> {
+    try {
+      if (this.destroyed) throw new Error("popup is closed");
+      this.attachCdp();
+      return this.window.webContents.debugger.sendCommand(method, params);
+    } catch (error) { return Promise.reject(error); }
+  }
+
+  get contentsId(): number { return this.window.webContents.id; }
+  runJs(source: string): Promise<unknown> { return this.window.webContents.executeJavaScript(source, true); }
+  currentUrl(): string { return this.window.webContents.getURL(); }
+  viewportSize() { return { width: this.state.width, height: this.state.height }; }
+  agentPointer(event: ProgrammaticPointerEvent) { this.input.programmaticPointer(event); }
+  releaseAgentPointer() { this.input.releaseProgrammaticButtons(); }
+  releaseAgentInput() { this.input.releaseProgrammaticInput(); }
+  releaseAllInput() { this.input.releaseAllInput(); }
+  agentKeyDown(key: AgentKey) { return this.input.programmaticKeyDown(key); }
+  agentKeyChar(key: AgentKey) { return this.input.programmaticKeyChar(key); }
+  agentKeyUp(key: AgentKey) { this.input.programmaticKeyUp(key); }
+  agentSelectAll() { return this.input.selectAllProgrammatic(); }
+  agentInsertText(text: string) { return this.input.insertTextProgrammatic(text); }
+  agentWheel(x: number, y: number, dx: number, dy: number) { return this.input.programmaticWheel(x, y, dx, dy); }
+  async agentNavigate(value: string) {
+    const url = normalizeUrl(value);
+    await this.dialogs.runIntent({ type: "navigate", url }, () => { void this.window.loadURL(url).catch(() => {}); }, () => this.window.loadURL(url));
+    return this.currentUrl();
+  }
+  async capturePage(rect?: Electron.Rectangle) {
+    let bounded: Electron.Rectangle | undefined;
+    if (rect) {
+      if (![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) || rect.width <= 0 || rect.height <= 0) throw new Error("invalid capture rectangle");
+      const x = Math.max(0, Math.floor(rect.x));
+      const y = Math.max(0, Math.floor(rect.y));
+      const width = Math.min(this.state.width, Math.ceil(rect.x + rect.width)) - x;
+      const height = Math.min(this.state.height, Math.ceil(rect.y + rect.height)) - y;
+      if (width <= 0 || height <= 0) throw new Error("element is outside the current viewport");
+      bounded = { x, y, width, height };
+    }
+    let image = await this.window.webContents.capturePage(bounded);
+    const size = image.getSize();
+    const scale = Math.min(1, 1600 / size.width, 1600 / size.height);
+    if (scale < 1) image = image.resize({ width: Math.max(1, Math.floor(size.width * scale)), height: Math.max(1, Math.floor(size.height * scale)) });
+    const png = image.toPNG();
+    if (png.byteLength > 2 * 1024 * 1024) throw new Error("visual observation exceeds the safe image limit");
+    return png;
+  }
+  async targetId(): Promise<string | null> {
+    const result = await this.cdp("Target.getTargetInfo") as { targetInfo?: { targetId?: string } };
+    return result.targetInfo?.targetId ?? null;
   }
 
   private update(change: Partial<PopupState>) {

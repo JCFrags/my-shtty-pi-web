@@ -33,17 +33,28 @@ test("extension registers only the five compact browser tools", async () => {
   ]);
 });
 
-test("tool schemas do not expose browser keys, sockets, epochs, or observation ids", async () => {
+test("tool schemas keep browser keys, sockets, observation ids, and control epochs internal", async () => {
   const tools = await registeredTools();
   const text = JSON.stringify(tools.map((tool) => tool.parameters));
-  for (const hidden of ["browser_key", "socket", "control_epoch", "observation_id"]) {
+  for (const hidden of ["browser_key", "socket", "observation_id", "control_epoch", "controlEpoch"]) {
     assert.equal(text.includes(hidden), false);
   }
   const act = tools.find((tool) => tool.name === "browser_act");
   assert.deepEqual(act.parameters.properties.action.enum, [
-    "click", "hover", "drag", "type", "press_key", "scroll", "navigate", "get_url", "wait_for",
+    "click", "hover", "drag", "type", "press_key", "scroll", "navigate", "get_url", "wait_for", "dialog",
   ]);
   const observe = tools.find((tool) => tool.name === "browser_observe");
   assert.deepEqual(observe.parameters.properties.view.enum, ["semantic", "visual", "both"]);
   assert.deepEqual(observe.parameters.properties.scope.enum, ["viewport", "element"]);
+});
+
+test("dialog action requires an ID and explicit decision without a model-supplied epoch", async () => {
+  const act = (await registeredTools()).find(tool => tool.name === "browser_act");
+  const ctx = { cwd: "/tmp/project", sessionManager: { getSessionId: () => "session-a" } };
+  for (const params of [{ action: "dialog", accept: true }, { action: "dialog", dialog_id: "pending" }]) {
+    await assert.rejects(act.execute("call", params, undefined, undefined, ctx), /dialog requires dialog_id and accept/);
+  }
+  assert.equal(act.parameters.additionalProperties, false);
+  assert.equal("control_epoch" in act.parameters.properties, false);
+  assert.equal(act.description.includes("control_epoch"), false);
 });

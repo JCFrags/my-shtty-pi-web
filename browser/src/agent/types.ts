@@ -1,3 +1,7 @@
+import type { BrowserDialog } from "./dialogs";
+
+export type AgentActionOutcome<T> = T | { contextId: number; completed: false; dialog?: BrowserDialog; openedContextId?: number };
+
 import type { ActionService, MouseButton, PageSnapshot, Point, Rect } from "agentcursor" with {
   "resolution-mode": "import",
 };
@@ -63,6 +67,7 @@ export interface AgentObserveRequest {
 }
 
 export interface AgentObservation {
+  contextId?: number;
   observationId: string;
   documentId: string;
   controlEpoch: number;

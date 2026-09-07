@@ -601,14 +601,16 @@ async function companionCommand(args: string[]): Promise<number> {
   }
   if (subcommand === "tabs") {
     const action = takeFlag(args, "--action") ?? "list";
-    if (action !== "list" && action !== "activate" && action !== "open" && action !== "close") {
-      fail("companion tabs --action must be list, activate, open, or close");
+    if (action !== "list" && action !== "activate" && action !== "open" && action !== "close" && action !== "wait") {
+      fail("companion tabs --action must be list, activate, open, close, or wait");
     }
     const tabValue = takeFlag(args, "--tab");
+    const afterValue = takeFlag(args, "--after-id");
+    const timeoutValue = takeFlag(args, "--timeout-ms");
     const url = takeFlag(args, "--url");
     if (args.length > 0) fail(`unexpected ${args[0]}`);
     const tab = tabValue === undefined ? undefined : Number(tabValue.replace(/^t/, ""));
-    print(await companionTabs(owner, { action, tab, url, cwd: process.cwd() }));
+    print(await companionTabs(owner, { action, tab, url, afterId: afterValue === undefined ? undefined : Number(afterValue), timeoutMs: timeoutValue === undefined ? undefined : Number(timeoutValue), cwd: process.cwd() }));
     return 0;
   }
   fail("companion needs open or tabs");

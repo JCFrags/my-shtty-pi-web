@@ -9,6 +9,7 @@
     "build:engine": "pnpm --filter pixel-react build",
     "start": "pnpm build:engine && pnpm build && pnpm --filter terminal-browser-cli build && exec node ../cli/dist/main.js",
     "typecheck": "tsc --noEmit",
+    "test:electron": "pnpm build && node test/run-electron.cjs",
     "test": "tsc -p tsconfig.json && node --test \"test/*.test.js\""
   },
   "dependencies": {

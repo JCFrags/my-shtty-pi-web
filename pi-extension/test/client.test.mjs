@@ -8,6 +8,7 @@ const context = { cwd: "/tmp/project", sessionId: "session-a" };
 
 function fixtureObservation(epoch = 4) {
   return {
+    contextId: 7,
     observationId: "obs-a",
     controlEpoch: epoch,
     snapshot: {
@@ -94,6 +95,7 @@ test("observation and epoch are supplied automatically and invalidated after mut
   await client.observe(context);
   await client.act(context, { action: "click", ref: "e1" });
   const click = calls.find((args) => args[1] === "click");
+  assert.equal(click[click.indexOf("--tab") + 1], "7");
   assert.equal(click.includes("--observation"), true);
   assert.equal(click.includes("obs-a"), true);
   assert.equal(click.includes("--control-epoch"), true);
@@ -142,4 +144,136 @@ test("resume uses the current epoch and refreshes observation before the next mu
   await client.act(context, { action: "press_key", key: "Enter" });
   assert.equal(calls.some((args) => args[1] === "resume" && args.includes("2")), true);
   assert.equal(calls.some((args) => args[1] === "press-key" && args.includes("obs-a")), true);
+});
+
+test("dialog observations do not require a screenshot file or page evaluation", async () => {
+  const dialog = { id: "dialog-1", contextId: 9, controlEpoch: 4, type: "prompt", message: "Name?", defaultValue: "" };
+  const client = new PiBrowserClient(async () => ({ contextId: 9, dialog, completed: false }));
+  const result = await client.observe(context, { view: "visual", contextId: 9 });
+  const { controlEpoch, ...visibleDialog } = dialog;
+  assert.deepEqual(result, { contextId: 9, dialog: visibleDialog, completed: false });
+});
+
+test("dialog response sends exact context and epoch, with prompt text only through stdin", async () => {
+  const calls = [];
+  const client = new PiBrowserClient(async request => {
+    calls.push(request);
+    if (request.args[1] === "observe") return { dialog: { id: "dialog-7", contextId: 7, controlEpoch: 8, type: "prompt" } };
+    return request.args[1] === "status" ? { state: "agent", controlEpoch: 8 } : { completed: true, controlEpoch: 8 };
+  });
+  await client.observe(context);
+  await assert.rejects(client.act(context, { action: "dialog", contextId: 9, dialogId: "dialog-7", accept: true }), /unknown dialog/);
+  await assert.rejects(client.act(context, { action: "dialog", dialogId: "unknown", accept: true }), /unknown dialog/);
+  const result = await client.act(context, { action: "dialog", dialogId: "dialog-7", accept: true, text: "private prompt text" });
+  assert.deepEqual(result, { contextId: 7, completed: true });
+  const request = calls.at(-1);
+  assert.equal(request.stdin, "private prompt text");
+  assert.equal(request.args.includes("private prompt text"), false);
+  assert.deepEqual(request.args.slice(0, 8), ["agent", "dialog", "--tab", "7", "--dialog-id", "dialog-7", "--control-epoch", "8"]);
+  await assert.rejects(client.act(context, { action: "dialog", dialogId: "dialog-7", accept: true }), /unknown dialog/);
+  assert.equal(calls.filter(request => request.args[1] === "dialog").length, 1);
+});
+
+test("context activation clears observation and routes subsequent observation explicitly", async () => {
+  const calls = [];
+  const client = new PiBrowserClient(async ({ args }) => {
+    calls.push(args);
+    if (args[0] === "companion") return { tabs: [{ id: 9, contextId: 9, openerId: 7, kind: "popup", active: true }] };
+    if (args[1] === "status") return { state: "agent", controlEpoch: 4 };
+    return { ...fixtureObservation(), contextId: 9 };
+  });
+  await client.tabs(context, { action: "activate", contextId: 9 });
+  await assert.rejects(client.act(context, { action: "click", ref: "e1" }), /browser_observe/);
+  await client.observe(context);
+  assert.equal(calls.at(-1)[calls.at(-1).indexOf("--tab") + 1], "9");
+});
+
+for (const source of ["tabs", "resume", "action"]) {
+  test(`${source} caches dialog identity without exposing epochs`, async () => {
+    const calls = [];
+    const dialog = { id: "pending", contextId: 9, controlEpoch: 4, type: "confirm", message: "Continue?" };
+    const client = new PiBrowserClient(async ({ args }) => {
+      calls.push(args);
+      if (args[1] === "status") return { state: "agent", controlEpoch: 4 };
+      if (args[1] === "dialog") return { completed: true };
+      return { contextId: 7, dialog, tabs: [{ id: 7, active: true }] };
+    });
+    const value = source === "tabs" ? await client.tabs(context, { action: "list" })
+      : source === "resume" ? await client.control(context, "resume")
+      : await client.act(context, { action: "navigate", url: "about:blank" });
+    assert.equal(JSON.stringify(value).includes("controlEpoch"), false);
+    assert.equal(value.dialog.id, "pending");
+    await client.act(context, { action: "dialog", dialogId: "pending", accept: false });
+    assert.deepEqual(calls.at(-1), ["agent", "dialog", "--tab", "9", "--dialog-id", "pending", "--control-epoch", "4", "--dismiss"]);
+  });
+}
+
+for (const change of ["epoch", "human", "pause", "open", "activate", "observe", "navigate"]) {
+  test(`${change} invalidates cached dialog responses`, async () => {
+    let epoch = 4;
+    let state = "agent";
+    let pending = true;
+    const calls = [];
+    const client = new PiBrowserClient(async ({ args }) => {
+      calls.push(args);
+      if (args[1] === "status" || args[1] === "pause") return { state, controlEpoch: epoch };
+      if (args[1] === "observe") return pending
+        ? { dialog: { id: "pending", contextId: 7, controlEpoch: epoch } } : fixtureObservation(epoch);
+      return { tabs: [{ id: 9, active: true }] };
+    });
+    await client.observe(context);
+    if (change === "epoch") epoch++;
+    if (change === "human") {
+      state = "human";
+      assert.equal(JSON.stringify(await client.control(context, "status")).includes("controlEpoch"), false);
+      state = "agent";
+    }
+    if (change === "pause") assert.equal(JSON.stringify(await client.control(context, "pause")).includes("controlEpoch"), false);
+    if (change === "open") await client.open(context, {});
+    if (change === "activate") await client.tabs(context, { action: "activate", contextId: 9 });
+    if (change === "observe") { pending = false; await client.observe(context); }
+    if (change === "navigate") await client.act(context, { action: "navigate", url: "about:blank" });
+    await assert.rejects(client.act(context, { action: "dialog", dialogId: "pending", accept: true }), /unknown dialog/);
+    assert.equal(calls.some(args => args[1] === "dialog"), false);
+  });
+}
+
+test("takeover recovery refreshes the same pending identity with the new internal epoch", async () => {
+  let epoch = 4;
+  let state = "agent";
+  const calls = [];
+  const client = new PiBrowserClient(async ({ args }) => {
+    calls.push(args);
+    if (args[1] === "resume") { state = "agent"; epoch++; }
+    if (["status", "resume"].includes(args[1])) return { state, controlEpoch: epoch };
+    if (args[1] === "observe") return { dialog: { id: "pending", contextId: 9, controlEpoch: epoch } };
+    return { completed: true };
+  });
+  await client.observe(context);
+  state = "human";
+  epoch++;
+  await assert.rejects(client.act(context, { action: "dialog", dialogId: "pending", accept: true }), /control is with the user/);
+  const resumed = await client.control(context, "resume");
+  assert.equal(resumed.observationReady, false);
+  assert.equal(JSON.stringify(resumed).includes("controlEpoch"), false);
+  await client.act(context, { action: "dialog", dialogId: resumed.dialog.id, accept: true });
+  assert.equal(calls.at(-1)[calls.at(-1).indexOf("--control-epoch") + 1], "6");
+});
+
+test("uncached and replaced dialog IDs never reach the CLI", async () => {
+  let id = "first";
+  let responses = 0;
+  const client = new PiBrowserClient(async ({ args }) => {
+    if (args[1] === "status") return { state: "agent", controlEpoch: 4 };
+    if (args[1] === "dialog") { responses++; return { completed: true }; }
+    return { dialog: { id, contextId: 7, controlEpoch: 4 } };
+  });
+  await assert.rejects(client.act(context, { action: "dialog", dialogId: id, accept: true }), /unknown dialog/);
+  await client.observe(context);
+  id = "second";
+  await client.observe(context);
+  await assert.rejects(client.act(context, { action: "dialog", dialogId: "first", accept: true }), /unknown dialog/);
+  assert.equal(responses, 0);
+  await client.act(context, { action: "dialog", dialogId: id, accept: false });
+  assert.equal(responses, 1);
 });

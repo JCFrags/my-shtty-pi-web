@@ -9,6 +9,8 @@ function tabManagerController() {
   return {
     surface: {},
     popup: null,
+    dialogs: { configure() {}, subscribe() { return () => {}; }, pending: null },
+    selectPopup() {},
     devtoolsFocused: false,
     setVisible() {},
     focusContent() {},

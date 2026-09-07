@@ -367,7 +367,10 @@ class Session {
         },
         onPageMenu: (params) => this.openPageMenu(params),
         onTabOpened: (opener, url) => this.records.get(opener)?.linkOpened(url),
-        onTabClosed: (id) => this.closeOrShutdown(id),
+        onTabClosed: (id) => {
+          if (this.tabs.count <= 1) this.shutdown();
+          else this.tabs.removeClosed(id);
+        },
         tabSwitchAllowed: () => !this.activeRecord()?.reviewing,
         agentTabSwitchAllowed: () => this.agentTabSwitchAllowed(),
         requestAgentRender: () => this.agentOverlayRender.request(),
@@ -418,6 +421,7 @@ class Session {
       onKey: (event) => this.handleKey(event),
       onPaste: (text) => {
         this.control.takeHuman("paste");
+        if (this.tabs.pendingDialog) return;
         const browser = this.tabs.activeController;
         if (browser?.popup) browser.popup.input.paste(text);
         else if (this.browserFocused && browser?.devtoolsFocused) {
@@ -426,6 +430,7 @@ class Session {
       },
       onPasteImage: (image) => {
         this.control.takeHuman("paste");
+        if (this.tabs.pendingDialog) return;
         const browser = this.tabs.activeController;
         if (browser?.popup) browser.popup.input.pasteImage(image);
         else if (this.browserFocused && browser?.devtoolsFocused) {
@@ -494,6 +499,9 @@ class Session {
       agentStatus: () => this.control.snapshot,
       agentPause: (expectedEpoch) => this.control.pause(expectedEpoch),
       agentResume: (expectedEpoch) => this.control.resume(expectedEpoch),
+      agentContext: (action, id, url, epoch) => this.tabs.agentContext(action, id, url, epoch),
+      agentDialog: (id, request) => this.tabs.respondDialog(id, request),
+      waitContexts: (after, timeout, epoch) => this.tabs.waitContexts(after, timeout, epoch),
       agentObserve: (id, request) => this.tabs.agentObserve(id, request),
       agentClick: (id, request) => this.tabs.agentClick(id, request),
       agentHover: (id, request) => this.tabs.agentHover(id, request),
@@ -594,8 +602,7 @@ class Session {
   }
 
   private closeOrShutdown(id: number) {
-    if (this.tabs.count <= 1) this.shutdown();
-    else this.tabs.close(id);
+    this.tabs.close(id);
   }
 
   private appTabActive(): boolean {
@@ -782,6 +789,11 @@ class Session {
         agentControl={this.control.snapshot}
         agentActivity={this.tabs.active?.agentRuntime.activity ?? null}
         surfaceLayout={this.surfaceLayout}
+        dialog={this.tabs.pendingDialog}
+        answerDialog={(id, accept, text) => {
+          this.control.takeHuman("keyboard");
+          void this.tabs.answerHumanDialog(id, accept, text).catch(error => this.showToast(String(error), "failed"));
+        }}
         popup={this.popupView()}
         zoomHud={this.zoomHud}
         download={this.download}
@@ -993,7 +1005,6 @@ class Session {
       !this.urlEditOpen &&
       !this.findOpen &&
       !this.pageMenu &&
-      !browser?.popup &&
       !browser?.devtoolsFocused;
   }
 
@@ -1092,6 +1103,13 @@ class Session {
 
   private handleKey(event: EngineKeyEvent) {
     if (event.kind !== "release") this.control.takeHuman("keyboard");
+    const dialog = this.tabs.pendingDialog;
+    if (dialog) {
+      if (event.kind !== "release" && (event.key === "escape" || (event.key === "enter" && dialog.type !== "prompt"))) {
+        void this.tabs.answerHumanDialog(dialog.id, event.key === "enter" && dialog.canAccept).catch(() => {});
+      }
+      return;
+    }
     const noShortcuts = this.sessionFlags.noShortcuts || this.appTabActive();
     const browser = this.tabs.activeController;
     if (browser?.popup) {

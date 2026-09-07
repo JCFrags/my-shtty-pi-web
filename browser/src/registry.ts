@@ -1,3 +1,4 @@
+import type { DialogResponse } from "./agent/dialogs";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -26,6 +27,7 @@ import {
   parseWaitForRequest,
 } from "./agent/protocol";
 import type {
+  AgentActionOutcome,
   AgentClickRequest,
   AgentClickResult,
   AgentDragRequest,
@@ -76,16 +78,19 @@ export interface ControlHost {
   agentStatus(): AgentControlSnapshot;
   agentPause(expectedEpoch: number): AgentControlSnapshot;
   agentResume(expectedEpoch: number): AgentControlSnapshot;
-  agentObserve(id: number, request: AgentObserveRequest): Promise<AgentObservation>;
-  agentClick(id: number, request: AgentClickRequest): Promise<AgentClickResult>;
-  agentHover(id: number, request: AgentHoverRequest): Promise<AgentHoverResult>;
-  agentDrag(id: number, request: AgentDragRequest): Promise<AgentDragResult>;
-  agentType(id: number, request: AgentTypeRequest): Promise<AgentTypeResult>;
-  agentPressKey(id: number, request: AgentPressKeyRequest): Promise<AgentPressKeyResult>;
-  agentScroll(id: number, request: AgentScrollRequest): Promise<AgentScrollResult>;
-  agentNavigate(id: number, request: AgentNavigateRequest): Promise<AgentNavigateResult>;
-  agentGetUrl(id: number, request: AgentGetUrlRequest): Promise<AgentGetUrlResult>;
-  agentWaitFor(id: number, request: AgentWaitForRequest): Promise<AgentWaitForResult>;
+  agentObserve(id: number, request: AgentObserveRequest): Promise<AgentActionOutcome<AgentObservation>>;
+  agentClick(id: number, request: AgentClickRequest): Promise<AgentActionOutcome<AgentClickResult>>;
+  agentHover(id: number, request: AgentHoverRequest): Promise<AgentActionOutcome<AgentHoverResult>>;
+  agentDrag(id: number, request: AgentDragRequest): Promise<AgentActionOutcome<AgentDragResult>>;
+  agentType(id: number, request: AgentTypeRequest): Promise<AgentActionOutcome<AgentTypeResult>>;
+  agentPressKey(id: number, request: AgentPressKeyRequest): Promise<AgentActionOutcome<AgentPressKeyResult>>;
+  agentScroll(id: number, request: AgentScrollRequest): Promise<AgentActionOutcome<AgentScrollResult>>;
+  agentNavigate(id: number, request: AgentNavigateRequest): Promise<AgentActionOutcome<AgentNavigateResult>>;
+  agentGetUrl(id: number, request: AgentGetUrlRequest): Promise<AgentActionOutcome<AgentGetUrlResult>>;
+  agentWaitFor(id: number, request: AgentWaitForRequest): Promise<AgentActionOutcome<AgentWaitForResult>>;
+  agentContext(action: "open" | "activate" | "close", id: number | undefined, url: string | undefined, epoch: number): Promise<unknown>;
+  agentDialog(id: number, request: DialogResponse): Promise<unknown>;
+  waitContexts(afterId: number, timeoutMs: number, expectedEpoch: number): Promise<unknown>;
   closeTab(id: number): boolean;
   agentTouch(id: number): boolean;
   agentRelease(): void;
@@ -97,6 +102,7 @@ export interface ControlHost {
 interface ControlRequest {
   id?: string;
   cmd: string;
+  action?: unknown;
   url?: string;
   cwd?: string;
   tab?: number;
@@ -123,6 +129,9 @@ interface ControlRequest {
   dy?: unknown;
   condition?: unknown;
   timeoutMs?: unknown;
+  afterId?: unknown;
+  dialogId?: unknown;
+  accept?: unknown;
 }
 
 export const MAX_CONTROL_LINE_BYTES = 256 * 1024;
@@ -284,6 +293,26 @@ export class Registry {
         if (request.tab === undefined) throw new Error("close-tab needs a tab id");
         if (!this.host.closeTab(request.tab)) throw new Error(`no tab ${request.tab}`);
         return { ...this.record(), tabs: await this.host.targets() };
+      }
+      case "agent.context": {
+        if (request.action !== "open" && request.action !== "activate" && request.action !== "close") throw new Error("invalid context action");
+        if (request.url !== undefined && (typeof request.url !== "string" || request.url.length > 8192)) throw new Error("invalid context URL");
+        const tab = request.action === "open" ? undefined : requiredTab(request, "agent.context");
+        return this.host.agentContext(request.action, tab, request.url, requiredEpoch(request.expectedControlEpoch, "agent.context"));
+      }
+      case "agent.dialog": {
+        const tab = requiredTab(request, "agent.dialog");
+        if (typeof request.dialogId !== "string" || request.dialogId.length > 128 || !request.dialogId) throw new Error("dialogId required");
+        if (typeof request.accept !== "boolean") throw new Error("accept must be boolean");
+        if (request.text !== undefined && (typeof request.text !== "string" || request.text.length > 32768)) throw new Error("invalid prompt text");
+        return this.host.agentDialog(tab, { dialogId: request.dialogId, accept: request.accept, text: request.text as string | undefined, expectedControlEpoch: requiredEpoch(request.expectedControlEpoch, "agent.dialog") });
+      }
+      case "wait-contexts": {
+        const after = request.afterId;
+        const timeout = request.timeoutMs ?? 10000;
+        if (typeof after !== "number" || !Number.isSafeInteger(after) || after < 0) throw new Error("afterId must be a nonnegative integer");
+        if (typeof timeout !== "number" || !Number.isSafeInteger(timeout) || timeout < 0 || timeout > 60000) throw new Error("invalid context wait timeout");
+        return this.host.waitContexts(after, timeout, requiredEpoch(request.expectedControlEpoch, "wait-contexts"));
       }
       case "agent.status":
         return this.host.agentStatus();

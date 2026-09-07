@@ -20,6 +20,7 @@ const MAX_ACTION_TIMEOUT_MS = 300_000;
 
 export async function agentCommand(terminal: Terminal | null, args: string[]): Promise<number> {
   const subcommand = args.shift();
+  if (subcommand === "dialog") return dialogCommand(terminal, args);
   if (subcommand === "observe") return observeCommand(terminal, args);
   if (subcommand === "click") return clickCommand(terminal, args);
   if (subcommand === "hover") return hoverCommand(terminal, args);
@@ -34,6 +35,25 @@ export async function agentCommand(terminal: Terminal | null, args: string[]): P
   if (subcommand === "pause") return transitionCommand(terminal, args, "agent.pause");
   if (subcommand === "resume") return transitionCommand(terminal, args, "agent.resume");
   throw new Error("agent needs observe, click, hover, drag, type, press-key, scroll, navigate, get-url, wait-for, status, pause, or resume (terminal-browser agent --help)");
+}
+
+async function dialogCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tab = parseTab(takeValue(args, "--tab"));
+  const dialogId = takeValue(args, "--dialog-id");
+  const epoch = parseEpoch(takeValue(args, "--control-epoch"), "agent.dialog");
+  const accept = takeBoolean(args, "--accept");
+  const dismiss = takeBoolean(args, "--dismiss");
+  const stdin = takeBoolean(args, "--stdin");
+  const textFlag = takeValue(args, "--text");
+  if (!tab || !dialogId || dialogId.length > 128 || accept === dismiss) throw new Error("dialog requires --tab, --dialog-id, and exactly one of --accept or --dismiss");
+  if (stdin && textFlag !== undefined) throw new Error("choose --stdin or --text");
+  if (args.length) throw new Error(`unexpected ${args[0]}`);
+  const text = stdin ? await readStdin(32768) : textFlag;
+  if (text !== undefined && text.length > 32768) throw new Error("prompt text too long");
+  const browser = await selectBrowser(terminal, browserKey);
+  print(await control(browser.socket, { cmd: "agent.dialog", tab, dialogId, expectedControlEpoch: epoch, accept, ...(text === undefined ? {} : { text }) }));
+  return 0;
 }
 
 async function statusCommand(terminal: Terminal | null, args: string[]): Promise<number> {
@@ -90,6 +110,7 @@ async function observeCommand(terminal: Terminal | null, args: string[]): Promis
     scope,
     ...(ref ? { ref } : {}),
   }) as Record<string, unknown>;
+  if (value.dialog) { print(value); return 0; }
   const visual = value.visual as Record<string, unknown> | undefined;
   if (view !== "semantic") {
     if (!visual || !Buffer.isBuffer(visual.data)) throw new Error("browser returned no visual image");
