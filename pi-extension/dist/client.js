@@ -70,7 +70,7 @@ function actionableError(stderr) {
         return "Browser control is with the user. Wait until the user returns control, then call browser_control with status or resume.";
     }
     if (/stale control epoch|page changed|stale or unknown observation/iu.test(message)) {
-        return "Browser state changed. Call browser_observe and retry the action.";
+        return "Browser state changed. Call browser_observe and inspect the outcome before deciding on another action.";
     }
     if (/no browser companion/iu.test(message))
         return "No companion browser is open. Call browser_open first.";
@@ -116,6 +116,8 @@ function parseVisualState(value) {
     return { width, height, rect: parsedRect };
 }
 function targetArguments(observation, target, prefix) {
+    if ("locator" in target)
+        return [prefix ? `--${prefix}-locator-json` : "--locator-json", JSON.stringify(target.locator)];
     if ("ref" in target)
         return prefix ? [`--${prefix}-ref`, target.ref] : [target.ref];
     const visual = observation.visual;
@@ -209,6 +211,8 @@ export class PiBrowserClient {
             args.push("--no-text");
         if (options.ref)
             args.push("--ref", options.ref);
+        if (options.filter)
+            args.push("--filter-json", JSON.stringify(options.filter));
         let directory = null;
         let imagePath = null;
         if (view !== "semantic") {
@@ -323,9 +327,9 @@ export class PiBrowserClient {
             }
         }
         if (request.action === "upload")
-            args.push("upload", request.ref, "--files-json", JSON.stringify(request.files));
+            args.push("upload", ...targetArguments(this.observation, request), "--files-json", JSON.stringify(request.files));
         if (request.action === "click")
-            args.push("click", request.ref);
+            args.push("click", ...targetArguments(this.observation, request));
         if (request.action === "hover") {
             args.push("hover", ...targetArguments(this.observation, request.target));
         }
@@ -335,7 +339,7 @@ export class PiBrowserClient {
                 args.push("--button", request.button);
         }
         if (request.action === "type")
-            args.push("type", request.ref, "--stdin", ...(request.replace ? ["--replace"] : []));
+            args.push("type", ...targetArguments(this.observation, request), "--stdin", ...(request.replace ? ["--replace"] : []));
         if (request.action === "press_key")
             args.push("press-key", request.key);
         if (request.action === "scroll")
@@ -348,6 +352,8 @@ export class PiBrowserClient {
             args.push("wait-for");
             if (request.ref)
                 args.push("--ref", request.ref);
+            if (request.locator)
+                args.push("--locator-json", JSON.stringify(request.locator));
             if (request.text)
                 args.push("--text", request.text);
             if (request.condition)
@@ -362,12 +368,25 @@ export class PiBrowserClient {
         if (targetContext !== null)
             args.push("--tab", String(targetContext));
         args.push("--control-epoch", String(status.controlEpoch));
-        const value = await this.runner({
-            args,
-            context,
-            ...(request.action === "type" ? { stdin: request.text } : {}),
-            timeoutMs: request.action === "wait_for" ? (request.timeoutMs ?? 10_000) + 5_000 : 300_000,
-        });
+        let value;
+        try {
+            value = await this.runner({
+                args,
+                context,
+                ...(request.action === "type" ? { stdin: request.text } : {}),
+                timeoutMs: request.action === "wait_for" ? (request.timeoutMs ?? 10_000) + 5_000 : 300_000,
+            });
+        }
+        catch (error) {
+            if (needsObservation) {
+                this.observation = null;
+                const message = error instanceof Error ? error.message : "Browser operation failed.";
+                if (!/browser_observe|control is with the user/i.test(message)) {
+                    throw new Error(`${message} Call browser_observe and inspect the outcome before deciding on another action.`);
+                }
+            }
+            throw error;
+        }
         if (value.dialog) {
             const dialog = this.cacheDialog(value.dialog);
             return { action: request.action, completed: false, contextId: dialog.contextId, dialog };

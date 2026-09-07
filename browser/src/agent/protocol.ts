@@ -1,3 +1,5 @@
+import { parseLocator } from "./locator";
+import type { AgentActionTarget, AgentElementTarget } from "./types";
 import { parseAgentKey } from "./key";
 import type {
   AgentDragRequest,
@@ -20,6 +22,9 @@ export const MAX_AGENT_WAIT_TEXT = 1_024;
 export interface AgentWireRequest {
   tab?: unknown;
   ref?: unknown;
+  locator?: unknown;
+  fromLocator?: unknown;
+  toLocator?: unknown;
   x?: unknown;
   y?: unknown;
   fromRef?: unknown;
@@ -63,7 +68,7 @@ export function parseHoverRequest(request: AgentWireRequest): {
   return {
     tab: requiredTab(request, "agent.hover"),
     request: {
-      target: parseActionTarget(request.ref, request.x, request.y, "agent.hover"),
+      target: parseActionTarget(request.ref, request.x, request.y, "agent.hover", request.locator),
       observationId: requiredAgentString(request.observationId, "agent.hover", "observationId"),
       expectedControlEpoch: requiredEpoch(request.expectedControlEpoch, "agent.hover"),
     },
@@ -81,8 +86,8 @@ export function parseDragRequest(request: AgentWireRequest): {
   return {
     tab: requiredTab(request, "agent.drag"),
     request: {
-      from: parseActionTarget(request.fromRef, request.fromX, request.fromY, "agent.drag from"),
-      to: parseActionTarget(request.toRef, request.toX, request.toY, "agent.drag to"),
+      from: parseActionTarget(request.fromRef, request.fromX, request.fromY, "agent.drag from", request.fromLocator),
+      to: parseActionTarget(request.toRef, request.toX, request.toY, "agent.drag to", request.toLocator),
       button,
       observationId: requiredAgentString(request.observationId, "agent.drag", "observationId"),
       expectedControlEpoch: requiredEpoch(request.expectedControlEpoch, "agent.drag"),
@@ -92,7 +97,7 @@ export function parseDragRequest(request: AgentWireRequest): {
 
 export function parseTypeRequest(request: AgentWireRequest): { tab: number; request: AgentTypeRequest } {
   const tab = requiredTab(request, "agent.type");
-  const ref = requiredAgentString(request.ref, "agent.type", "ref");
+  const target = parseElementTarget(request.ref, request.locator);
   const observationId = requiredAgentString(request.observationId, "agent.type", "observationId");
   const replace = request.replace === undefined ? false : request.replace;
   if (typeof replace !== "boolean") throw new Error("agent.type replace must be boolean");
@@ -100,7 +105,7 @@ export function parseTypeRequest(request: AgentWireRequest): { tab: number; requ
   return {
     tab,
     request: {
-      ref,
+      ...target,
       text,
       replace,
       observationId,
@@ -185,14 +190,16 @@ export function parseWaitForRequest(request: AgentWireRequest): {
 } {
   const tab = requiredTab(request, "agent.wait-for");
   const ref = request.ref === undefined ? undefined : requiredAgentString(request.ref, "agent.wait-for", "ref");
+  const locator = request.locator === undefined ? undefined : parseLocator(request.locator);
+  if (locator && ref) throw new Error("wait needs exactly one ref or locator");
   const text = request.text === undefined ? undefined : requiredWaitText(request.text);
-  if (ref === undefined && text === undefined) throw new Error("agent.wait-for needs a ref or text");
+  if (ref === undefined && locator === undefined && text === undefined) throw new Error("agent.wait-for needs a ref or text");
   const condition = request.condition === undefined ? undefined : request.condition;
-  if (condition !== undefined && condition !== "exists" && condition !== "visible" && condition !== "text") {
-    throw new Error("agent.wait-for condition must be exists, visible, or text");
+  if (condition !== undefined && condition !== "exists" && condition !== "visible" && condition !== "text" && condition !== "actionable") {
+    throw new Error("agent.wait-for condition must be exists, visible, actionable, or text");
   }
-  if (condition === "exists" && ref === undefined) throw new Error("agent.wait-for exists needs a ref");
-  if (condition === "visible" && ref === undefined) throw new Error("agent.wait-for visible needs a ref");
+  if (condition === "exists" && ref === undefined && locator === undefined) throw new Error("agent.wait-for exists needs a ref");
+  if ((condition === "visible" || condition === "actionable") && ref === undefined && locator === undefined) throw new Error("agent.wait-for visible needs a ref");
   if (condition === "text" && text === undefined) throw new Error("agent.wait-for text needs text");
   const timeoutMs = request.timeoutMs === undefined ? 10_000 : request.timeoutMs;
   if (typeof timeoutMs !== "number" || !Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > 60_000) {
@@ -202,6 +209,7 @@ export function parseWaitForRequest(request: AgentWireRequest): {
     tab,
     request: {
       ...(ref === undefined ? {} : { ref }),
+      ...(locator === undefined ? {} : { locator }),
       ...(text === undefined ? {} : { text }),
       ...(condition === undefined ? {} : { condition }),
       timeoutMs,
@@ -227,7 +235,12 @@ function parseActionTarget(
   xValue: unknown,
   yValue: unknown,
   command: string,
-): { ref: string } | { x: number; y: number } {
+  locator?: unknown,
+): AgentActionTarget {
+  if (locator !== undefined) {
+    if (xValue !== undefined || yValue !== undefined) throw new Error("locator cannot be combined with coordinates");
+    return parseElementTarget(refValue, locator);
+  }
   const hasRef = refValue !== undefined;
   const hasCoordinates = xValue !== undefined || yValue !== undefined;
   if (hasRef === hasCoordinates) throw new Error(`${command} needs exactly one ref or x/y pair`);
@@ -247,7 +260,7 @@ function requiredAgentString(value: unknown, command: string, name: string): str
   return value;
 }
 
-function requiredText(value: unknown, replace: boolean): string {
+export function requiredText(value: unknown, replace: boolean): string {
   const max = replace ? MAX_AGENT_REPLACE_TEXT : MAX_AGENT_NATURAL_TEXT;
   if (typeof value !== "string" || value.length > max) throw new Error(`agent.type text must be at most ${max} characters`);
   if (value.includes("\0")) throw new Error("agent.type text contains NUL");
@@ -261,4 +274,9 @@ function requiredWaitText(value: unknown): string {
   }
   if (value.includes("\0")) throw new Error("agent.wait-for text contains NUL");
   return value;
+}
+
+export function parseElementTarget(ref: unknown, locator: unknown): AgentElementTarget {
+  if ((ref !== undefined) === (locator !== undefined)) throw new Error("provide exactly one ref or locator");
+  return locator !== undefined ? { locator: parseLocator(locator) } : { ref: requiredAgentString(ref, "agent target", "ref") };
 }

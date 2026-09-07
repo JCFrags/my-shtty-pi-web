@@ -232,6 +232,11 @@ function runtimeFixture(options = {}) {
       },
     }),
     currentDocumentId: async () => documentId,
+    elementState: async ref => ({ documentId, state: ref === "e1" ? {
+      ref, tag: "button", role: "button", name: "Increment", text: "Increment",
+      rect: { x: 1, y: 2, width: 20, height: 10 }, bounds: { x: 1, y: 2, width: 20, height: 10 }, visible: true, enabled: true,
+      editable: false, hit: true, focused: true,
+    } : null }),
     ensureVisible: async () => null,
   };
   const target = {
@@ -936,4 +941,59 @@ test('BrowserAgentRuntime rejects a closed click target before another document 
   const observation = await fixture.runtime.observe();
   await assert.rejects(fixture.runtime.click({ ref: 'e1', observationId: observation.observationId, expectedControlEpoch: 1 }), /page changed/);
   assert.equal(documentReads, 1);
+});
+
+test('socket disconnect cancels only its own active runtime input and queued request', async () => {
+  let release;
+  let started;
+  const gate = new Promise(resolve => { release = resolve; });
+  const entered = new Promise(resolve => { started = resolve; });
+  let downs = 0;
+  const f = runtimeFixture({ actionServiceFactory: async driver => ({
+    click: async () => {
+      started();
+      await gate;
+      await driver.click(clickArgs({ preClickDwellMs: 0, pressMs: 0 }));
+      downs++;
+      return { x: 20, y: 24 };
+    },
+  }) });
+  const observation = await f.runtime.observe();
+  const host = registryHost(`cancel-${randomUUID()}`);
+  let signal;
+  let outcome;
+  host.agentClick = (_id, request, requestSignal) => {
+    signal = requestSignal;
+    const action = f.runtime.click({ ...request, signal });
+    outcome = action.catch(error => error);
+    return action;
+  };
+  const registry = new Registry(host);
+  const socket = net.connect(registry.socketPath);
+  socket.on('error', () => {});
+  try {
+    socket.on('connect', () => socket.write(JSON.stringify({ id: 'cancel', cmd: 'agent.click', tab: 1,
+      ref: 'e1', observationId: observation.observationId, expectedControlEpoch: 1 }) + '\n'));
+    await entered;
+    const queuedAbort = new AbortController();
+    const queued = f.runtime.click({ ref: 'e1', observationId: observation.observationId, expectedControlEpoch: 1, signal: queuedAbort.signal });
+    queuedAbort.abort(new Error('queued cancellation'));
+    const queuedResult = queued.catch(error => error);
+    socket.destroy();
+    for (let i = 0; i < 100 && !signal.aborted; i++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(signal.aborted, true);
+    release();
+    assert.match((await outcome).message, /disconnected/);
+    assert.match((await queuedResult).message, /queued cancellation/);
+    assert.equal(downs, 0);
+    const next = await f.runtime.observe();
+    const response = await registryRequest(registry.socketPath, { id: 'next', cmd: 'agent.click', tab: 1,
+      ref: 'e1', observationId: next.observationId, expectedControlEpoch: 1 });
+    assert.equal(response.ok, true);
+    assert.equal(downs, 1);
+  } finally {
+    release();
+    socket.destroy();
+    registry.dispose();
+  }
 });

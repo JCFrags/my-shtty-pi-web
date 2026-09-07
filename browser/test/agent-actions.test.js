@@ -214,6 +214,11 @@ function runtimeFixture(options = {}) {
     }),
     currentDocumentId: async () => "document-1",
     ensureVisible: async () => null,
+    elementState: async ref => ({ documentId: "document-1", state: ref === "e1" ? {
+      ref, tag: "input", role: "textbox", name: "Name", text: "Name",
+      rect: { x: 1, y: 2, width: 20, height: 10 }, bounds: { x: 1, y: 2, width: 20, height: 10 }, visible: true, enabled: true,
+      editable: options.refState?.editable ?? true, hit: true, focused: true,
+    } : null }),
     refState: async () => options.refState || ({ exists: true, connected: true, editable: true }),
     probe: async () => ({ exists: true, visible: true, refText: "", documentText: "" }),
   };

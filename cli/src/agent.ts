@@ -15,7 +15,7 @@ const MAX_KEY = 128;
 const MAX_NATURAL_TEXT = 4_096;
 const MAX_REPLACE_TEXT = 32_768;
 const MAX_SCROLL_DELTA = 20_000;
-const ACTION_TIMEOUT_MS = 10_000;
+const ACTION_TIMEOUT_MS = 30_000;
 const MAX_ACTION_TIMEOUT_MS = 300_000;
 
 export async function agentCommand(terminal: Terminal | null, args: string[]): Promise<number> {
@@ -92,6 +92,7 @@ async function observeCommand(terminal: Terminal | null, args: string[]): Promis
   const ref = takeValue(args, "--ref");
   const imageOutput = takeValue(args, "--image-output");
   const noText = takeBoolean(args, "--no-text");
+  const filter = takeLocator(args, "--filter-json");
   if (scope === "element" && !ref) throw new Error("agent observe element scope needs --ref");
   if (scope === "viewport" && ref) throw new Error("agent observe --ref needs element scope");
   if (scope === "element" && view === "semantic") throw new Error("agent observe element scope needs a visual view");
@@ -107,6 +108,7 @@ async function observeCommand(terminal: Terminal | null, args: string[]): Promis
     tab,
     maxElements,
     includeText: !noText,
+    ...(filter === undefined ? {} : { filter }),
     view,
     scope,
     ...(ref ? { ref } : {}),
@@ -128,11 +130,10 @@ async function clickCommand(terminal: Terminal | null, args: string[]): Promise<
   const tabValue = takeValue(args, "--tab");
   const observationId = takeValue(args, "--observation");
   const epochValue = takeValue(args, "--control-epoch");
+  const locator = takeLocator(args, "--locator-json");
   const ref = args.shift();
-  if (!ref || ref.startsWith("-")) {
-    throw new Error("agent click needs a ref (terminal-browser agent click --help)");
-  }
-  validateAgentString(ref, "agent click ref");
+  if ((ref !== undefined) === (locator !== undefined)) throw new Error("agent target needs a ref or --locator-json, but not both");
+  if (ref !== undefined) validateAgentString(ref, "agent target ref");
   if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent click --help)`);
   const browser = await selectBrowser(terminal, browserKey);
   const tab = await selectTab(browser, parseTab(tabValue));
@@ -142,7 +143,7 @@ async function clickCommand(terminal: Terminal | null, args: string[]): Promise<
     await control(browser.socket, {
       cmd: "agent.click",
       tab,
-      ref,
+      ...(ref === undefined ? { locator } : { ref }),
       observationId: observation,
       expectedControlEpoch,
     }),
@@ -159,11 +160,10 @@ async function uploadCommand(terminal: Terminal | null, args: string[]): Promise
   let files: unknown;
   try { files = JSON.parse(filesValue ?? "null"); } catch { throw new Error("invalid files JSON"); }
   if (!Array.isArray(files) || !files.length || files.length > 16 || files.some(file => typeof file !== "string" || !file || file.length > 4096)) throw new Error("upload requires 1 to 16 file paths");
+  const locator = takeLocator(args, "--locator-json");
   const ref = args.shift();
-  if (!ref || ref.startsWith("-")) {
-    throw new Error("agent upload needs a ref (terminal-browser agent upload --help)");
-  }
-  validateAgentString(ref, "agent upload ref");
+  if ((ref !== undefined) === (locator !== undefined)) throw new Error("agent target needs a ref or --locator-json, but not both");
+  if (ref !== undefined) validateAgentString(ref, "agent target ref");
   if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent upload --help)`);
   const browser = await selectBrowser(terminal, browserKey);
   const tab = await selectTab(browser, parseTab(tabValue));
@@ -173,7 +173,7 @@ async function uploadCommand(terminal: Terminal | null, args: string[]): Promise
     await control(browser.socket, {
       cmd: "agent.upload",
       tab,
-      ref,
+      ...(ref === undefined ? { locator } : { ref }),
       files: (files as string[]).map(file => path.resolve(process.cwd(), file)),
       observationId: observation,
       expectedControlEpoch,
@@ -189,8 +189,9 @@ async function hoverCommand(terminal: Terminal | null, args: string[]): Promise<
   const epochValue = takeValue(args, "--control-epoch");
   const xValue = takeValue(args, "--x");
   const yValue = takeValue(args, "--y");
+  const locator = takeLocator(args, "--locator-json");
   const ref = args.shift();
-  const target = parseCliTarget(ref, xValue, yValue, "agent hover");
+  const target = parseCliTarget(ref, xValue, yValue, "agent hover", locator);
   if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent hover --help)`);
   const browser = await selectBrowser(terminal, browserKey);
   const tab = await selectTab(browser, parseTab(tabValue));
@@ -214,12 +215,14 @@ async function dragCommand(terminal: Terminal | null, args: string[]): Promise<n
     takeValue(args, "--from-x"),
     takeValue(args, "--from-y"),
     "agent drag from",
+    takeLocator(args, "--from-locator-json"),
   );
   const to = parseCliTarget(
     takeValue(args, "--to-ref"),
     takeValue(args, "--to-x"),
     takeValue(args, "--to-y"),
     "agent drag to",
+    takeLocator(args, "--to-locator-json"),
   );
   const button = takeValue(args, "--button") ?? "left";
   if (button !== "left" && button !== "middle" && button !== "right") {
@@ -248,11 +251,10 @@ async function typeCommand(terminal: Terminal | null, args: string[]): Promise<n
   const textFlag = takeValue(args, "--text");
   const stdin = takeBoolean(args, "--stdin");
   const replace = takeBoolean(args, "--replace");
+  const locator = takeLocator(args, "--locator-json");
   const ref = args.shift();
-  if (!ref || ref.startsWith("-")) {
-    throw new Error("agent type needs a ref (terminal-browser agent type --help)");
-  }
-  validateAgentString(ref, "agent type ref");
+  if ((ref !== undefined) === (locator !== undefined)) throw new Error("agent target needs a ref or --locator-json, but not both");
+  if (ref !== undefined) validateAgentString(ref, "agent target ref");
   if ((textFlag === undefined && !stdin) || (textFlag !== undefined && stdin)) {
     throw new Error("agent type needs exactly one of --text or --stdin");
   }
@@ -272,7 +274,7 @@ async function typeCommand(terminal: Terminal | null, args: string[]): Promise<n
     await control(browser.socket, {
       cmd: "agent.type",
       tab,
-      ref,
+      ...(ref === undefined ? { locator } : { ref }),
       text,
       replace,
       observationId: observation,
@@ -377,16 +379,18 @@ async function waitForCommand(terminal: Terminal | null, args: string[]): Promis
   const observationId = takeValue(args, "--observation");
   const epochValue = takeValue(args, "--control-epoch");
   const ref = takeValue(args, "--ref");
+  const locator = takeLocator(args, "--locator-json");
+  if (ref !== undefined && locator !== undefined) throw new Error("wait requires exactly one ref or locator");
   const text = takeValue(args, "--text");
   const condition = takeValue(args, "--condition");
   const timeoutValue = takeValue(args, "--timeout-ms");
-  if (ref === undefined && text === undefined) throw new Error("agent wait-for needs --ref or --text");
+  if (ref === undefined && locator === undefined && text === undefined) throw new Error("agent wait-for needs --ref or --text");
   if (ref !== undefined) validateAgentString(ref, "agent wait-for ref");
-  if (condition !== undefined && condition !== "exists" && condition !== "visible" && condition !== "text") {
-    throw new Error("agent wait-for --condition must be exists, visible, or text");
+  if (condition !== undefined && condition !== "exists" && condition !== "visible" && condition !== "text" && condition !== "actionable") {
+    throw new Error("agent wait-for --condition must be exists, visible, actionable, or text");
   }
-  if (condition === "exists" && ref === undefined) throw new Error("agent wait-for exists needs --ref");
-  if (condition === "visible" && ref === undefined) throw new Error("agent wait-for visible needs --ref");
+  if (condition === "exists" && ref === undefined && locator === undefined) throw new Error("agent wait-for exists needs --ref");
+  if ((condition === "visible" || condition === "actionable") && ref === undefined && locator === undefined) throw new Error("agent wait-for visible needs --ref");
   if (condition === "text" && text === undefined) throw new Error("agent wait-for text needs --text");
   if (text !== undefined) validateWaitText(text);
   const timeoutMs = parseWaitTimeout(timeoutValue);
@@ -399,6 +403,7 @@ async function waitForCommand(terminal: Terminal | null, args: string[]): Promis
     cmd: "agent.wait-for",
     tab,
     ...(ref === undefined ? {} : { ref }),
+    ...(locator === undefined ? {} : { locator }),
     ...(text === undefined ? {} : { text }),
     ...(condition === undefined ? {} : { condition }),
     timeoutMs,
@@ -523,12 +528,19 @@ function validateAgentString(value: string, name: string): void {
   }
 }
 
+type CliTarget = { ref: string } | { locator: unknown[] } | { x: number; y: number };
+
 function parseCliTarget(
   ref: string | undefined,
   xValue: string | undefined,
   yValue: string | undefined,
   command: string,
-): { ref: string } | { x: number; y: number } {
+  locator?: unknown[],
+): CliTarget {
+  if (locator !== undefined) {
+    if (ref !== undefined || xValue !== undefined || yValue !== undefined) throw new Error("locator cannot be combined with ref or coordinates");
+    return { locator };
+  }
   const hasCoordinates = xValue !== undefined || yValue !== undefined;
   if ((ref !== undefined) === hasCoordinates) throw new Error(`${command} needs exactly one ref or x/y pair`);
   if (ref !== undefined) {
@@ -543,7 +555,8 @@ function parseCliTarget(
   return { x, y };
 }
 
-function prefixTarget(prefix: "from" | "to", target: { ref: string } | { x: number; y: number }) {
+function prefixTarget(prefix: "from" | "to", target: CliTarget) {
+  if ("locator" in target) return { [`${prefix}Locator`]: target.locator };
   return "ref" in target
     ? { [`${prefix}Ref`]: target.ref }
     : { [`${prefix}X`]: target.x, [`${prefix}Y`]: target.y };
@@ -611,4 +624,14 @@ async function readStdin(maxLength: number): Promise<string> {
 
 function print(value: unknown) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+function takeLocator(args: string[], flag: string): unknown[] | undefined {
+  const value = takeValue(args, flag);
+  if (value === undefined) return undefined;
+  if (value.length > 32_768) throw new Error("locator JSON is too long");
+  let spec: unknown;
+  try { spec = JSON.parse(value); } catch { throw new Error("invalid locator JSON"); }
+  if (!Array.isArray(spec) || !spec.length || spec.length > 16) throw new Error("locator must contain 1 to 16 native steps");
+  return spec;
 }

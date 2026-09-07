@@ -26,9 +26,31 @@ export interface BrowserStateCache {
         };
     };
 }
-export type BrowserActionTarget = {
+export type LocatorSpec = Array<{
+    kind: "css" | "testid";
+    value: string;
+} | {
+    kind: "role";
+    value: string;
+    name?: string;
+    exact?: boolean;
+} | {
+    kind: "text" | "label" | "placeholder";
+    value: string;
+    exact?: boolean;
+} | {
+    kind: "filter";
+    hasText: string;
+} | {
+    kind: "nth";
+    index: number;
+}>;
+export type BrowserElementTarget = {
     ref: string;
 } | {
+    locator: LocatorSpec;
+};
+export type BrowserActionTarget = BrowserElementTarget | {
     x: number;
     y: number;
 };
@@ -38,14 +60,12 @@ export type BrowserAction = {
     dialogId: string;
     accept: boolean;
     text?: string;
-} | {
+} | ({
     action: "upload";
-    ref: string;
     files: string[];
-} | {
+} & BrowserElementTarget) | ({
     action: "click";
-    ref: string;
-} | {
+} & BrowserElementTarget) | {
     action: "hover";
     target: BrowserActionTarget;
 } | {
@@ -53,12 +73,11 @@ export type BrowserAction = {
     from: BrowserActionTarget;
     to: BrowserActionTarget;
     button?: "left" | "middle" | "right";
-} | {
+} | ({
     action: "type";
-    ref: string;
     text: string;
     replace?: boolean;
-} | {
+} & BrowserElementTarget) | {
     action: "press_key";
     key: string;
 } | {
@@ -73,8 +92,9 @@ export type BrowserAction = {
 } | {
     action: "wait_for";
     ref?: string;
+    locator?: LocatorSpec;
     text?: string;
-    condition?: "exists" | "visible" | "text";
+    condition?: "exists" | "visible" | "text" | "actionable";
     timeoutMs?: number;
 };
 export declare class PiBrowserClient {
@@ -156,6 +176,7 @@ export declare class PiBrowserClient {
         includeText?: boolean;
         view?: "semantic" | "visual" | "both";
         scope?: "viewport" | "element";
+        filter?: LocatorSpec;
         ref?: string;
     }): Promise<{
         contextId: unknown;

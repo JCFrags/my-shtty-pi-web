@@ -98,6 +98,10 @@ test('runtime upload uses the ActionService click and rejects stale observations
     observer: {
       observe: async () => ({ documentId: 'document-1', snapshot: { viewport: { width: 100, height: 100 }, elements: [{ ref: 'input' }] } }),
       currentDocumentId: async () => 'document-1',
+      elementState: async ref => ({ documentId: 'document-1', state: {
+        ref, rect: { x: 0, y: 0, width: 20, height: 30 }, bounds: { x: 0, y: 0, width: 20, height: 30 },
+        visible: true, enabled: true, editable: false, hit: true, focused: true, text: '', tag: 'input', role: 'button', name: 'Upload',
+      } }),
     },
     driver: {}, personaProvider: async () => ({}),
     actionServiceFactory: async () => ({ click: async target => { clicks.push(target); f.opened(); return { x: 10, y: 20 }; } }),
@@ -145,5 +149,29 @@ test('chooser timeout cancels input before disabling interception', async t => {
   t.mock.timers.tick(15000);
   await failed;
   assert.equal(cancelled, true);
+  f.cleanup();
+});
+
+test('cancelled upload keeps its operation alive until the pending click settles', async t => {
+  const f = fixture(t);
+  let release;
+  let entered;
+  let cancelled = false;
+  let settled = false;
+  const gate = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { entered = resolve; });
+  const result = f.uploads.run(f.root, ['file.txt'], async () => {
+    entered();
+    await gate;
+    if (cancelled) throw new Error('click cancelled');
+    f.opened();
+  }, async () => {}, () => { cancelled = true; }).then(() => { settled = true; }, error => { settled = true; return error; });
+  await started;
+  f.uploads.cancel();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, false);
+  release();
+  assert.match((await result).message, /cancelled/);
+  assert.equal(settled, true);
   f.cleanup();
 });

@@ -508,23 +508,23 @@ class Session {
       agentContext: (action, id, url, epoch) => this.tabs.agentContext(action, id, url, epoch),
       agentDialog: (id, request) => this.tabs.respondDialog(id, request),
       waitContexts: (after, timeout, epoch) => this.tabs.waitContexts(after, timeout, epoch),
-      agentObserve: (id, request) => this.tabs.agentObserve(id, request),
-      agentUpload: (id, request) => this.tabs.agentUpload(id, request),
+      agentObserve: (id, request, signal) => this.tabs.agentObserve(id, { ...request, signal }),
+      agentUpload: (id, request, signal) => this.tabs.agentUpload(id, { ...request, signal }),
       agentDownloads: (action, id, contextId, timeout, epoch) => {
         this.control.assertAgent(epoch);
         if (action === "list") return { projectRoot: this.owner?.projectDir, downloads: this.tabs.downloads.list(contextId) };
         if (action === "cancel") return { projectRoot: this.owner?.projectDir, download: this.tabs.downloads.cancel(id!, contextId) };
         return this.tabs.downloads.wait(id!, timeout, this.control, epoch, contextId).then(download => ({ projectRoot: this.owner?.projectDir, download }));
       },
-      agentClick: (id, request) => this.tabs.agentClick(id, request),
-      agentHover: (id, request) => this.tabs.agentHover(id, request),
-      agentDrag: (id, request) => this.tabs.agentDrag(id, request),
-      agentType: (id, request) => this.tabs.agentType(id, request),
-      agentPressKey: (id, request) => this.tabs.agentPressKey(id, request),
-      agentScroll: (id, request) => this.tabs.agentScroll(id, request),
-      agentNavigate: (id, request) => this.tabs.agentNavigate(id, request),
-      agentGetUrl: (id, request) => this.tabs.agentGetUrl(id, request),
-      agentWaitFor: (id, request) => this.tabs.agentWaitFor(id, request),
+      agentClick: (id, request, signal) => this.tabs.agentClick(id, { ...request, signal }),
+      agentHover: (id, request, signal) => this.tabs.agentHover(id, { ...request, signal }),
+      agentDrag: (id, request, signal) => this.tabs.agentDrag(id, { ...request, signal }),
+      agentType: (id, request, signal) => this.tabs.agentType(id, { ...request, signal }),
+      agentPressKey: (id, request, signal) => this.tabs.agentPressKey(id, { ...request, signal }),
+      agentScroll: (id, request, signal) => this.tabs.agentScroll(id, { ...request, signal }),
+      agentNavigate: (id, request, signal) => this.tabs.agentNavigate(id, { ...request, signal }),
+      agentGetUrl: (id, request, signal) => this.tabs.agentGetUrl(id, { ...request, signal }),
+      agentWaitFor: (id, request, signal) => this.tabs.agentWaitFor(id, { ...request, signal }),
       closeTab: (id) => {
         if (!this.tabs.has(id)) return false;
         this.tabs.close(id);

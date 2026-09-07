@@ -58,3 +58,15 @@ test("dialog action requires an ID and explicit decision without a model-supplie
   assert.equal("control_epoch" in act.parameters.properties, false);
   assert.equal(act.description.includes("control_epoch"), false);
 });
+
+test('native locator schemas are bounded and keep all five tool names', async () => {
+  const tools = await registeredTools();
+  assert.equal(tools.length, 5);
+  const properties = tools.find(tool => tool.name === 'browser_act').parameters.properties;
+  for (const field of ['locator', 'from_locator', 'to_locator']) {
+    assert.equal(properties[field].minItems, 1);
+    assert.equal(properties[field].maxItems, 16);
+  }
+  assert(properties.condition.enum.includes('actionable'));
+  assert.equal(tools.find(tool => tool.name === 'browser_observe').parameters.properties.filter.maxItems, 16);
+});

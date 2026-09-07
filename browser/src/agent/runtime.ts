@@ -1,3 +1,7 @@
+import { validateUploadFiles } from "./files";
+import { readiness, sameRect, TargetPreparation } from "./target-preparation";
+import { parseLocator } from "./locator";
+import { requiredText } from "./protocol";
 import { randomUUID } from "node:crypto";
 
 import type { ActionService, BrowserDriver, Persona, Point } from "agentcursor" with {
@@ -14,6 +18,9 @@ import { TerminalBrowserDriver } from "./terminal-browser-driver";
 import type { BrowserControl } from "./control";
 import type {
   AgentActionService,
+  AgentActionTarget,
+  AgentElementTarget,
+  AgentElementState,
   AgentActivity,
   AgentBrowserTarget,
   AgentClickRequest,
@@ -87,6 +94,7 @@ interface AgentOperation {
   documentGeneration: number;
   observationId?: string;
   allowDocumentChange: boolean;
+  signal?: AbortSignal;
 }
 
 export class BrowserAgentRuntime {
@@ -104,6 +112,7 @@ export class BrowserAgentRuntime {
   private actionService: Promise<AgentActionService> | null = null;
   private operationQueue: Promise<void> = Promise.resolve();
   private documentGeneration = 0;
+  private requestSignal: AbortSignal | undefined;
   private activeOperation: AgentOperation | null = null;
   private activityValue: AgentActivity | null = null;
   private pulseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -117,6 +126,7 @@ export class BrowserAgentRuntime {
     this.observer = options.observer ?? new PageObserver(target);
     this.driver = options.driver ?? new TerminalBrowserDriver(target, this.observer, {
       beforeInput: () => this.assertOperationInput(),
+      sleep: (ms) => this.operationSleep(ms),
       onPointer: (event) => this.updateActivity(event),
       onTarget: (point) => this.updateTarget(point),
     });
@@ -146,7 +156,7 @@ export class BrowserAgentRuntime {
       const includeText = options.includeText ?? true;
       const view = options.view ?? "semantic";
       const scope = options.scope ?? "viewport";
-      const page = await this.observer.observe(maxElements, includeText);
+      const page = await this.observer.observe(maxElements, includeText, options.filter);
       this.control.assertAgent(controlEpoch);
       if (documentGeneration !== this.documentGeneration) {
         throw new Error("page changed during observation");
@@ -186,9 +196,10 @@ export class BrowserAgentRuntime {
         snapshot: page.snapshot,
         ...(visual ? { visual } : {}),
       };
+      this.requestSignal?.throwIfAborted();
       this.latestObservation = observation;
       return observation;
-    });
+    }, options.signal);
   }
 
   invalidateDocument(): void {
@@ -243,8 +254,10 @@ export class BrowserAgentRuntime {
       });
       try {
         this.assertOperationInput();
+        const prepared = await this.prepareTargets(operation, observation, elementTarget(request));
+        const ref = prepared.primary!.state.ref;
         const downloadStartSequence = this.target.downloadStartSequence;
-        const point: Point = await action.click({ ref: request.ref });
+        const point: Point = await action.click({ ref });
         await this.assertClickCompletion(operation, downloadStartSequence);
         const finalDocumentId = await this.observer.currentDocumentId();
         const downloadStarted = await this.assertClickCompletion(operation, downloadStartSequence);
@@ -254,7 +267,7 @@ export class BrowserAgentRuntime {
         }
         this.control.assertAgent(operation.controlEpoch);
         return {
-          ref: request.ref,
+          ref: prepared.primary!.state.ref,
           point,
           documentId: finalDocumentId,
           controlEpoch: request.expectedControlEpoch,
@@ -266,7 +279,7 @@ export class BrowserAgentRuntime {
         this.clearOperation(operation);
         this.clearTarget();
       }
-    });
+    }, request.signal);
   }
 
   async upload(request: AgentUploadRequest, projectRoot: string | null): Promise<AgentClickResult> {
@@ -290,9 +303,12 @@ export class BrowserAgentRuntime {
       try {
         this.assertOperationInput();
         if (!this.target.uploads) throw new Error("upload is unavailable in this context");
+        validateUploadFiles(projectRoot, request.files);
+        const prepared = await this.prepareTargets(operation, observation, elementTarget(request));
+        const ref = prepared.primary!.state.ref;
         let point: Point = { x: 0, y: 0 };
         await this.target.uploads.run(projectRoot, request.files, async () => {
-          point = await action.click({ ref: request.ref });
+          point = await action.click({ ref });
         }, async () => {
           this.assertOperation(operation);
           if (await this.observer.currentDocumentId() !== observation.documentId) throw new Error("page changed since observation");
@@ -305,7 +321,7 @@ export class BrowserAgentRuntime {
           throw new Error("page changed since observation");
         }
         return {
-          ref: request.ref,
+          ref: prepared.primary!.state.ref,
           point,
           documentId: finalDocumentId,
           controlEpoch: request.expectedControlEpoch,
@@ -317,7 +333,7 @@ export class BrowserAgentRuntime {
         this.clearOperation(operation);
         this.clearTarget();
       }
-    });
+    }, request.signal);
   }
 
   async hover(request: AgentHoverRequest): Promise<AgentHoverResult> {
@@ -340,7 +356,8 @@ export class BrowserAgentRuntime {
       try {
         this.resetPulse();
         this.assertOperationInput();
-        await action.hover(request.target);
+        const prepared = await this.prepareTargets(operation, observation, request.target, undefined, true);
+        await action.hover(prepared.primary ? { ref: prepared.primary.state.ref } : request.target as { x: number; y: number });
         this.assertOperation(operation);
         const finalDocumentId = await this.observer.currentDocumentId();
         this.assertOperation(operation);
@@ -355,8 +372,9 @@ export class BrowserAgentRuntime {
         this.rethrowOperationError(operation, error);
       } finally {
         this.clearOperation(operation);
+        this.actionService = null;
       }
-    });
+    }, request.signal);
   }
 
   async drag(request: AgentDragRequest): Promise<AgentDragResult> {
@@ -379,7 +397,10 @@ export class BrowserAgentRuntime {
       });
       try {
         this.assertOperationInput();
-        await action.drag(request.from, request.to, request.button);
+        const prepared = await this.prepareTargets(operation, observation, request.from, request.to);
+        await action.drag(
+          prepared.primary ? { ref: prepared.primary.state.ref } : request.from as { x: number; y: number },
+          prepared.destination ? { ref: prepared.destination.state.ref } : request.to as { x: number; y: number }, request.button);
         this.assertOperation(operation);
         const finalDocumentId = await this.observer.currentDocumentId();
         this.assertOperation(operation);
@@ -401,7 +422,7 @@ export class BrowserAgentRuntime {
           this.target.releaseAgentPointer();
         } catch {}
       }
-    });
+    }, request.signal);
   }
 
   async type(request: AgentTypeRequest): Promise<AgentTypeResult> {
@@ -415,10 +436,7 @@ export class BrowserAgentRuntime {
       if (documentId !== observation.documentId) {
         throw new Error("page changed since observation");
       }
-      const refState = await this.observer.refState(request.ref);
-      this.assertObservation(observation, request.observationId, request.expectedControlEpoch);
-      if (!refState.exists || !refState.connected) throw new Error("stale or unknown ref");
-      if (!refState.editable) throw new Error("ref is not editable");
+      requiredText(request.text, request.replace);
       const operation = this.installOperation({
         kind: "type",
         controlEpoch: request.expectedControlEpoch,
@@ -428,7 +446,9 @@ export class BrowserAgentRuntime {
       });
       try {
         this.assertOperationInput();
-        await action.type({ ref: request.ref, text: request.text, replace: request.replace });
+        const prepared = await this.prepareTargets(operation, observation, elementTarget(request), undefined, false, true);
+        const ref = prepared.primary!.state.ref;
+        await action.type({ ref, text: request.text, replace: request.replace });
         this.assertOperation(operation);
         const finalDocumentId = await this.observer.currentDocumentId();
         this.assertOperation(operation);
@@ -436,7 +456,7 @@ export class BrowserAgentRuntime {
           throw new Error("page changed since observation");
         }
         return {
-          ref: request.ref,
+          ref: prepared.primary!.state.ref,
           characters: [...request.text].length,
           documentId: finalDocumentId,
           controlEpoch: request.expectedControlEpoch,
@@ -448,7 +468,7 @@ export class BrowserAgentRuntime {
         this.clearOperation(operation);
         this.clearTarget();
       }
-    });
+    }, request.signal);
   }
 
   async pressKey(request: AgentPressKeyRequest): Promise<AgentPressKeyResult> {
@@ -490,7 +510,7 @@ export class BrowserAgentRuntime {
       } finally {
         this.clearOperation(operation);
       }
-    });
+    }, request.signal);
   }
 
   async scroll(request: AgentScrollRequest): Promise<AgentScrollResult> {
@@ -532,7 +552,7 @@ export class BrowserAgentRuntime {
       } finally {
         this.clearOperation(operation);
       }
-    });
+    }, request.signal);
   }
 
   async navigate(request: AgentNavigateRequest): Promise<AgentNavigateResult> {
@@ -562,7 +582,7 @@ export class BrowserAgentRuntime {
         this.clearOperation(operation);
         this.clearActivity();
       }
-    });
+    }, request.signal);
   }
 
   async getUrl(request: AgentGetUrlRequest): Promise<AgentGetUrlResult> {
@@ -586,14 +606,14 @@ export class BrowserAgentRuntime {
       } finally {
         this.clearOperation(operation);
       }
-    });
+    }, request.signal);
   }
 
   async waitFor(request: AgentWaitForRequest): Promise<AgentWaitForResult> {
     return this.enqueue(async () => {
       const observation = this.latestObservation;
       this.assertObservation(observation, request.observationId, request.expectedControlEpoch);
-      const condition = request.condition ?? (request.ref ? "visible" : "text");
+      const condition = request.condition ?? (request.ref || request.locator ? "visible" : "text");
       const action = await this.actionServiceInstance();
       this.assertObservation(observation, request.observationId, request.expectedControlEpoch);
       const documentId = await this.observer.currentDocumentId();
@@ -610,12 +630,9 @@ export class BrowserAgentRuntime {
       });
       try {
         this.assertOperationInput();
-        const matched = await action.waitFor({
-          ref: request.ref,
-          text: request.text,
-          condition,
-          timeoutMs: request.timeoutMs,
-        });
+        const matched = request.locator || condition === "actionable"
+          ? await this.waitForTarget(request, observation, operation)
+          : await action.waitFor({ ref: request.ref, text: request.text, condition, timeoutMs: request.timeoutMs });
         this.assertOperation(operation);
         const finalDocumentId = await this.observer.currentDocumentId();
         this.assertOperation(operation);
@@ -635,7 +652,74 @@ export class BrowserAgentRuntime {
       } finally {
         this.clearOperation(operation);
       }
-    });
+    }, request.signal);
+  }
+
+  private async operationSleep(ms: number): Promise<void> {
+    const deadline = Date.now() + ms;
+    do {
+      this.assertOperationInput();
+      await new Promise(resolve => setTimeout(resolve, Math.min(40, Math.max(0, deadline - Date.now()))));
+    } while (Date.now() < deadline);
+    this.assertOperationInput();
+  }
+
+  private async prepareTargets(operation: AgentOperation, observation: AgentObservation,
+    from: AgentActionTarget, to?: AgentActionTarget, hover = false, editable = false) {
+    this.assertActionTarget(observation, from);
+    if (to) this.assertActionTarget(observation, to);
+    const preparation = new TargetPreparation(this.observer, observation.documentId,
+      () => this.assertOperation(operation), ms => this.operationSleep(ms));
+    const scroll = !("x" in from || to && "x" in to);
+    const primary = "x" in from ? undefined : await preparation.prepare(from, editable ? "editable" : "pointer", 5_000, scroll);
+    const destination = !to || "x" in to ? undefined : await preparation.prepare(to, "pointer", 5_000, scroll);
+    if (primary && destination) {
+      const point = { x: primary.state.rect.x + primary.state.rect.width / 2, y: primary.state.rect.y + primary.state.rect.height / 2 };
+      if (!await preparation.check(primary, point)) throw new Error("drag source is no longer actionable after preparing destination");
+    }
+    this.assertOperation(operation);
+    if (this.driver instanceof TerminalBrowserDriver) this.driver.bindTargets(preparation, primary, destination, hover);
+    return { primary, destination };
+  }
+
+  private async waitForTarget(request: AgentWaitForRequest, observation: AgentObservation, operation: AgentOperation): Promise<boolean> {
+    if (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 0 || request.timeoutMs > 60_000) throw new Error("invalid wait timeout");
+    const target = elementTarget(request);
+    const condition = request.condition ?? "visible";
+    if (!["exists", "visible", "text", "actionable"].includes(condition)) throw new Error("invalid wait condition");
+    if (condition === "text" && (typeof request.text !== "string" || !request.text.length || request.text.length > 1024 || request.text.includes("\0"))) throw new Error("text wait needs bounded text");
+    const deadline = Date.now() + request.timeoutMs;
+    let previous: AgentElementState | null = null;
+    while (true) {
+      this.assertOperation(operation);
+      let state: AgentElementState | null;
+      if ("locator" in target) {
+        const query = await this.observer.queryLocator(target.locator);
+        this.assertOperation(operation);
+        if (query.documentId !== observation.documentId) throw new Error("page changed since observation");
+        if (query.count > 1) {
+          const candidates = query.matches.map(({ ref, role, name }) => ({ ref, role, name: name.slice(0, 120) }));
+          throw new Error(`ambiguous locator (${query.count} matches); narrow the scope or use nth: ${JSON.stringify(candidates)}`);
+        }
+        state = query.matches[0] ?? null;
+      } else {
+        const result = await this.observer.elementState(target.ref, { documentId: observation.documentId });
+        this.assertOperation(operation);
+        if (result.documentId !== observation.documentId) throw new Error("page changed since observation");
+        state = result.state;
+      }
+      let textMatched = false;
+      if (state && condition === "text") {
+        const probe = await this.observer.probe(state.ref, request.text);
+        this.assertOperation(operation);
+        textMatched = probe.refText.replace(/\s+/g, " ").trim().includes(request.text!.replace(/\s+/g, " ").trim());
+      }
+      if (state && (condition === "exists" || condition === "visible" && state.visible || textMatched ||
+          condition === "actionable" && !readiness(state, "pointer") && previous?.ref === state.ref && sameRect(previous.rect, state.rect))) return true;
+      previous = state;
+      if (Date.now() >= deadline) return false;
+      await this.operationSleep(Math.min(80, deadline - Date.now()));
+    }
   }
 
   private actionServiceInstance(): Promise<AgentActionService> {
@@ -653,6 +737,7 @@ export class BrowserAgentRuntime {
     observationId: string,
     expectedControlEpoch: number,
   ): asserts observation is AgentObservation {
+    this.requestSignal?.throwIfAborted();
     this.control.assertAgent(expectedControlEpoch);
     if (
       !observation ||
@@ -666,8 +751,9 @@ export class BrowserAgentRuntime {
 
   private assertActionTarget(
     observation: AgentObservation,
-    target: { ref: string } | { x: number; y: number },
+    target: AgentActionTarget,
   ): void {
+    if ("locator" in target) { parseLocator(target.locator); return; }
     if ("ref" in target) {
       if (!observation.snapshot.elements.some((element) => element.ref === target.ref)) {
         throw new Error("stale or unknown ref");
@@ -687,6 +773,7 @@ export class BrowserAgentRuntime {
   }
 
   private rethrowOperationError(operation: AgentOperation, error: unknown): never {
+    this.actionService = null;
     try {
       this.assertOperation(operation);
     } catch (guardError) {
@@ -696,21 +783,30 @@ export class BrowserAgentRuntime {
   }
 
   private installOperation(operation: AgentOperation): AgentOperation {
+    operation.signal = this.requestSignal;
+    operation.signal?.throwIfAborted();
     this.activeOperation = operation;
     return operation;
   }
 
   private clearOperation(operation: AgentOperation): void {
-    if (this.activeOperation === operation) this.activeOperation = null;
+    if (this.activeOperation === operation) {
+      this.activeOperation = null;
+      if (this.driver instanceof TerminalBrowserDriver) this.driver.clearTargets();
+    }
   }
 
   private async assertClickCompletion(operation: AgentOperation, sequence: number | undefined): Promise<boolean> {
+    operation.signal?.throwIfAborted();
     this.control.assertAgent(operation.controlEpoch);
     let downloadStarted = sequence !== undefined &&
       this.target.downloadStartSequence !== undefined && this.target.downloadStartSequence > sequence;
     if (!downloadStarted && sequence !== undefined && this.target.waitForDownloadStart &&
       this.documentGeneration !== operation.documentGeneration) {
       const abort = new AbortController();
+      const cancel = () => abort.abort();
+      operation.signal?.addEventListener("abort", cancel, { once: true });
+      if (operation.signal?.aborted) abort.abort();
       const unsubscribe = this.control.subscribe(() => {
         if (this.control.state !== "agent" || this.control.controlEpoch !== operation.controlEpoch) abort.abort();
       });
@@ -718,10 +814,12 @@ export class BrowserAgentRuntime {
         downloadStarted = await this.target.waitForDownloadStart(sequence, abort.signal) &&
           this.target.downloadStartSequence !== undefined && this.target.downloadStartSequence > sequence;
       } finally {
+        operation.signal?.removeEventListener("abort", cancel);
         unsubscribe();
         abort.abort();
       }
     }
+    operation.signal?.throwIfAborted();
     if (downloadStarted && this.activeOperation === operation) {
       this.control.assertAgent(operation.controlEpoch);
     } else {
@@ -731,6 +829,7 @@ export class BrowserAgentRuntime {
   }
 
   private assertOperation(operation: AgentOperation): void {
+    operation.signal?.throwIfAborted();
     if (this.activeOperation !== operation) {
       throw new Error("agent operation is no longer active");
     }
@@ -819,13 +918,29 @@ export class BrowserAgentRuntime {
     this.onActivityChange(this.activity);
   }
 
-  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+  private enqueue<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     const previous = this.operationQueue;
     let release!: () => void;
     this.operationQueue = new Promise<void>((resolve) => {
       release = resolve;
     });
-    return previous.then(operation).finally(release);
+    return previous.then(async () => {
+      signal?.throwIfAborted();
+      this.requestSignal = signal;
+      const abort = () => {
+        if (this.requestSignal !== signal) return;
+        try { this.target.releaseAgentInput(); } catch {}
+        this.target.uploads?.cancel();
+        this.actionService = null;
+        this.latestObservation = null;
+      };
+      signal?.addEventListener("abort", abort, { once: true });
+      try { return await operation(); }
+      finally {
+        signal?.removeEventListener("abort", abort);
+        this.requestSignal = undefined;
+      }
+    }).finally(release);
   }
 }
 
@@ -851,4 +966,9 @@ function pngDimensions(data: Buffer): { width: number; height: number } {
     throw new Error("visual observation returned invalid dimensions");
   }
   return { width, height };
+}
+
+function elementTarget(request: { ref?: string; locator?: import("agentcursor", { with: { "resolution-mode": "import" } }).LocatorSpec }): AgentElementTarget {
+  if ((request.ref !== undefined) === (request.locator !== undefined)) throw new Error("provide exactly one ref or locator");
+  return request.locator !== undefined ? { locator: parseLocator(request.locator) } : { ref: request.ref! };
 }

@@ -169,11 +169,50 @@ fail on hidden windows. The fixtures exercise the real controller and popup
 runtime, opener communication, strict CSP prompts, native dialogs, stale replies,
 timeouts, and beforeunload replay. The files fixture also runs a prompt → popup
 return → project upload → tracked download sequence, including takeover cleanup
-and two owners in the same project. CI runs both fixtures with `xvfb-run -a` on
+and two owners in the same project. The semantic fixture checks locator identity, focus, obstruction, scrolling and
+cancellation using native input. CI runs these fixtures with `xvfb-run -a` on
 Ubuntu; native failures fail the integration job, separate from the optional
 pixel-terminals baseline. The terminal dialog card is build-checked but still
 needs a visual check in a live terminal session.
 
+
+### Semantic targets
+
+The same five Pi tools accept native AgentCursor locator step arrays. Observe
+first, then use exactly one `ref` or `locator` for click, type, upload or hover:
+
+```json
+{"action":"click","locator":[{"kind":"role","value":"button","name":"Save"}]}
+```
+
+Steps support `css`, `role` (optional `name` and `exact`), `label`, `text`,
+`placeholder`, `testid`, `filter` (`hasText`), and `nth` (`index`, including negative
+indexes). Query steps search within the preceding matches; open shadow roots are
+included. Actions reject ambiguity and return up to eight candidate summaries.
+Use a narrower scope or explicit `nth` selection. Arrays contain 1–16 steps;
+query strings are limited to 1024 characters and each scope to 20000 elements.
+Role/name matching uses DOM roles and accessible labels, not a complete browser
+accessibility-tree query. Frames and closed shadow roots are not included.
+
+Drag uses `from_locator` / `to_locator`, or the existing ref/visual-coordinate
+fields. `browser_observe.filter` narrows the element list without changing the
+page-text option. `wait_for` accepts a locator and `exists`, `visible`, `text`, or
+`actionable`; actionable checks stable, enabled, unobstructed pointer access.
+
+Preparation waits for attachment, visibility, enablement, editability for typing,
+and stable geometry. The actual pointer point is checked again after slow-natural
+motion. A locator can resolve a replacement node only before button-down; a ref
+never changes identity. Changed targets can cause bounded natural re-approach,
+never an automatic retry of a dispatched click or edit. Focus is checked before
+insertion. Cancellation/disconnect stops later input and releases held keys/buttons;
+already dispatched side effects are not undone. Re-observe after an interrupted
+action. DOM checks and native input delivery are not atomic.
+
+CLI equivalents use `--locator-json '<steps>'`, `--from-locator-json`,
+`--to-locator-json`, and observe `--filter-json`. Browser socket fields use
+`locator`, `fromLocator`, `toLocator`, and `filter`. Existing ref commands remain
+available. Observer execution stays injectable through `AgentPageObserver`; the
+general root `runJs` path is unchanged.
 
 ### Agent cursor alignment
 
@@ -194,7 +233,7 @@ still required to confirm visual alignment on a particular terminal backend.
 ### Project uploads and tracked downloads
 
 Use `browser_act` with `action: "upload"`, a visible input/button `ref` from the
-latest observation, and `files: ["relative/path.txt"]`. The normal slow-natural
+latest observation or a unique `locator`, and `files: ["relative/path.txt"]`. The normal slow-natural
 AgentCursor click must open a native chooser in that context's main document.
 Direct file inputs, button-triggered choosers, multiple files, and popup contexts
 are supported. Iframe choosers are rejected. The browser process independently

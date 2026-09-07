@@ -153,17 +153,17 @@ Downloads: companion tabs --action downloads [--tab <id>], or --action download_
 
 Commands:
   terminal-browser agent observe [options]
-  terminal-browser agent upload <ref> --files-json '["relative/file.txt"]' --observation <id> --control-epoch <n> [options]
-  terminal-browser agent click <ref> --observation <id> --control-epoch <n> [options]
-  terminal-browser agent hover (<ref> | --x <n> --y <n>) --observation <id> --control-epoch <n> [options]
-  terminal-browser agent drag (--from-ref <ref> | --from-x <n> --from-y <n>) (--to-ref <ref> | --to-x <n> --to-y <n>) --observation <id> --control-epoch <n> [options]
-  terminal-browser agent type <ref> (--text <text> | --stdin) --observation <id> --control-epoch <n> [--replace] [options]
+  terminal-browser agent upload (<ref> | --locator-json <steps>) --files-json '["relative/file.txt"]' --observation <id> --control-epoch <n> [options]
+  terminal-browser agent click (<ref> | --locator-json <steps>) --observation <id> --control-epoch <n> [options]
+  terminal-browser agent hover (<ref> | --locator-json <steps> | --x <n> --y <n>) --observation <id> --control-epoch <n> [options]
+  terminal-browser agent drag (--from-ref <ref> | --from-locator-json <steps> | --from-x <n> --from-y <n>) (--to-ref <ref> | --to-locator-json <steps> | --to-x <n> --to-y <n>) --observation <id> --control-epoch <n> [options]
+  terminal-browser agent type (<ref> | --locator-json <steps>) (--text <text> | --stdin) --observation <id> --control-epoch <n> [--replace] [options]
   terminal-browser agent press-key <key> --observation <id> --control-epoch <n> [options]
   terminal-browser agent scroll --dy <n> [--dx <n>] --observation <id> --control-epoch <n> [options]
   terminal-browser agent dialog --tab <context-id> --dialog-id <id> --control-epoch <n> (--accept | --dismiss) [--text <text> | --stdin]
   terminal-browser agent navigate <url> --control-epoch <n> [options]
   terminal-browser agent get-url --control-epoch <n> [options]
-  terminal-browser agent wait-for (--ref <ref> | --text <text>) [--condition exists|visible|text] [--timeout-ms <n>] --observation <id> --control-epoch <n> [options]
+  terminal-browser agent wait-for (--ref <ref> | --locator-json <steps> | --text <text>) [--condition exists|visible|text|actionable] [--timeout-ms <n>] --observation <id> --control-epoch <n> [options]
   terminal-browser agent status [--browser <key>]
   terminal-browser agent pause --control-epoch <n> [--browser <key>]
   terminal-browser agent resume --control-epoch <n> [--browser <key>]
@@ -181,11 +181,14 @@ Common options:
 
 Options for observe:
   --max-elements <n>    Return 1 to 500 elements (default 200)
+  --filter-json <steps> Filter the element list with native locator steps
   --no-text             Omit visible page text
   --view <kind>         semantic (default), visual, or both
   --scope <kind>        viewport (default) or element
   --ref <ref>           Crop an element visual observation to this ref
   --image-output <path> Write visual PNG bytes to a new file with mode 0600
+
+Locator steps use AgentCursor css, role/name, label, text, placeholder, testid, filter, and nth. Query steps scope the next query. Actions require one match. Arrays have 1–16 steps, each text at most 1024 characters. Disconnecting cancels pending input; already dispatched side effects are not undone.
 
 Type reads stdin only with --stdin. Use --replace to select all and insert
 text as one native edit. Status, pause, and resume are browser-wide and do not

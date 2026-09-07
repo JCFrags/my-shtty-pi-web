@@ -233,6 +233,7 @@ export class TabManager {
   }
 
   async agentObserve(id: number, request: AgentObserveRequest): Promise<AgentActionOutcome<AgentObservation>> {
+    request.signal?.throwIfAborted();
     const tab = this.context(id);
     if (!tab) throw new Error(`no context ${id}`);
     this.control.assertAgent();
@@ -261,7 +262,9 @@ export class TabManager {
   async agentClick(id: number, request: AgentClickRequest): Promise<AgentActionOutcome<AgentClickResult>> {
     const tab = this.context(id);
     if (!tab) throw new Error(`no tab ${id}`);
+    request.signal?.throwIfAborted();
     return this.mutate(id, request.expectedControlEpoch, async () => {
+      request.signal?.throwIfAborted();
       if (!this.agentActivate(id)) {
         throw new Error("cannot activate a tab while terminal-browser is in a modal state");
       }
@@ -276,7 +279,9 @@ export class TabManager {
   async agentUpload(id: number, request: AgentUploadRequest): Promise<AgentActionOutcome<AgentClickResult>> {
     const tab = this.context(id);
     if (!tab) throw new Error(`no tab ${id}`);
+    request.signal?.throwIfAborted();
     return this.mutate(id, request.expectedControlEpoch, async () => {
+      request.signal?.throwIfAborted();
       if (!this.agentActivate(id)) {
         throw new Error("cannot activate a tab while terminal-browser is in a modal state");
       }
@@ -291,7 +296,9 @@ export class TabManager {
   async agentHover(id: number, request: AgentHoverRequest): Promise<AgentActionOutcome<AgentHoverResult>> {
     const tab = this.context(id);
     if (!tab) throw new Error(`no tab ${id}`);
+    request.signal?.throwIfAborted();
     return this.mutate(id, request.expectedControlEpoch, async () => {
+      request.signal?.throwIfAborted();
       if (!this.agentActivate(id)) {
         throw new Error("cannot activate a tab while terminal-browser is in a modal state");
       }
@@ -306,7 +313,9 @@ export class TabManager {
   async agentDrag(id: number, request: AgentDragRequest): Promise<AgentActionOutcome<AgentDragResult>> {
     const tab = this.context(id);
     if (!tab) throw new Error(`no tab ${id}`);
+    request.signal?.throwIfAborted();
     return this.mutate(id, request.expectedControlEpoch, async () => {
+      request.signal?.throwIfAborted();
       if (!this.agentActivate(id)) {
         throw new Error("cannot activate a tab while terminal-browser is in a modal state");
       }
@@ -321,7 +330,9 @@ export class TabManager {
   async agentType(id: number, request: AgentTypeRequest): Promise<AgentActionOutcome<AgentTypeResult>> {
     const tab = this.context(id);
     if (!tab) throw new Error(`no tab ${id}`);
+    request.signal?.throwIfAborted();
     return this.mutate(id, request.expectedControlEpoch, async () => {
+      request.signal?.throwIfAborted();
       if (!this.agentActivate(id)) {
         throw new Error("cannot activate a tab while terminal-browser is in a modal state");
       }
@@ -336,7 +347,9 @@ export class TabManager {
   async agentPressKey(id: number, request: AgentPressKeyRequest): Promise<AgentActionOutcome<AgentPressKeyResult>> {
     const tab = this.context(id);
     if (!tab) throw new Error(`no tab ${id}`);
+    request.signal?.throwIfAborted();
     return this.mutate(id, request.expectedControlEpoch, async () => {
+      request.signal?.throwIfAborted();
       if (!this.agentActivate(id)) {
         throw new Error("cannot activate a tab while terminal-browser is in a modal state");
       }
@@ -351,7 +364,9 @@ export class TabManager {
   async agentScroll(id: number, request: AgentScrollRequest): Promise<AgentActionOutcome<AgentScrollResult>> {
     const tab = this.context(id);
     if (!tab) throw new Error(`no tab ${id}`);
+    request.signal?.throwIfAborted();
     return this.mutate(id, request.expectedControlEpoch, async () => {
+      request.signal?.throwIfAborted();
       if (!this.agentActivate(id)) {
         throw new Error("cannot activate a tab while terminal-browser is in a modal state");
       }
@@ -366,7 +381,9 @@ export class TabManager {
   async agentNavigate(id: number, request: AgentNavigateRequest): Promise<AgentActionOutcome<AgentNavigateResult>> {
     const tab = this.context(id);
     if (!tab) throw new Error(`no tab ${id}`);
+    request.signal?.throwIfAborted();
     return this.mutate(id, request.expectedControlEpoch, async () => {
+      request.signal?.throwIfAborted();
       if (!this.agentActivate(id)) {
         throw new Error("cannot activate a tab while terminal-browser is in a modal state");
       }
@@ -381,7 +398,9 @@ export class TabManager {
   async agentGetUrl(id: number, request: AgentGetUrlRequest): Promise<AgentActionOutcome<AgentGetUrlResult>> {
     const tab = this.context(id);
     if (!tab) throw new Error(`no tab ${id}`);
+    request.signal?.throwIfAborted();
     return this.mutate(id, request.expectedControlEpoch, async () => {
+      request.signal?.throwIfAborted();
       if (!this.agentActivate(id)) {
         throw new Error("cannot activate a tab while terminal-browser is in a modal state");
       }

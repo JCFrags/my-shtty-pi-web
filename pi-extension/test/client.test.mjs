@@ -313,3 +313,46 @@ test('download list, wait and exact cancel survive client reconnect without inte
   assert.equal(calls.at(-1).args[calls.at(-1).args.indexOf('--download-id') + 1], item.id);
   assert.equal(calls.at(-1).args[calls.at(-1).args.indexOf('--tab') + 1], '7');
 });
+
+test('semantic actions and observation filters preserve native locator step arrays', async () => {
+  const calls = [];
+  const locator = [{ kind: 'role', value: 'button', name: 'Save' }, { kind: 'nth', index: 0 }];
+  const client = new PiBrowserClient(async ({ args }) => {
+    calls.push(args);
+    if (args[0] === 'companion') return { tabs: [{ id: 7, active: true }] };
+    if (args[1] === 'status') return { state: 'agent', controlEpoch: 4, reason: null, busy: false };
+    if (args[1] === 'observe') return fixtureObservation();
+    return { matched: true, condition: 'actionable' };
+  });
+  for (const request of [{ action: 'click', locator }, { action: 'type', locator, text: 'Ada' },
+    { action: 'hover', target: { locator } }, { action: 'upload', locator, files: ['file.txt'] },
+    { action: 'wait_for', locator, condition: 'actionable', timeoutMs: 1000 }]) {
+    await client.observe(context, { filter: locator });
+    await client.act(context, request);
+    const args = calls.at(-1);
+    assert.deepEqual(JSON.parse(args[args.indexOf('--locator-json') + 1]), locator);
+  }
+  await client.observe(context, {});
+  await client.act(context, { action: 'drag', from: { locator }, to: { ref: 'e1' } });
+  assert.deepEqual(JSON.parse(calls.at(-1)[calls.at(-1).indexOf('--from-locator-json') + 1]), locator);
+  assert(calls.some(args => args.includes('--filter-json')));
+});
+
+test('failed native actions require a new observation before another attempt', async () => {
+  let clicks = 0;
+  const client = new PiBrowserClient(async ({ args }) => {
+    if (args[0] === 'companion') return { tabs: [{ id: 7, active: true }] };
+    if (args[1] === 'status') return { state: 'agent', controlEpoch: 4, reason: null, busy: false };
+    if (args[1] === 'observe') return fixtureObservation();
+    if (args[1] === 'click') { clicks++; throw new Error('target obstructed'); }
+  });
+  await client.observe(context, {});
+  await assert.rejects(client.act(context, { action: 'click', ref: 'e1' }), error => {
+    assert.match(error.message, /obstructed/);
+    assert.match(error.message, /browser_observe and inspect the outcome/);
+    assert.doesNotMatch(error.message, /retry the action/);
+    return true;
+  });
+  await assert.rejects(client.act(context, { action: 'click', ref: 'e1' }), /browser_observe/);
+  assert.equal(clicks, 1);
+});

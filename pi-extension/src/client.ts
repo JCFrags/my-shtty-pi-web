@@ -83,7 +83,7 @@ function actionableError(stderr: string): string {
     return "Browser control is with the user. Wait until the user returns control, then call browser_control with status or resume.";
   }
   if (/stale control epoch|page changed|stale or unknown observation/iu.test(message)) {
-    return "Browser state changed. Call browser_observe and retry the action.";
+    return "Browser state changed. Call browser_observe and inspect the outcome before deciding on another action.";
   }
   if (/no browser companion/iu.test(message)) return "No companion browser is open. Call browser_open first.";
   return message || "Browser operation failed.";
@@ -100,20 +100,28 @@ export interface BrowserStateCache {
   };
 }
 
-export type BrowserActionTarget = { ref: string } | { x: number; y: number };
+export type LocatorSpec = Array<
+  | { kind: "css" | "testid"; value: string }
+  | { kind: "role"; value: string; name?: string; exact?: boolean }
+  | { kind: "text" | "label" | "placeholder"; value: string; exact?: boolean }
+  | { kind: "filter"; hasText: string }
+  | { kind: "nth"; index: number }
+>;
+export type BrowserElementTarget = { ref: string } | { locator: LocatorSpec };
+export type BrowserActionTarget = BrowserElementTarget | { x: number; y: number };
 
 export type BrowserAction =
   | { action: "dialog"; contextId?: number; dialogId: string; accept: boolean; text?: string }
-  | { action: "upload"; ref: string; files: string[] }
-  | { action: "click"; ref: string }
+  | ({ action: "upload"; files: string[] } & BrowserElementTarget)
+  | ({ action: "click" } & BrowserElementTarget)
   | { action: "hover"; target: BrowserActionTarget }
   | { action: "drag"; from: BrowserActionTarget; to: BrowserActionTarget; button?: "left" | "middle" | "right" }
-  | { action: "type"; ref: string; text: string; replace?: boolean }
+  | ({ action: "type"; text: string; replace?: boolean } & BrowserElementTarget)
   | { action: "press_key"; key: string }
   | { action: "scroll"; dy: number; dx?: number }
   | { action: "navigate"; url: string }
   | { action: "get_url" }
-  | { action: "wait_for"; ref?: string; text?: string; condition?: "exists" | "visible" | "text"; timeoutMs?: number };
+  | { action: "wait_for"; ref?: string; locator?: LocatorSpec; text?: string; condition?: "exists" | "visible" | "text" | "actionable"; timeoutMs?: number };
 
 interface ControlStatus {
   state: "agent" | "human" | "paused";
@@ -168,6 +176,7 @@ function targetArguments(
   target: BrowserActionTarget,
   prefix?: "from" | "to",
 ): string[] {
+  if ("locator" in target) return [prefix ? `--${prefix}-locator-json` : "--locator-json", JSON.stringify(target.locator)];
   if ("ref" in target) return prefix ? [`--${prefix}-ref`, target.ref] : [target.ref];
   const visual = observation.visual;
   if (!visual) throw new Error("Coordinate actions require the latest visual browser_observe result.");
@@ -242,6 +251,7 @@ export class PiBrowserClient {
     includeText?: boolean;
     view?: "semantic" | "visual" | "both";
     scope?: "viewport" | "element";
+    filter?: LocatorSpec;
     ref?: string;
   } = {}) {
     const view = options.view ?? "semantic";
@@ -256,6 +266,7 @@ export class PiBrowserClient {
     if (contextId !== null) args.push("--tab", String(contextId));
     if (options.includeText === false) args.push("--no-text");
     if (options.ref) args.push("--ref", options.ref);
+    if (options.filter) args.push("--filter-json", JSON.stringify(options.filter));
     let directory: string | null = null;
     let imagePath: string | null = null;
     if (view !== "semantic") {
@@ -367,8 +378,8 @@ export class PiBrowserClient {
         throw new Error("Call browser_observe before this action so it uses the current page state.");
       }
     }
-    if (request.action === "upload") args.push("upload", request.ref, "--files-json", JSON.stringify(request.files));
-    if (request.action === "click") args.push("click", request.ref);
+    if (request.action === "upload") args.push("upload", ...targetArguments(this.observation!, request), "--files-json", JSON.stringify(request.files));
+    if (request.action === "click") args.push("click", ...targetArguments(this.observation!, request));
     if (request.action === "hover") {
       args.push("hover", ...targetArguments(this.observation!, request.target));
     }
@@ -377,7 +388,7 @@ export class PiBrowserClient {
         ...targetArguments(this.observation!, request.to, "to"));
       if (request.button) args.push("--button", request.button);
     }
-    if (request.action === "type") args.push("type", request.ref, "--stdin", ...(request.replace ? ["--replace"] : []));
+    if (request.action === "type") args.push("type", ...targetArguments(this.observation!, request), "--stdin", ...(request.replace ? ["--replace"] : []));
     if (request.action === "press_key") args.push("press-key", request.key);
     if (request.action === "scroll") args.push("scroll", "--dy", String(request.dy), "--dx", String(request.dx ?? 0));
     if (request.action === "navigate") args.push("navigate", request.url);
@@ -385,6 +396,7 @@ export class PiBrowserClient {
     if (request.action === "wait_for") {
       args.push("wait-for");
       if (request.ref) args.push("--ref", request.ref);
+      if (request.locator) args.push("--locator-json", JSON.stringify(request.locator));
       if (request.text) args.push("--text", request.text);
       if (request.condition) args.push("--condition", request.condition);
       if (request.timeoutMs !== undefined) args.push("--timeout-ms", String(request.timeoutMs));
@@ -395,12 +407,24 @@ export class PiBrowserClient {
     const targetContext = this.observation?.contextId ?? this.contextId;
     if (targetContext !== null) args.push("--tab", String(targetContext));
     args.push("--control-epoch", String(status.controlEpoch));
-    const value = await this.runner({
+    let value: Record<string, unknown>;
+    try {
+      value = await this.runner({
       args,
       context,
       ...(request.action === "type" ? { stdin: request.text } : {}),
       timeoutMs: request.action === "wait_for" ? (request.timeoutMs ?? 10_000) + 5_000 : 300_000,
-    }) as Record<string, unknown>;
+      }) as Record<string, unknown>;
+    } catch (error) {
+      if (needsObservation) {
+        this.observation = null;
+        const message = error instanceof Error ? error.message : "Browser operation failed.";
+        if (!/browser_observe|control is with the user/i.test(message)) {
+          throw new Error(`${message} Call browser_observe and inspect the outcome before deciding on another action.`);
+        }
+      }
+      throw error;
+    }
     if (value.dialog) {
       const dialog = this.cacheDialog(value.dialog);
       return { action: request.action, completed: false, contextId: dialog.contextId, dialog };

@@ -1,9 +1,13 @@
-import type { PageSnapshot, Rect } from "agentcursor" with {
+import { DOM_HELPERS, LOCATOR_HELPERS, REGISTRY_SETUP } from "./page-script";
+import { parseLocator } from "./locator";
+import type { LocatorSpec, PageSnapshot, Point, Rect } from "agentcursor" with {
   "resolution-mode": "import",
 };
 
 import type {
   AgentBrowserTarget,
+  AgentElementState,
+  AgentLocatorQuery,
   AgentPageObserver,
   AgentPageProbe,
   ObservedPage,
@@ -13,160 +17,16 @@ const DEFAULT_MAX_ELEMENTS = 200;
 const MAX_ELEMENTS = 500;
 const MAX_TEXT = 20_000;
 
-const REGISTRY_SETUP = String.raw`
-const registryKey = "__terminalBrowserAgentRegistry";
-const existingRegistry = globalThis[registryKey];
-const makeDocumentId = () => {
-  try {
-    return globalThis.crypto.randomUUID();
-  } catch {}
-  return "document-" + Date.now() + "-" + Math.random().toString(36).slice(2);
-};
-const registry =
-  existingRegistry && existingRegistry.ownerDocument === document
-    ? existingRegistry
-    : {
-        ownerDocument: document,
-        documentId: makeDocumentId(),
-        refs: new WeakMap(),
-        elements: new Map(),
-        next: 1,
-      };
-if (registry !== existingRegistry) globalThis[registryKey] = registry;
-`;
 
-function observeSource(maxElements: number, includeText: boolean): string {
+function observeSource(maxElements: number, includeText: boolean, filter?: LocatorSpec): string {
   return String.raw`(() => {
 ${REGISTRY_SETUP}
 const limit = ${maxElements};
 const includeText = ${includeText ? "true" : "false"};
-const clean = (value, max) => String(value ?? "")
-  .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
-  .replace(/\s+/g, " ")
-  .trim()
-  .slice(0, max);
-const refFor = (element) => {
-  let ref = registry.refs.get(element);
-  if (!ref) {
-    ref = "e" + registry.next++;
-    registry.refs.set(element, ref);
-    registry.elements.set(ref, element);
-  }
-  return ref;
-};
-const contentEditable = (element) => {
-  const value = element.getAttribute("contenteditable");
-  return element.isContentEditable === true ||
-    (value !== null && value.toLowerCase() !== "false");
-};
-const hasTabIndex = (element) => element.hasAttribute("tabindex") && element.tabIndex >= 0;
-const roleOf = (element) => {
-  const explicit = element.getAttribute("role")?.trim().split(/\s+/, 1)[0];
-  if (explicit) return explicit;
-  const tag = element.tagName.toLowerCase();
-  if (tag === "a" && element.hasAttribute("href")) return "link";
-  if (tag === "button" || tag === "summary") return "button";
-  if (tag === "textarea") return "textbox";
-  if (tag === "select") return element.multiple ? "listbox" : "combobox";
-  if (tag === "input") {
-    const type = (element.getAttribute("type") || "text").toLowerCase();
-    if (["button", "image", "reset", "submit"].includes(type)) return "button";
-    if (type === "checkbox") return "checkbox";
-    if (type === "radio") return "radio";
-    if (type === "range") return "slider";
-    if (type === "number") return "spinbutton";
-    if (type === "search") return "searchbox";
-    return "textbox";
-  }
-  if (contentEditable(element)) return "textbox";
-  return "generic";
-};
-const candidate = (element) => {
-  const tag = element.tagName.toLowerCase();
-  if (tag === "input" && (element.getAttribute("type") || "text").toLowerCase() === "hidden") {
-    return false;
-  }
-  if (element.getAttribute("role")?.trim()) return true;
-  if (hasTabIndex(element) || contentEditable(element)) return true;
-  return tag === "a" && element.hasAttribute("href") ||
-    ["button", "input", "textarea", "select", "summary"].includes(tag);
-};
-const rectInfo = (element) => {
-  const rect = element.getBoundingClientRect();
-  const style = getComputedStyle(element);
-  const opacity = Number.parseFloat(style.opacity || "1");
-  if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" ||
-      !Number.isFinite(opacity) || opacity <= 0 || rect.width <= 0 || rect.height <= 0) {
-    return null;
-  }
-  return {
-    rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-    visible: true,
-    inViewport: rect.bottom > 0 && rect.right > 0 && rect.left < innerWidth && rect.top < innerHeight,
-  };
-};
-const visibleText = (element) => {
-  try {
-    return element.innerText || element.textContent || "";
-  } catch {
-    return element.textContent || "";
-  }
-};
-const labelledBy = (element) => {
-  const value = element.getAttribute("aria-labelledby");
-  if (!value) return "";
-  const root = element.getRootNode();
-  const getById = root && typeof root.getElementById === "function"
-    ? (id) => root.getElementById(id)
-    : () => null;
-  return value.split(/\s+/).map((id) => getById(id)?.textContent || "").join(" ");
-};
-const associatedLabel = (element) => {
-  try {
-    if ("labels" in element && element.labels?.length) {
-      return Array.from(element.labels).map((label) => visibleText(label)).join(" ");
-    }
-  } catch {}
-  try {
-    return element.closest("label") ? visibleText(element.closest("label")) : "";
-  } catch {
-    return "";
-  }
-};
-const accessibleName = (element) => {
-  const labelled = [
-    element.getAttribute("aria-label"),
-    labelledBy(element),
-    associatedLabel(element),
-    element.getAttribute("alt"),
-    element.getAttribute("placeholder"),
-    element.getAttribute("title"),
-    visibleText(element),
-  ];
-  if (!labelled[3]) {
-    try {
-      labelled[3] = element.querySelector("[alt]")?.getAttribute("alt") || "";
-    } catch {}
-  }
-  return clean(labelled.find((value) => clean(value, 200)) || "", 200);
-};
-const valueOf = (element) => {
-  const tag = element.tagName.toLowerCase();
-  const type = (element.getAttribute("type") || "text").toLowerCase();
-  if (tag === "input" && type === "password") return "";
-  if (tag === "input" || tag === "textarea") return clean(element.value, 200);
-  if (tag === "select") return clean(Array.from(element.selectedOptions || []).map((option) => option.textContent).join(" "), 200);
-  if (contentEditable(element)) return clean(element.textContent, 200);
-  return "";
-};
-const editableOf = (element) => {
-  const tag = element.tagName.toLowerCase();
-  const type = (element.getAttribute("type") || "text").toLowerCase();
-  if (contentEditable(element)) return true;
-  if (tag === "textarea") return !element.disabled && !element.readOnly;
-  if (tag === "input" && type !== "hidden") return !element.disabled && !element.readOnly;
-  return false;
-};
+${DOM_HELPERS}
+${LOCATOR_HELPERS}
+const selected = ${JSON.stringify(filter ?? null)};
+const selectedNodes = selected ? new Set(queryLocator(selected)) : null;
 const elements = [];
 const shadowTexts = [];
 const visited = new WeakSet();
@@ -174,7 +34,7 @@ const walk = (node) => {
   if (node instanceof Element) {
     if (visited.has(node)) return;
     visited.add(node);
-    if (candidate(node) && elements.length < limit) {
+    if ((selectedNodes ? selectedNodes.has(node) : candidate(node)) && elements.length < limit) {
       const info = rectInfo(node);
       if (info) {
         const value = valueOf(node);
@@ -319,9 +179,47 @@ export class PageObserver implements AgentPageObserver {
   async observe(
     maxElements = DEFAULT_MAX_ELEMENTS,
     includeText = true,
+    filter?: LocatorSpec,
   ): Promise<ObservedPage> {
-    const result = await this.target.runJs(observeSource(boundMaxElements(maxElements), includeText));
+    const result = await this.target.runJs(observeSource(boundMaxElements(maxElements), includeText, filter === undefined ? undefined : parseLocator(filter)));
     return parseObservedPage(result);
+  }
+
+  async queryLocator(spec: LocatorSpec): Promise<AgentLocatorQuery> {
+    const result = await this.target.runJs(`(() => {
+${REGISTRY_SETUP}
+${DOM_HELPERS}
+${LOCATOR_HELPERS}
+const nodes = queryLocator(${JSON.stringify(parseLocator(spec))});
+return { documentId: registry.documentId, count: nodes.length, matches: nodes.slice(0, 8).map(node => stateOf(node)) };
+})()`);
+    if (!result || typeof result !== "object") throw new Error("invalid locator result");
+    const query = result as AgentLocatorQuery;
+    if (typeof query.documentId !== "string" || !Number.isSafeInteger(query.count) || query.count < 0 ||
+        !Array.isArray(query.matches) || query.matches.length > 8) throw new Error("invalid locator result");
+    query.matches.forEach(validateElementState);
+    return query;
+  }
+
+  async elementState(ref: string, options: { point?: Point; scroll?: boolean; documentId?: string } = {}): Promise<{ documentId: string; state: AgentElementState | null }> {
+    const result = await this.target.runJs(`(() => {
+${REGISTRY_SETUP}
+${DOM_HELPERS}
+${LOCATOR_HELPERS}
+const expected = ${JSON.stringify(options.documentId ?? null)};
+if (expected && registry.documentId !== expected) throw new Error("page changed since observation");
+const element = registry.elements.get(${JSON.stringify(ref)});
+if (${options.scroll === true} && element?.isConnected && shown(element)) {
+  const rect = clippedRect(element);
+  const full = element.getBoundingClientRect();
+  if (rect.width < full.width || rect.height < full.height) element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+}
+return { documentId: registry.documentId, state: stateOf(element, ${JSON.stringify(options.point ?? null)}) };
+})()`);
+    if (!result || typeof result !== "object" || typeof (result as { documentId?: unknown }).documentId !== "string") throw new Error("invalid element state");
+    const state = result as { documentId: string; state: AgentElementState | null };
+    if (state.state !== null) validateElementState(state.state);
+    return state;
   }
 
   async currentDocumentId(): Promise<string> {
@@ -401,4 +299,15 @@ function parseObservedPage(value: unknown): ObservedPage {
 function boundMaxElements(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_MAX_ELEMENTS;
   return Math.min(MAX_ELEMENTS, Math.max(1, Math.floor(value)));
+}
+
+function validateElementState(state: AgentElementState): void {
+  if (!state || typeof state !== "object" || !state.rect || !state.bounds ||
+      ![state.bounds.x, state.bounds.y, state.bounds.width, state.bounds.height].every(Number.isFinite) ||
+      ![state.rect.x, state.rect.y, state.rect.width, state.rect.height].every(Number.isFinite) ||
+      state.rect.width < 0 || state.rect.height < 0 ||
+      ![state.ref, state.text, state.tag, state.name, state.role].every(value => typeof value === "string") ||
+      ![state.visible, state.enabled, state.editable, state.hit, state.focused].every(value => typeof value === "boolean")) {
+    throw new Error("invalid element state");
+  }
 }

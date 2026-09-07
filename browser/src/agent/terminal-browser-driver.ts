@@ -1,3 +1,5 @@
+import { TargetPreparation } from "./target-preparation";
+import type { PreparedTarget } from "./target-preparation";
 import type {
   BrowserDriver,
   CursorSample,
@@ -58,6 +60,13 @@ export class TerminalBrowserDriver implements BrowserDriver {
   private readonly onTarget: ((point: Point) => void) | undefined;
   private lastPosition: Point | null = null;
   private persona: Persona | null = null;
+  private binding: { preparation: TargetPreparation; primary?: PreparedTarget; destination?: PreparedTarget; hover: boolean } | null = null;
+
+  bindTargets(preparation: TargetPreparation, primary?: PreparedTarget, destination?: PreparedTarget, hover = false): void {
+    this.binding = { preparation, primary, destination, hover };
+  }
+
+  clearTargets(): void { this.binding = null; }
 
   constructor(
     private readonly target: AgentBrowserTarget,
@@ -72,8 +81,19 @@ export class TerminalBrowserDriver implements BrowserDriver {
     this.onTarget = options.onTarget;
   }
 
-  snapshot(maxElements: number, includeText: boolean) {
-    return this.observer.observe(maxElements, includeText).then(({ snapshot }) => snapshot);
+  async snapshot(maxElements: number, includeText: boolean) {
+    this.beforeInput?.();
+    const { snapshot } = await this.observer.observe(maxElements, includeText);
+    this.beforeInput?.();
+    for (const prepared of [this.binding?.primary, this.binding?.destination]) {
+      if (!prepared) continue;
+      const state = prepared.state;
+      const element = { ref: state.ref, tag: state.tag, role: state.role, name: state.name, rect: state.rect, editable: state.editable };
+      const index = snapshot.elements.findIndex(candidate => candidate.ref === state.ref);
+      if (index < 0) snapshot.elements.push(element);
+      else snapshot.elements[index] = element;
+    }
+    return snapshot;
   }
 
   usePersona(persona: Persona): void {
@@ -93,7 +113,11 @@ export class TerminalBrowserDriver implements BrowserDriver {
     this.assertContentMode(mode);
     await this.replayMove(samples, true);
     const last = samples.at(-1);
-    if (last) this.lastPosition = { x: last.x, y: last.y };
+    if (last) {
+      const point = { x: last.x, y: last.y };
+      if (this.binding?.hover) await this.readyAt(point, this.binding.primary);
+      this.lastPosition = point;
+    }
   }
 
   async click(args: ClickArgs): Promise<void> {
@@ -101,7 +125,12 @@ export class TerminalBrowserDriver implements BrowserDriver {
     try {
       await this.replayMove(args.samples, true);
       if (args.preClickDwellMs > 0) await this.sleep(args.preClickDwellMs);
+      await this.readyAt(args.target, this.binding?.primary);
+      if (this.binding?.primary) this.binding.primary.committed = true;
       await this.clickCycle(args.target, args.button, args.pressMs);
+      if (args.dblclick && this.binding?.primary && !await this.binding.preparation.check(this.binding.primary, args.target)) {
+        throw new Error("target changed after first click; action was not retried");
+      }
       if (args.dblclick) await this.clickCycle(args.target, args.button, args.pressMs);
       this.lastPosition = { ...args.target };
     } catch (error) {
@@ -109,8 +138,12 @@ export class TerminalBrowserDriver implements BrowserDriver {
     }
   }
 
-  ensureVisible(ref?: string, _point?: Point) {
-    return ref ? this.observer.ensureVisible(ref) : Promise.resolve(null);
+  async ensureVisible(ref?: string, _point?: Point) {
+    this.beforeInput?.();
+    const prepared = [this.binding?.primary, this.binding?.destination].find(target => target?.state.ref === ref);
+    const result = prepared ? prepared.state.rect : ref ? await this.observer.ensureVisible(ref) : null;
+    this.beforeInput?.();
+    return result;
   }
 
   async type(args: TypeArgs): Promise<void> {
@@ -118,8 +151,10 @@ export class TerminalBrowserDriver implements BrowserDriver {
     validateTypeArgs(args);
     try {
       if (args.replace) {
+        await this.assertTypingTarget();
         this.beforeInput?.();
         await this.target.agentSelectAll();
+        await this.assertTypingTarget();
         this.beforeInput?.();
         await this.target.agentInsertText(args.text);
         return;
@@ -129,6 +164,7 @@ export class TerminalBrowserDriver implements BrowserDriver {
           const delay = operation.delayMs;
           if (!Number.isFinite(delay) || delay < 0) throw new Error("invalid typing schedule");
           await this.sleep(delay);
+          await this.assertTypingTarget();
           if (operation.t === "back") await this.dispatchKeyCycle(parseAgentKey("Backspace"));
           else await this.dispatchTextKey(operation.ch);
         }
@@ -137,6 +173,7 @@ export class TerminalBrowserDriver implements BrowserDriver {
       for (const character of args.text) {
         const range = boundedDelay(args.perKeyMinMs, args.perKeyMaxMs, this.random);
         await this.sleep(range);
+        await this.assertTypingTarget();
         await this.dispatchTextKey(character);
       }
     } catch (error) {
@@ -217,18 +254,39 @@ export class TerminalBrowserDriver implements BrowserDriver {
 
   async drag(args: DragArgs): Promise<void> {
     this.assertContentMode(args.mode);
-    const start = args.samples[0];
-    if (!start) throw new Error("drag needs a movement path");
-    const down = { kind: "down" as const, x: start.x, y: start.y, button: args.button };
+    const first = args.samples[0];
+    if (!first) throw new Error("drag needs a movement path");
+    let start = { x: first.x, y: first.y };
+    let samples = args.samples;
     let held = false;
     let failure: unknown;
     try {
       await this.approachDragSource(start);
+      if (this.binding) {
+        const binding = this.binding;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const sourceReady = !binding.primary || await binding.preparation.check(binding.primary, start);
+          const destinationReady = !binding.destination || await binding.preparation.check(binding.destination, args.target);
+          if (sourceReady && destinationReady) break;
+          if (attempt === 2) throw new Error("drag target changed before input");
+          if (!sourceReady && binding.primary) start = await binding.preparation.refresh(binding.primary, start);
+          if (!destinationReady && binding.destination) Object.assign(args.target, await binding.preparation.refresh(binding.destination, args.target));
+          samples = await this.naturalSamples(start, args.target);
+          await this.approachDragSource(start);
+          await this.sleep(80);
+        }
+      }
+      if (this.binding?.primary) this.binding.primary.committed = true;
+      if (this.binding?.destination) this.binding.destination.committed = true;
       this.beforeInput?.();
+      const down = { kind: "down" as const, x: start.x, y: start.y, button: args.button };
       this.target.agentPointer(down);
       this.onPointer?.(down);
       held = true;
-      await this.replayMove(args.samples, true);
+      await this.replayMove(samples, true);
+      if (this.binding?.destination && !await this.binding.preparation.check(this.binding.destination, args.target)) {
+        throw new Error("drag destination changed after input; action was not retried");
+      }
       this.lastPosition = { ...args.target };
     } catch (error) {
       failure = error;
@@ -255,20 +313,47 @@ export class TerminalBrowserDriver implements BrowserDriver {
   }
 
   async resolveLocator(
-    _spec: ResolveLocatorArgs[0],
-    _opts: ResolveLocatorArgs[1],
+    spec: ResolveLocatorArgs[0],
+    opts: ResolveLocatorArgs[1],
   ): Promise<Awaited<ReturnType<BrowserDriver["resolveLocator"]>>> {
-    this.unsupported("resolveLocator");
+    this.beforeInput?.();
+    const documentId = await this.observer.currentDocumentId();
+    this.beforeInput?.();
+    const preparation = new TargetPreparation(this.observer, documentId, () => this.beforeInput?.(), this.sleep, this.now);
+    return preparation.resolveLocator(spec, opts.timeoutMs, opts.scrollIntoView);
   }
 
-  private async approachDragSource(start: Point): Promise<void> {
+  private async assertTypingTarget(): Promise<void> {
+    this.beforeInput?.();
+    if (this.binding?.primary) await this.binding.preparation.assertFocused(this.binding.primary);
+    this.beforeInput?.();
+  }
+
+  private async readyAt(point: Point, target?: PreparedTarget): Promise<void> {
+    if (!target || !this.binding) return;
+    const binding = this.binding;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      this.beforeInput?.();
+      if (await binding.preparation.check(target, point)) {
+        this.beforeInput?.();
+        return;
+      }
+      if (attempt === 2) break;
+      const updated = await binding.preparation.refresh(target, point);
+      await this.approachDragSource(updated);
+      point.x = updated.x;
+      point.y = updated.y;
+      await this.sleep(80);
+    }
+    throw new Error("target changed or is obstructed before input");
+  }
+
+  private async naturalSamples(from: Point, to: Point): Promise<CursorSample[]> {
     const persona = this.persona;
     if (!persona) throw new Error("slow-natural persona is not configured");
-    const current = await this.cursorState();
-    if (current.x === start.x && current.y === start.y) return;
     const traits = persona.traits();
     const { generateMove } = await loadAgentCursor();
-    const samples = generateMove(current, start, {
+    return generateMove(from, to, {
       rng: persona.rng,
       targetWidth: 24,
       speedFactor: traits.speedFactor,
@@ -278,7 +363,12 @@ export class TerminalBrowserDriver implements BrowserDriver {
       overshootMag: traits.overshootMag,
       handedness: traits.handedness,
     });
-    await this.replayMove(samples, true);
+  }
+
+  private async approachDragSource(start: Point): Promise<void> {
+    const current = await this.cursorState();
+    if (current.x === start.x && current.y === start.y) return;
+    await this.replayMove(await this.naturalSamples(current, start), true);
     this.lastPosition = { ...start };
   }
 
@@ -300,6 +390,7 @@ export class TerminalBrowserDriver implements BrowserDriver {
       await this.target.agentKeyDown(key);
       held = true;
       if (key.character) {
+        await this.assertTypingTarget();
         this.beforeInput?.();
         await this.target.agentKeyChar(key);
       }

@@ -2,7 +2,7 @@ import { StringEnum, Type } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { PiBrowserClient } from "./client.js";
-import type { BrowserAction, ToolContext } from "./client.js";
+import type { BrowserAction, BrowserActionTarget, BrowserElementTarget, LocatorSpec, ToolContext } from "./client.js";
 import { loadWebResearch } from "./web-research.js";
 
 function context(ctx: ExtensionContext, signal?: AbortSignal): ToolContext {
@@ -48,10 +48,20 @@ const tabsParameters = Type.Object({
   url: Type.Optional(Type.String({ maxLength: 8192 })),
 }, { additionalProperties: false });
 
+const locatorText = Type.String({ minLength: 1, maxLength: 1024, pattern: "^[^\\u0000-\\u001f\\u007f-\\u009f]+$" });
+const locatorParameters = Type.Array(Type.Union([
+  Type.Object({ kind: StringEnum(["css", "testid"] as const), value: locatorText }, { additionalProperties: false }),
+  Type.Object({ kind: StringEnum(["role"] as const), value: locatorText, name: Type.Optional(locatorText), exact: Type.Optional(Type.Boolean()) }, { additionalProperties: false }),
+  Type.Object({ kind: StringEnum(["text", "label", "placeholder"] as const), value: locatorText, exact: Type.Optional(Type.Boolean()) }, { additionalProperties: false }),
+  Type.Object({ kind: StringEnum(["filter"] as const), hasText: locatorText }, { additionalProperties: false }),
+  Type.Object({ kind: StringEnum(["nth"] as const), index: Type.Integer({ minimum: -20000, maximum: 20000 }) }, { additionalProperties: false }),
+]), { minItems: 1, maxItems: 16, description: "Native AgentCursor steps. Query steps scope following queries. Actions require one match; use nth only for explicit selection." });
+
 const observeParameters = Type.Object({
   context_id: Type.Optional(Type.Integer({ minimum: 1 })),
   max_elements: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
   include_text: Type.Optional(Type.Boolean()),
+  filter: Type.Optional(locatorParameters),
   view: Type.Optional(StringEnum(["semantic", "visual", "both"] as const)),
   scope: Type.Optional(StringEnum(["viewport", "element"] as const)),
   ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
@@ -64,6 +74,9 @@ const actParameters = Type.Object({
   accept: Type.Optional(Type.Boolean()),
   action: StringEnum(["upload", "click", "hover", "drag", "type", "press_key", "scroll", "navigate", "get_url", "wait_for", "dialog"] as const),
   ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+  locator: Type.Optional(locatorParameters),
+  from_locator: Type.Optional(locatorParameters),
+  to_locator: Type.Optional(locatorParameters),
   x: Type.Optional(Type.Number({ minimum: 0, maximum: 20000 })),
   y: Type.Optional(Type.Number({ minimum: 0, maximum: 20000 })),
   from_ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
@@ -79,7 +92,7 @@ const actParameters = Type.Object({
   dx: Type.Optional(Type.Number({ minimum: -20000, maximum: 20000 })),
   dy: Type.Optional(Type.Number({ minimum: -20000, maximum: 20000 })),
   url: Type.Optional(Type.String({ minLength: 1, maxLength: 8192 })),
-  condition: Type.Optional(StringEnum(["exists", "visible", "text"] as const)),
+  condition: Type.Optional(StringEnum(["exists", "visible", "text", "actionable"] as const)),
   timeout_ms: Type.Optional(Type.Integer({ minimum: 0, maximum: 60000 })),
 }, { additionalProperties: false });
 
@@ -94,6 +107,9 @@ function browserAction(params: {
   dialog_id?: string;
   accept?: boolean;
   ref?: string;
+  locator?: LocatorSpec;
+  from_locator?: LocatorSpec;
+  to_locator?: LocatorSpec;
   x?: number;
   y?: number;
   from_ref?: string;
@@ -109,7 +125,7 @@ function browserAction(params: {
   dx?: number;
   dy?: number;
   url?: string;
-  condition?: "exists" | "visible" | "text";
+  condition?: "exists" | "visible" | "text" | "actionable";
   timeout_ms?: number;
 }): BrowserAction {
   if (params.action === "dialog") {
@@ -117,25 +133,24 @@ function browserAction(params: {
     return { action: "dialog", contextId: params.context_id, dialogId: params.dialog_id, accept: params.accept, text: params.text };
   }
   if (params.action === "upload") {
-    if (!params.ref || !params.files?.length) throw new Error("upload requires a trigger/input ref and project file paths");
-    return { action: "upload", ref: params.ref, files: params.files };
+    if (!params.files?.length) throw new Error("upload requires a trigger/input ref and project file paths");
+    return { action: "upload", ...elementTarget(params.ref, params.locator), files: params.files };
   }
   if (params.action === "click") {
-    if (!params.ref) throw new Error("click requires ref from browser_observe");
-    return { action: "click", ref: params.ref };
+    return { action: "click", ...elementTarget(params.ref, params.locator) };
   }
   if (params.action === "hover") {
-    const target = actionTarget(params.ref, params.x, params.y, "hover");
+    const target = actionTarget(params.ref, params.x, params.y, "hover", params.locator);
     return { action: "hover", target };
   }
   if (params.action === "drag") {
-    const from = actionTarget(params.from_ref, params.from_x, params.from_y, "drag from");
-    const to = actionTarget(params.to_ref, params.to_x, params.to_y, "drag to");
+    const from = actionTarget(params.from_ref, params.from_x, params.from_y, "drag from", params.from_locator);
+    const to = actionTarget(params.to_ref, params.to_x, params.to_y, "drag to", params.to_locator);
     return { action: "drag", from, to, button: params.button };
   }
   if (params.action === "type") {
-    if (!params.ref || params.text === undefined) throw new Error("type requires ref and text");
-    return { action: "type", ref: params.ref, text: params.text, replace: params.replace };
+    if (params.text === undefined) throw new Error("type requires ref and text");
+    return { action: "type", ...elementTarget(params.ref, params.locator), text: params.text, replace: params.replace };
   }
   if (params.action === "press_key") {
     if (!params.key) throw new Error("press_key requires key");
@@ -150,10 +165,11 @@ function browserAction(params: {
     return { action: "navigate", url: params.url };
   }
   if (params.action === "get_url") return { action: "get_url" };
-  if (!params.ref && !params.text) throw new Error("wait_for requires ref or text");
+  if (!params.ref && !params.locator && !params.text) throw new Error("wait_for requires ref or text");
   return {
     action: "wait_for",
     ref: params.ref,
+    locator: params.locator,
     text: params.text,
     condition: params.condition,
     timeoutMs: params.timeout_ms,
@@ -165,7 +181,12 @@ function actionTarget(
   x: number | undefined,
   y: number | undefined,
   name: string,
-): { ref: string } | { x: number; y: number } {
+  locator?: LocatorSpec,
+): BrowserActionTarget {
+  if (locator !== undefined) {
+    if (x !== undefined || y !== undefined) throw new Error("locator cannot be combined with coordinates");
+    return elementTarget(ref, locator);
+  }
   const hasCoordinates = x !== undefined || y !== undefined;
   if ((ref !== undefined) === hasCoordinates || (hasCoordinates && (x === undefined || y === undefined))) {
     throw new Error(`${name} requires exactly one ref or x/y pair`);
@@ -217,7 +238,7 @@ export default async function terminalBrowserExtension(pi: ExtensionAPI): Promis
   pi.registerTool({
     name: "browser_observe",
     label: "Browser Observe",
-    description: "Read a bounded semantic, visual, or combined observation from the active companion tab. Visual captures cover the viewport or one referenced element.",
+    description: "Read a bounded semantic, visual, or combined observation from the active companion tab. Use filter with native locator steps to narrow the element list. Visual captures cover the viewport or one referenced element.",
     promptSnippet: "Observe the active companion browser tab before acting",
     promptGuidelines: ["Use browser_observe after browser_open and after each page-changing browser_act call. Then use one browser_act action."],
     parameters: observeParameters,
@@ -238,6 +259,7 @@ export default async function terminalBrowserExtension(pi: ExtensionAPI): Promis
         view: params.view,
         scope: params.scope,
         ref: params.ref,
+        filter: params.filter,
       }));
     },
   });
@@ -245,7 +267,7 @@ export default async function terminalBrowserExtension(pi: ExtensionAPI): Promis
   pi.registerTool({
     name: "browser_act",
     label: "Browser Act",
-    description: "Perform one native action in this Pi pane's companion browser: upload, click, hover, drag, type, press_key, scroll, navigate, get_url, wait_for, or dialog. Dialog responses require the exact dialog_id returned by observe, tabs, resume, or an interrupted action and an explicit accept decision. Optional context_id must match that dialog. Never assume acceptance. Upload clicks a visible input or chooser button through AgentCursor, then assigns 1–16 regular project files (32 MiB each, 64 MiB total); secret paths and project escapes are rejected. Changing cwd does not change the companion project root; reopen the companion to adopt another project. Coordinates require the latest visual observation.",
+    description: "Perform one native action in this Pi pane's companion browser: upload, click, hover, drag, type, press_key, scroll, navigate, get_url, wait_for, or dialog. Dialog responses require the exact dialog_id returned by observe, tabs, resume, or an interrupted action and an explicit accept decision. Optional context_id must match that dialog. Never assume acceptance. Upload clicks a visible input or chooser button through AgentCursor, then assigns 1–16 regular project files (32 MiB each, 64 MiB total); secret paths and project escapes are rejected. Changing cwd does not change the companion project root; reopen the companion to adopt another project. Use exactly one ref or locator (native bounded step array) for click, type, upload or hover; drag accepts from_locator/to_locator. Ambiguous locators fail; scope or nth selects explicitly. wait_for accepts locator and actionable. Coordinates require the latest visual observation.",
     promptSnippet: "Perform one native companion-browser action",
     promptGuidelines: ["Use browser_act for exactly one action per call, then use browser_observe again when the page may have changed."],
     parameters: actParameters,
@@ -263,4 +285,9 @@ export default async function terminalBrowserExtension(pi: ExtensionAPI): Promis
       return result(await client.control(context(ctx, signal), params.action));
     },
   });
+}
+
+function elementTarget(ref: string | undefined, locator: LocatorSpec | undefined): BrowserElementTarget {
+  if ((ref !== undefined) === (locator !== undefined)) throw new Error("provide exactly one ref or locator");
+  return locator !== undefined ? { locator } : { ref: ref! };
 }

@@ -1,3 +1,5 @@
+import { parseElementTarget } from "./agent/protocol";
+import { parseLocator } from "./agent/locator";
 import type { DialogResponse } from "./agent/dialogs";
 import fs from "node:fs";
 import net from "node:net";
@@ -79,18 +81,18 @@ export interface ControlHost {
   agentStatus(): AgentControlSnapshot;
   agentPause(expectedEpoch: number): AgentControlSnapshot;
   agentResume(expectedEpoch: number): AgentControlSnapshot;
-  agentObserve(id: number, request: AgentObserveRequest): Promise<AgentActionOutcome<AgentObservation>>;
-  agentUpload(id: number, request: AgentUploadRequest): Promise<AgentActionOutcome<AgentClickResult>>;
+  agentObserve(id: number, request: AgentObserveRequest, signal?: AbortSignal): Promise<AgentActionOutcome<AgentObservation>>;
+  agentUpload(id: number, request: AgentUploadRequest, signal?: AbortSignal): Promise<AgentActionOutcome<AgentClickResult>>;
   agentDownloads(action: "list" | "wait" | "cancel", id: string | undefined, contextId: number | undefined, timeout: number, epoch: number): unknown;
-  agentClick(id: number, request: AgentClickRequest): Promise<AgentActionOutcome<AgentClickResult>>;
-  agentHover(id: number, request: AgentHoverRequest): Promise<AgentActionOutcome<AgentHoverResult>>;
-  agentDrag(id: number, request: AgentDragRequest): Promise<AgentActionOutcome<AgentDragResult>>;
-  agentType(id: number, request: AgentTypeRequest): Promise<AgentActionOutcome<AgentTypeResult>>;
-  agentPressKey(id: number, request: AgentPressKeyRequest): Promise<AgentActionOutcome<AgentPressKeyResult>>;
-  agentScroll(id: number, request: AgentScrollRequest): Promise<AgentActionOutcome<AgentScrollResult>>;
-  agentNavigate(id: number, request: AgentNavigateRequest): Promise<AgentActionOutcome<AgentNavigateResult>>;
-  agentGetUrl(id: number, request: AgentGetUrlRequest): Promise<AgentActionOutcome<AgentGetUrlResult>>;
-  agentWaitFor(id: number, request: AgentWaitForRequest): Promise<AgentActionOutcome<AgentWaitForResult>>;
+  agentClick(id: number, request: AgentClickRequest, signal?: AbortSignal): Promise<AgentActionOutcome<AgentClickResult>>;
+  agentHover(id: number, request: AgentHoverRequest, signal?: AbortSignal): Promise<AgentActionOutcome<AgentHoverResult>>;
+  agentDrag(id: number, request: AgentDragRequest, signal?: AbortSignal): Promise<AgentActionOutcome<AgentDragResult>>;
+  agentType(id: number, request: AgentTypeRequest, signal?: AbortSignal): Promise<AgentActionOutcome<AgentTypeResult>>;
+  agentPressKey(id: number, request: AgentPressKeyRequest, signal?: AbortSignal): Promise<AgentActionOutcome<AgentPressKeyResult>>;
+  agentScroll(id: number, request: AgentScrollRequest, signal?: AbortSignal): Promise<AgentActionOutcome<AgentScrollResult>>;
+  agentNavigate(id: number, request: AgentNavigateRequest, signal?: AbortSignal): Promise<AgentActionOutcome<AgentNavigateResult>>;
+  agentGetUrl(id: number, request: AgentGetUrlRequest, signal?: AbortSignal): Promise<AgentActionOutcome<AgentGetUrlResult>>;
+  agentWaitFor(id: number, request: AgentWaitForRequest, signal?: AbortSignal): Promise<AgentActionOutcome<AgentWaitForResult>>;
   agentContext(action: "open" | "activate" | "close", id: number | undefined, url: string | undefined, epoch: number): Promise<unknown>;
   agentDialog(id: number, request: DialogResponse): Promise<unknown>;
   waitContexts(afterId: number, timeoutMs: number, expectedEpoch: number): Promise<unknown>;
@@ -114,6 +116,10 @@ interface ControlRequest {
   view?: unknown;
   scope?: unknown;
   ref?: unknown;
+  locator?: unknown;
+  fromLocator?: unknown;
+  toLocator?: unknown;
+  filter?: unknown;
   x?: unknown;
   y?: unknown;
   fromRef?: unknown;
@@ -218,16 +224,20 @@ export class Registry {
   private serve(connection: net.Socket) {
     let buffer = "";
     let closed = false;
+    const pending = new Set<AbortController>();
+    const cancel = () => { for (const controller of pending) controller.abort(new Error("browser request disconnected")); };
     const tooLarge = () => {
       if (closed) return;
       closed = true;
+      cancel();
       buffer = "";
       connection.end(`${JSON.stringify({ id: null, ok: false, error: "request too large" })}\n`);
     };
     connection.setEncoding("utf8");
-    connection.on("error", () => {});
+    connection.on("error", () => { closed = true; cancel(); });
     connection.on("close", () => {
       closed = true;
+      cancel();
     });
     connection.on("data", (chunk: string) => {
       if (closed) return;
@@ -240,7 +250,14 @@ export class Registry {
           tooLarge();
           return;
         }
-        if (line.trim()) void this.dispatch(line, connection);
+        if (line.trim()) {
+          const controller = new AbortController();
+          pending.add(controller);
+          void this.dispatch(line, connection, controller.signal).finally(() => {
+            controller.abort(new Error("browser request finished"));
+            pending.delete(controller);
+          });
+        }
         if (closed) return;
         newline = buffer.indexOf("\n");
       }
@@ -248,7 +265,7 @@ export class Registry {
     });
   }
 
-  private async dispatch(line: string, connection: net.Socket) {
+  private async dispatch(line: string, connection: net.Socket, signal: AbortSignal) {
     let id: string | null = null;
     try {
       const request = JSON.parse(line) as ControlRequest;
@@ -264,7 +281,8 @@ export class Registry {
         connection.end(`${JSON.stringify({ id, ok: true, data: { tab } })}\n`);
         return;
       }
-      const data = await this.handle(request);
+      const data = await this.handle(request, signal);
+      signal.throwIfAborted();
       const response = binaryResponse(id, data);
       connection.write(`${JSON.stringify(response.header)}\n`);
       if (response.binary) connection.end(response.binary);
@@ -277,7 +295,8 @@ export class Registry {
     }
   }
 
-  private async handle(request: ControlRequest): Promise<unknown> {
+  private async handle(request: ControlRequest, signal: AbortSignal): Promise<unknown> {
+    signal.throwIfAborted();
     switch (request.cmd) {
       case "state":
         return this.record();
@@ -327,7 +346,7 @@ export class Registry {
         return this.host.agentResume(requiredEpoch(request.expectedControlEpoch, "agent.resume"));
       case "agent.observe": {
         const parsed = observeRequest(request);
-        return this.host.agentObserve(parsed.tab, parsed.request);
+        return this.host.agentObserve(parsed.tab, parsed.request, signal);
       }
       case "agent.downloads": {
         if (request.action !== "list" && request.action !== "wait" && request.action !== "cancel") throw new Error("invalid download action");
@@ -340,43 +359,43 @@ export class Registry {
       case "agent.upload": {
         const parsed = clickRequest(request);
         if (!Array.isArray(request.files) || !request.files.length || request.files.length > 16 || request.files.some(file => typeof file !== "string" || file.length > 4096)) throw new Error("upload requires 1 to 16 file paths");
-        return this.host.agentUpload(parsed.tab, { ...parsed.request, files: request.files as string[] });
+        return this.host.agentUpload(parsed.tab, { ...parsed.request, files: request.files as string[] }, signal);
       }
       case "agent.click": {
         const parsed = clickRequest(request);
-        return this.host.agentClick(parsed.tab, parsed.request);
+        return this.host.agentClick(parsed.tab, parsed.request, signal);
       }
       case "agent.hover": {
         const parsed = parseHoverRequest(request);
-        return this.host.agentHover(parsed.tab, parsed.request);
+        return this.host.agentHover(parsed.tab, parsed.request, signal);
       }
       case "agent.drag": {
         const parsed = parseDragRequest(request);
-        return this.host.agentDrag(parsed.tab, parsed.request);
+        return this.host.agentDrag(parsed.tab, parsed.request, signal);
       }
       case "agent.type": {
         const parsed = parseTypeRequest(request);
-        return this.host.agentType(parsed.tab, parsed.request);
+        return this.host.agentType(parsed.tab, parsed.request, signal);
       }
       case "agent.press-key": {
         const parsed = parsePressKeyRequest(request);
-        return this.host.agentPressKey(parsed.tab, parsed.request);
+        return this.host.agentPressKey(parsed.tab, parsed.request, signal);
       }
       case "agent.scroll": {
         const parsed = parseScrollRequest(request);
-        return this.host.agentScroll(parsed.tab, parsed.request);
+        return this.host.agentScroll(parsed.tab, parsed.request, signal);
       }
       case "agent.navigate": {
         const parsed = parseNavigateRequest(request);
-        return this.host.agentNavigate(parsed.tab, parsed.request);
+        return this.host.agentNavigate(parsed.tab, parsed.request, signal);
       }
       case "agent.get-url": {
         const parsed = parseGetUrlRequest(request);
-        return this.host.agentGetUrl(parsed.tab, parsed.request);
+        return this.host.agentGetUrl(parsed.tab, parsed.request, signal);
       }
       case "agent.wait-for": {
         const parsed = parseWaitForRequest(request);
-        return this.host.agentWaitFor(parsed.tab, parsed.request);
+        return this.host.agentWaitFor(parsed.tab, parsed.request, signal);
       }
       case "agent-touch": {
         if (request.tab === undefined) throw new Error("agent-touch needs a tab id");
@@ -443,7 +462,7 @@ function observeRequest(request: ControlRequest): {
   }
   return {
     tab,
-    request: { maxElements, includeText, view, scope, ...(ref ? { ref } : {}) },
+    request: { maxElements, includeText, view, scope, ...(ref ? { ref } : {}), ...(request.filter === undefined ? {} : { filter: parseLocator(request.filter) }) },
   };
 }
 
@@ -485,7 +504,7 @@ function clickRequest(request: ControlRequest): {
   return {
     tab,
     request: {
-      ref: requiredAgentString(request.ref, "ref"),
+      ...parseElementTarget(request.ref, request.locator),
       observationId: requiredAgentString(request.observationId, "observationId"),
       expectedControlEpoch: requiredEpoch(request.expectedControlEpoch, "agent.click"),
     },

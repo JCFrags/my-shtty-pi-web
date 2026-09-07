@@ -22,6 +22,7 @@ export class BrowserUploads {
     let assigned = false;
     let accepting = false;
     let node: number | null = null;
+    let clickTask: Promise<unknown> | null = null;
     let resolveChooser!: (event: Record<string, unknown>) => void;
     let rejectCancelled!: (error: Error) => void;
     const chooser = new Promise<Record<string, unknown>>(resolve => { resolveChooser = resolve; });
@@ -50,7 +51,8 @@ export class BrowserUploads {
       await check();
       await this.send("Page.setInterceptFileChooserDialog", { enabled: true });
       await check();
-      const event = await Promise.race([Promise.all([click(), chooser]).then(([, event]) => event), aborted]);
+      clickTask = click();
+      const event = await Promise.race([Promise.all([clickTask, chooser]).then(([, event]) => event), aborted]);
       await check();
       const current = await this.send("Page.getFrameTree") as typeof tree;
       if (!node || event.frameId !== tree.frameTree.frame.id || current.frameTree.frame.loaderId !== tree.frameTree.frame.loaderId) throw new Error("file chooser is not in the observed document");
@@ -63,6 +65,7 @@ export class BrowserUploads {
       await check();
     } finally {
       clearTimeout(timer);
+      await clickTask?.catch(() => {});
       if (!assigned && node !== null) await this.send("DOM.setFileInputFiles", { backendNodeId: node, files: [] }).catch(() => {});
       await this.send("Page.setInterceptFileChooserDialog", { enabled: false }).catch(() => {});
       this.contents.debugger.off("message", onMessage);

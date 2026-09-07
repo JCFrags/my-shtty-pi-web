@@ -2,7 +2,7 @@ import type { BrowserDialog } from "./dialogs";
 
 export type AgentActionOutcome<T> = T | { contextId: number; completed: false; dialog?: BrowserDialog; openedContextId?: number };
 
-import type { ActionService, MouseButton, PageSnapshot, Point, Rect } from "agentcursor" with {
+import type { ActionService, LocatorSpec, MouseButton, PageSnapshot, Point, Rect } from "agentcursor" with {
   "resolution-mode": "import",
 };
 import type { AgentKey } from "./key";
@@ -40,8 +40,20 @@ export interface AgentPageProbe {
   documentText: string;
 }
 
+export interface AgentElementState {
+  ref: string; rect: Rect; bounds: Rect; visible: boolean; enabled: boolean; editable: boolean;
+  hit: boolean; focused: boolean; text: string; tag: string; name: string; role: string;
+}
+
+export interface AgentLocatorQuery {
+  documentId: string; count: number; matches: AgentElementState[];
+}
+
 export interface AgentPageObserver {
-  observe(maxElements: number, includeText: boolean): Promise<ObservedPage>;
+  queryLocator(spec: LocatorSpec): Promise<AgentLocatorQuery>;
+  elementState(ref: string, options?: { point?: Point; scroll?: boolean; documentId?: string }): Promise<{ documentId: string; state: AgentElementState | null }>;
+
+  observe(maxElements: number, includeText: boolean, filter?: LocatorSpec): Promise<ObservedPage>;
   currentDocumentId(): Promise<string>;
   ensureVisible(ref: string): Promise<Rect | null>;
   refState(ref: string): Promise<{ exists: boolean; connected: boolean; editable: boolean }>;
@@ -61,7 +73,8 @@ export interface AgentVisualObservation {
   data: Buffer;
 }
 
-export interface AgentObserveRequest {
+export interface AgentObserveRequest extends AgentRequest {
+  filter?: LocatorSpec;
   maxElements: number;
   includeText: boolean;
   view: AgentObservationView;
@@ -84,8 +97,11 @@ export interface AgentActivity {
   pulse: boolean;
 }
 
-export interface AgentClickRequest {
-  ref: string;
+export interface AgentRequest { signal?: AbortSignal }
+
+export interface AgentClickRequest extends AgentRequest {
+  ref?: string;
+  locator?: LocatorSpec;
   observationId: string;
   expectedControlEpoch: number;
 }
@@ -102,9 +118,10 @@ export interface AgentClickResult {
   url: string;
 }
 
-export type AgentActionTarget = { ref: string } | { x: number; y: number };
+export type AgentElementTarget = { ref: string } | { locator: LocatorSpec };
+export type AgentActionTarget = AgentElementTarget | { x: number; y: number };
 
-export interface AgentHoverRequest {
+export interface AgentHoverRequest extends AgentRequest {
   target: AgentActionTarget;
   observationId: string;
   expectedControlEpoch: number;
@@ -117,7 +134,7 @@ export interface AgentHoverResult {
   url: string;
 }
 
-export interface AgentDragRequest {
+export interface AgentDragRequest extends AgentRequest {
   from: AgentActionTarget;
   to: AgentActionTarget;
   button: MouseButton;
@@ -134,8 +151,9 @@ export interface AgentDragResult {
   url: string;
 }
 
-export interface AgentTypeRequest {
-  ref: string;
+export interface AgentTypeRequest extends AgentRequest {
+  ref?: string;
+  locator?: LocatorSpec;
   text: string;
   replace: boolean;
   observationId: string;
@@ -150,7 +168,7 @@ export interface AgentTypeResult {
   url: string;
 }
 
-export interface AgentPressKeyRequest {
+export interface AgentPressKeyRequest extends AgentRequest {
   key: string;
   observationId: string;
   expectedControlEpoch: number;
@@ -163,7 +181,7 @@ export interface AgentPressKeyResult {
   url: string;
 }
 
-export interface AgentScrollRequest {
+export interface AgentScrollRequest extends AgentRequest {
   dx: number;
   dy: number;
   observationId: string;
@@ -178,7 +196,7 @@ export interface AgentScrollResult {
   url: string;
 }
 
-export interface AgentNavigateRequest {
+export interface AgentNavigateRequest extends AgentRequest {
   url: string;
   expectedControlEpoch: number;
 }
@@ -189,7 +207,7 @@ export interface AgentNavigateResult {
   controlEpoch: number;
 }
 
-export interface AgentGetUrlRequest {
+export interface AgentGetUrlRequest extends AgentRequest {
   expectedControlEpoch: number;
 }
 
@@ -198,18 +216,19 @@ export interface AgentGetUrlResult {
   controlEpoch: number;
 }
 
-export interface AgentWaitForRequest {
+export interface AgentWaitForRequest extends AgentRequest {
   observationId: string;
   expectedControlEpoch: number;
   ref?: string;
   text?: string;
-  condition?: "exists" | "visible" | "text";
+  locator?: LocatorSpec;
+  condition?: "exists" | "visible" | "text" | "actionable";
   timeoutMs: number;
 }
 
 export interface AgentWaitForResult {
   matched: boolean;
-  condition: "exists" | "visible" | "text";
+  condition: "exists" | "visible" | "text" | "actionable";
   ref?: string;
   documentId: string;
   controlEpoch: number;
