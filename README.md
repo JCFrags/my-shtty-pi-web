@@ -169,3 +169,57 @@ fail on hidden windows. The fixtures exercise the real controller and popup
 runtime, opener communication, strict CSP prompts, native dialogs, stale replies,
 timeouts, and beforeunload replay. The terminal dialog card is build-checked but
 still needs a visual check in a live terminal session.
+
+
+### Project uploads and tracked downloads
+
+Use `browser_act` with `action: "upload"`, a visible input/button `ref` from the
+latest observation, and `files: ["relative/path.txt"]`. The normal slow-natural
+AgentCursor click must open a native chooser in that context's main document.
+Direct file inputs, button-triggered choosers, multiple files, and popup contexts
+are supported. Iframe choosers are rejected. The browser process independently
+canonicalizes paths against the owning Pi project before the click and again
+before assignment. Uploads accept 1–16 existing regular files, at most 32 MiB each
+and 64 MiB total. Directories, special files, project escapes (including symlinks),
+and conventional secret paths such as `.env`, `.ssh`, credentials and private-key
+files are rejected. This is a path policy, not a file-content secret scanner.
+The companion captures its canonical owning project root at launch. Changing the
+Pi session or current directory does not change that root or pane ownership.
+CLI relative upload paths resolve from its current directory; paths outside the
+launch root fail with an instruction to reopen the companion. Close and reopen
+(or restart) the companion to adopt another project. No upload contents are
+logged or returned. Interception ends on success, failure,
+15-second timeout, navigation, takeover, or context closure.
+
+Use `browser_tabs` with `action: "downloads"` to list up to 64 retained transfers;
+`context_id` optionally filters the owning context, including closed contexts.
+`download_wait` and `download_cancel` take an exact `download_id`. Waits are
+bounded by `timeout_ms` (0–60000), return the current state on timeout, run outside
+the action queue, and fail on control takeover. Up to 32 transfers can be active.
+One Electron-session dispatcher routes each download by its source WebContents,
+not the first browser callback. Results include the captured `projectRoot`, state, byte progress, and a
+project-relative `savePath` under `.terminal-browser-downloads/item-*/`. Each
+transfer gets a private unique directory and a sanitized filename. Existing files
+are not overwritten. Files are never auto-opened or executed. Failed path setup
+has an empty save path. Closing a context or browser interrupts active transfers.
+History survives CLI/Pi client reconnects and browser restart/reboot recovery:
+up to 64 validated records with stable download IDs are stored in the owning
+project's `.terminal-browser-downloads/history-<sha256>.json` using atomic private
+(mode `0600`) writes. The filename hashes the full owning workspace/tab/pane tuple:
+separate owners in the same project cannot access each other's history through
+browser tools; restarting the same owner restores its history. Starts and terminal states are flushed immediately;
+progress is flushed at most once per second. On restart, unfinished transfers
+become `interrupted`; terminal records remain available to list and wait, but
+transfers are not resumed. Malformed or unsafe metadata is ignored without
+returning its contents. Tests cover graceful restart and abrupt process death
+(the reboot recovery path). Unowned browser instances reject transfers.
+A download-link click can report page-state invalidation before the transfer
+appears; use the download list to check the actual transfer state.
+
+CLI equivalents are `agent upload <ref> --files-json '["relative/path.txt"]'
+--observation <id> --control-epoch <n>` and `companion tabs --action
+downloads|download_wait|download_cancel` (wait/cancel require `--download-id`).
+Pi supplies observations, epochs, and exact companion routing internally; there
+are still exactly five browser tools. The pinned `test:electron` command above
+also verifies direct/button/popup uploads, takeover cleanup and reuse, concurrent
+owner-scoped downloads, cancellation, network interruption, and context closure.

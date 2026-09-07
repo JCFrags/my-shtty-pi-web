@@ -1,3 +1,5 @@
+import { BrowserUploads } from "../agent/uploads";
+import { registerDownloadSource, type BrowserDownloads } from "../agent/downloads";
 import { BrowserWindow, screen } from "electron";
 import { BrowserDialogs } from "../agent/dialogs";
 import type {
@@ -43,6 +45,7 @@ export interface ControllerOptions {
 export class BrowserController {
   readonly surface: Surface;
   readonly dialogs: BrowserDialogs;
+  readonly uploads: BrowserUploads;
   onPopupCreated: ((popup: PopupWindow, openerContentsId: number) => void) | null = null;
   onPopupClosed: ((popup: PopupWindow) => void) | null = null;
   private readonly popupSurface: Surface;
@@ -146,6 +149,7 @@ export class BrowserController {
       },
     });
     this.dialogs = new BrowserDialogs(this.window.webContents, (method, params) => this.cdp(method, params));
+    this.uploads = new BrowserUploads(this.window.webContents, (method, params) => this.cdp(method, params));
     if (this.clipboardRead) allowClipboardRead(this.window.webContents);
     this.input = new PageInput({
       contents: () => this.window.webContents,
@@ -251,6 +255,8 @@ export class BrowserController {
     this.selectedPopup = popup;
     this.onPopupChange?.();
   }
+
+  trackDownloads(tracker: BrowserDownloads, contextId: number) { registerDownloadSource(this.window.webContents, tracker, contextId); }
 
   get contentsId(): number { return this.window.webContents.id; }
 
@@ -559,6 +565,7 @@ export class BrowserController {
 
   agentPointer(event: ProgrammaticPointerEvent) {
     if (this.stopped) return;
+    if (event.kind === "down" && event.button === "left") this.uploads.acceptChooserFromClick();
     this.input.programmaticPointer(event);
   }
 

@@ -17,6 +17,7 @@ import type {
   AgentActivity,
   AgentBrowserTarget,
   AgentClickRequest,
+  AgentUploadRequest,
   AgentClickResult,
   AgentDragRequest,
   AgentDragResult,
@@ -191,6 +192,7 @@ export class BrowserAgentRuntime {
   }
 
   invalidateDocument(): void {
+    this.target.uploads?.cancel();
     this.documentGeneration += 1;
     this.latestObservation = null;
     this.actionService = null;
@@ -201,6 +203,7 @@ export class BrowserAgentRuntime {
   }
 
   invalidateControl(): void {
+    this.target.uploads?.cancel();
     this.documentGeneration += 1;
     this.latestObservation = null;
     this.actionService = null;
@@ -241,6 +244,57 @@ export class BrowserAgentRuntime {
       try {
         this.assertOperationInput();
         const point: Point = await action.click({ ref: request.ref });
+        this.assertOperation(operation);
+        const finalDocumentId = await this.observer.currentDocumentId();
+        this.assertOperation(operation);
+        if (finalDocumentId !== observation.documentId) {
+          throw new Error("page changed since observation");
+        }
+        return {
+          ref: request.ref,
+          point,
+          documentId: finalDocumentId,
+          controlEpoch: request.expectedControlEpoch,
+          url: this.target.currentUrl(),
+        };
+      } catch (error) {
+        this.rethrowOperationError(operation, error);
+      } finally {
+        this.clearOperation(operation);
+        this.clearTarget();
+      }
+    });
+  }
+
+  async upload(request: AgentUploadRequest, projectRoot: string | null): Promise<AgentClickResult> {
+    return this.enqueue(async () => {
+      const observation = this.latestObservation;
+      this.assertObservation(observation, request.observationId, request.expectedControlEpoch);
+      const action = await this.actionServiceInstance();
+      this.assertObservation(observation, request.observationId, request.expectedControlEpoch);
+      const documentId = await this.observer.currentDocumentId();
+      this.assertObservation(observation, request.observationId, request.expectedControlEpoch);
+      if (documentId !== observation.documentId) {
+        throw new Error("page changed since observation");
+      }
+      const operation = this.installOperation({
+        kind: "click",
+        controlEpoch: request.expectedControlEpoch,
+        documentGeneration: this.documentGeneration,
+        observationId: observation.observationId,
+        allowDocumentChange: false,
+      });
+      try {
+        this.assertOperationInput();
+        if (!this.target.uploads) throw new Error("upload is unavailable in this context");
+        let point: Point = { x: 0, y: 0 };
+        await this.target.uploads.run(projectRoot, request.files, async () => {
+          point = await action.click({ ref: request.ref });
+        }, async () => {
+          this.assertOperation(operation);
+          if (await this.observer.currentDocumentId() !== observation.documentId) throw new Error("page changed since observation");
+          this.assertOperation(operation);
+        }, () => this.invalidateControl());
         this.assertOperation(operation);
         const finalDocumentId = await this.observer.currentDocumentId();
         this.assertOperation(operation);

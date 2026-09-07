@@ -9,6 +9,7 @@ import type { AgentKey } from "./key";
 import type { ProgrammaticPointerEvent } from "../page/input";
 
 export interface AgentBrowserTarget {
+  uploads?: import("./uploads").BrowserUploads;
   runJs(source: string): Promise<unknown>;
   agentPointer(event: ProgrammaticPointerEvent): void;
   releaseAgentPointer(): void;
@@ -85,6 +86,10 @@ export interface AgentClickRequest {
   ref: string;
   observationId: string;
   expectedControlEpoch: number;
+}
+
+export interface AgentUploadRequest extends AgentClickRequest {
+  files: string[];
 }
 
 export interface AgentClickResult {

@@ -142,14 +142,18 @@ close all open browsers.
   },
   agent: {
     summary: "Observe, control, and act through native AgentCursor",
-    usage: "terminal-browser agent <observe|click|hover|drag|type|press-key|scroll|navigate|get-url|wait-for|dialog|status|pause|resume> [options]",
+    usage: "terminal-browser agent <observe|upload|click|hover|drag|type|press-key|scroll|navigate|get-url|wait-for|dialog|status|pause|resume> [options]",
     body: `
 Reads a fresh observation and performs native actions on the selected tab.
 Responses are JSON. Observation-bound actions require the latest observation
 and control epoch; navigation invalidates earlier observations.
 
+Uploads accept 1–16 regular files within the owning Pi project, at most 32 MiB each and 64 MiB total. Secret paths and symlink escapes are rejected. The launch project root stays fixed across Pi cwd/session changes; reopen the companion to use another project. CLI relative paths use the current working directory. A visible native click opens the chooser; no file contents are returned.
+Downloads: companion tabs --action downloads [--tab <id>], or --action download_wait|download_cancel --download-id <id> [--timeout-ms <n>]. Saved files stay under .terminal-browser-downloads in the owning project and are never opened.
+
 Commands:
   terminal-browser agent observe [options]
+  terminal-browser agent upload <ref> --files-json '["relative/file.txt"]' --observation <id> --control-epoch <n> [options]
   terminal-browser agent click <ref> --observation <id> --control-epoch <n> [options]
   terminal-browser agent hover (<ref> | --x <n> --y <n>) --observation <id> --control-epoch <n> [options]
   terminal-browser agent drag (--from-ref <ref> | --from-x <n> --from-y <n>) (--to-ref <ref> | --to-x <n> --to-y <n>) --observation <id> --control-epoch <n> [options]

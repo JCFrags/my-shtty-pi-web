@@ -277,3 +277,39 @@ test("uncached and replaced dialog IDs never reach the CLI", async () => {
   await client.act(context, { action: "dialog", dialogId: id, accept: false });
   assert.equal(responses, 1);
 });
+
+test('uploads carry only file paths and use cached context, observation and epoch', async () => {
+  const calls = [];
+  const client = new PiBrowserClient(async request => {
+    calls.push(request);
+    if (request.args[1] === 'status') return { state: 'agent', controlEpoch: 4 };
+    if (request.args[1] === 'observe') return fixtureObservation();
+    return { controlEpoch: 4, observationId: 'hidden' };
+  });
+  await assert.rejects(client.act(context, { action: 'upload', ref: 'e1', files: ['data/a.txt'] }), /browser_observe/);
+  await client.observe(context);
+  assert.deepEqual(await client.act(context, { action: 'upload', ref: 'e1', files: ['data/a.txt'] }), { action: 'upload', completed: true });
+  const call = calls.find(call => call.args[1] === 'upload');
+  assert.deepEqual(call.args.slice(0, 5), ['agent', 'upload', 'e1', '--files-json', '["data/a.txt"]']);
+  assert.equal(call.args[call.args.indexOf('--tab') + 1], '7');
+  assert.equal(call.stdin, undefined);
+  await assert.rejects(client.act(context, { action: 'upload', ref: 'e1', files: ['data/a.txt'] }), /browser_observe/);
+});
+
+test('download list, wait and exact cancel survive client reconnect without internal identifiers', async () => {
+  const calls = [];
+  const item = { id: 'f'.repeat(36), contextId: 7, state: 'completed', name: 'file.txt', savePath: '.terminal-browser-downloads/item/file.txt', received: 12, total: 12, controlEpoch: 4, socket: 'hidden-socket' };
+  const runner = async request => { calls.push(request); return request.args.includes('downloads') ? { projectRoot: '/original/project', downloads: Array(80).fill(item) } : { projectRoot: '/original/project', download: item }; };
+  const client = new PiBrowserClient(runner);
+  const list = await client.tabs(context, { action: 'downloads', contextId: 7 });
+  assert.equal(list.downloads.length, 64);
+  assert.equal(list.projectRoot, "/original/project");
+  assert.equal(JSON.stringify(list).includes('hidden-socket'), false);
+  const reconnected = new PiBrowserClient(runner);
+  const waited = await reconnected.tabs(context, { action: 'download_wait', downloadId: item.id, timeoutMs: 60000 });
+  assert.equal(waited.download.id, item.id);
+  assert.equal(calls.at(-1).timeoutMs, 65000);
+  await reconnected.tabs(context, { action: 'download_cancel', downloadId: item.id, contextId: 7 });
+  assert.equal(calls.at(-1).args[calls.at(-1).args.indexOf('--download-id') + 1], item.id);
+  assert.equal(calls.at(-1).args[calls.at(-1).args.indexOf('--tab') + 1], '7');
+});

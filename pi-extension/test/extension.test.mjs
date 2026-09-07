@@ -41,7 +41,7 @@ test("tool schemas keep browser keys, sockets, observation ids, and control epoc
   }
   const act = tools.find((tool) => tool.name === "browser_act");
   assert.deepEqual(act.parameters.properties.action.enum, [
-    "click", "hover", "drag", "type", "press_key", "scroll", "navigate", "get_url", "wait_for", "dialog",
+    "upload", "click", "hover", "drag", "type", "press_key", "scroll", "navigate", "get_url", "wait_for", "dialog",
   ]);
   const observe = tools.find((tool) => tool.name === "browser_observe");
   assert.deepEqual(observe.parameters.properties.view.enum, ["semantic", "visual", "both"]);

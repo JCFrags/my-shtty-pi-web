@@ -811,3 +811,29 @@ test("socket dispatches native action requests and enforces the 256 KiB line bou
     registry.dispose();
   }
 });
+
+test('socket upload and download variants validate identity and expose no project override', async () => {
+  const calls = [];
+  const host = registryHost(`files-${randomUUID()}`);
+  host.agentUpload = async (tab, request) => { calls.push({ tab, request }); return { completed: true }; };
+  host.agentDownloads = async (...args) => { calls.push(args); return { downloads: [] }; };
+  const registry = new Registry(host);
+  try {
+    const base = { tab: 2, ref: 'e1', observationId: 'obs', expectedControlEpoch: 1 };
+    const valid = await registryRequest(registry.socketPath, { id: "files", cmd: 'agent.upload', ...base, files: ['data/file.txt'], projectRoot: '/forged' });
+    assert.equal(valid.ok, true);
+    assert.deepEqual(calls[0], { tab: 2, request: { ref: 'e1', observationId: 'obs', expectedControlEpoch: 1, files: ['data/file.txt'] } });
+    for (const files of [[], Array(17).fill('file'), [1]]) {
+      assert.equal((await registryRequest(registry.socketPath, { id: "files", cmd: 'agent.upload', ...base, files })).ok, false);
+    }
+    const id = randomUUID();
+    for (const action of ['list', 'wait', 'cancel']) {
+      const response = await registryRequest(registry.socketPath, { id: "files", cmd: 'agent.downloads', action, downloadId: id, tab: 2, expectedControlEpoch: 1, timeoutMs: 0 });
+      assert.equal(response.ok, true);
+    }
+    assert.deepEqual(calls.slice(1), [['list', id, 2, 0, 1], ['wait', id, 2, 0, 1], ['cancel', id, 2, 0, 1]]);
+    for (const invalid of [{ action: 'other' }, { action: 'wait' }, { action: 'cancel', downloadId: 'bad' }, { action: 'list', timeoutMs: 60001 }, { action: 'list', tab: -1 }]) {
+      assert.equal((await registryRequest(registry.socketPath, { id: "files", cmd: 'agent.downloads', expectedControlEpoch: 1, ...invalid })).ok, false);
+    }
+  } finally { registry.dispose(); }
+});

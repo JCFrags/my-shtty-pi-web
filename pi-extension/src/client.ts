@@ -104,6 +104,7 @@ export type BrowserActionTarget = { ref: string } | { x: number; y: number };
 
 export type BrowserAction =
   | { action: "dialog"; contextId?: number; dialogId: string; accept: boolean; text?: string }
+  | { action: "upload"; ref: string; files: string[] }
   | { action: "click"; ref: string }
   | { action: "hover"; target: BrowserActionTarget }
   | { action: "drag"; from: BrowserActionTarget; to: BrowserActionTarget; button?: "left" | "middle" | "right" }
@@ -120,6 +121,12 @@ interface ControlStatus {
   reason: string | null;
   busy: boolean;
   interactionStyle: "slow-natural";
+}
+
+function boundedDownload(value: unknown) {
+  const item = value as Record<string, unknown>;
+  if (!item || typeof item.id !== "string" || typeof item.contextId !== "number") throw new Error("Invalid download state");
+  return { id: item.id.slice(0, 128), contextId: item.contextId, state: String(item.state).slice(0, 32), received: Number(item.received), total: Number(item.total), name: String(item.name).slice(0, 160), savePath: String(item.savePath).slice(0, 4096) };
 }
 
 function boundedTabs(value: unknown) {
@@ -209,13 +216,16 @@ export class PiBrowserClient {
     return { action: value.action, tabs };
   }
 
-  async tabs(context: ToolContext, request: { action: "list" | "activate" | "open" | "close" | "wait"; contextId?: number; url?: string; afterId?: number; timeoutMs?: number }) {
+  async tabs(context: ToolContext, request: { action: "list" | "activate" | "open" | "close" | "wait" | "downloads" | "download_wait" | "download_cancel"; downloadId?: string; contextId?: number; url?: string; afterId?: number; timeoutMs?: number }) {
     const args = ["companion", "tabs", "--action", request.action];
     if (request.contextId !== undefined) args.push("--tab", String(request.contextId));
+    if (request.downloadId !== undefined) args.push("--download-id", request.downloadId);
     if (request.afterId !== undefined) args.push("--after-id", String(request.afterId));
     if (request.timeoutMs !== undefined) args.push("--timeout-ms", String(request.timeoutMs));
     if (request.url !== undefined) args.push("--url", request.url);
-    const value = await this.runner({ args, context, timeoutMs: request.action === "wait" ? (request.timeoutMs ?? 10000) + 5000 : 30000 }) as Record<string, unknown>;
+    const value = await this.runner({ args, context, timeoutMs: (request.action === "wait" || request.action === "download_wait") ? (request.timeoutMs ?? 10000) + 5000 : 30000 }) as Record<string, unknown>;
+    if (request.action === "downloads") return { projectRoot: typeof value.projectRoot === "string" ? value.projectRoot.slice(0, 4096) : undefined, downloads: Array.isArray(value.downloads) ? value.downloads.slice(0, 64).map(boundedDownload) : [] };
+    if (request.action === "download_wait" || request.action === "download_cancel") return { projectRoot: typeof value.projectRoot === "string" ? value.projectRoot.slice(0, 4096) : undefined, download: boundedDownload(value.download) };
     const tabs = boundedTabs(value);
     const active = Number(tabs.find(tab => tab.active)?.id) || null;
     if (active !== this.contextId || (request.action !== "list" && request.action !== "wait")) {
@@ -357,6 +367,7 @@ export class PiBrowserClient {
         throw new Error("Call browser_observe before this action so it uses the current page state.");
       }
     }
+    if (request.action === "upload") args.push("upload", request.ref, "--files-json", JSON.stringify(request.files));
     if (request.action === "click") args.push("click", request.ref);
     if (request.action === "hover") {
       args.push("hover", ...targetArguments(this.observation!, request.target));

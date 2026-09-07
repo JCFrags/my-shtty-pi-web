@@ -69,3 +69,9 @@ test("pane response accepts only the expected plugin entrypoint", () => {
   assert.equal(parseOpenedPane(valid), "w1:p8");
   assert.throws(() => parseOpenedPane(valid.replace("companion", "other")), /invalid Herdr/);
 });
+
+test('file operations preserve the accepted pane-owned companion matching across session and cwd changes', () => {
+  for (const other of [{ ...ownerA, sessionId: 'pi-b' }, { ...ownerA, projectDir: '/tmp/b' }]) {
+    assert.deepEqual(ownerMatches([row('a', ownerA)], other).map(value => value.key), ['a']);
+  }
+});

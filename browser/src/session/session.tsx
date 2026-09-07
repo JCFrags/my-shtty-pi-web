@@ -180,6 +180,7 @@ function matchApps(apps: RegisteredApp[], query: string): RegisteredApp[] {
 
 class Session {
   private readonly ctx: SessionContext;
+  private readonly owner: ReturnType<typeof parseBrowserOwner>;
   private readonly terminal: Terminal | null;
   private readonly marker: string;
   private ownPane: Pane | null = null;
@@ -282,6 +283,8 @@ class Session {
 
   constructor(ctx: SessionContext) {
     this.ctx = ctx;
+    const owner = parseBrowserOwner(ctx.env);
+    this.owner = owner ? { ...owner, projectDir: fs.realpathSync(owner.projectDir) } : null;
     this.terminal = detect(ctx.env);
     this.marker = `terminal-browser:${ctx.key}`;
     this.argv = ctx.argv;
@@ -315,7 +318,7 @@ class Session {
     this.mainScript = flagValue(this.argv, "--main-script");
     this.fallbackState = initialBrowserState(this.initialUrl());
     registerPreloadOnce(
-      configureBrowserSession(this.partition, (progress) => this.showDownload(progress)),
+      configureBrowserSession(this.partition),
       reactGrabPreloadPath(),
     );
     this.control = new BrowserControl({
@@ -332,6 +335,9 @@ class Session {
     );
     this.tabs = new TabManager(
       {
+        owner: this.owner,
+        projectRoot: this.owner?.projectDir ?? null,
+        onDownload: value => this.showDownload({ ...value, state: value.state === "completed" ? "done" : value.state === "progressing" ? "progressing" : "failed" }),
         createController: (url, visible, onState, options) =>
           new BrowserController(
             this.root!.createSurface(),
@@ -474,7 +480,7 @@ class Session {
     this.registry = new Registry({
       key: this.ctx.key,
       tty: this.ctx.tty ?? null,
-      owner: parseBrowserOwner(this.ctx.env),
+      owner: this.owner,
       where: async () => {
         const pane = await this.findOwnPane();
         return {
@@ -503,6 +509,13 @@ class Session {
       agentDialog: (id, request) => this.tabs.respondDialog(id, request),
       waitContexts: (after, timeout, epoch) => this.tabs.waitContexts(after, timeout, epoch),
       agentObserve: (id, request) => this.tabs.agentObserve(id, request),
+      agentUpload: (id, request) => this.tabs.agentUpload(id, request),
+      agentDownloads: (action, id, contextId, timeout, epoch) => {
+        this.control.assertAgent(epoch);
+        if (action === "list") return { projectRoot: this.owner?.projectDir, downloads: this.tabs.downloads.list(contextId) };
+        if (action === "cancel") return { projectRoot: this.owner?.projectDir, download: this.tabs.downloads.cancel(id!, contextId) };
+        return this.tabs.downloads.wait(id!, timeout, this.control, epoch, contextId).then(download => ({ projectRoot: this.owner?.projectDir, download }));
+      },
       agentClick: (id, request) => this.tabs.agentClick(id, request),
       agentHover: (id, request) => this.tabs.agentHover(id, request),
       agentDrag: (id, request) => this.tabs.agentDrag(id, request),
@@ -727,7 +740,7 @@ class Session {
       if (file && !path.isAbsolute(file)) throw new Error(`${file} is not an absolute path`);
     }
     claimPartitionPreload(partition, app.preload ?? null);
-    const ses = configureBrowserSession(partition, (progress) => this.showDownload(progress));
+    const ses = configureBrowserSession(partition);
     if (app.preload) {
       registerPreloadOnce(ses, apiPreloadPath());
       registerPreloadOnce(ses, app.preload);

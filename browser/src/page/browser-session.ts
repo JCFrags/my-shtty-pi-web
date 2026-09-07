@@ -52,7 +52,6 @@ function granted(contents: WebContents | null, permission: string): boolean {
 
 export function configureBrowserSession(
   partition: string | null,
-  onDownload: (progress: DownloadProgress) => void,
 ): Session {
   const target = browserSession(partition);
   if (configured.has(target)) return target;
@@ -77,23 +76,6 @@ export function configureBrowserSession(
     return ranged ?? net.fetch(request, { bypassCustomProtocolHandlers: true });
   });
 
-  target.on("will-download", (_event, item) => {
-    const savePath = downloadPath(item.getFilename());
-    item.setSavePath(savePath);
-    const report = (state: DownloadProgress["state"]) =>
-      onDownload({
-        name: path.basename(savePath),
-        savePath,
-        received: item.getReceivedBytes(),
-        total: item.getTotalBytes(),
-        state,
-      });
-    item.on("updated", (_updated, state) =>
-      report(state === "interrupted" ? "failed" : "progressing"),
-    );
-    item.once("done", (_done, state) => report(state === "completed" ? "done" : "failed"));
-    report("progressing");
-  });
 
   return target;
 }
@@ -203,15 +185,4 @@ function escapeHtml(value: string): string {
     /[&<>"]/g,
     (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]!,
   );
-}
-
-function downloadPath(filename: string): string {
-  const dir = app.getPath("downloads");
-  fs.mkdirSync(dir, { recursive: true });
-  const ext = path.extname(filename);
-  const base = path.basename(filename, ext);
-  for (let i = 0; ; i++) {
-    const candidate = path.join(dir, i === 0 ? filename : `${base} (${i})${ext}`);
-    if (!fs.existsSync(candidate)) return candidate;
-  }
 }

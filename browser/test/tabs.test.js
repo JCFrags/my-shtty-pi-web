@@ -8,6 +8,7 @@ const { TabManager: tabManagerClass } = require("../dist/session/tabs.js");
 function tabManagerController() {
   return {
     surface: {},
+    trackDownloads() {},
     popup: null,
     dialogs: { configure() {}, subscribe() { return () => {}; }, pending: null },
     selectPopup() {},

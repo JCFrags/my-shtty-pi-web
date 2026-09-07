@@ -1,3 +1,5 @@
+import { BrowserDownloads } from "../agent/downloads";
+import type { BrowserOwner } from "pixel-store";
 import type { BrowserDialog, BrowserDialogs, DialogResponse } from "../agent/dialogs";
 import type { PopupWindow } from "../page/popup";
 import { BrowserAgentRuntime } from "../agent/runtime";
@@ -10,6 +12,7 @@ import type {
   AgentActionOutcome,
   AgentBrowserTarget,
   AgentClickRequest,
+  AgentUploadRequest,
   AgentClickResult,
   AgentDragRequest,
   AgentDragResult,
@@ -81,6 +84,9 @@ export interface TabTarget {
 
 
 export interface TabHost {
+  owner?: BrowserOwner | null;
+  projectRoot?: string | null;
+  onDownload?: (value: import("../agent/downloads").BrowserDownload) => void;
   createController(
     url: string,
     visible: boolean,
@@ -107,6 +113,7 @@ const AGENT_CONTROL_TTL_MS = Number.isFinite(parsedTtl) && parsedTtl > 0 ? parse
 const AGENT_CONTROL_SWEEP_MS = 500;
 
 export class TabManager {
+  readonly downloads: BrowserDownloads;
   private tabs: Tab[] = [];
   private activeId = 0;
   private activeContextId = 0;
@@ -120,7 +127,7 @@ export class TabManager {
     private readonly fallbackUrl: string,
     private readonly control: BrowserControl,
     private readonly personaProvider: AgentPersonaProvider = createSlowNaturalPersonaProvider(),
-  ) {}
+  ) { this.downloads = new BrowserDownloads(host.projectRoot ?? null, host.owner ?? null, host.onDownload); }
 
   get active(): Tab | null {
     return this.tabs.find((tab) => tab.id === this.activeId) ?? null;
@@ -167,6 +174,7 @@ export class TabManager {
       personaProvider: this.personaProvider,
       onActivityChange: () => this.host.requestAgentRender(),
     });
+    tab.controller.trackDownloads(this.downloads, tab.id);
     this.bindDialogs(tab.id, tab.controller.dialogs, tab.agentRuntime);
     tab.controller.onPopupCreated = (popup, opener) => this.adoptPopup(tab, popup, opener);
     tab.controller.onPopupClosed = (popup) => this.removePopup(popup);
@@ -254,6 +262,21 @@ export class TabManager {
       }
       try {
         return await tab.agentRuntime.click(request);
+      } finally {
+        tab.controller.releaseAgentInput();
+      }
+    });
+  }
+
+  async agentUpload(id: number, request: AgentUploadRequest): Promise<AgentActionOutcome<AgentClickResult>> {
+    const tab = this.context(id);
+    if (!tab) throw new Error(`no tab ${id}`);
+    return this.mutate(id, request.expectedControlEpoch, async () => {
+      if (!this.agentActivate(id)) {
+        throw new Error("cannot activate a tab while terminal-browser is in a modal state");
+      }
+      try {
+        return await tab.agentRuntime.upload(request, this.host.projectRoot ?? null);
       } finally {
         tab.controller.releaseAgentInput();
       }
@@ -449,6 +472,7 @@ export class TabManager {
     });
     this.popups.set(id, { id, openerId, rootId: root.id, controller, agentRuntime });
     controller.onMainFrameNavigationStart = () => agentRuntime.invalidateDocument();
+    controller.trackDownloads(this.downloads, id);
     this.bindDialogs(id, controller.dialogs, agentRuntime);
     this.context(this.activeContextId)?.agentRuntime.invalidateControl();
     if (this.activeId !== root.id) this.activeController?.setVisible(false);
@@ -464,6 +488,7 @@ export class TabManager {
     const popup = [...this.popups.values()].find(item => item.controller === controller);
     if (!popup) return;
     popup.agentRuntime.invalidateControl();
+    this.downloads.interruptContext(popup.id);
     this.popups.delete(popup.id);
     if (this.activeContextId === popup.id) {
       this.activeContextId = popup.rootId;
@@ -509,6 +534,7 @@ export class TabManager {
     const at = this.tabs.findIndex((t) => t.id === id);
     if (at < 0) return;
     const [closed] = this.tabs.splice(at, 1);
+    this.downloads.interruptContext(id);
     closed.agentRuntime.invalidateControl();
     closed.controller.stop();
     if (this.activeId === id) {
@@ -643,6 +669,7 @@ export class TabManager {
   }
 
   stopAll() {
+    this.downloads.stop();
     this.stopAgentSweep();
     for (const tab of this.tabs) {
       tab.agentRuntime.invalidateControl();

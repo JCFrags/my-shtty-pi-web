@@ -1,3 +1,5 @@
+import { BrowserUploads } from "../agent/uploads";
+import { registerDownloadSource, type BrowserDownloads } from "../agent/downloads";
 import { nativeImage } from "electron";
 import { BrowserDialogs } from "../agent/dialogs";
 import type { AgentBrowserTarget } from "../agent/types";
@@ -21,6 +23,7 @@ export interface PopupState {
 
 export class PopupWindow implements AgentBrowserTarget {
   readonly dialogs: BrowserDialogs;
+  readonly uploads: BrowserUploads;
   onMainFrameNavigationStart: (() => void) | null = null;
   readonly input: PageInput;
   cursorShape = "default";
@@ -47,6 +50,7 @@ export class PopupWindow implements AgentBrowserTarget {
   ) {
     this.window = window;
     this.dialogs = new BrowserDialogs(window.webContents, (method, params) => this.cdp(method, params));
+    this.uploads = new BrowserUploads(this.window.webContents, (method, params) => this.cdp(method, params));
     this.surface = surface;
     this.onChange = onChange;
     this.renderScale = renderScale;
@@ -187,11 +191,16 @@ export class PopupWindow implements AgentBrowserTarget {
     } catch (error) { return Promise.reject(error); }
   }
 
+  trackDownloads(tracker: BrowserDownloads, contextId: number) { registerDownloadSource(this.window.webContents, tracker, contextId); }
+
   get contentsId(): number { return this.window.webContents.id; }
   runJs(source: string): Promise<unknown> { return this.window.webContents.executeJavaScript(source, true); }
   currentUrl(): string { return this.window.webContents.getURL(); }
   viewportSize() { return { width: this.state.width, height: this.state.height }; }
-  agentPointer(event: ProgrammaticPointerEvent) { this.input.programmaticPointer(event); }
+  agentPointer(event: ProgrammaticPointerEvent) {
+    if (event.kind === "down" && event.button === "left") this.uploads.acceptChooserFromClick();
+    this.input.programmaticPointer(event);
+  }
   releaseAgentPointer() { this.input.releaseProgrammaticButtons(); }
   releaseAgentInput() { this.input.releaseProgrammaticInput(); }
   releaseAllInput() { this.input.releaseAllInput(); }

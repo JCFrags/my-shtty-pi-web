@@ -39,6 +39,10 @@ export type BrowserAction = {
     accept: boolean;
     text?: string;
 } | {
+    action: "upload";
+    ref: string;
+    files: string[];
+} | {
     action: "click";
     ref: string;
 } | {
@@ -97,12 +101,37 @@ export declare class PiBrowserClient {
         }[];
     }>;
     tabs(context: ToolContext, request: {
-        action: "list" | "activate" | "open" | "close" | "wait";
+        action: "list" | "activate" | "open" | "close" | "wait" | "downloads" | "download_wait" | "download_cancel";
+        downloadId?: string;
         contextId?: number;
         url?: string;
         afterId?: number;
         timeoutMs?: number;
     }): Promise<{
+        projectRoot: string | undefined;
+        downloads: {
+            id: string;
+            contextId: number;
+            state: string;
+            received: number;
+            total: number;
+            name: string;
+            savePath: string;
+        }[];
+        download?: undefined;
+    } | {
+        projectRoot: string | undefined;
+        download: {
+            id: string;
+            contextId: number;
+            state: string;
+            received: number;
+            total: number;
+            name: string;
+            savePath: string;
+        };
+        downloads?: undefined;
+    } | {
         matched?: boolean | undefined;
         dialog?: {
             [x: string]: unknown;
@@ -117,6 +146,9 @@ export declare class PiBrowserClient {
             title: string;
             active: boolean;
         }[];
+        projectRoot?: undefined;
+        downloads?: undefined;
+        download?: undefined;
     }>;
     observe(context: ToolContext, options?: {
         contextId?: number;
@@ -186,7 +218,7 @@ export declare class PiBrowserClient {
         matched?: undefined;
         condition?: undefined;
     } | {
-        action: "click" | "hover" | "drag" | "type" | "press_key" | "scroll" | "navigate" | "get_url" | "wait_for";
+        action: "upload" | "click" | "hover" | "drag" | "type" | "press_key" | "scroll" | "navigate" | "get_url" | "wait_for";
         completed: boolean;
         contextId: unknown;
         dialog: {
@@ -197,7 +229,7 @@ export declare class PiBrowserClient {
         matched?: undefined;
         condition?: undefined;
     } | {
-        action: "click" | "hover" | "drag" | "type" | "press_key" | "scroll" | "navigate" | "get_url" | "wait_for";
+        action: "upload" | "click" | "hover" | "drag" | "type" | "press_key" | "scroll" | "navigate" | "get_url" | "wait_for";
         completed: boolean;
         openedContextId: {};
         contextId?: undefined;
@@ -224,7 +256,7 @@ export declare class PiBrowserClient {
         openedContextId?: undefined;
         url?: undefined;
     } | {
-        action: "click" | "hover" | "drag" | "type" | "press_key" | "scroll" | "navigate";
+        action: "upload" | "click" | "hover" | "drag" | "type" | "press_key" | "scroll" | "navigate";
         completed: boolean;
         contextId?: undefined;
         dialog?: undefined;

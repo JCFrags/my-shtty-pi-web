@@ -15,6 +15,7 @@ function fixture() {
     contents.getURL = () => 'https://fixture.test/';
     return {
       contents, contentsId: sequence++,
+      trackDownloads() {},
       dialogs: new BrowserDialogs(contents, async () => ({})),
       state: { url: 'https://fixture.test/', title: 'Fixture' },
       releases: 0, popup: null, devtoolsFocused: false,

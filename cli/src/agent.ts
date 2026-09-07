@@ -22,6 +22,7 @@ export async function agentCommand(terminal: Terminal | null, args: string[]): P
   const subcommand = args.shift();
   if (subcommand === "dialog") return dialogCommand(terminal, args);
   if (subcommand === "observe") return observeCommand(terminal, args);
+  if (subcommand === "upload") return uploadCommand(terminal, args);
   if (subcommand === "click") return clickCommand(terminal, args);
   if (subcommand === "hover") return hoverCommand(terminal, args);
   if (subcommand === "drag") return dragCommand(terminal, args);
@@ -34,7 +35,7 @@ export async function agentCommand(terminal: Terminal | null, args: string[]): P
   if (subcommand === "status") return statusCommand(terminal, args);
   if (subcommand === "pause") return transitionCommand(terminal, args, "agent.pause");
   if (subcommand === "resume") return transitionCommand(terminal, args, "agent.resume");
-  throw new Error("agent needs observe, click, hover, drag, type, press-key, scroll, navigate, get-url, wait-for, status, pause, or resume (terminal-browser agent --help)");
+  throw new Error("agent needs observe, upload, click, hover, drag, type, press-key, scroll, navigate, get-url, wait-for, status, pause, or resume (terminal-browser agent --help)");
 }
 
 async function dialogCommand(terminal: Terminal | null, args: string[]): Promise<number> {
@@ -145,6 +146,38 @@ async function clickCommand(terminal: Terminal | null, args: string[]): Promise<
       observationId: observation,
       expectedControlEpoch,
     }),
+  );
+  return 0;
+}
+
+async function uploadCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const observationId = takeValue(args, "--observation");
+  const epochValue = takeValue(args, "--control-epoch");
+  const filesValue = takeValue(args, "--files-json");
+  let files: unknown;
+  try { files = JSON.parse(filesValue ?? "null"); } catch { throw new Error("invalid files JSON"); }
+  if (!Array.isArray(files) || !files.length || files.length > 16 || files.some(file => typeof file !== "string" || !file || file.length > 4096)) throw new Error("upload requires 1 to 16 file paths");
+  const ref = args.shift();
+  if (!ref || ref.startsWith("-")) {
+    throw new Error("agent upload needs a ref (terminal-browser agent upload --help)");
+  }
+  validateAgentString(ref, "agent upload ref");
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent upload --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  const observation = parseObservation(observationId, "agent.upload");
+  const expectedControlEpoch = parseEpoch(epochValue, "agent.upload");
+  print(
+    await control(browser.socket, {
+      cmd: "agent.upload",
+      tab,
+      ref,
+      files: (files as string[]).map(file => path.resolve(process.cwd(), file)),
+      observationId: observation,
+      expectedControlEpoch,
+    }, MAX_ACTION_TIMEOUT_MS),
   );
   return 0;
 }

@@ -54,7 +54,8 @@ export interface CompanionOpenResult {
 }
 
 export interface CompanionTabsRequest {
-  action: "list" | "activate" | "open" | "close" | "wait";
+  action: "list" | "activate" | "open" | "close" | "wait" | "downloads" | "download_wait" | "download_cancel";
+  downloadId?: string;
   afterId?: number;
   timeoutMs?: number;
   tab?: number;
@@ -274,6 +275,13 @@ export async function companionTabs(owner: BrowserOwner, request: CompanionTabsR
     return control(browser.socket, { cmd: "targets" }) as Promise<BrowserTargets>;
   }
   const status = await control(browser.socket, { cmd: "agent.status" }) as { controlEpoch: number };
+  if (request.action === "downloads" || request.action === "download_wait" || request.action === "download_cancel") {
+    const timeoutMs = request.timeoutMs ?? 10000;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > 60000) throw new Error("invalid download wait timeout");
+    if (request.tab !== undefined && (!Number.isSafeInteger(request.tab) || request.tab < 1)) throw new Error("invalid download context");
+    if (request.action !== "downloads" && (typeof request.downloadId !== "string" || !/^[a-f0-9-]{36}$/.test(request.downloadId))) throw new Error("download ID required");
+    return control(browser.socket, { cmd: "agent.downloads", action: request.action === "downloads" ? "list" : request.action === "download_wait" ? "wait" : "cancel", downloadId: request.downloadId, tab: request.tab, timeoutMs, expectedControlEpoch: status.controlEpoch }, timeoutMs + 5000) as Promise<BrowserTargets>;
+  }
   if (request.action === "wait") {
     const afterId = request.afterId;
     const timeoutMs = request.timeoutMs ?? 10000;

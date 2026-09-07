@@ -29,6 +29,7 @@ import {
 import type {
   AgentActionOutcome,
   AgentClickRequest,
+  AgentUploadRequest,
   AgentClickResult,
   AgentDragRequest,
   AgentDragResult,
@@ -79,6 +80,8 @@ export interface ControlHost {
   agentPause(expectedEpoch: number): AgentControlSnapshot;
   agentResume(expectedEpoch: number): AgentControlSnapshot;
   agentObserve(id: number, request: AgentObserveRequest): Promise<AgentActionOutcome<AgentObservation>>;
+  agentUpload(id: number, request: AgentUploadRequest): Promise<AgentActionOutcome<AgentClickResult>>;
+  agentDownloads(action: "list" | "wait" | "cancel", id: string | undefined, contextId: number | undefined, timeout: number, epoch: number): unknown;
   agentClick(id: number, request: AgentClickRequest): Promise<AgentActionOutcome<AgentClickResult>>;
   agentHover(id: number, request: AgentHoverRequest): Promise<AgentActionOutcome<AgentHoverResult>>;
   agentDrag(id: number, request: AgentDragRequest): Promise<AgentActionOutcome<AgentDragResult>>;
@@ -131,6 +134,8 @@ interface ControlRequest {
   timeoutMs?: unknown;
   afterId?: unknown;
   dialogId?: unknown;
+  files?: unknown;
+  downloadId?: unknown;
   accept?: unknown;
 }
 
@@ -323,6 +328,19 @@ export class Registry {
       case "agent.observe": {
         const parsed = observeRequest(request);
         return this.host.agentObserve(parsed.tab, parsed.request);
+      }
+      case "agent.downloads": {
+        if (request.action !== "list" && request.action !== "wait" && request.action !== "cancel") throw new Error("invalid download action");
+        const timeout = request.timeoutMs ?? 10000;
+        if (typeof timeout !== "number" || !Number.isSafeInteger(timeout) || timeout < 0 || timeout > 60000) throw new Error("invalid download wait timeout");
+        if (request.action !== "list" && (typeof request.downloadId !== "string" || !/^[a-f0-9-]{36}$/.test(request.downloadId))) throw new Error("download ID required");
+        const tab = request.tab === undefined ? undefined : requiredTab(request, "agent.downloads");
+        return this.host.agentDownloads(request.action, request.downloadId as string | undefined, tab, timeout, requiredEpoch(request.expectedControlEpoch, "agent.downloads"));
+      }
+      case "agent.upload": {
+        const parsed = clickRequest(request);
+        if (!Array.isArray(request.files) || !request.files.length || request.files.length > 16 || request.files.some(file => typeof file !== "string" || file.length > 4096)) throw new Error("upload requires 1 to 16 file paths");
+        return this.host.agentUpload(parsed.tab, { ...parsed.request, files: request.files as string[] });
       }
       case "agent.click": {
         const parsed = clickRequest(request);

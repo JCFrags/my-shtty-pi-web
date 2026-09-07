@@ -40,8 +40,9 @@ const openParameters = Type.Object({
 }, { additionalProperties: false });
 
 const tabsParameters = Type.Object({
-  action: StringEnum(["list", "activate", "open", "close", "wait"] as const),
+  action: StringEnum(["list", "activate", "open", "close", "wait", "downloads", "download_wait", "download_cancel"] as const),
   context_id: Type.Optional(Type.Integer({ minimum: 1 })),
+  download_id: Type.Optional(Type.String({ minLength: 36, maxLength: 36 })),
   after_context_id: Type.Optional(Type.Integer({ minimum: 0 })),
   timeout_ms: Type.Optional(Type.Integer({ minimum: 0, maximum: 60000 })),
   url: Type.Optional(Type.String({ maxLength: 8192 })),
@@ -57,10 +58,11 @@ const observeParameters = Type.Object({
 }, { additionalProperties: false });
 
 const actParameters = Type.Object({
+  files: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 4096 }), { minItems: 1, maxItems: 16 })),
   context_id: Type.Optional(Type.Integer({ minimum: 1 })),
   dialog_id: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
   accept: Type.Optional(Type.Boolean()),
-  action: StringEnum(["click", "hover", "drag", "type", "press_key", "scroll", "navigate", "get_url", "wait_for", "dialog"] as const),
+  action: StringEnum(["upload", "click", "hover", "drag", "type", "press_key", "scroll", "navigate", "get_url", "wait_for", "dialog"] as const),
   ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
   x: Type.Optional(Type.Number({ minimum: 0, maximum: 20000 })),
   y: Type.Optional(Type.Number({ minimum: 0, maximum: 20000 })),
@@ -86,7 +88,8 @@ const controlParameters = Type.Object({
 }, { additionalProperties: false });
 
 function browserAction(params: {
-  action: "click" | "hover" | "drag" | "type" | "press_key" | "scroll" | "navigate" | "get_url" | "wait_for" | "dialog";
+  files?: string[];
+  action: "upload" | "click" | "hover" | "drag" | "type" | "press_key" | "scroll" | "navigate" | "get_url" | "wait_for" | "dialog";
   context_id?: number;
   dialog_id?: string;
   accept?: boolean;
@@ -112,6 +115,10 @@ function browserAction(params: {
   if (params.action === "dialog") {
     if (!params.dialog_id || params.accept === undefined) throw new Error("dialog requires dialog_id and accept");
     return { action: "dialog", contextId: params.context_id, dialogId: params.dialog_id, accept: params.accept, text: params.text };
+  }
+  if (params.action === "upload") {
+    if (!params.ref || !params.files?.length) throw new Error("upload requires a trigger/input ref and project file paths");
+    return { action: "upload", ref: params.ref, files: params.files };
   }
   if (params.action === "click") {
     if (!params.ref) throw new Error("click requires ref from browser_observe");
@@ -189,7 +196,7 @@ export default async function terminalBrowserExtension(pi: ExtensionAPI): Promis
   pi.registerTool({
     name: "browser_tabs",
     label: "Browser Tabs",
-    description: "List, wait for, activate, open, or close native tab and popup contexts. Use context_id; wait returns contexts newer than after_context_id without holding the action lane. Results are limited to 32 contexts.",
+    description: "List, wait for, activate, open, or close native tab and popup contexts. Use context_id; wait returns contexts newer than after_context_id without holding the action lane. Results are limited to 32 contexts. downloads lists up to 64 owner-scoped transfers, optionally filtered by context_id. download_wait and download_cancel require an exact download_id. Waits release the action lane. Results include the fixed launch projectRoot and relative savePath. Files are saved under that project and never opened.",
     parameters: tabsParameters,
     async execute(_id, params, signal, _update, ctx) {
       if ((params.action === "activate" || params.action === "close") && params.context_id === undefined) {
@@ -198,6 +205,7 @@ export default async function terminalBrowserExtension(pi: ExtensionAPI): Promis
       if (params.action === "wait" && params.after_context_id === undefined) throw new Error("wait requires after_context_id from the last context list");
       return result(await client.tabs(context(ctx, signal), {
         action: params.action,
+        downloadId: params.download_id,
         afterId: params.after_context_id,
         timeoutMs: params.timeout_ms,
         contextId: params.context_id,
@@ -237,7 +245,7 @@ export default async function terminalBrowserExtension(pi: ExtensionAPI): Promis
   pi.registerTool({
     name: "browser_act",
     label: "Browser Act",
-    description: "Perform one native action in this Pi pane's companion browser: click, hover, drag, type, press_key, scroll, navigate, get_url, wait_for, or dialog. Dialog responses require the exact dialog_id returned by observe, tabs, resume, or an interrupted action and an explicit accept decision. Optional context_id must match that dialog. Never assume acceptance. Coordinates require the latest visual observation.",
+    description: "Perform one native action in this Pi pane's companion browser: upload, click, hover, drag, type, press_key, scroll, navigate, get_url, wait_for, or dialog. Dialog responses require the exact dialog_id returned by observe, tabs, resume, or an interrupted action and an explicit accept decision. Optional context_id must match that dialog. Never assume acceptance. Upload clicks a visible input or chooser button through AgentCursor, then assigns 1–16 regular project files (32 MiB each, 64 MiB total); secret paths and project escapes are rejected. Changing cwd does not change the companion project root; reopen the companion to adopt another project. Coordinates require the latest visual observation.",
     promptSnippet: "Perform one native companion-browser action",
     promptGuidelines: ["Use browser_act for exactly one action per call, then use browser_observe again when the page may have changed."],
     parameters: actParameters,
