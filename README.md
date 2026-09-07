@@ -249,6 +249,19 @@ root `sendInputEvent`. HTML5 drag interception is on the root session; drag even
 use the selected frame session. These routes stay inside the normal PageInput and
 slow-natural driver, with input release and cancellation checks.
 
+For a focused visible check, run `node browser/test/fixtures/dynamic-live.cjs`
+from the checkout and open its printed loopback URL. Choose only the right card,
+prepare and wait for the replaced delayed control, then select the `contact-form`
+frame, fill `Contact name`, wait for `Submit embedded` to become actionable, and
+capture its result. Each output counter must increase only once. Repeat the frame
+step in its popup to check cursor alignment. The fixture uses only local data.
+
+A rebuilt CLI does not replace an already-running Electron daemon. List affected
+contexts before stopping the shared daemon, obtain permission for unsaved work,
+and verify the old daemon exited before reopening companions. Record hashes of
+the built browser files at startup and verify the new frame behavior in a fresh
+Pi process; source HEAD or a new CLI PID alone is not deployment evidence.
+
 ### Agent cursor alignment
 
 The terminal overlay uses terminal-root coordinates, including the page origin and
