@@ -5,6 +5,21 @@ import { Icon } from "./icons";
 import type { Theme } from "./theme";
 import type { ChromeActions, ChromeLayout, PopupView } from "./types";
 
+function popupGeometry(view: PopupView, layout: ChromeLayout) {
+  const rem = layout.rem;
+  const headerH = Math.round(rem * 1.7);
+  const cardH = headerH + view.height;
+  const left = layout.page.x + Math.round((layout.page.width - view.width) / 2);
+  const top =
+    layout.page.y + Math.max(Math.round(rem * 0.5), Math.round((layout.page.height - cardH) / 2));
+  return { headerH, left, top };
+}
+
+export function popupSurfaceLayout(view: PopupView, layout: ChromeLayout, scale: number) {
+  const { headerH, left, top } = popupGeometry(view, layout);
+  return { x: left, y: top + headerH, width: view.width, height: view.height, scale };
+}
+
 export function PopupModal({
   view,
   actions,
@@ -20,11 +35,7 @@ export function PopupModal({
 }) {
   const rem = layout.rem;
   const [closeHover, setCloseHover] = useState(false);
-  const headerH = Math.round(rem * 1.7);
-  const cardH = headerH + view.height;
-  const left = layout.page.x + Math.round((layout.page.width - view.width) / 2);
-  const top =
-    layout.page.y + Math.max(Math.round(rem * 0.5), Math.round((layout.page.height - cardH) / 2));
+  const { headerH, left, top } = popupGeometry(view, layout);
   return (
     <>
       <Box

@@ -106,3 +106,35 @@ test('release invalidates runtime observation and releases root and popup inputs
   assert(root.controller.releases > 0);
   manager.stopAll();
 });
+
+test('active overlay activity follows root, popup motion, switch and popup closure', () => {
+  const { manager, target } = fixture();
+  assert.equal(manager.activeAgentActivity, null);
+  const root = manager.create('https://fixture.test/');
+  const rootActivity = { cursor: { x: 11, y: 22 }, target: null, pulse: false };
+  root.agentRuntime.activityValue = rootActivity;
+  assert.deepEqual(manager.activeAgentActivity, rootActivity);
+  const popup = target();
+  root.controller.onPopupCreated(popup, root.controller.contentsId);
+  const popupId = manager.registryView().find(context => context.kind === 'popup').id;
+  const runtime = manager.popups.get(popupId).agentRuntime;
+  assert.equal(manager.activeAgentActivity, null);
+  for (const x of [50, 75, 100]) {
+    runtime.activityValue = { cursor: { x, y: 60 }, target: null, pulse: false };
+    assert.deepEqual(manager.activeAgentActivity.cursor, { x, y: 60 });
+    assert.notDeepEqual(manager.activeAgentActivity, root.agentRuntime.activity);
+  }
+  assert.equal(manager.agentActivate(root.id), true);
+  assert.equal(manager.activeAgentActivity, null);
+  root.agentRuntime.activityValue = rootActivity;
+  assert.deepEqual(manager.activeAgentActivity, rootActivity);
+  assert.equal(manager.agentActivate(popupId), true);
+  assert.equal(manager.activeAgentActivity, null);
+  runtime.activityValue = { cursor: { x: 150, y: 160 }, target: null, pulse: false };
+  assert.deepEqual(manager.activeAgentActivity.cursor, { x: 150, y: 160 });
+  root.controller.onPopupClosed(popup);
+  assert.equal(manager.activeAgentActivity, null);
+  root.agentRuntime.activityValue = rootActivity;
+  assert.deepEqual(manager.activeAgentActivity, rootActivity);
+  manager.stopAll();
+});

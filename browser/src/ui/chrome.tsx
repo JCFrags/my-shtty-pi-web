@@ -12,7 +12,7 @@ import { PageContextMenu } from "./context-menu";
 import { MarkupCanvas } from "./markup-canvas";
 import { BrowserDialogCard, NewTabCard, PaletteCard, UrlCard } from "./modals";
 import { DownloadHud, FindBar, Toast, ZoomHud } from "./overlays";
-import { PopupModal } from "./popup-modal";
+import { PopupModal, popupSurfaceLayout } from "./popup-modal";
 import {
   RecordBar,
   RecordCornerButton,
@@ -131,14 +131,14 @@ export function Chrome({
         agentActive={agentActive}
       />
       {agentActive && <AgentGlow layout={layout} theme={theme} intensity={glowPulse} />}
-      <AgentActivityOverlay
+      {!popup && <AgentActivityOverlay
         activity={agentActivity}
         control={agentControl}
         layout={surfaceLayout}
         noOverlays={noOverlays}
         rem={layout.rem}
         theme={theme}
-      />
+      />}
       {layout.devtools && (
         <DevtoolsPane
           layout={layout}
@@ -183,6 +183,14 @@ export function Chrome({
           surface={popupSurface}
         />
       )}
+      {popup && <AgentActivityOverlay
+        activity={agentActivity}
+        control={agentControl}
+        layout={popupSurfaceLayout(popup, layout, surfaceLayout.scale)}
+        noOverlays={noOverlays}
+        rem={layout.rem}
+        theme={theme}
+      />}
       {dialog && <BrowserDialogCard key={dialog.id} dialog={dialog} answer={answerDialog} layout={layout} theme={theme} />}
       {progress != null && (
         <Box

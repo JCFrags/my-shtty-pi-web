@@ -1,5 +1,5 @@
-import { createElement, Fragment } from "react";
-import { Box, Text } from "pixel-react";
+import { cloneElement, createElement, Fragment, type ReactElement } from "react";
+import { Box, Text, type Style } from "pixel-react";
 import type { Point } from "agentcursor" with { "resolution-mode": "import" };
 import type { BrowserSurfaceLayout } from "../page/types";
 import type { AgentActivity } from "../agent/types";
@@ -52,6 +52,30 @@ export function agentOverlayGeometry(
       ? clipAgentSurfacePoint(mapAgentCssPoint(activity.target, layout), layout)
       : null,
   };
+}
+
+function clipOverlayNode(node: ReactElement<{ style?: Style }> | null, layout: BrowserSurfaceLayout) {
+  if (!node) return null;
+  const style = node.props.style!;
+  const x = Number(style.inset?.left);
+  const y = Number(style.inset?.top);
+  const width = Number(style.width);
+  const height = Number(style.height);
+  const left = Math.max(layout.x, x);
+  const top = Math.max(layout.y, y);
+  const right = Math.min(layout.x + layout.width, x + width);
+  const bottom = Math.min(layout.y + layout.height, y + height);
+  if (right <= left || bottom <= top) return null;
+  if (left === x && top === y && right === x + width && bottom === y + height) return node;
+  return createElement(Box, {
+    style: {
+      position: "absolute",
+      inset: { left, top },
+      width: right - left,
+      height: bottom - top,
+      overflow: "hidden",
+    },
+  }, cloneElement(node, { style: { ...style, inset: { left: x - left, top: y - top } } }));
 }
 
 export class AgentOverlayRenderCoalescer {
@@ -113,8 +137,8 @@ export function AgentActivityOverlay({
         style: {
           position: "absolute",
           inset: {
-            top: target.y - layout.y - targetSize / 2,
-            left: target.x - layout.x - targetSize / 2,
+            top: target.y - targetSize / 2,
+            left: target.x - targetSize / 2,
           },
           width: targetSize,
           height: targetSize,
@@ -128,8 +152,8 @@ export function AgentActivityOverlay({
         style: {
           position: "absolute",
           inset: {
-            top: target.y - layout.y - targetSize * (0.7 + pulse * 0.35),
-            left: target.x - layout.x - targetSize * (0.7 + pulse * 0.35),
+            top: target.y - targetSize * (0.7 + pulse * 0.35),
+            left: target.x - targetSize * (0.7 + pulse * 0.35),
           },
           width: targetSize * (1.4 + pulse * 0.7),
           height: targetSize * (1.4 + pulse * 0.7),
@@ -148,8 +172,8 @@ export function AgentActivityOverlay({
           style: {
             position: "absolute",
             inset: {
-              top: cursor.y - layout.y - cursorSize * 0.22,
-              left: cursor.x - layout.x - cursorSize * 0.18,
+              top: cursor.y - cursorSize * 0.22,
+              left: cursor.x - cursorSize * 0.18,
             },
             width: cursorSize,
             height: cursorSize,
@@ -164,8 +188,8 @@ export function AgentActivityOverlay({
       style: {
         position: "absolute",
         inset: {
-          top: Math.max(4, Math.round(unit * 0.55)),
-          left: layout.width - pillWidth - Math.round(unit * 0.55),
+          top: layout.y + Math.max(4, Math.round(unit * 0.55)),
+          left: layout.x + layout.width - pillWidth - Math.round(unit * 0.55),
         },
         width: pillWidth,
         height: Math.max(16, Math.round(unit * 1.65)),
@@ -196,14 +220,14 @@ export function AgentActivityOverlay({
     {
       style: {
         position: "absolute",
-        inset: { top: layout.y, left: layout.x },
-        width: layout.width,
-        height: layout.height,
+        inset: { top: 0, left: 0 },
+        width: layout.x + layout.width,
+        height: layout.y + layout.height,
         overflow: "hidden",
       },
     },
-    createElement(Fragment, null, targetRing, targetPulse),
-    cursorNode,
-    pill,
+    createElement(Fragment, null, clipOverlayNode(targetRing, layout), clipOverlayNode(targetPulse, layout)),
+    clipOverlayNode(cursorNode, layout),
+    clipOverlayNode(pill, layout),
   );
 }

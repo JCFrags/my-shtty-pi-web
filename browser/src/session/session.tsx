@@ -800,7 +800,7 @@ class Session {
         urlEdit={this.urlEditOpen}
         noOverlays={noOverlays}
         agentControl={this.control.snapshot}
-        agentActivity={this.tabs.active?.agentRuntime.activity ?? null}
+        agentActivity={this.tabs.activeAgentActivity}
         surfaceLayout={this.surfaceLayout}
         dialog={this.tabs.pendingDialog}
         answerDialog={(id, accept, text) => {

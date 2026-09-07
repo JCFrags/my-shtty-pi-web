@@ -10,6 +10,7 @@ import {
 } from "../agent/interaction-profile";
 import type {
   AgentActionOutcome,
+  AgentActivity,
   AgentBrowserTarget,
   AgentClickRequest,
   AgentUploadRequest,
@@ -131,6 +132,10 @@ export class TabManager {
 
   get active(): Tab | null {
     return this.tabs.find((tab) => tab.id === this.activeId) ?? null;
+  }
+
+  get activeAgentActivity(): AgentActivity | null {
+    return this.context(this.activeContextId)?.agentRuntime.activity ?? null;
   }
 
   get activeController(): BrowserController | null {

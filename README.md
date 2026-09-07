@@ -175,6 +175,22 @@ pixel-terminals baseline. The terminal dialog card is build-checked but still
 needs a visual check in a live terminal session.
 
 
+### Agent cursor alignment
+
+The terminal overlay uses terminal-root coordinates, including the page origin and
+cursor hotspot. Edge graphics are clipped to the active surface. Popup activity
+comes from the popup runtime and is drawn above its modal using the popup content
+origin, including the header. Browser input coordinates are separate and unchanged.
+
+Terminal resize recomputes the surface from the current engine dimensions and cell
+size. The overlay uses that new layout and its scale on each render. Display scale
+is selected at startup (explicit override, CSS-pixel terminal, or host display);
+this does not detect a later move between monitors with different scale factors.
+`browser/test/agent-overlay.test.js` checks component positions, clipping, resized
+layouts, supplied scale changes, and popup layering. Context tests check activity
+selection across popup motion, switching, and closure. A live terminal check is
+still required to confirm visual alignment on a particular terminal backend.
+
 ### Project uploads and tracked downloads
 
 Use `browser_act` with `action: "upload"`, a visible input/button `ref` from the
