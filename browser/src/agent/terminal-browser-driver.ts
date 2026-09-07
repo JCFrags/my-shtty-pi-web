@@ -276,8 +276,12 @@ export class TerminalBrowserDriver implements BrowserDriver {
           await this.sleep(80);
         }
       }
+      if (!this.binding?.primary) await this.target.frames?.assertCoordinates(start);
+      if (!this.binding?.destination) await this.target.frames?.assertCoordinates(args.target);
       if (this.binding?.primary) this.binding.primary.committed = true;
       if (this.binding?.destination) this.binding.destination.committed = true;
+      this.beforeInput?.();
+      await this.target.agentStartDrag?.();
       this.beforeInput?.();
       const down = { kind: "down" as const, x: start.x, y: start.y, button: args.button };
       this.target.agentPointer(down);
@@ -287,10 +291,14 @@ export class TerminalBrowserDriver implements BrowserDriver {
       if (this.binding?.destination && !await this.binding.preparation.check(this.binding.destination, args.target)) {
         throw new Error("drag destination changed after input; action was not retried");
       }
+      if (!this.binding?.destination) await this.target.frames?.assertCoordinates(args.target);
       this.lastPosition = { ...args.target };
     } catch (error) {
       failure = error;
     } finally {
+      if (failure !== undefined) {
+        try { await this.target.agentFinishDrag?.(true); } catch {}
+      }
       if (held) {
         const releasePoint = this.lastPosition ?? start;
         const up = { kind: "up" as const, x: releasePoint.x, y: releasePoint.y, button: args.button };
@@ -300,6 +308,8 @@ export class TerminalBrowserDriver implements BrowserDriver {
         } catch {}
       }
     }
+    try { await this.target.agentFinishDrag?.(failure !== undefined); }
+    catch (error) { failure ??= error; }
     if (failure !== undefined) this.releaseAndRethrow(failure);
   }
 
@@ -330,7 +340,7 @@ export class TerminalBrowserDriver implements BrowserDriver {
   }
 
   private async readyAt(point: Point, target?: PreparedTarget): Promise<void> {
-    if (!target || !this.binding) return;
+    if (!target || !this.binding) { await this.target.frames?.assertCoordinates(point); return; }
     const binding = this.binding;
     for (let attempt = 0; attempt < 3; attempt++) {
       this.beforeInput?.();

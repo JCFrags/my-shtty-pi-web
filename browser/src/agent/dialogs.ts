@@ -51,7 +51,8 @@ export class BrowserDialogs {
   private control: BrowserControl | null = null;
   private value: Pending | null = null;
   private readonly listeners = new Set<() => void>();
-  private readonly scripts = new Map<number, string>();
+  private readonly scripts = new Map<string, string>();
+  private pendingSession = "";
   private generation = 0;
   private intent: Intent | null = null;
   private permit: Intent | null = null;
@@ -59,10 +60,11 @@ export class BrowserDialogs {
   private disposed = false;
   private responding = false;
   private ready: Promise<void> | null = null;
+  private readonly sessionReady = new Map<string, Promise<void>>();
 
   constructor(
     private readonly contents: WebContents,
-    private readonly send: (method: string, params?: Record<string, unknown>) => Promise<unknown>,
+    private readonly send: (method: string, params?: Record<string, unknown>, sessionId?: string) => Promise<unknown>,
     private readonly timeoutMs = 60_000,
   ) {
     this.debugger = contents.debugger;
@@ -97,13 +99,18 @@ export class BrowserDialogs {
     return () => this.listeners.delete(listener);
   }
 
-  initialize(): Promise<void> {
-    return this.ready ??= Promise.all([
-      this.send("Page.enable"),
-      this.send("Runtime.enable"),
-      this.send("Debugger.enable"),
-      this.send("Page.addScriptToEvaluateOnNewDocument", { source: PROMPT_SOURCE, runImmediately: true }),
-    ]).then(() => undefined);
+  initialize(): Promise<void> { return this.ready ??= this.initializeSession(""); }
+
+  initializeSession(session: string): Promise<void> {
+    let ready=this.sessionReady.get(session);
+    if(!ready) {
+      ready=Promise.all([
+        this.send("Page.enable", {}, session), this.send("Runtime.enable", {}, session), this.send("Debugger.enable", {}, session),
+        this.send("Page.addScriptToEvaluateOnNewDocument", { source: PROMPT_SOURCE, runImmediately: true }, session),
+      ]).then(()=>undefined);
+      this.sessionReady.set(session,ready);
+    }
+    return ready;
   }
 
   runIntent<T>(description: BrowserIntent, replay: () => void, operation: () => T): T {
@@ -222,54 +229,60 @@ export class BrowserDialogs {
     });
   }
 
-  private readonly onMessage = (_event: Electron.Event, method: string, params: Record<string, unknown>) => {
+  private readonly onMessage = (_event: Electron.Event, method: string, params: Record<string, unknown>, session = "") => {
     if (this.disposed) return;
-    if (method === "Runtime.executionContextsCleared") this.scripts.clear();
-    if (method === "Runtime.executionContextDestroyed") this.scripts.delete(Number(params.executionContextId));
+    if (method === "Target.detachedFromTarget") { this.sessionReady.delete(String(params.sessionId)); if(params.sessionId===this.pendingSession) void this.cancel(); }
+    if (method === "Runtime.executionContextsCleared") {
+      for (const key of this.scripts.keys()) if(key.startsWith(session+":")) this.scripts.delete(key);
+      if(session && session === this.pendingSession) void this.cancel();
+    }
+    if (method === "Runtime.executionContextDestroyed") this.scripts.delete(session+":"+Number(params.executionContextId));
     if (method === "Debugger.scriptParsed") {
-      const context = Number(params.executionContextId);
+      const context = session+":"+Number(params.executionContextId);
       if (!this.scripts.has(context) && params.url === "terminal-browser-prompt.js" && params.hash === PROMPT_HASH && params.startLine === 0 && params.endLine === 9) {
-        this.scripts.set(context, String(params.scriptId));
+        this.scripts.set(context, session+":"+String(params.scriptId));
       }
     }
     if (method === "Page.javascriptDialogOpening" && (params.type === "alert" || params.type === "confirm")) {
+      if (!this.value) this.pendingSession = session;
       this.open(params.type, String(params.message ?? ""), "", true, async (accept) => {
-        await this.send("Page.handleJavaScriptDialog", { accept });
+        await this.send("Page.handleJavaScriptDialog", { accept }, session);
       });
     }
-    if (method === "Page.javascriptDialogClosed" && this.value?.value.type !== "prompt" && this.value?.value.type !== "beforeunload") {
+    if (method === "Page.javascriptDialogClosed" && session === this.pendingSession && this.value?.value.type !== "prompt" && this.value?.value.type !== "beforeunload") {
       if (this.value) clearTimeout(this.value.timer);
       this.value = null;
       this.changed();
     }
-    if (method === "Debugger.paused") void this.paused(params).catch(async () => {
-      await this.send("Debugger.resume").catch(() => {});
+    if (method === "Debugger.paused") void this.paused(params, session).catch(async () => {
+      await this.send("Debugger.resume", {}, session).catch(() => {});
     });
   };
 
-  private async paused(params: Record<string, unknown>) {
+  private async paused(params: Record<string, unknown>, session: string) {
     const frame = (params.callFrames as Array<{ callFrameId: string; functionName: string; location: { scriptId: string; lineNumber: number; columnNumber: number } }>)[0];
-    if (!frame || ![...this.scripts.values()].includes(frame.location.scriptId) || frame.functionName !== "terminalBrowserPrompt" || frame.location.lineNumber !== 5 || frame.location.columnNumber !== 2) {
-      await this.send("Debugger.resume");
+    if (!frame || ![...this.scripts.values()].includes(session+":"+frame.location.scriptId) || frame.functionName !== "terminalBrowserPrompt" || frame.location.lineNumber !== 5 || frame.location.columnNumber !== 2) {
+      await this.send("Debugger.resume", {}, session);
       return;
     }
     const result = await this.send("Debugger.evaluateOnCallFrame", {
       callFrameId: frame.callFrameId,
       expression: "({message:promptMessage,defaultValue:promptDefault})",
       returnByValue: true,
-    }) as { result?: { value?: { message: string; defaultValue: string } }; exceptionDetails?: unknown };
+    }, session) as { result?: { value?: { message: string; defaultValue: string } }; exceptionDetails?: unknown };
     if (result.exceptionDetails || !result.result?.value) throw new Error("cannot read prompt");
     const { message, defaultValue } = result.result.value;
+    if (!this.value) this.pendingSession = session;
     this.open("prompt", message, defaultValue, true, async (accept, text) => {
       try {
         const written = await this.send("Debugger.evaluateOnCallFrame", {
           callFrameId: frame.callFrameId,
           expression: `promptResult = ${JSON.stringify(accept ? text ?? defaultValue : null)}`,
           returnByValue: true,
-        }) as { exceptionDetails?: unknown };
+        }, session) as { exceptionDetails?: unknown };
         if (written.exceptionDetails) throw new Error("cannot set prompt response");
       } finally {
-        await this.send("Debugger.resume");
+        await this.send("Debugger.resume", {}, session);
       }
     });
   }

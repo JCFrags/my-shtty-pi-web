@@ -356,3 +356,27 @@ test('failed native actions require a new observation before another attempt', a
   await assert.rejects(client.act(context, { action: 'click', ref: 'e1' }), /browser_observe/);
   assert.equal(clicks, 1);
 });
+
+test("frame observations cache friendly selection and reject mismatched actions before dispatch", async () => {
+  const calls = [];
+  const client = new PiBrowserClient(async ({ args }) => {
+    calls.push(args);
+    if (args[1] === "status") return { state: "agent", controlEpoch: 4 };
+    if (args[1] === "observe") return { ...fixtureObservation(), frame: "f2", frames: [
+      { ref: "f1", name: "", url: "https://example.test/", selected: false },
+      { ref: "f2", parent: "f1", name: "child", url: "https://child.test/", selected: true, frameId: "hidden-frame", sessionId: "hidden-session" },
+    ], framesTruncated: false };
+    return { completed: true };
+  });
+  const observation = await client.observe(context, { frame: "f2" });
+  assert.equal(observation.frame, "f2");
+  assert.equal(observation.frames.length, 2);
+  assert.equal(JSON.stringify(observation).includes("hidden-"), false);
+  assert.deepEqual(calls[0].slice(-2), ["--frame", "f2"]);
+  await assert.rejects(client.act(context, { action: "click", ref: "e1", frame: "f1" }), /Frame must match/);
+  assert.equal(calls.some(args => args[1] === "click"), false);
+  await client.act(context, { action: "click", ref: "e1", frame: "f2" });
+  const click = calls.find(args => args[1] === "click");
+  assert(click);
+  assert.equal(click.includes("--frame"), false);
+});

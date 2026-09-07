@@ -70,3 +70,12 @@ test('native locator schemas are bounded and keep all five tool names', async ()
   assert(properties.condition.enum.includes('actionable'));
   assert.equal(tools.find(tool => tool.name === 'browser_observe').parameters.properties.filter.maxItems, 16);
 });
+
+test("frame selection stays concise without backend frame or session identifiers", async () => {
+  const tools = await registeredTools();
+  for (const name of ["browser_observe", "browser_act"]) {
+    const properties = tools.find(tool => tool.name === name).parameters.properties;
+    assert.equal(properties.frame.pattern, "^(main|f[1-9][0-9]{0,8})$");
+    for (const hidden of ["frameId", "sessionId", "executionContextId", "uniqueContextId", "loaderId"]) assert.equal(hidden in properties, false);
+  }
+});

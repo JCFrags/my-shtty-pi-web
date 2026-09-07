@@ -15,6 +15,10 @@ export interface InputTarget {
   scale(): number;
   focus(): Promise<void> | void;
   cdp(method: string, params?: Record<string, unknown>): Promise<unknown>;
+  programmaticDrag?(mode: "start" | "finish" | "cancel"): Promise<void>;
+  programmaticEdit?(text?: string): Promise<unknown> | null;
+  programmaticKey?(event: { type: "rawKeyDown" | "keyUp" | "char"; key: AgentKey; character?: string }): Promise<unknown> | null;
+  programmaticPointer?(event: Electron.MouseInputEvent | Electron.MouseWheelInputEvent): Promise<unknown> | null;
 }
 
 type SendableInputEvent = Parameters<WebContents["sendInputEvent"]>[0];
@@ -60,7 +64,9 @@ export class PageInput {
         programmaticGeneration !== this.programmaticInputGeneration
       ) return;
       try {
-        void Promise.resolve(contents.sendInputEvent(event)).catch(() => {});
+        void Promise.resolve(programmaticGeneration !== undefined && event.type.startsWith("mouse")
+          ? this.target.programmaticPointer?.(event as Electron.MouseInputEvent) ?? contents.sendInputEvent(event)
+          : contents.sendInputEvent(event)).catch(() => {});
       } catch {}
     };
     if (this.focusGate) void this.focusGate.then(deliver, () => {});
@@ -123,6 +129,7 @@ export class PageInput {
   }
 
   releaseProgrammaticButtons() {
+    void this.target.programmaticDrag?.("cancel").catch(() => {});
     this.programmaticInputGeneration += 1;
     this.releaseProgrammaticButtonsNow();
   }
@@ -182,7 +189,19 @@ export class PageInput {
     }
   }
 
+  async startProgrammaticDrag(): Promise<void> {
+    const generation=this.programmaticInputGeneration;
+    const focus=this.syncFocus();
+    if(focus) await focus;
+    if(generation!==this.programmaticInputGeneration) throw new Error("agent input was released");
+    await this.target.programmaticDrag?.("start");
+    if(generation!==this.programmaticInputGeneration) {await this.target.programmaticDrag?.("cancel");throw new Error("agent input was released");}
+  }
+
+  async finishProgrammaticDrag(cancelled: boolean): Promise<void> { await this.target.programmaticDrag?.(cancelled ? "cancel" : "finish"); }
+
   releaseProgrammaticInput() {
+    void this.target.programmaticDrag?.("cancel").catch(() => {});
     this.programmaticInputGeneration += 1;
     this.releaseProgrammaticButtonsNow();
     this.releaseProgrammaticKeysNow();
@@ -193,7 +212,7 @@ export class PageInput {
     const focus = this.syncFocus();
     if (focus) await focus;
     if (generation !== this.programmaticInputGeneration) throw new Error("agent input was released");
-    this.target.contents().selectAll();
+    await (this.target.programmaticEdit?.() ?? this.target.contents().selectAll());
   }
 
   async insertTextProgrammatic(text: string): Promise<void> {
@@ -201,7 +220,7 @@ export class PageInput {
     const focus = this.syncFocus();
     if (focus) await focus;
     if (generation !== this.programmaticInputGeneration) throw new Error("agent input was released");
-    await this.target.contents().insertText(text);
+    await (this.target.programmaticEdit?.(text) ?? this.target.contents().insertText(text));
   }
 
   async programmaticWheel(x: number, y: number, deltaX: number, deltaY: number): Promise<void> {
@@ -209,7 +228,7 @@ export class PageInput {
     const focus = this.syncFocus();
     if (focus) await focus;
     if (generation !== this.programmaticInputGeneration) throw new Error("agent input was released");
-    await this.target.contents().sendInputEvent({
+    const event: Electron.MouseWheelInputEvent = {
       type: "mouseWheel",
       x: Math.max(0, Math.round(x)),
       y: Math.max(0, Math.round(y)),
@@ -220,7 +239,8 @@ export class PageInput {
       hasPreciseScrollingDeltas: true,
       canScroll: true,
       modifiers: [],
-    });
+    };
+    await (this.target.programmaticPointer?.(event) ?? this.target.contents().sendInputEvent(event));
   }
 
   releasePhysicalInput() {
@@ -235,6 +255,8 @@ export class PageInput {
   }
 
   private async sendAgentKey(event: { type: "rawKeyDown" | "keyUp" | "char"; key: AgentKey; character?: string }): Promise<void> {
+    const routed = this.target.programmaticKey?.(event);
+    if (routed) { await routed; return; }
     const modifiers: Electron.InputEvent["modifiers"] = event.key.modifiers.map((modifier) =>
       modifier === "ctrl" ? "ctrl" : modifier === "meta" ? "meta" : modifier,
     );

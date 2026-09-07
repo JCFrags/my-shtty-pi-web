@@ -14,3 +14,9 @@ test('CLI rejects invalid or combined locator arguments before routing', async (
   await assert.rejects(agentCommand(null, ['observe', '--filter-json', '{}']), /locator/);
   await assert.rejects(agentCommand(null, ['wait-for', '--condition', 'actionable', '--text', 'ready']), /needs --ref/);
 });
+
+test('CLI frame selection rejects backend identifiers and malformed references before routing', async () => {
+  for (const frame of ['f0', 'f-1', 'f1234567890', 'session-123', 'frame:123', 'https://example.test/', '']) {
+    await assert.rejects(agentCommand(null, ['observe', '--frame', frame]), /frame|needs a value/);
+  }
+});

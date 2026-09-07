@@ -57,7 +57,10 @@ const locatorParameters = Type.Array(Type.Union([
   Type.Object({ kind: StringEnum(["nth"] as const), index: Type.Integer({ minimum: -20000, maximum: 20000 }) }, { additionalProperties: false }),
 ]), { minItems: 1, maxItems: 16, description: "Native AgentCursor steps. Query steps scope following queries. Actions require one match; use nth only for explicit selection." });
 
+const frameParameter = Type.Optional(Type.String({ pattern: "^(main|f[1-9][0-9]{0,8})$", description: "Friendly frame ref from observe, or main. Omit to keep selection." }));
+
 const observeParameters = Type.Object({
+  frame: frameParameter,
   context_id: Type.Optional(Type.Integer({ minimum: 1 })),
   max_elements: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
   include_text: Type.Optional(Type.Boolean()),
@@ -68,6 +71,7 @@ const observeParameters = Type.Object({
 }, { additionalProperties: false });
 
 const actParameters = Type.Object({
+  frame: frameParameter,
   files: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 4096 }), { minItems: 1, maxItems: 16 })),
   context_id: Type.Optional(Type.Integer({ minimum: 1 })),
   dialog_id: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
@@ -238,7 +242,7 @@ export default async function terminalBrowserExtension(pi: ExtensionAPI): Promis
   pi.registerTool({
     name: "browser_observe",
     label: "Browser Observe",
-    description: "Read a bounded semantic, visual, or combined observation from the active companion tab. Use filter with native locator steps to narrow the element list. Visual captures cover the viewport or one referenced element.",
+    description: "Read a bounded semantic, visual, or combined observation from the active companion tab. Use filter with native locator steps to narrow the element list. Visual captures cover the containing context viewport or one referenced element. Up to 24 friendly frame summaries are included. Use frame to select fN or main; omission keeps the current frame.",
     promptSnippet: "Observe the active companion browser tab before acting",
     promptGuidelines: ["Use browser_observe after browser_open and after each page-changing browser_act call. Then use one browser_act action."],
     parameters: observeParameters,
@@ -253,6 +257,7 @@ export default async function terminalBrowserExtension(pi: ExtensionAPI): Promis
         throw new Error("element scope requires visual or both view");
       }
       return observationResult(await client.observe(context(ctx, signal), {
+        frame: params.frame,
         contextId: params.context_id,
         maxElements: params.max_elements,
         includeText: params.include_text,
@@ -267,12 +272,12 @@ export default async function terminalBrowserExtension(pi: ExtensionAPI): Promis
   pi.registerTool({
     name: "browser_act",
     label: "Browser Act",
-    description: "Perform one native action in this Pi pane's companion browser: upload, click, hover, drag, type, press_key, scroll, navigate, get_url, wait_for, or dialog. Dialog responses require the exact dialog_id returned by observe, tabs, resume, or an interrupted action and an explicit accept decision. Optional context_id must match that dialog. Never assume acceptance. Upload clicks a visible input or chooser button through AgentCursor, then assigns 1–16 regular project files (32 MiB each, 64 MiB total); secret paths and project escapes are rejected. Changing cwd does not change the companion project root; reopen the companion to adopt another project. Use exactly one ref or locator (native bounded step array) for click, type, upload or hover; drag accepts from_locator/to_locator. Ambiguous locators fail; scope or nth selects explicitly. wait_for accepts locator and actionable. Coordinates require the latest visual observation.",
+    description: "Perform one native action in this Pi pane's companion browser: upload, click, hover, drag, type, press_key, scroll, navigate, get_url, wait_for, or dialog. Dialog responses require the exact dialog_id returned by observe, tabs, resume, or an interrupted action and an explicit accept decision. Optional context_id must match that dialog. Never assume acceptance. Upload clicks a visible input or chooser button through AgentCursor, then assigns 1–16 regular project files (32 MiB each, 64 MiB total); secret paths and project escapes are rejected. Changing cwd does not change the companion project root; reopen the companion to adopt another project. Use exactly one ref or locator (native bounded step array) for click, type, upload or hover; drag accepts from_locator/to_locator. Ambiguous locators fail; scope or nth selects explicitly. wait_for accepts locator and actionable. Coordinates require the latest visual observation. Frame defaults to the selected observation; explicit frame must match it. Select another frame with browser_observe first. Drag endpoints must be in that same frame. Omit frame for context navigation, get_url, and dialog.",
     promptSnippet: "Perform one native companion-browser action",
     promptGuidelines: ["Use browser_act for exactly one action per call, then use browser_observe again when the page may have changed."],
     parameters: actParameters,
     async execute(_id, params, signal, _update, ctx) {
-      return result(await client.act(context(ctx, signal), browserAction(params)));
+      return result(await client.act(context(ctx, signal), { ...browserAction(params), frame: params.frame }));
     },
   });
 

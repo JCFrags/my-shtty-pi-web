@@ -86,6 +86,8 @@ async function transitionCommand(
 async function observeCommand(terminal: Terminal | null, args: string[]): Promise<number> {
   const browserKey = takeValue(args, "--browser");
   const tabValue = takeValue(args, "--tab");
+  const frame = takeValue(args, "--frame");
+  if (frame !== undefined && !/^(main|f[1-9][0-9]{0,8})$/.test(frame)) throw new Error("invalid frame selection");
   const maxValue = takeValue(args, "--max-elements");
   const view = parseObservationView(takeValue(args, "--view"));
   const scope = parseObservationScope(takeValue(args, "--scope"));
@@ -105,6 +107,7 @@ async function observeCommand(terminal: Terminal | null, args: string[]): Promis
   const maxElements = parseMaxElements(maxValue);
   const value = await control(browser.socket, {
     cmd: "agent.observe",
+    ...(frame ? { frame } : {}),
     tab,
     maxElements,
     includeText: !noText,

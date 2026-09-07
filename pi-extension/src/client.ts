@@ -90,6 +90,8 @@ function actionableError(stderr: string): string {
 }
 
 export interface BrowserStateCache {
+  frame?: string;
+  frameIsMain?: boolean;
   contextId: number;
   observationId: string;
   controlEpoch: number;
@@ -110,7 +112,7 @@ export type LocatorSpec = Array<
 export type BrowserElementTarget = { ref: string } | { locator: LocatorSpec };
 export type BrowserActionTarget = BrowserElementTarget | { x: number; y: number };
 
-export type BrowserAction =
+export type BrowserAction = { frame?: string } & (
   | { action: "dialog"; contextId?: number; dialogId: string; accept: boolean; text?: string }
   | ({ action: "upload"; files: string[] } & BrowserElementTarget)
   | ({ action: "click" } & BrowserElementTarget)
@@ -121,7 +123,7 @@ export type BrowserAction =
   | { action: "scroll"; dy: number; dx?: number }
   | { action: "navigate"; url: string }
   | { action: "get_url" }
-  | { action: "wait_for"; ref?: string; locator?: LocatorSpec; text?: string; condition?: "exists" | "visible" | "text" | "actionable"; timeoutMs?: number };
+  | { action: "wait_for"; ref?: string; locator?: LocatorSpec; text?: string; condition?: "exists" | "visible" | "text" | "actionable"; timeoutMs?: number });
 
 interface ControlStatus {
   state: "agent" | "human" | "paused";
@@ -246,6 +248,7 @@ export class PiBrowserClient {
   }
 
   async observe(context: ToolContext, options: {
+    frame?: string;
     contextId?: number;
     maxElements?: number;
     includeText?: boolean;
@@ -264,6 +267,7 @@ export class PiBrowserClient {
     ];
     const contextId = options.contextId ?? this.contextId;
     if (contextId !== null) args.push("--tab", String(contextId));
+    if (options.frame) args.push("--frame", options.frame);
     if (options.includeText === false) args.push("--no-text");
     if (options.ref) args.push("--ref", options.ref);
     if (options.filter) args.push("--filter-json", JSON.stringify(options.filter));
@@ -288,6 +292,7 @@ export class PiBrowserClient {
         : undefined;
       this.observation = {
         contextId: Number(value.contextId),
+        ...(typeof value.frame === "string" ? { frame: value.frame, frameIsMain: Array.isArray(value.frames) && value.frames.some(frame => frame.ref === value.frame && !frame.parent) } : {}),
         observationId: String(value.observationId),
         controlEpoch: Number(value.controlEpoch),
         ...(visual ? { visual: parseVisualState(visual) } : {}),
@@ -305,6 +310,7 @@ export class PiBrowserClient {
       const image = imagePath ? await readFile(imagePath) : null;
       return {
         contextId: this.contextId,
+        ...(typeof value.frame === "string" ? { frame: value.frame, frames: Array.isArray(value.frames) ? value.frames.slice(0,24).map(frame => ({ ref: String(frame.ref).slice(0,10), ...(typeof frame.parent === "string" ? { parent: frame.parent.slice(0,10) } : {}), name: String(frame.name ?? "").slice(0,100), url: String(frame.url ?? "").slice(0,500), selected: frame.selected === true })) : [], framesTruncated: value.framesTruncated === true } : {}),
         ...(view === "visual" ? {
           url: semantic.url,
           title: semantic.title,
@@ -354,6 +360,7 @@ export class PiBrowserClient {
     if (status.state !== "agent") {
       throw new Error("Browser control is with the user. Wait for control to be returned, or call browser_control with resume when asked.");
     }
+    if (request.frame !== undefined && ["navigate", "get_url", "dialog"].includes(request.action)) throw new Error("Frame selection applies to observed element and pointer actions; omit frame for context navigation, URL, or dialogs.");
     if (request.action === "dialog") {
       const dialog = this.pendingDialog;
       if (!dialog || dialog.id !== request.dialogId ||
@@ -370,6 +377,7 @@ export class PiBrowserClient {
       if (this.pendingDialog === dialog) this.pendingDialog = null;
       return { contextId: dialog.contextId, completed: true };
     }
+    if (request.frame !== undefined && request.frame !== this.observation?.frame && !(request.frame === "main" && this.observation?.frameIsMain)) throw new Error("Frame must match the current observation. Call browser_observe with frame first.");
     const args = ["agent"];
     const needsObservation = request.action !== "navigate" && request.action !== "get_url";
     if (needsObservation) {

@@ -207,6 +207,8 @@ export class PiBrowserClient {
         const contextId = options.contextId ?? this.contextId;
         if (contextId !== null)
             args.push("--tab", String(contextId));
+        if (options.frame)
+            args.push("--frame", options.frame);
         if (options.includeText === false)
             args.push("--no-text");
         if (options.ref)
@@ -234,6 +236,7 @@ export class PiBrowserClient {
                 : undefined;
             this.observation = {
                 contextId: Number(value.contextId),
+                ...(typeof value.frame === "string" ? { frame: value.frame, frameIsMain: Array.isArray(value.frames) && value.frames.some(frame => frame.ref === value.frame && !frame.parent) } : {}),
                 observationId: String(value.observationId),
                 controlEpoch: Number(value.controlEpoch),
                 ...(visual ? { visual: parseVisualState(visual) } : {}),
@@ -252,6 +255,7 @@ export class PiBrowserClient {
             const image = imagePath ? await readFile(imagePath) : null;
             return {
                 contextId: this.contextId,
+                ...(typeof value.frame === "string" ? { frame: value.frame, frames: Array.isArray(value.frames) ? value.frames.slice(0, 24).map(frame => ({ ref: String(frame.ref).slice(0, 10), ...(typeof frame.parent === "string" ? { parent: frame.parent.slice(0, 10) } : {}), name: String(frame.name ?? "").slice(0, 100), url: String(frame.url ?? "").slice(0, 500), selected: frame.selected === true })) : [], framesTruncated: value.framesTruncated === true } : {}),
                 ...(view === "visual" ? {
                     url: semantic.url,
                     title: semantic.title,
@@ -301,6 +305,8 @@ export class PiBrowserClient {
         if (status.state !== "agent") {
             throw new Error("Browser control is with the user. Wait for control to be returned, or call browser_control with resume when asked.");
         }
+        if (request.frame !== undefined && ["navigate", "get_url", "dialog"].includes(request.action))
+            throw new Error("Frame selection applies to observed element and pointer actions; omit frame for context navigation, URL, or dialogs.");
         if (request.action === "dialog") {
             const dialog = this.pendingDialog;
             if (!dialog || dialog.id !== request.dialogId ||
@@ -318,6 +324,8 @@ export class PiBrowserClient {
                 this.pendingDialog = null;
             return { contextId: dialog.contextId, completed: true };
         }
+        if (request.frame !== undefined && request.frame !== this.observation?.frame && !(request.frame === "main" && this.observation?.frameIsMain))
+            throw new Error("Frame must match the current observation. Call browser_observe with frame first.");
         const args = ["agent"];
         const needsObservation = request.action !== "navigate" && request.action !== "get_url";
         if (needsObservation) {

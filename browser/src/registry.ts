@@ -120,6 +120,7 @@ interface ControlRequest {
   fromLocator?: unknown;
   toLocator?: unknown;
   filter?: unknown;
+  frame?: unknown;
   x?: unknown;
   y?: unknown;
   fromRef?: unknown;
@@ -438,6 +439,8 @@ function observeRequest(request: ControlRequest): {
   ) {
     throw new Error("agent.observe maxElements must be an integer from 1 to 500");
   }
+  const frame = request.frame;
+  if (frame !== undefined && (typeof frame !== "string" || !/^(main|f[1-9][0-9]{0,8})$/.test(frame))) throw new Error("invalid frame selection");
   const includeText = request.includeText === undefined ? true : request.includeText;
   if (typeof includeText !== "boolean") {
     throw new Error("agent.observe includeText must be boolean");
@@ -462,7 +465,7 @@ function observeRequest(request: ControlRequest): {
   }
   return {
     tab,
-    request: { maxElements, includeText, view, scope, ...(ref ? { ref } : {}), ...(request.filter === undefined ? {} : { filter: parseLocator(request.filter) }) },
+    request: { ...(frame ? { frame } : {}), maxElements, includeText, view, scope, ...(ref ? { ref } : {}), ...(request.filter === undefined ? {} : { filter: parseLocator(request.filter) }) },
   };
 }
 

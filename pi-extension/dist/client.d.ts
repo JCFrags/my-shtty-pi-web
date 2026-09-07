@@ -12,6 +12,8 @@ export interface CommandRequest {
 export type CommandRunner = (request: CommandRequest) => Promise<unknown>;
 export declare const defaultCommandRunner: CommandRunner;
 export interface BrowserStateCache {
+    frame?: string;
+    frameIsMain?: boolean;
     contextId: number;
     observationId: string;
     controlEpoch: number;
@@ -55,6 +57,8 @@ export type BrowserActionTarget = BrowserElementTarget | {
     y: number;
 };
 export type BrowserAction = {
+    frame?: string;
+} & ({
     action: "dialog";
     contextId?: number;
     dialogId: string;
@@ -96,7 +100,7 @@ export type BrowserAction = {
     text?: string;
     condition?: "exists" | "visible" | "text" | "actionable";
     timeoutMs?: number;
-};
+});
 export declare class PiBrowserClient {
     private readonly runner;
     private observation;
@@ -171,6 +175,7 @@ export declare class PiBrowserClient {
         download?: undefined;
     }>;
     observe(context: ToolContext, options?: {
+        frame?: string;
         contextId?: number;
         maxElements?: number;
         includeText?: boolean;
@@ -196,6 +201,15 @@ export declare class PiBrowserClient {
         title: string;
         viewport: unknown;
         elements: any[];
+        frame?: string | undefined;
+        frames?: {
+            name: string;
+            url: string;
+            selected: boolean;
+            parent?: any;
+            ref: string;
+        }[] | undefined;
+        framesTruncated?: boolean | undefined;
         contextId: number;
         dialog?: undefined;
         completed?: undefined;
@@ -208,6 +222,15 @@ export declare class PiBrowserClient {
         url: string;
         title: string;
         viewport: unknown;
+        frame?: string | undefined;
+        frames?: {
+            name: string;
+            url: string;
+            selected: boolean;
+            parent?: any;
+            ref: string;
+        }[] | undefined;
+        framesTruncated?: boolean | undefined;
         contextId: number;
         dialog?: undefined;
         completed?: undefined;

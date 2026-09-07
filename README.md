@@ -192,7 +192,7 @@ included. Actions reject ambiguity and return up to eight candidate summaries.
 Use a narrower scope or explicit `nth` selection. Arrays contain 1–16 steps;
 query strings are limited to 1024 characters and each scope to 20000 elements.
 Role/name matching uses DOM roles and accessible labels, not a complete browser
-accessibility-tree query. Frames and closed shadow roots are not included.
+accessibility-tree query. Queries stay inside the selected frame; closed shadow roots are not included.
 
 Drag uses `from_locator` / `to_locator`, or the existing ref/visual-coordinate
 fields. `browser_observe.filter` narrows the element list without changing the
@@ -214,6 +214,41 @@ CLI equivalents use `--locator-json '<steps>'`, `--from-locator-json`,
 available. Observer execution stays injectable through `AgentPageObserver`; the
 general root `runJs` path is unchanged.
 
+### Frame selection
+
+`browser_observe` returns up to 24 frame summaries (`ref`, `parent`, `name`, `url`,
+`selected`) plus `frame` and `framesTruncated`. Select a listed friendly ref with
+`{"frame":"f2"}`; use `{"frame":"main"}` to return to the main document. Omission
+keeps the selection. Frame refs belong to their native context, including popups.
+`browser_act.frame` can confirm the selected frame but cannot switch away from
+its cached observation. Refs are scoped internally by context, frame, and document.
+CLI observe uses `--frame f2` or `--frame main`.
+
+Same-origin, cross-origin, and nested out-of-process frames support observe,
+click, type, hover, wait, element capture, upload, and same-frame drag. Both drag
+endpoints must belong to the selected frame. Native context navigation and URL
+commands still apply to the context, not a selected child. Frame or ancestor
+navigation, detach, and process swaps invalidate prior observations and release
+input. Observe `main` after a selected frame disappears; there is no parent fallback.
+
+Frame geometry uses parent-session DOM owners, content-box offsets, ancestor
+clipping, and parent hit tests. Ancestor owners scroll before targets are measured
+again. Element rectangles, captures, and activity use the containing root/popup
+input surface. Page zoom is included; terminal display scale and device pixel ratio
+are not substitutes for page zoom. Visual coordinates become stale when frame
+geometry or scrolling changes. Frame-owner transforms, perspective, and CSS `zoom`
+are rejected; ordinary axis-aligned owners and browser page zoom are supported.
+Frame ancestry is limited to 32 levels and summaries to the first 24 live frames.
+
+The pinned native frame fixture uses different local sites and asserts real
+out-of-process sessions, nested same-origin/cross-origin frames, duplicate labels,
+zoomed root/popup capture pixels, scrolling, upload, child prompts, drag delivery,
+process swaps, detach, geometry rejection, and takeover without repeated effects.
+Electron offscreen out-of-process frames need exact-session CDP input, rather than
+root `sendInputEvent`. HTML5 drag interception is on the root session; drag events
+use the selected frame session. These routes stay inside the normal PageInput and
+slow-natural driver, with input release and cancellation checks.
+
 ### Agent cursor alignment
 
 The terminal overlay uses terminal-root coordinates, including the page origin and
@@ -234,9 +269,10 @@ still required to confirm visual alignment on a particular terminal backend.
 
 Use `browser_act` with `action: "upload"`, a visible input/button `ref` from the
 latest observation or a unique `locator`, and `files: ["relative/path.txt"]`. The normal slow-natural
-AgentCursor click must open a native chooser in that context's main document.
-Direct file inputs, button-triggered choosers, multiple files, and popup contexts
-are supported. Iframe choosers are rejected. The browser process independently
+AgentCursor click must open a native chooser in the selected frame.
+Direct file inputs, button-triggered choosers, multiple files, popup contexts,
+and same-origin/cross-origin frames are supported. Chooser events and backend nodes
+are bound to that frame's session and document. The browser process independently
 canonicalizes paths against the owning Pi project before the click and again
 before assignment. Uploads accept 1–16 existing regular files, at most 32 MiB each
 and 64 MiB total. Directories, special files, project escapes (including symlinks),

@@ -1,3 +1,4 @@
+import { BrowserFrames } from "../agent/frames";
 import { BrowserUploads } from "../agent/uploads";
 import { registerDownloadSource, waitForDownloadStart, type BrowserDownloads } from "../agent/downloads";
 import { nativeImage } from "electron";
@@ -24,6 +25,7 @@ export interface PopupState {
 export class PopupWindow implements AgentBrowserTarget {
   readonly dialogs: BrowserDialogs;
   readonly uploads: BrowserUploads;
+  readonly frames: BrowserFrames;
   onMainFrameNavigationStart: (() => void) | null = null;
   readonly input: PageInput;
   cursorShape = "default";
@@ -49,8 +51,9 @@ export class PopupWindow implements AgentBrowserTarget {
     openWindow?: (details: Electron.HandlerDetails) => Electron.WindowOpenHandlerResponse,
   ) {
     this.window = window;
-    this.dialogs = new BrowserDialogs(window.webContents, (method, params) => this.cdp(method, params));
-    this.uploads = new BrowserUploads(this.window.webContents, (method, params) => this.cdp(method, params));
+    this.frames = new BrowserFrames(this.window.webContents, (method, params, session) => this.cdp(method, params, session), session => this.dialogs.initializeSession(session));
+    this.dialogs = new BrowserDialogs(window.webContents, (method, params, session) => this.cdp(method, params, session));
+    this.uploads = new BrowserUploads(this.window.webContents, (method, params, session) => this.cdp(method, params, session), this.frames);
     this.surface = surface;
     this.onChange = onChange;
     this.renderScale = renderScale;
@@ -63,6 +66,10 @@ export class PopupWindow implements AgentBrowserTarget {
     };
     this.input = new PageInput({
       contents: () => this.window.webContents,
+      programmaticDrag: mode => mode === "start" ? this.frames.startDrag() : this.frames.finishDrag(mode === "cancel"),
+      programmaticEdit: text => this.frames.active ? this.frames.dispatchEdit(text) : null,
+      programmaticKey: event => this.frames.active || event.type === "keyUp" ? this.frames.dispatchKey(event) : null,
+      programmaticPointer: event => this.frames.active || event.type === "mouseUp" ? this.frames.dispatchPointer(event) : null,
       scale,
       focus: () => this.focus(),
       cdp: (method, params) => this.cdp(method, params),
@@ -97,7 +104,7 @@ export class PopupWindow implements AgentBrowserTarget {
       this.surface.clear();
       onClosed();
     });
-    void this.dialogs.initialize().catch(() => {});
+    void this.dialogs.initialize().then(() => this.frames.initialize()).catch(() => {});
     contents.once("did-finish-load", () => { void this.startStreaming(size, renderScale).catch(() => {}); });
     this.focus();
   }
@@ -146,7 +153,8 @@ export class PopupWindow implements AgentBrowserTarget {
 
   private async startStreaming(size: { width: number; height: number }, renderScale: number) {
     await this.attachCdp();
-    this.window.webContents.debugger.on("message", (_event, method, params) => {
+    this.window.webContents.debugger.on("message", (_event, method, params, session) => {
+      if (session) return;
       if (method !== "Page.screencastFrame") return;
       const frame = params as { data: string; sessionId: number };
       void this.cdp("Page.screencastFrameAck", { sessionId: frame.sessionId }).catch(() => {});
@@ -183,11 +191,11 @@ export class PopupWindow implements AgentBrowserTarget {
     this.cdpAttached = true;
   }
 
-  private cdp(method: string, params?: Record<string, unknown>): Promise<unknown> {
+  private cdp(method: string, params?: Record<string, unknown>, sessionId?: string): Promise<unknown> {
     try {
       if (this.destroyed) throw new Error("popup is closed");
       this.attachCdp();
-      return this.window.webContents.debugger.sendCommand(method, params);
+      return this.window.webContents.debugger.sendCommand(method, params, sessionId || undefined);
     } catch (error) { return Promise.reject(error); }
   }
 
@@ -211,6 +219,8 @@ export class PopupWindow implements AgentBrowserTarget {
     if (event.kind === "down" && event.button === "left") this.uploads.acceptChooserFromClick();
     this.input.programmaticPointer(event);
   }
+  agentStartDrag() { return this.input.startProgrammaticDrag(); }
+  agentFinishDrag(cancelled: boolean) { return this.input.finishProgrammaticDrag(cancelled); }
   releaseAgentPointer() { this.input.releaseProgrammaticButtons(); }
   releaseAgentInput() { this.input.releaseProgrammaticInput(); }
   releaseAllInput() { this.input.releaseAllInput(); }

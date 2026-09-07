@@ -9,10 +9,13 @@ import type { AgentKey } from "./key";
 import type { ProgrammaticPointerEvent } from "../page/input";
 
 export interface AgentBrowserTarget {
+  frames?: import("./frames").BrowserFrames;
   readonly downloadStartSequence?: number;
   waitForDownloadStart?(sequence: number, signal: AbortSignal): Promise<boolean>;
   uploads?: import("./uploads").BrowserUploads;
   runJs(source: string): Promise<unknown>;
+  agentStartDrag?(): Promise<void>;
+  agentFinishDrag?(cancelled: boolean): Promise<void>;
   agentPointer(event: ProgrammaticPointerEvent): void;
   releaseAgentPointer(): void;
   releaseAgentInput(): void;
@@ -74,6 +77,7 @@ export interface AgentVisualObservation {
 }
 
 export interface AgentObserveRequest extends AgentRequest {
+  frame?: string;
   filter?: LocatorSpec;
   maxElements: number;
   includeText: boolean;
@@ -83,6 +87,9 @@ export interface AgentObserveRequest extends AgentRequest {
 }
 
 export interface AgentObservation {
+  frame?: string;
+  frames?: import("./frames").FrameSummary[];
+  framesTruncated?: boolean;
   contextId?: number;
   observationId: string;
   documentId: string;

@@ -1,3 +1,4 @@
+import { BrowserFrames } from "../agent/frames";
 import { BrowserUploads } from "../agent/uploads";
 import { registerDownloadSource, waitForDownloadStart, type BrowserDownloads } from "../agent/downloads";
 import { BrowserWindow, screen } from "electron";
@@ -46,6 +47,7 @@ export class BrowserController {
   readonly surface: Surface;
   readonly dialogs: BrowserDialogs;
   readonly uploads: BrowserUploads;
+  readonly frames: BrowserFrames;
   onPopupCreated: ((popup: PopupWindow, openerContentsId: number) => void) | null = null;
   onPopupClosed: ((popup: PopupWindow) => void) | null = null;
   private readonly popupSurface: Surface;
@@ -148,11 +150,16 @@ export class BrowserController {
         additionalArguments: this.preloadArgv(),
       },
     });
-    this.dialogs = new BrowserDialogs(this.window.webContents, (method, params) => this.cdp(method, params));
-    this.uploads = new BrowserUploads(this.window.webContents, (method, params) => this.cdp(method, params));
+    this.frames = new BrowserFrames(this.window.webContents, (method, params, session) => this.cdp(method, params, session), session => this.dialogs.initializeSession(session));
+    this.dialogs = new BrowserDialogs(this.window.webContents, (method, params, session) => this.cdp(method, params, session));
+    this.uploads = new BrowserUploads(this.window.webContents, (method, params, session) => this.cdp(method, params, session), this.frames);
     if (this.clipboardRead) allowClipboardRead(this.window.webContents);
     this.input = new PageInput({
       contents: () => this.window.webContents,
+      programmaticDrag: mode => mode === "start" ? this.frames.startDrag() : this.frames.finishDrag(mode === "cancel"),
+      programmaticEdit: text => this.frames.active ? this.frames.dispatchEdit(text) : null,
+      programmaticKey: event => this.frames.active || event.type === "keyUp" ? this.frames.dispatchKey(event) : null,
+      programmaticPointer: event => this.frames.active || event.type === "mouseUp" ? this.frames.dispatchPointer(event) : null,
       scale: () => this.layout.scale,
       focus: () => this.focusContent(),
       cdp: async (method, params) => {
@@ -247,6 +254,7 @@ export class BrowserController {
     await this.window.loadURL("about:blank");
     await this.attachCdp();
     await this.dialogs.initialize();
+    await this.frames.initialize();
     if (!this.stopped) await this.window.loadURL(normalizeUrl(initialUrl, this.cwd));
   }
 
@@ -374,7 +382,8 @@ export class BrowserController {
     if (this.cdpAttached) return;
     this.window.webContents.debugger.attach("1.3");
     this.cdpAttached = true;
-    this.window.webContents.debugger.on("message", (_event, method, params) => {
+    this.window.webContents.debugger.on("message", (_event, method, params, session) => {
+      if (session) return;
       this.cdpEventHandlers.get(method)?.(params);
       if (method !== "Runtime.bindingCalled") return;
       const call = params as { name: string; payload: string };
@@ -405,10 +414,10 @@ export class BrowserController {
     });
   }
 
-  cdp(method: string, params?: Record<string, unknown>): Promise<Record<string, unknown>> {
+  cdp(method: string, params?: Record<string, unknown>, sessionId?: string): Promise<Record<string, unknown>> {
     try {
       if (this.stopped) throw new Error("browser is stopped");
-      return this.window.webContents.debugger.sendCommand(method, params) as Promise<Record<string, unknown>>;
+      return this.window.webContents.debugger.sendCommand(method, params, sessionId || undefined) as Promise<Record<string, unknown>>;
     } catch (error) { return Promise.reject(error); }
   }
 
@@ -628,6 +637,8 @@ export class BrowserController {
     this.devtools?.input.releaseAllInput();
   }
 
+  agentStartDrag() { return this.input.startProgrammaticDrag(); }
+  agentFinishDrag(cancelled: boolean) { return this.input.finishProgrammaticDrag(cancelled); }
   releaseAgentPointer() {
     if (this.stopped) return;
     this.input.releaseProgrammaticButtons();

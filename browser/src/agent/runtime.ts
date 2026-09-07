@@ -1,3 +1,4 @@
+import { FrameObserver } from "./frame-observer";
 import { validateUploadFiles } from "./files";
 import { readiness, sameRect, TargetPreparation } from "./target-preparation";
 import { parseLocator } from "./locator";
@@ -123,7 +124,8 @@ export class BrowserAgentRuntime {
   ) {
     this.control = options.control;
     this.onActivityChange = options.onActivityChange ?? (() => {});
-    this.observer = options.observer ?? new PageObserver(target);
+    this.observer = options.observer ?? (target.frames ? new FrameObserver(target.frames) : new PageObserver(target));
+    target.frames?.subscribe(() => this.invalidateDocument());
     this.driver = options.driver ?? new TerminalBrowserDriver(target, this.observer, {
       beforeInput: () => this.assertOperationInput(),
       sleep: (ms) => this.operationSleep(ms),
@@ -151,6 +153,7 @@ export class BrowserAgentRuntime {
   async observe(options: Partial<AgentObserveRequest> = {}): Promise<AgentObservation> {
     return this.enqueue(async () => {
       const controlEpoch = this.control.assertAgent().controlEpoch;
+      await this.target.frames?.select(options.frame);
       const documentGeneration = this.documentGeneration;
       const maxElements = options.maxElements ?? 200;
       const includeText = options.includeText ?? true;
@@ -190,6 +193,7 @@ export class BrowserAgentRuntime {
         };
       }
       const observation: AgentObservation = {
+        ...(this.target.frames?.summaries() ?? {}),
         observationId: this.observationId(),
         documentId: page.documentId,
         controlEpoch,
@@ -197,6 +201,7 @@ export class BrowserAgentRuntime {
         ...(visual ? { visual } : {}),
       };
       this.requestSignal?.throwIfAborted();
+      this.target.frames?.rememberGeometry();
       this.latestObservation = observation;
       return observation;
     }, options.signal);
@@ -668,6 +673,8 @@ export class BrowserAgentRuntime {
     from: AgentActionTarget, to?: AgentActionTarget, hover = false, editable = false) {
     this.assertActionTarget(observation, from);
     if (to) this.assertActionTarget(observation, to);
+    if ("x" in from) await this.target.frames?.assertCoordinates(from);
+    if (to && "x" in to) await this.target.frames?.assertCoordinates(to);
     const preparation = new TargetPreparation(this.observer, observation.documentId,
       () => this.assertOperation(operation), ms => this.operationSleep(ms));
     const scroll = !("x" in from || to && "x" in to);
@@ -829,6 +836,7 @@ export class BrowserAgentRuntime {
   }
 
   private assertOperation(operation: AgentOperation): void {
+    this.target.frames?.assertInput();
     operation.signal?.throwIfAborted();
     if (this.activeOperation !== operation) {
       throw new Error("agent operation is no longer active");
