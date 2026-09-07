@@ -167,8 +167,12 @@ Run `pnpm --filter terminal-browser test:electron` for the pinned Electron nativ
 fixtures. Linux requires an X11 display: the native Wayland dialog backend can
 fail on hidden windows. The fixtures exercise the real controller and popup
 runtime, opener communication, strict CSP prompts, native dialogs, stale replies,
-timeouts, and beforeunload replay. The terminal dialog card is build-checked but
-still needs a visual check in a live terminal session.
+timeouts, and beforeunload replay. The files fixture also runs a prompt → popup
+return → project upload → tracked download sequence, including takeover cleanup
+and two owners in the same project. CI runs both fixtures with `xvfb-run -a` on
+Ubuntu; native failures fail the integration job, separate from the optional
+pixel-terminals baseline. The terminal dialog card is build-checked but still
+needs a visual check in a live terminal session.
 
 
 ### Project uploads and tracked downloads
