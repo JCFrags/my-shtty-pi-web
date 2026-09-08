@@ -76,11 +76,25 @@ function config(root) {
   }
   return value;
 }
-function withLock(root, action) {
+function withLock(root, action, recovering = false) {
   privateDirectory(root, true);
   const lock = path.join(root, ".manager-lock");
+  if (recovering && fs.existsSync(lock)) {
+    privateDirectory(lock);
+    const owner = readJson(path.join(lock, "owner.json"));
+    assert(Number.isSafeInteger(owner.pid) && owner.pid > 0, "unknown lock owner");
+    let absent = false;
+    try { process.kill(owner.pid, 0); } catch (error) { absent = error.code === "ESRCH"; }
+    assert(absent, "manager owner is live or unknown; recovery refused");
+    fs.unlinkSync(path.join(lock, "owner.json"));
+    fs.rmdirSync(lock);
+  }
   fs.mkdirSync(lock, { mode: 0o700 });
-  try { return action(); } finally { fs.rmdirSync(lock); }
+  fs.writeFileSync(path.join(lock, "owner.json"), json({ pid: process.pid }), { flag: "wx", mode: 0o600 });
+  try {
+    assert(recovering || !fs.existsSync(path.join(root, "pending.json")), "interrupted transaction requires explicit recover");
+    return action();
+  } finally { fs.unlinkSync(path.join(lock, "owner.json")); fs.rmdirSync(lock); }
 }
 export function stage(archive, manifestFile, root) {
   return withLock(root, () => {
@@ -169,10 +183,6 @@ function changeHerdr(file, from, to) {
   }
   return { file, before, after: json(entries), from, to };
 }
-function undoHerdr(change) {
-  if (snapshot(change.file) === change.after) atomic(change.file, change.before, change.after);
-  else { const undo = changeHerdr(change.file, change.to, change.from); atomic(undo.file, undo.after, undo.before); }
-}
 function current(root) { const raw = snapshot(path.join(root, "selection.json")); return raw ? JSON.parse(raw) : null; }
 export function activate(root, artifactId) {
   return withLock(root, () => {
@@ -213,23 +223,7 @@ export function activate(root, artifactId) {
     const backups = path.join(root, "backups");
     privateDirectory(backups, true);
     fs.writeFileSync(path.join(backups, `${randomUUID()}.json`), json(transaction), { flag: "wx", mode: 0o600 });
-    const applied = [];
-    let piApplied = false;
-    let herdrApplied = false;
-    try {
-      atomic(pi.file, pi.after, pi.before); piApplied = true;
-      atomic(herdr.file, herdr.after, herdr.before); herdrApplied = true;
-      for (const link of links) { replaceLink(link.file, link.after, link.before); applied.push(link); }
-      atomic(selectionFile, json(transaction), beforeSelection);
-    } catch (error) {
-      for (const link of applied.reverse()) replaceLink(link.file, link.before, link.after);
-      if (herdrApplied) undoHerdr(herdr);
-      if (piApplied) {
-        if (snapshot(pi.file) === pi.after) atomic(pi.file, pi.before, pi.after);
-        else { const undo = changePackage(pi.file, pi.to, pi.from, pi.index); atomic(pi.file, undo.after, undo.before); }
-      }
-      throw error;
-    }
+    transact(root, { pi, herdr, links, selection: { file: selectionFile, before: beforeSelection, after: json(transaction) } });
     return { selected: artifactId, previous: selected?.artifactId ?? null, loadedRuntime: "unchanged" };
   });
 }
@@ -245,26 +239,76 @@ export function rollback(root) {
     for (const link of selected.links) assert.equal(linkSnapshot(link.file), link.after, "link changed since activation");
     const selectionFile = path.join(root, "selection.json");
     const before = snapshot(selectionFile);
-    const applied = [];
-    atomic(pi.file, pi.after, pi.before);
-    let herdrApplied = false;
-    try {
-      atomic(herdr.file, herdr.after, herdr.before); herdrApplied = true;
-      for (const link of selected.links) { replaceLink(link.file, link.before, link.after); applied.push(link); }
-      atomic(selectionFile, json(selected.previous), before);
-    } catch (error) {
-      for (const link of applied.reverse()) replaceLink(link.file, link.after, link.before);
-      if (herdrApplied) undoHerdr(herdr);
-      const undo = changePackage(pi.file, pi.to, pi.from, pi.index); atomic(pi.file, undo.after, undo.before);
-      throw error;
-    }
+    transact(root, { pi, herdr, links: selected.links.map(link => ({ file: link.file, before: link.after, after: link.before })), selection: { file: selectionFile, before, after: json(selected.previous) } });
     return { selected: selected.previous?.artifactId ?? null, loadedRuntime: "unchanged" };
   });
+}
+function reverseTransaction(transaction) {
+  const { pi, herdr, links, selection } = transaction;
+  assert.equal(snapshot(selection.file), selection.before, "selection changed during interrupted operation");
+  const plans = [];
+  for (const link of [...links].reverse()) {
+    const actual = linkSnapshot(link.file);
+    if (JSON.stringify(actual) === JSON.stringify(link.before)) continue;
+    assert.deepEqual(actual, link.after, "interrupted link was changed");
+    plans.push(() => replaceLink(link.file, link.before, link.after));
+  }
+  for (const [change, reverse] of [[herdr, () => changeHerdr(herdr.file, herdr.to, herdr.from)], [pi, () => changePackage(pi.file, pi.to, pi.from, pi.index)]]) {
+    const actual = snapshot(change.file);
+    if (actual === change.before) continue;
+    if (actual === change.after) plans.push(() => atomic(change.file, change.before, actual));
+    else {
+      let undo;
+      try { undo = reverse(); }
+      catch {
+        if (change === pi) changePackage(pi.file, pi.from, pi.from, pi.index);
+        else changeHerdr(herdr.file, herdr.from, herdr.from);
+        continue;
+      }
+      plans.push(() => atomic(undo.file, undo.after, undo.before));
+    }
+  }
+  for (const apply of plans) apply();
+}
+function transact(root, transaction) {
+  const pending = path.join(root, "pending.json");
+  atomic(pending, json(transaction), null);
+  try {
+    for (const change of [transaction.pi, transaction.herdr]) atomic(change.file, change.after, change.before);
+    for (const link of transaction.links) replaceLink(link.file, link.after, link.before);
+    atomic(transaction.selection.file, transaction.selection.after, transaction.selection.before);
+  } catch (error) {
+    reverseTransaction(transaction);
+    fs.unlinkSync(pending);
+    throw error;
+  }
+  fs.unlinkSync(pending);
+}
+export function recover(root) {
+  return withLock(root, () => {
+    const installation = config(root);
+    const pending = path.join(root, "pending.json");
+    const raw = snapshot(pending);
+    if (raw === null) return { recovered: false, loadedRuntime: "unchanged" };
+    const transaction = JSON.parse(raw);
+    assert.equal(transaction.pi.file, installation.selection.piSettings);
+    assert.equal(transaction.herdr.file, installation.selection.herdrRegistry);
+    assert.deepEqual(transaction.links.map(link => link.file), [installation.selection.cli, installation.selection.herdr]);
+    assert.equal(transaction.selection.file, path.join(root, "selection.json"));
+    const committed = snapshot(transaction.selection.file) === transaction.selection.after;
+    if (committed) {
+      changePackage(transaction.pi.file, transaction.pi.to, transaction.pi.to, transaction.pi.index);
+      changeHerdr(transaction.herdr.file, transaction.herdr.to, transaction.herdr.to);
+      for (const link of transaction.links) assert.deepEqual(linkSnapshot(link.file), link.after);
+    } else reverseTransaction(transaction);
+    fs.unlinkSync(pending);
+    return { recovered: true, committed, selected: current(root)?.artifactId ?? null, loadedRuntime: "unchanged" };
+  }, true);
 }
 export function status(root) {
   privateDirectory(root);
   const selected = current(root);
-  return { schemaVersion: 1, candidates: fs.existsSync(path.join(root, "releases")) ? fs.readdirSync(path.join(root, "releases")).filter((entry) => /^[a-f0-9]{64}$/.test(entry)).sort() : [], selected: selected?.artifactId ?? null, loadedRuntime: "unknown", graphics: "unknown", automaticRepair: false };
+  return { schemaVersion: 1, candidates: fs.existsSync(path.join(root, "releases")) ? fs.readdirSync(path.join(root, "releases")).filter((entry) => /^[a-f0-9]{64}$/.test(entry)).sort() : [], selected: selected?.artifactId ?? null, recoveryRequired: fs.existsSync(path.join(root, "pending.json")) || fs.existsSync(path.join(root, ".manager-lock")), loadedRuntime: "unknown", graphics: "unknown", automaticRepair: false };
 }
 function configure(root, receipt) {
   return withLock(root, () => {
@@ -281,8 +325,8 @@ function configure(root, receipt) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   try {
     const [command, ...args] = process.argv.slice(2);
-    const result = command === "stage" ? stage(...args) : command === "configure" ? configure(...args) : command === "activate" ? activate(...args) : command === "rollback" ? rollback(...args) : command === "status" ? status(...args) : null;
-    assert(result, "usage: install-manager.mjs stage ARCHIVE MANIFEST ROOT | configure ROOT RECEIPT | activate ROOT ARTIFACT_ID | rollback ROOT | status ROOT");
+    const result = command === "stage" ? stage(...args) : command === "configure" ? configure(...args) : command === "activate" ? activate(...args) : command === "rollback" ? rollback(...args) : command === "status" ? status(...args) : command === "recover" ? recover(...args) : null;
+    assert(result, "usage: install-manager.mjs stage ARCHIVE MANIFEST ROOT | configure ROOT RECEIPT | activate ROOT ARTIFACT_ID | rollback ROOT | recover ROOT | status ROOT");
     process.stdout.write(json(result));
   } catch { process.stderr.write("installation refused; verify archive, owner-only paths, namespace receipt and unchanged selections. No runtime was restarted.\n"); process.exitCode = 1; }
 }

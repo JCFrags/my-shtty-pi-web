@@ -8,6 +8,8 @@
     "install:dist": "scripts/install-local.sh",
     "test:dist": "node --test scripts/test/*.test.mjs",
     "test:dist:smoke": "node scripts/test/smoke-dist.mjs",
+    "test:dist:recovery": "node scripts/test/recovery-dist.mjs",
+    "test:dist:ci": "bash scripts/test/ci-dist.sh",
     "dist": "pnpm build:dist && pnpm install:dist",
     "release:patch": "scripts/tag-release.sh patch",
     "release:minor": "scripts/tag-release.sh minor",

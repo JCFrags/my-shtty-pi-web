@@ -514,6 +514,9 @@ impl PixelEngine {
                 .collect();
             let mut autoprofile = Autoprofile::from_env(&mut engine);
             let exit_error = loop {
+                if stop.load(Ordering::Relaxed) {
+                    break None;
+                }
                 let events = match engine.pump(None) {
                     Ok(events) => events,
                     Err(e) => break Some(e.to_string()),
@@ -583,6 +586,11 @@ impl PixelEngine {
         self.stop.store(true, Ordering::Relaxed);
         self.waker.wake();
         if let Some(thread) = self.thread.take() {
+            // The pump can consume a wake before it starts waiting again.
+            while !thread.is_finished() {
+                self.waker.wake();
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
             let _ = thread.join();
         }
         self.engine = None;

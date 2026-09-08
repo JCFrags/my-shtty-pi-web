@@ -6,6 +6,7 @@ const path = require("node:path");
 const { test } = require("node:test");
 
 const { control } = require("../dist/control.js");
+const { RUNTIME_IDENTITY } = require("pixel-store");
 
 test("control keeps visual bytes in the binary socket payload", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "terminal-browser-control-"));
@@ -20,6 +21,11 @@ test("control keeps visual bytes in the binary socket payload", async () => {
       const newline = request.indexOf("\n");
       if (newline < 0) return;
       const parsed = JSON.parse(request.slice(0, newline));
+      if (parsed.cmd === "hello") {
+        connection.end(JSON.stringify({ id: parsed.id, ok: true, data: { identity: RUNTIME_IDENTITY } }) + "\n");
+        return;
+      }
+      assert.equal(parsed.expectedInstance, RUNTIME_IDENTITY.instanceId);
       const header = {
         id: parsed.id,
         ok: true,

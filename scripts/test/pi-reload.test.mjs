@@ -7,8 +7,8 @@ import test from "node:test";
 import { fileHash, inventory, objectHash, writeJson } from "../dist-manifest.mjs";
 import { fixture, root } from "./dist-fixture.mjs";
 
-const piRoot=process.env.TERMINAL_BROWSER_PI_ROOT??"/usr/local/lib/node_modules/@earendil-works/pi-coding-agent";
-test("offline Pi 0.85 same SettingsManager/ResourceLoader A -> B -> A retains loaded identity and lifecycle receipts",{skip:!fs.existsSync(piRoot)},t=>{
+const piRoot=fs.realpathSync(process.env.TERMINAL_BROWSER_PI_ROOT??path.join(root,"pi-extension/node_modules/@earendil-works/pi-coding-agent"));
+test("offline prepared Pi same SettingsManager/ResourceLoader A -> B -> A retains loaded identity and lifecycle receipts",t=>{
   const home=fs.mkdtempSync(path.join(os.tmpdir(),"browser-pi-reload-"));t.after(()=>fs.rmSync(home,{recursive:true,force:true}));
   const env={PATH:process.env.PATH,HOME:home,XDG_CONFIG_HOME:path.join(home,'config'),XDG_DATA_HOME:path.join(home,'data'),XDG_STATE_HOME:path.join(home,'state'),XDG_CACHE_HOME:path.join(home,'cache'),XDG_RUNTIME_DIR:path.join(home,'runtime'),TERMINAL_BROWSER_APPDATA:path.join(home,'appdata'),TERMINAL_BROWSER_INTEROP_DIR:path.join(home,'interop'),PI_CODING_AGENT_DIR:path.join(home,'agent'),PI_OFFLINE:'1'};
   for(const directory of Object.values(env).filter(value=>value.startsWith(home)))fs.mkdirSync(directory,{recursive:true,mode:0o700});

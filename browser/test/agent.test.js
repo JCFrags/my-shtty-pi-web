@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const net = require("node:net");
 const { randomUUID } = require("node:crypto");
 const { test } = require("node:test");
+const { RUNTIME_IDENTITY } = require("pixel-store");
 
 const { BrowserAgentRuntime } = require("../dist/agent/runtime.js");
 const { BrowserControl } = require("../dist/agent/control.js");
@@ -562,7 +563,7 @@ function registryRequest(socketPath, request) {
         reject(error);
       }
     });
-    socket.on("connect", () => socket.write(`${JSON.stringify(request)}\n`));
+    socket.on("connect", () => socket.write(`${JSON.stringify({ identity: RUNTIME_IDENTITY, expectedInstance: RUNTIME_IDENTITY.instanceId, ...request })}\n`));
   });
 }
 
@@ -590,7 +591,7 @@ function registryBinaryRequest(socketPath, request) {
       socket.destroy();
       resolve({ header, headerText, binary: buffer.subarray(newline + 1, newline + 1 + bytes) });
     });
-    socket.on("connect", () => socket.write(`${JSON.stringify(request)}\n`));
+    socket.on("connect", () => socket.write(`${JSON.stringify({ identity: RUNTIME_IDENTITY, expectedInstance: RUNTIME_IDENTITY.instanceId, ...request })}\n`));
   });
 }
 
@@ -972,9 +973,9 @@ test('socket disconnect cancels only its own active runtime input and queued req
   const socket = net.connect(registry.socketPath);
   socket.on('error', () => {});
   try {
-    socket.on('connect', () => socket.write(JSON.stringify({ id: 'cancel', cmd: 'agent.click', tab: 1,
+    socket.on('connect', () => socket.write(JSON.stringify({ identity: RUNTIME_IDENTITY, expectedInstance: RUNTIME_IDENTITY.instanceId, id: 'cancel', cmd: 'agent.click', tab: 1,
       ref: 'e1', observationId: observation.observationId, expectedControlEpoch: 1 }) + '\n'));
-    await entered;
+    await Promise.race([entered, new Promise((_, reject) => setTimeout(() => reject(new Error("native action did not start")), 2000).unref())]);
     const queuedAbort = new AbortController();
     const queued = f.runtime.click({ ref: 'e1', observationId: observation.observationId, expectedControlEpoch: 1, signal: queuedAbort.signal });
     queuedAbort.abort(new Error('queued cancellation'));

@@ -98,7 +98,13 @@ and activation are safe. Releases and scoped activation backups are retained;
 there is no destructive cleanup. Rollback checks the selected paths and changes
 only the integration's Pi source, Herdr registration fields and launch links, preserving unrelated later
 settings edits. Changed selections or package order cause a safe refusal.
-An interrupted operation retains its owner-only backup for explicit recovery.
+An interrupted activation or rollback retains an owner-only transaction. Inspect
+`status`, then run the retained manager's `recover ROOT` explicitly. Recovery
+refuses a live or unknown manager lock owner and changed integration selections.
+It reverses an uncommitted operation, or confirms a completed selection, while
+preserving later unrelated Pi settings and Herdr registry edits. Repeating
+recovery is safe. Process interruption is tested with SIGKILL at every selection
+write; power-loss durability is not claimed. No recovery starts or resumes a browser.
 Upstream `upgrade` is disabled for this integration.
 
 A running daemon and Pi extension retain their startup artifact, protocol and
@@ -159,16 +165,32 @@ an extracted candidate before use:
 
 ```bash
 node scripts/dist-manifest.mjs verify /path/to/extracted/terminal-browser /path/to/manifest-linux-x64.json
-TERMINAL_BROWSER_PI_ROOT=/usr/local/lib/node_modules/@earendil-works/pi-coding-agent \
-  pnpm test:dist:smoke /path/to/extracted/terminal-browser
+pnpm test:dist:smoke /path/to/extracted/terminal-browser
+pnpm test:dist:recovery /path/to/release-output-A /path/to/release-output-B
 ```
 
-The Fedora smoke test uses Bubblewrap with no checkout, real home, development
-`node_modules`, display socket, or network. It checks the packaged launchers,
-Electron/native SQLite imports, assets, slow-natural AgentCursor click/type,
-isolated daemon startup, and (when a Pi root is supplied) all five extension
-registrations. It does not test a visible Herdr pane or production activation.
-The Pi package is tested with workspace Pi 0.84.2 and installed Pi 0.85.1.
+The Linux x64 smoke and recovery tests use Bubblewrap with no checkout, real
+home, development `node_modules`, display socket, or external network. Only the
+loopback fixture is reachable. The smoke checks packaged launchers, native
+SQLite/assets, and the actual packaged main daemon through private PTYs and the
+CLI/companion sockets: local and delayed actions, cross-origin frame input and
+capture, popup activation/input/capture, two owners, pause, and an exact-inventory
+shutdown race. Internal captures are not visible terminal acceptance.
+
+Recovery takes two complete, separately sealed release output directories. It
+stages and uses their packaged managers outside the checkout, checks interrupted
+activation recovery, scoped rollback and retained state, then changes A → B → A
+while the A daemon and a paused companion stay loaded. The new CLI must refuse
+a mismatched mutation without replay. Pi's offline loader checks the old loaded
+receipt versus the new selection, then explicit A → B → A lifecycle changes.
+After an approved fixture shutdown, an explicit B launch checks that each owner
+recovers only its own actual download history. These tests do not touch a real
+Herdr API, visible pane, production installation, or production Pi session.
+
+Both tests copy only the prepared Pi host dependency closure into the sandbox;
+the default is workspace Pi 0.84.2. Set `TERMINAL_BROWSER_PI_ROOT` to test another
+prepared compatible host, such as Pi 0.85.1. Missing host dependencies fail rather
+than skip. The browser artifact still contains no Pi host or development modules.
 
 Packaged Pi and Herdr entrypoints call their own artifact's `bin/terminal-browser`,
 which establishes `TERMINAL_BROWSER_DIST_ROOT` and uses bundled Electron as the
@@ -177,15 +199,24 @@ build generates bundle mode. The packaged Herdr descriptor has no source build
 step. No development symlink or runtime dependency installation is required.
 The browser uses its own AgentCursor driver, not the optional OS-cursor driver.
 
-Run installation regressions with `pnpm test:dist`. The local Pi loader test uses
-`TERMINAL_BROWSER_PI_ROOT` (default: the installed Pi package under
-`/usr/local/lib/node_modules/@earendil-works/pi-coding-agent`) and checks both a
-fresh offline process and A → B → A in the same SettingsManager/ResourceLoader.
-If that Pi package is absent, this one test is explicitly skipped.
+Run installation regressions with `pnpm test:dist`. The Pi loader test uses the
+same prepared host selection and checks both a fresh offline process and
+A → B → A in the same SettingsManager/ResourceLoader without a global Pi install.
+
+`pnpm test:dist:ci` builds two fresh complete releases outside the checkout and
+runs the distribution, smoke and recovery gates without installation in the real
+HOME. CI uses Ubuntu 24.04 x64, Node 24.18.0, pnpm 10.13.1, Rust 1.93.1, system
+Python 3.12, Bubblewrap, and declared native libraries/tools. Cargo lockfiles and
+upstream checksums remain enforced; actual host tool versions are logged and
+recorded in each manifest. Existing workspace tests and all four native Electron
+fixtures remain separate required integration gates. The upstream terminal-adapter
+baseline remains non-blocking; it is not packaged runtime acceptance.
 
 Tests must isolate HOME, all XDG directories, `TERMINAL_BROWSER_APPDATA`,
 `TERMINAL_BROWSER_INTEROP_DIR`, and `PI_CODING_AGENT_DIR`, and remove inherited
-Herdr/owner/production routes. XDG alone does not isolate global interop state.
+Herdr/owner/production routes. Use a short private runtime path (for example,
+`mktemp -d /tmp/XXXXXX`): Unix socket paths have a small fixed length limit. XDG
+alone does not isolate global interop state.
 
 ### Usage
 ```

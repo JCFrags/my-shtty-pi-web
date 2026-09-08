@@ -178,3 +178,52 @@ test("activation refuses mutable state aliases and release-root state without to
   assert.throws(()=>activate(box.root,candidate.manifest.artifactId));
   assert.equal(fs.readFileSync(box.settings,"utf8"),before);
 });
+
+test("SIGKILL at every activation and rollback write has explicit repeatable recovery", (t) => {
+  const box = sandbox(t), a = archive(t), b = archive(t, (dir, manifest) => {
+    fs.appendFileSync(path.join(dir, "browser/dist/main.js"), " B");
+    manifest.identity.source.commit = "b".repeat(40);
+  });
+  for (const candidate of [a, b]) stage(candidate.tarball, candidate.outerFile, box.root);
+  activate(box.root, a.manifest.artifactId);
+  const hook = path.join(box.home, "crash.cjs");
+  fs.writeFileSync(hook, `const fs=require('node:fs');const rename=fs.renameSync;let writes=0;fs.renameSync=function(...args){const result=rename.apply(this,args);if(++writes===Number(process.env.CRASH_WRITE))process.kill(process.pid,'SIGKILL');return result;};`);
+  for (const operation of ["activate", "rollback"]) {
+    for (let write = 1; write <= 6; write++) {
+      if (operation === "rollback") activate(box.root, b.manifest.artifactId);
+      const before = status(box.root).selected;
+      const args = ["--require", hook, path.join(repository, "scripts/install-manager.mjs"), operation, box.root, ...(operation === "activate" ? [b.manifest.artifactId] : [])];
+      assert.throws(() => execFileSync(process.execPath, args, { env: { PATH: process.env.PATH, CRASH_WRITE: String(write) }, stdio: "pipe" }), error => error.signal === "SIGKILL");
+      assert.equal(status(box.root).recoveryRequired, true);
+      assert.throws(() => activate(box.root, a.manifest.artifactId));
+      const result = box.run("recover", box.root);
+      assert.equal(result.committed, write === 6);
+      assert.equal(status(box.root).selected, write === 6 ? (operation === "activate" ? b : a).manifest.artifactId : before);
+      assert.equal(status(box.root).recoveryRequired, false);
+      assert.equal(box.run("recover", box.root).recovered, false);
+      activate(box.root, a.manifest.artifactId);
+    }
+  }
+});
+
+test("recovery refuses a live manager and preserves later unrelated edits after a crash", (t) => {
+  const box = sandbox(t), a = archive(t);
+  stage(a.tarball, a.outerFile, box.root);
+  const lock = path.join(box.root, ".manager-lock");
+  fs.mkdirSync(lock, { mode: 0o700 });
+  writeJson(path.join(lock, "owner.json"), { pid: process.pid });
+  assert.throws(() => box.run("recover", box.root));
+  fs.unlinkSync(path.join(lock, "owner.json")); fs.rmdirSync(lock);
+  const hook = path.join(box.home, "crash.cjs");
+  fs.writeFileSync(hook, `const fs=require('node:fs');const rename=fs.renameSync;let writes=0;fs.renameSync=function(...args){const result=rename.apply(this,args);if(++writes===4)process.kill(process.pid,'SIGKILL');return result;};`);
+  assert.throws(() => execFileSync(process.execPath, ["--require", hook, path.join(repository, "scripts/install-manager.mjs"), "activate", box.root, a.manifest.artifactId], { stdio: "pipe" }));
+  const settings = JSON.parse(fs.readFileSync(box.settings)); settings.later = true; settings.packages[1].skills = ["later"]; writeJson(box.settings, settings);
+  const registry = JSON.parse(fs.readFileSync(box.selection.herdrRegistry)); registry[0].later = true; registry[1].enabled = false; writeJson(box.selection.herdrRegistry, registry);
+  box.run("recover", box.root);
+  assert.equal(JSON.parse(fs.readFileSync(box.settings)).later, true);
+  assert.deepEqual(JSON.parse(fs.readFileSync(box.settings)).packages[1].skills, ["later"]);
+  assert.equal(JSON.parse(fs.readFileSync(box.settings)).packages[1].source, box.selection.piSource);
+  assert.equal(JSON.parse(fs.readFileSync(box.selection.herdrRegistry))[0].later, true);
+  assert.equal(JSON.parse(fs.readFileSync(box.selection.herdrRegistry))[1].enabled, false);
+  assert.equal(status(box.root).selected, null);
+});

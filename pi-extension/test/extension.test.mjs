@@ -7,7 +7,9 @@ process.env.PI_WEB_SEARCH_READ_EXTENSION = "/nonexistent/pi-web-research-extensi
 
 async function registeredTools() {
   const tools = [];
-  await extension({ registerTool(tool) { tools.push(tool); } });
+  const events = [];
+  await extension({ registerTool(tool) { tools.push(tool); }, on(event, handler) { assert.equal(typeof handler, "function"); events.push(event); } });
+  assert.deepEqual(events, ["session_start", "session_shutdown"]);
   return tools;
 }
 

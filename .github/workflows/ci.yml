@@ -52,6 +52,29 @@ jobs:
       - name: Pi extension tests
         run: pnpm --filter pi-terminal-browser test
 
+  packaged-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@1.93.1
+      - name: Install Ubuntu 24.04 native and isolation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libssl-dev libclang-dev nasm python3 bubblewrap unzip curl libgtk-3-0t64 libnss3 libgbm1 libasound2t64 libxss1 libxshmfence1
+          python3 -c 'import sys; assert sys.version_info[:2] == (3, 12)'
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: pnpm install --frozen-lockfile
+      - name: Build two complete pinned releases and run offline packaged runtime and recovery
+        run: pnpm test:dist:ci
+
   pixel-terminals-baseline:
     runs-on: ubuntu-22.04
     timeout-minutes: 10

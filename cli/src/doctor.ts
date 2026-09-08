@@ -89,7 +89,7 @@ export async function doctor() {
     pi: { loaded: loadedPi, state: loadedPi.length ? "receipts-found" : "unknown", remedy: "Use an exact versioned package source at the same settings index. Only reload an idle Pi session with an empty draft after approval." },
     herdrOwnership: "unknown; persisted plugin registration does not prove the running Herdr registration",
     graphics: { state: "unknown", reason: process.stdout.isTTY ? "visible terminal rendering has not been verified" : "non-TTY invocation; internal Chromium frames are not visible rendering evidence" },
-    dependencies: { bundledRuntime: Boolean(dist && fs.existsSync(path.join(dist, "build-manifest.json"))), systemLibraries: "unknown; not executed", piCompatibility: "requires Pi 0.85.1", herdrCompatibility: "requires separate registration verification" },
+    dependencies: { bundledRuntime: Boolean(dist && fs.existsSync(path.join(dist, "build-manifest.json"))), systemLibraries: "unknown; not executed", piCompatibility: "requires Pi >=0.84.2 <0.86.0; host availability unknown", herdrCompatibility: "requires separate registration verification" },
     automaticRepair: false,
   };
 }

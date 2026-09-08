@@ -39,6 +39,10 @@ test("doctor is nonmutating, bounded, redacted and graphics remains unknown with
   const value=JSON.parse(result);
   assert.equal(value.graphics.state,"unknown");
   assert.equal(value.automaticRepair,false);
+  assert.equal(value.dependencies.bundledRuntime,false);
+  assert.match(value.dependencies.piCompatibility,/requires Pi >=0\.84\.2 <0\.86\.0; host availability unknown/);
+  assert.equal(value.selectedNextLaunch.pi.state,"unknown");
+  assert.equal(value.selectedNextLaunch.herdr.state,"unknown");
   assert(!result.includes("CANARY"));
   assert.deepEqual(tree(box.home),before);
   const invalid=path.join(box.home,'invalid-receipt.json');fs.writeFileSync(invalid,'{"secret":"INVALID_CONFIG_CANARY"}',{mode:0o600});
