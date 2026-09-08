@@ -9,11 +9,118 @@ A real browser that runs inside your terminal
 
 
 
-### Install (macOS & Linux):
+### Install this Pi/Herdr integration
+
+Use a reviewed complete artifact from **this repository**, not the upstream curl
+installer or Homebrew package. Node and Python 3.11 or newer are required for installation.
+Pi and Herdr remain host applications. Build instructions are below.
 
 ```bash
-curl -fsSL https://terminal-browser.sh/install | bash
+INSTALL="$HOME/.local/share/terminal-browser-managed"
+pnpm install:dist stage /absolute/path/terminal-browser-linux-x64.tar.gz /absolute/path/manifest-linux-x64.json "$INSTALL"
 ```
+
+Staging validates the outer checksum, runtime pins, complete file inventory and
+safe archive paths. It never changes active selections or starts a browser.
+It returns the artifact ID. Keep the archive and its reviewed outer manifest.
+
+Before first activation, prepare an owner-only JSON receipt with these fields.
+All paths except `piSource` must be exact absolute paths. `piSource` is the exact
+existing Pi `packages` source, including a relative source if currently used;
+use `null` only for a fresh installation (the new package is appended).
+`herdrSource` pins the existing local 0.2.0 plugin root; use `null` only when
+that plugin is not registered. `herdrRegistry` is the persisted Herdr registry.
+The CLI and Herdr parent directories must already exist. An occupied directory
+at either selection is refused, not deleted.
+
+```json
+{
+  "schemaVersion": 1,
+  "namespace": "terminal-browser-dev-61753e09",
+  "paths": {
+    "dataHome": "/home/USER/.local/share",
+    "stateHome": "/home/USER/.local/state",
+    "cacheHome": "/home/USER/.cache",
+    "runtimeHome": "/run/user/UID",
+    "appData": "/home/USER/.config",
+    "interopState": "/home/USER/.local/state/terminal-browser-interop",
+    "interopShare": "/home/USER/.local/share/terminal-browser-interop"
+  },
+  "selection": {
+    "cli": "/home/USER/.local/bin/terminal-browser",
+    "herdr": "/home/USER/.local/share/terminal-browser-herdr",
+    "piSettings": "/home/USER/.pi/agent/settings.json",
+    "piSource": "packages/pi-terminal-browser",
+    "herdrRegistry": "/home/USER/.config/herdr/plugins.json",
+    "herdrSource": "/absolute/path/to/existing/herdr-plugin"
+  }
+}
+```
+
+For adoption, verify these are the existing installation's actual base paths,
+not merely your current shell defaults. The accepted local development
+namespace is `terminal-browser-dev-61753e09`; the unrelated `baadb0eb` namespace
+must stay unchanged. For a fresh installation, choose a new namespace matching
+`terminal-browser-` plus eight hexadecimal characters. Profiles, database/WAL,
+cache and download history stay in place. No live state is copied. A locked or
+uncertain profile is refused; no numbered or temporary profile is substituted.
+
+```bash
+chmod 600 /absolute/path/installation-receipt.json
+pnpm install:dist configure "$INSTALL" /absolute/path/installation-receipt.json
+pnpm install:dist activate "$INSTALL" ARTIFACT_ID
+terminal-browser doctor --json
+```
+
+**Activation requires approval.** It changes next-launch selections, not loaded
+processes. Pi gets the exact new absolute versioned package source at the same
+index, preserving object filters and unrelated settings. Do not use a stable
+symlink as evidence of a loaded Pi update. Do not auto-reload, clear a draft, or
+resume browser control. The matching Herdr registry entry gets the exact retained `plugin_root` and
+`manifest_path`, plus the prebuilt descriptor without its checkout build step.
+Other plugins, their order, and the current enabled flag stay unchanged.
+No running Herdr API or reload is called. Doctor distinguishes this persisted
+next-launch selection from unknown running Herdr registration.
+
+After installation, the retained bundle contains the same manager; no checkout
+is needed for an update or rollback:
+
+```bash
+MANAGER="$INSTALL/releases/ARTIFACT_ID/terminal-browser/scripts/install.sh"
+"$MANAGER" stage /absolute/path/update.tar.gz /absolute/path/manifest.json "$INSTALL"
+"$MANAGER" activate "$INSTALL" NEW_ARTIFACT_ID
+"$MANAGER" status "$INSTALL"
+"$MANAGER" rollback "$INSTALL"
+```
+
+Use the archive's original filename from its outer manifest. Repeated staging
+and activation are safe. Releases and scoped activation backups are retained;
+there is no destructive cleanup. Rollback checks the selected paths and changes
+only the integration's Pi source, Herdr registration fields and launch links, preserving unrelated later
+settings edits. Changed selections or package order cause a safe refusal.
+An interrupted operation retains its owner-only backup for explicit recovery.
+Upstream `upgrade` is disabled for this integration.
+
+A running daemon and Pi extension retain their startup artifact, protocol and
+process-start identity. Doctor is read-only and reports candidates, next-launch
+selections and observed loaded identities separately. Unknown is not absent.
+It does not scan page content, open/migrate the database, prepare graphics,
+repair sockets, or run setup. Graphics stays unknown without visible terminal
+evidence; an internal Chromium frame is not such evidence.
+
+Replacing a daemon loses its open tabs and transient browser state. First get
+its complete metadata-only session inventory, then obtain approval for that
+exact process/build/session set:
+
+```bash
+terminal-browser daemon-status > /absolute/path/approved-daemon-status.json
+terminal-browser shutdown --expect /absolute/path/approved-daemon-status.json
+```
+
+The daemon rechecks that exact state before shutdown and refuses a new-session
+race. No command is replayed and no browser is automatically reopened. Legacy,
+unresponsive or uncertain processes require separate inspection and explicit
+recovery, not a guessed PID kill or socket deletion.
 
 ### Build a local runtime artifact (Fedora x64)
 
@@ -70,10 +177,15 @@ build generates bundle mode. The packaged Herdr descriptor has no source build
 step. No development symlink or runtime dependency installation is required.
 The browser uses its own AgentCursor driver, not the optional OS-cursor driver.
 
-This is artifact preparation only. The existing `install:dist`, setup, and upstream
-upgrade paths are not the versioned activation/rollback workflow. Do not use them
-to activate this candidate over a running local installation. Runtime startup
-identity and strict stale-daemon rejection are separate from artifact checksums.
+Run installation regressions with `pnpm test:dist`. The local Pi loader test uses
+`TERMINAL_BROWSER_PI_ROOT` (default: the installed Pi package under
+`/usr/local/lib/node_modules/@earendil-works/pi-coding-agent`) and checks both a
+fresh offline process and A → B → A in the same SettingsManager/ResourceLoader.
+If that Pi package is absent, this one test is explicitly skipped.
+
+Tests must isolate HOME, all XDG directories, `TERMINAL_BROWSER_APPDATA`,
+`TERMINAL_BROWSER_INTEROP_DIR`, and `PI_CODING_AGENT_DIR`, and remove inherited
+Herdr/owner/production routes. XDG alone does not isolate global interop state.
 
 ### Usage
 ```

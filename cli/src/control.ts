@@ -1,10 +1,17 @@
 import { randomUUID } from "node:crypto";
 import net from "node:net";
+import { RUNTIME_IDENTITY, runtimeMatches } from "pixel-store";
 
 const MAX_CONTROL_HEADER_BYTES = 256 * 1024;
 const MAX_CONTROL_BINARY_BYTES = 2 * 1024 * 1024;
 
-export function control(
+export async function control(socketPath: string, request: Record<string, unknown>, timeoutMs = 10_000): Promise<unknown> {
+  const hello = await requestControl(socketPath, { cmd: "hello" }, Math.min(timeoutMs, 2000)) as { identity?: { instanceId?: string } };
+  if (!runtimeMatches(hello?.identity) || typeof hello.identity?.instanceId !== "string") throw new Error("companion runtime mismatch; inspect doctor before explicit replacement");
+  return requestControl(socketPath, { ...request, expectedInstance: hello.identity.instanceId }, timeoutMs);
+}
+
+function requestControl(
   socketPath: string,
   request: Record<string, unknown>,
   timeoutMs = 10_000,
@@ -82,6 +89,6 @@ export function control(
         resolve(response.data);
       }
     });
-    connection.write(`${JSON.stringify({ id, ...request })}\n`);
+    connection.write(`${JSON.stringify({ id, ...request, identity: RUNTIME_IDENTITY })}\n`);
   });
 }

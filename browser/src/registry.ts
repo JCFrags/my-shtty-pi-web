@@ -8,6 +8,8 @@ import path from "node:path";
 import { callerTty } from "pixel-terminals";
 import {
   INTEROP_PROTOCOL_VERSIONS,
+  RUNTIME_IDENTITY,
+  runtimeMatches,
   advertiseInstance,
   openSpecSchema,
   removeInstance,
@@ -105,6 +107,8 @@ export interface ControlHost {
 }
 
 interface ControlRequest {
+  identity?: unknown;
+  expectedInstance?: unknown;
   id?: string;
   cmd: string;
   action?: unknown;
@@ -282,6 +286,7 @@ export class Registry {
         connection.end(`${JSON.stringify({ id, ok: true, data: { tab } })}\n`);
         return;
       }
+      if (request.cmd !== "hello" && (!runtimeMatches(request.identity) || request.expectedInstance !== RUNTIME_IDENTITY.instanceId)) throw new Error("runtime identity mismatch; explicit replacement is required");
       const data = await this.handle(request, signal);
       signal.throwIfAborted();
       const response = binaryResponse(id, data);
@@ -299,6 +304,8 @@ export class Registry {
   private async handle(request: ControlRequest, signal: AbortSignal): Promise<unknown> {
     signal.throwIfAborted();
     switch (request.cmd) {
+      case "hello":
+        return { identity: RUNTIME_IDENTITY, key: this.host.key, owner: this.host.owner ? { workspaceId: this.host.owner.workspaceId, tabId: this.host.owner.tabId, paneId: this.host.owner.paneId } : null, where: await this.host.where() };
       case "state":
         return this.record();
       case "where":

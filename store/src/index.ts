@@ -1,3 +1,5 @@
+export { RUNTIME_IDENTITY, RUNTIME_PROTOCOL, artifactIdentity, processStart, runtimeMatches } from "./runtime";
+export { INSTALLATION } from "./installation";
 export {
   APP_DIR_NAME,
   DATA_DIR,

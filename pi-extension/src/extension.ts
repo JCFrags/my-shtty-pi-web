@@ -4,6 +4,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { PiBrowserClient } from "./client.js";
 import type { BrowserAction, BrowserActionTarget, BrowserElementTarget, LocatorSpec, ToolContext } from "./client.js";
 import { loadWebResearch } from "./web-research.js";
+import { LOADED_IDENTITY, startupReceipt } from "./identity.js";
 
 function context(ctx: ExtensionContext, signal?: AbortSignal): ToolContext {
   return {
@@ -201,6 +202,13 @@ function actionTarget(
 export default async function terminalBrowserExtension(pi: ExtensionAPI): Promise<void> {
   await loadWebResearch(pi);
   const client = new PiBrowserClient();
+  let cleanup = () => {};
+  pi.on("session_start", () => {
+    cleanup();
+    cleanup = startupReceipt();
+    pi.events.emit("terminal-browser:loaded", LOADED_IDENTITY);
+  });
+  pi.on("session_shutdown", () => { cleanup(); cleanup = () => {}; });
 
   pi.registerTool({
     name: "browser_open",

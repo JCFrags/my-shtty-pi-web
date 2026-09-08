@@ -3,8 +3,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchMode } from "./launch-mode.js";
 
+export const runtimeRoot = resolve(dirname(realpathSync(fileURLToPath(import.meta.url))), "../..");
+
 export function cliCommand(args: string[]): [string, string[]] {
-  const root = resolve(dirname(realpathSync(fileURLToPath(import.meta.url))), "../..");
+  const root = runtimeRoot;
   if (launchMode === "source") {
     return [process.execPath, [join(root, "cli/dist/main.js"), ...args]];
   }

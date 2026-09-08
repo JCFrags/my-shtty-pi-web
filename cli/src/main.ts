@@ -3,9 +3,14 @@ import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
+import os from "node:os";
 
 import {
   DAEMON_SOCKET,
+  RUNTIME_IDENTITY,
+  runtimeMatches,
+  INSTALLATION,
+  APP_DIR_NAME,
   LOGS_DIR,
   appId,
   ensureDataDir,
@@ -41,6 +46,8 @@ import { openSshTunnel, startBundle, validateBundleDir, validateSshTarget } from
 import type { RemoteBundle } from "./ssh";
 import type { InstanceRecord } from "./registry";
 import { installedVersion, upgradeCommand } from "./upgrade";
+import { daemonRequest } from "./daemon-status";
+import { doctor, safeDaemonStatus } from "./doctor";
 
 const DIST_ROOT = process.env.TERMINAL_BROWSER_DIST_ROOT ?? null;
 delete process.env.ELECTRON_RUN_AS_NODE;
@@ -147,20 +154,12 @@ function interactiveTty(): string | null {
   return ownTtyPath();
 }
 
-function browserBuildStamp(): string {
-  const main = path.resolve(__dirname, "..", "..", "browser", "dist", "main.js");
-  try {
-    return String(Math.floor(fs.statSync(main).mtimeMs));
-  } catch {
-    return "unknown";
-  }
-}
-
 function connectDaemon(): Promise<net.Socket> {
   return new Promise((resolve, reject) => {
     const socket = net.connect(DAEMON_SOCKET);
-    socket.once("connect", () => resolve(socket));
-    socket.once("error", reject);
+    const timer = setTimeout(() => { socket.destroy(); reject(new Error("daemon connection timed out")); }, 2000);
+    socket.once("connect", () => { clearTimeout(timer); resolve(socket); });
+    socket.once("error", (error) => { clearTimeout(timer); reject(error); });
   });
 }
 
@@ -173,7 +172,11 @@ function spawnDaemon() {
 async function daemonSocket(): Promise<net.Socket> {
   try {
     return await connectDaemon();
-  } catch {}
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT" || fs.existsSync(DAEMON_SOCKET)) throw new Error("existing daemon is unavailable; inspect status before explicit recovery");
+  }
+  const appData = INSTALLATION?.paths.appData ?? process.env.TERMINAL_BROWSER_APPDATA ?? (process.platform === "darwin" ? path.join(os.homedir(), "Library/Application Support") : process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"));
+  if (fs.existsSync(path.join(appData, APP_DIR_NAME, "terminal-browser.lock"))) throw new Error("profile ownership is occupied or uncertain; no daemon was started. Inspect doctor before explicit recovery.");
   spawnDaemon();
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
@@ -220,97 +223,32 @@ async function openSession(argv: string[], tty: string): Promise<{ socket: net.S
     env: process.env,
     cwd: process.cwd(),
   };
-  const ask = (socket: net.Socket, build: string | null) =>
+  let expectedInstance: string;
+  const ask = (socket: net.Socket) =>
     new Promise<DaemonReply>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("daemon open timed out")), 20_000);
-      nextReply(socket, (reply) => {
-        clearTimeout(timer);
-        resolve(reply);
-      });
-      socket.once("close", () => {
-        clearTimeout(timer);
-        reject(new Error("daemon closed the connection"));
-      });
-      socket.write(`${JSON.stringify(build ? { ...payload, build } : payload)}\n`);
+      const timer = setTimeout(() => { socket.destroy(); reject(new Error("daemon open timed out")); }, 20_000);
+      nextReply(socket, (reply) => { clearTimeout(timer); resolve(reply); });
+      socket.once("close", () => { clearTimeout(timer); reject(new Error("daemon closed the connection")); });
+      socket.write(`${JSON.stringify({ ...payload, identity: RUNTIME_IDENTITY, expectedInstance })}\n`);
     });
-  let socket = await daemonSocket();
-  let reply = await ask(socket, browserBuildStamp());
-  if (reply.ok === false && reply.error === "stale") {
-    socket.destroy();
-    await sleep(700);
-    socket = await daemonSocket();
-    reply = await ask(socket, browserBuildStamp());
-  }
-  if (reply.ok === false && reply.error === "stale") {
-    socket.destroy();
-    socket = await daemonSocket();
-    reply = await ask(socket, null);
-  }
+  const socket = await daemonSocket();
+  try {
+    const hello = await daemonRequest({ cmd: "hello" }) as { identity?: { instanceId?: string } };
+    if (!runtimeMatches(hello.identity) || typeof hello.identity?.instanceId !== "string") throw new Error("daemon runtime mismatch; explicit replacement approval is required");
+    expectedInstance = hello.identity.instanceId;
+  } catch (error) { socket.destroy(); throw error; }
+  const reply = await ask(socket);
   return { socket, reply };
 }
 
-async function daemonPid(): Promise<number | null> {
-  for (const record of await instances()) {
-    try {
-      process.kill(record.pid, 0);
-      return record.pid;
-    } catch {}
-  }
-  return null;
-}
-
-async function gone(pid: number, within: number): Promise<boolean> {
-  const deadline = Date.now() + within;
-  while (Date.now() < deadline) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return true;
-    }
-    await sleep(100);
-  }
-  return false;
-}
-
-async function shutdownDaemon(): Promise<number> {
-  let socket: net.Socket | null = null;
-  try {
-    socket = await connectDaemon();
-  } catch {}
-  const pid = await daemonPid();
-  if (!socket) {
-    if (pid === null) {
-      process.stdout.write("no daemon running\n");
-      return 0;
-    }
-    return kill(pid, "it was not listening");
-  }
-  const answer = await new Promise<DaemonReply | null>((resolve) => {
-    const timer = setTimeout(() => resolve(null), 2500);
-    const settle = (value: DaemonReply | null) => {
-      clearTimeout(timer);
-      resolve(value);
-    };
-    nextReply(socket!, settle);
-    socket!.once("close", () => settle({ ok: true }));
-    socket!.write('{"cmd":"shutdown"}\n');
-  });
-  socket.destroy();
-  if (answer === null) {
-    if (pid === null) fail("the daemon did not answer and no browser names its process");
-    return kill(pid, "it did not answer");
-  }
-  const browsers = answer.sessions ?? 0;
-  process.stdout.write(
-    browsers === 0 ? "daemon stopped\n" : `daemon stopped, with ${browsers} open\n`,
-  );
-  return 0;
-}
-
-async function kill(pid: number, why: string): Promise<number> {
-  process.kill(pid, "SIGTERM");
-  if (!(await gone(pid, 2000))) process.kill(pid, "SIGKILL");
-  process.stdout.write(`daemon stopped, killed ${pid} because ${why}\n`);
+async function shutdownDaemon(args: string[]): Promise<number> {
+  if (args.length !== 2 || args[0] !== "--expect") throw new Error("shutdown requires --expect STATUS_FILE after explicit approval of all affected sessions; use daemon-status first");
+  const stat = fs.lstatSync(args[1]);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 128 * 1024) throw new Error("invalid expected daemon status file");
+  const expected = JSON.parse(fs.readFileSync(args[1], "utf8"));
+  const answer = await daemonRequest({ cmd: "shutdown", expected: { identity: expected.identity, sessions: expected.sessions, complete: expected.complete } }) as { ok?: boolean };
+  if (!answer.ok) throw new Error("daemon identity or session inventory changed; request fresh status and approval");
+  print({ stopped: true, automaticRestart: false });
   return 0;
 }
 
@@ -752,6 +690,10 @@ async function main(): Promise<number> {
     process.stdout.write(commandHelp(command) ?? rootHelp());
     return 0;
   }
+  if (command === "doctor") { print(await doctor()); return 0; }
+  if (command === "daemon-status") { print(safeDaemonStatus(await daemonRequest({ cmd: "status" }))); return 0; }
+  if (command === "shutdown") return shutdownDaemon(args);
+  if (command === "upgrade") return upgradeCommand();
   if (command !== "setup") ensureSetup();
   if (command === "open") {
     await openCommand(args);
@@ -771,8 +713,6 @@ async function main(): Promise<number> {
     markSetupDone();
     return editors !== 0 ? editors : sandbox;
   }
-  if (command === "upgrade") return upgradeCommand();
-  if (command === "shutdown") return shutdownDaemon();
   if (command === "register-app") return registerAppCommand(args);
   if (command === "unregister-app") return unregisterAppCommand(args);
   if (command === "apps") return appsCommand(args);

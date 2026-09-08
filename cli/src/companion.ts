@@ -8,9 +8,7 @@ import {
   AGENT_SOCKETS_DIR,
   BROWSER_OWNER_ENV,
   browserOwnerEnvironment,
-  removeInstance,
   requireHerdrBrowserOwner,
-  withdrawInstance,
 } from "pixel-store";
 import type { BrowserOwner, InstanceRow } from "pixel-store";
 
@@ -97,10 +95,6 @@ async function withOwnerLock<T>(owner: BrowserOwner, operation: () => Promise<T>
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       if (Date.now() >= deadline) throw new Error("browser companion launch is already in progress");
-      try {
-        const age = Date.now() - (await fs.stat(lock)).mtimeMs;
-        if (age > LOCK_TIMEOUT_MS) await fs.rm(lock, { recursive: true, force: true });
-      } catch {}
       await sleep(100);
     }
   }
@@ -153,9 +147,9 @@ async function liveOwned(owner: BrowserOwner): Promise<Array<{ record: InstanceR
       ]);
       live.push({ record, where, tabs: targets.tabs ?? [] });
       continue;
-    } catch {}
-    await removeInstance(record.key).catch(() => {});
-    withdrawInstance(record.key);
+    } catch {
+      throw new Error("existing companion identity or readiness is uncertain; no record was removed and no duplicate was opened. Inspect doctor before explicit recovery.");
+    }
   }
   return live;
 }

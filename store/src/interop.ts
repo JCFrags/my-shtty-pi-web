@@ -5,10 +5,12 @@ import path from "node:path";
 import { z } from "zod";
 
 import type { BrowserOwner } from "./owner";
+import { INSTALLATION } from "./installation";
 
 const HOME = os.homedir();
 
 function interopRoot(kind: "state" | "share"): string {
+  if (INSTALLATION) return kind === "state" ? INSTALLATION.paths.interopState : INSTALLATION.paths.interopShare;
   const override = process.env.TERMINAL_BROWSER_INTEROP_DIR;
   if (override && path.isAbsolute(override)) return override;
   return path.join(HOME, ".local", kind, "terminal-browser-interop");

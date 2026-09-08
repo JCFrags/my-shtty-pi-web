@@ -70,7 +70,16 @@ export interface SessionContext {
   onClose(code: number): void;
 }
 
+export interface SessionMetadata {
+  key: string;
+  owner: { workspaceId: string; tabId: string; paneId: string } | null;
+  terminal: string | null;
+  tab: string | null;
+  pane: string | null;
+}
+
 export interface SessionHandle {
+  metadata(): SessionMetadata;
   ready: Promise<void>;
   close(code?: number): void;
   nudgeResize(): void;
@@ -83,6 +92,7 @@ export function createSession(ctx: SessionContext): SessionHandle {
     session.shutdown(1);
   });
   return {
+    metadata: () => session.metadata(),
     ready,
     close: (code = 0) => session.shutdown(code),
     nudgeResize: () => session.nudgeResize(),
@@ -540,6 +550,16 @@ class Session {
     this.registry.setCdpPort(this.ctx.cdpPort);
     void this.findOwnPane();
     this.render();
+  }
+
+  metadata(): SessionMetadata {
+    return {
+      key: this.ctx.key,
+      owner: this.owner ? { workspaceId: this.owner.workspaceId, tabId: this.owner.tabId, paneId: this.owner.paneId } : null,
+      terminal: this.terminal?.name ?? null,
+      tab: this.ownPane?.tab ?? null,
+      pane: this.ownPane?.id ?? null,
+    };
   }
 
   private findOwnPane(): Promise<Pane | null> {
