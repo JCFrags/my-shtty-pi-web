@@ -1,0 +1,17 @@
+{
+  "sourceGitSha": "70ca901e35473a53bf2a37284235fb7714972ee8",
+  "platform": "linux-x64",
+  "nodeMajor": 24,
+  "esbuild": {
+    "version": "0.28.2",
+    "integrity": "sha512-HKVLS8dvII+xoKW9kmqxbRKrnWEXfJJr/FZhhJmiqIB0e053QNYFqOBouTMO/k5sID4MvCiUCvv8b9M4h32wIA==",
+    "entrySha256": "61ec0ba144ff93f4bf0e96ad6fab6f430ede0aa13e27ace8063ed63ba416b3cd",
+    "binarySha256": "e1698a3d5c6c0798fee4fd3b5cc816651f460c63d390a7a26ea4beb0b1884100"
+  },
+  "typescript": "6.0.3",
+  "vitest": "4.1.10",
+  "tsx": "4.20.6",
+  "nodeTypes": "24.12.4",
+  "typebox": "1.3.7",
+  "piPeers": "0.85.1"
+}

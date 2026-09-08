@@ -52,6 +52,24 @@ jobs:
       - name: Pi extension tests
         run: pnpm --filter pi-terminal-browser test
 
+  research-retention:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install the independent frozen research toolchain without lifecycle scripts
+        run: pnpm --dir scripts/retire-legacy install --frozen-lockfile --ignore-workspace
+      - name: Reproduce the research-only runtime and verify retained behavior
+        run: pnpm --dir scripts/retire-legacy run test:run
+      - name: Verify exact legacy cleanup and preservation
+        run: node --test scripts/test/legacy-browser-cleanup.test.mjs
+
   packaged-runtime:
     runs-on: ubuntu-24.04
     timeout-minutes: 45

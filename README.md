@@ -128,6 +128,87 @@ race. No command is replayed and no browser is automatically reopened. Legacy,
 unresponsive or uncertain processes require separate inspection and explicit
 recovery, not a guessed PID kill or socket deletion.
 
+### Permanent research/browser separation
+
+The local cutover uses only managed terminal-browser for browser control. The
+Tauri workspace, browser daemon, egress service, qualification services, desktop
+entries and their installation/rollback hooks are retired. Browser rollback
+selects another retained **terminal-browser** release; it never reinstalls Tauri.
+Do not restore a whole old Pi settings file to recover one integration.
+
+Web search/read remains a separate service and Pi extension. The licensed source
+closure in `scripts/retire-legacy/` retains the original authority, cache, content,
+passage selection, SDK, audit and research schemas. Its provenance records the
+original source hashes and the exact retained declarations. It contains no
+browser routes, browser tools, backend selection or workspace launcher.
+
+Build and test it independently on Linux x64 with Node 24 and pnpm 10.13.1:
+
+```bash
+pnpm --dir scripts/retire-legacy install --frozen-lockfile --ignore-workspace
+pnpm --dir scripts/retire-legacy run test:run
+node scripts/retire-legacy/build.mjs /absolute/new/research-output scripts/retire-legacy
+```
+
+The independent lock disables dependency lifecycle scripts. The test runner
+checks the reviewed runtime manifest hash, all 70 research tests and strict
+TypeScript checks. It never uses the historical checkout's dependency tree.
+The `research-retention` CI job runs this same gate.
+
+For deployment, verify every `manifest.json` file hash, then copy the complete
+output to `~/.local/share/pi-web-research/releases/<manifest-sha256>/`. Do not
+modify the versioned runtime files. Its extension needs the host Pi peer modules;
+provide a `node_modules` link to the installed Pi host's dependency directory,
+not a temporary build directory. Select that release's `webxd.mjs` in the
+existing user `webxd.service`, retaining its Unix socket, working directory and
+existing `WEBX_CACHE_DIR` and `WEBX_CONTENT_DIR`. Store these two environment
+values in `~/.config/pi-web-research/service.env` with mode 0600. The Python
+reader service, its mixed source tree and `.venv` must remain in place.
+Select the release's `pi-web` launcher for research status, doctor and audit.
+After the service restart and readiness, `pi-web doctor --json` must report
+healthy authority, search and read capabilities.
+
+Register the exact versioned `extension.mjs` in Pi's **extensions** array,
+preserving the packages array and all other settings. Coordinate global writes
+with any other maintenance session. Remove the former optional bridge file
+`~/.local/share/pi-terminal-browser/pi-web-search-read/extension.mjs` only after
+verifying its known ownership and replacement. This prevents duplicate research
+registration. Overwriting the old bridge in place is insufficient: native ESM
+imports can retain its old bytes across Pi reloads. At a settled, empty-draft
+boundary, explicitly reload only the owning Pi session. Verify its loaded
+research tools separately from its selected configuration. Never reload other
+conversations or resume human browser control automatically.
+
+`scripts/legacy-browser-cleanup.mjs` is the bounded local retirement tool. It
+accepts a classified version-1 inventory with `candidateDeletions` records
+(`path`, `inode`, `device`, `uid`, `type`, plus file `sha256` or `symlinkTarget`).
+Default mode retires the fixed historical source/install roots. Inventory kind
+`phase4a-runtime` removes only the fixed obsolete runtime selections after
+research migration. Kind `tauri-dependencies` removes only the pinned dedicated
+Tauri packages and hoisted links; first verify that retained package manifests
+and reverse links have no dependency outside that deletion set.
+
+```bash
+node scripts/legacy-browser-cleanup.mjs plan --inventory /private/inventory.json --out /private/new-plan.json
+node scripts/legacy-browser-cleanup.mjs apply --plan /private/new-plan.json --sha256 REVIEWED_PLAN_SHA256 --journal /private/new-journal.jsonl
+```
+
+Review the exact plan before apply. It checks all snapshots, Git changes, active
+services/processes and symlink boundaries before mutation. Process inspection
+can require noninteractive `sudo readlink` for protected process metadata; this
+never runs the cleanup as root. It journals owner-write preparation of read-only
+retired directories and every exact deletion. A failed partial plan must never
+be replayed: inspect its journal and create a new plan for the verified remainder.
+Original release manifests stay unchanged as historical provenance, not valid
+installation manifests. Retirement markers describe the source-removal snapshot;
+subsequent dependency deletion journals describe later changes to that snapshot.
+Keep all journals outside the retired trees.
+
+Preserve the shared reader/document runtime, cache/content stores, profiles,
+user storage, media keys, HSTS data, downloads, modified reports and unrelated
+packages. Do not delete the original repository, mixed `components/browser`,
+shared `node_modules`, Python environments or system libraries wholesale.
+
 ### Build a local runtime artifact (Fedora x64)
 
 Use the existing distribution build, after preparing the locked workspace dependencies:
