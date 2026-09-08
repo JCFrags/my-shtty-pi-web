@@ -823,7 +823,10 @@ impl Terminal {
                     rustix::event::PollFd::new(wake, rustix::event::PollFlags::IN),
                 ];
                 poll(&mut fds)?;
-                if fds[1].revents().contains(rustix::event::PollFlags::IN) {
+                // Keep the wake for the blocking poll after a nonblocking input probe.
+                if wait != Some(Duration::ZERO)
+                    && fds[1].revents().contains(rustix::event::PollFlags::IN)
+                {
                     let mut sink = [0u8; 64];
                     while matches!(rustix::io::read(wake, &mut sink), Ok(n) if n > 0) {}
                 }
@@ -2528,6 +2531,25 @@ mod tty_tests {
             }
             sink
         })
+    }
+
+    #[test]
+    fn pending_wake_survives_nonblocking_input_probe() {
+        let (master, _slave, path) = open_pty();
+        let _drain = drain(&master);
+        let mut term = Terminal::open(&path, Wrapper::None, SessionEnv::of_process()).unwrap();
+        term.waker().unwrap().wake();
+        assert!(term.poll_event(Some(Duration::ZERO)).unwrap().is_none());
+        let ready = |term: &Terminal| {
+            let mut fds = [rustix::event::PollFd::new(
+                term.wake_rx.as_ref().unwrap(),
+                rustix::event::PollFlags::IN,
+            )];
+            rustix::event::poll(&mut fds, Some(&rustix::event::Timespec::default())).unwrap()
+        };
+        assert_eq!(ready(&term), 1, "the next blocking poll must see the queued wake");
+        assert!(term.poll_event(Some(Duration::from_millis(500))).unwrap().is_none());
+        assert_eq!(ready(&term), 0, "the blocking poll must consume the wake");
     }
 
     #[test]

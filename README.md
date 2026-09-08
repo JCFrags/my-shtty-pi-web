@@ -176,6 +176,10 @@ SQLite/assets, and the actual packaged main daemon through private PTYs and the
 CLI/companion sockets: local and delayed actions, cross-origin frame input and
 capture, popup activation/input/capture, two owners, pause, and an exact-inventory
 shutdown race. Internal captures are not visible terminal acceptance.
+For CPU-sensitive startup failures, prefix the smoke command with `taskset -c`
+and one available CPU number. Registration failures include the last bounded CLI
+result or error. CI also runs the private-PTY Rust tests, including preservation
+of a queued wake across the engine's nonblocking input probe.
 
 Recovery takes two complete, separately sealed release output directories. It
 stages and uses their packaged managers outside the checkout, checks interrupted

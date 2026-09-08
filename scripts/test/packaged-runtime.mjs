@@ -64,14 +64,14 @@ function request(message, keep = false) {
     });
   });
 }
-async function until(check, label) {
+async function until(check, label, evidence = () => "") {
   for (let attempt = 0; attempt < 160; attempt++) {
     const value = await check();
     if (value) return value;
     assert.equal(daemon.exitCode, null, errors);
     await sleep(100);
   }
-  throw Error(label + "\n" + errors);
+  throw Error(label + "\n" + evidence() + "\n" + errors);
 }
 try {
   await until(() => fs.existsSync(socket), "daemon startup");
@@ -88,9 +88,22 @@ try {
   };
   await open(0, "one");
   const tabs = async pane => run(["companion", "tabs", "--action", "list"], pane);
-  await until(async () => (await tabs("one").catch(() => null))?.tabs?.some(tab => tab.url === url), "first companion registration");
+  const registration = async (pane, label) => {
+    let lastCheck;
+    await until(async () => {
+      try {
+        const result = await tabs(pane);
+        lastCheck = JSON.stringify({ pane, result }).slice(-4000);
+        return result?.tabs?.some(tab => tab.url === url);
+      } catch (error) {
+        lastCheck = JSON.stringify({ pane, error: String(error), stderr: error.stderr }).slice(-4000);
+        return false;
+      }
+    }, label, () => "last registration check: " + lastCheck);
+  };
+  await registration("one", "first companion registration");
   await open(1, "two");
-  await until(async () => (await tabs("two").catch(() => null))?.tabs?.some(tab => tab.url === url), "second companion registration");
+  await registration("two", "second companion registration");
   const observe = (pane = "one", args = []) => run(["agent", "observe", ...args], pane);
   const text = value => JSON.stringify(value);
   await until(async () => text(await observe()).includes("Right card"), "local page load");
@@ -174,7 +187,7 @@ try {
   const inventory = await run(["daemon-status"]);
   assert.equal(inventory.sessions.length, 2);
   await open(2, "three");
-  await until(async () => (await tabs("three").catch(() => null))?.tabs?.some(tab => tab.url === url), "third companion registration");
+  await registration("three", "third companion registration");
   fs.writeFileSync("/tmp/approval.json", JSON.stringify(inventory), { mode: 0o600 });
   await assert.rejects(run(["shutdown", "--expect", "/tmp/approval.json"]));
   const fresh = await run(["daemon-status"]);
@@ -197,7 +210,7 @@ try {
     assert.notEqual(current.identity.instanceId, initial.identity.instanceId);
     for (const [index, pane] of ["one", "two"].entries()) {
       assert.equal((await request({ cmd: "open", identity: current.identity, expectedInstance: current.identity.instanceId, tty: ttys[index], argv: [url], cwd: "/tmp/project", env: { TERM: "xterm-kitty", ...owner(pane) } }, true)).ok, true);
-      await until(async () => (await tabs(pane).catch(() => null))?.tabs?.some(tab => tab.url === url), "recovered owner registration");
+      await registration(pane, "recovered owner registration");
       assert.deepEqual((await run(["companion", "tabs", "--action", "downloads"], pane)).downloads.map(item => item.id), [history[pane]]);
     }
     const approval = await run(["daemon-status"]);

@@ -20,6 +20,7 @@ rustc --version
 python3 --version
 bwrap --version
 pnpm test:dist
+CARGO_TARGET_DIR="$TERMINAL_BROWSER_NATIVE_TARGET" cargo test --release --locked --manifest-path engine/Cargo.toml -p pixel-core terminal::tty_tests
 for release in a b; do
   TERMINAL_BROWSER_RELEASE_OUT="$WORK/$release" scripts/release.sh "ci-$release-$(git rev-parse --short HEAD)"
 done
