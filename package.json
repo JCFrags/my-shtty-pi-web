@@ -6,6 +6,8 @@
     "browser": "pnpm --filter terminal-browser start",
     "build:dist": "scripts/release.sh \"local-$(git rev-parse --short HEAD)\"",
     "install:dist": "scripts/install-local.sh",
+    "test:dist": "node --test scripts/test/*.test.mjs",
+    "test:dist:smoke": "node scripts/test/smoke-dist.mjs",
     "dist": "pnpm build:dist && pnpm install:dist",
     "release:patch": "scripts/tag-release.sh patch",
     "release:minor": "scripts/tag-release.sh minor",

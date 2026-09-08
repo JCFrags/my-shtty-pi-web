@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANIFEST="$ROOT/skill/skills.json"
-OUT="$ROOT/skill/build"
+OUT="${TERMINAL_BROWSER_SKILL_OUT:-$ROOT/skill/build}"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

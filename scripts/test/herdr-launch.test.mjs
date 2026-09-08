@@ -1,0 +1,29 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import test from "node:test";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+test("Herdr entrypoints resolve a directory alias before finding the artifact and preserve owner/arguments", (t) => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "herdr bundle "));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const plugin = path.join(temp, "versions/one/herdr-plugin");
+  fs.mkdirSync(path.dirname(plugin), { recursive: true });
+  fs.cpSync(path.join(root, "herdr-plugin"), plugin, { recursive: true });
+  const probe = path.join(temp, "probe.cjs");
+  fs.writeFileSync(probe, 'console.log(JSON.stringify({args:process.argv.slice(2),owner:process.env.TERMINAL_BROWSER_OWNER_PROJECT_DIR,pane:process.env.TERMINAL_BROWSER_OWNER_PANE_ID}));');
+  fs.writeFileSync(path.join(plugin, "launch.sh"), '#!/bin/bash\nexec "$NODE" "$PROBE" "$@"\n');
+  const alias = path.join(temp, "alias");
+  fs.symlinkSync(plugin, alias);
+  const herdr = path.join(temp, "herdr");
+  fs.writeFileSync(herdr, '#!/bin/sh\nprintf \'{"result":{"pane":{"foreground_cwd":"/tmp/project with spaces"}}}\'\n', { mode: 0o755 });
+  const env = { PATH: process.env.PATH, NODE: process.execPath, PROBE: probe, HERDR_BIN_PATH: herdr, HERDR_ENV: "1", HERDR_WORKSPACE_ID: "workspace", HERDR_TAB_ID: "tab", HERDR_PANE_ID: "pane" };
+  const run = (script, extra = {}) => JSON.parse(execFileSync("bash", [path.join(alias, script)], { env: { ...env, ...extra }, encoding: "utf8" }));
+  assert.deepEqual(run("open-companion.sh").args, ["open", "--no-merge"]);
+  assert.deepEqual(run("open-companion.sh", { TERMINAL_BROWSER_COMPANION_URL: "https://example.test/?q=a b" }).args, ["open", "https://example.test/?q=a b", "--no-merge"]);
+  assert.deepEqual(run("open-split.sh").args, ["open", "--split", "right"]);
+  assert.deepEqual(run("focus-companion.sh"), { args: ["companion", "open"], owner: "/tmp/project with spaces", pane: "pane" });
+});

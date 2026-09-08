@@ -3,7 +3,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="$(node -e 'console.log(require(process.argv[1]+"/package.json").devDependencies.electron)' "$ROOT/browser")"
-DEST="$(node -e 'const p=require("path");console.log(p.join(p.dirname(require.resolve("electron/package.json",{paths:[process.argv[1]]})),"dist"))' "$ROOT/browser")"
+if [ "${1:-}" = --dest ]; then
+  DEST="${2:?destination required}"
+  if [ -e "$DEST" ]; then echo "fetch-electron: destination already exists: $DEST" >&2; exit 1; fi
+else
+  DEST="$(node -e 'const p=require("path");console.log(p.join(p.dirname(require.resolve("electron/package.json",{paths:[process.argv[1]]})),"dist"))' "$ROOT/browser")"
+fi
 
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) PLATFORM="darwin-arm64" ;;
@@ -28,12 +33,12 @@ sha256_file() {
   fi
 }
 
-expected="$(curl -fsL --retry 3 "$MIRROR/SHASUMS256.txt" | awk -v zip="*$ZIP" '$2 == zip {print $1}')"
+expected="$(node -e 'const p=require(process.argv[1]); if(p.electron.version!==process.argv[2]) throw Error("Electron version differs from upstream lock"); process.stdout.write(p.electron.archives[process.argv[3]] || "")' "$ROOT/upstreams.lock.json" "$VERSION" "$PLATFORM")"
 if [ -z "$expected" ]; then
-  echo "fetch-electron: $ZIP is missing from the mirror's SHASUMS256.txt" >&2
+  echo "fetch-electron: $ZIP is missing from upstreams.lock.json" >&2
   exit 1
 fi
-if [ -f "$MARKER" ] && [ "$(cat "$MARKER")" = "$expected" ]; then
+if [ -f "$MARKER" ] && [ "$(cat "$MARKER")" = "$expected" ] && [ "$(cat "$DEST/version")" = "$VERSION" ]; then
   exit 0
 fi
 
@@ -43,7 +48,7 @@ echo "fetch-electron: downloading patched electron v$VERSION ($PLATFORM)" >&2
 curl -fL --retry 3 --progress-bar "$MIRROR/$ZIP" -o "$TMP/$ZIP"
 actual="$(sha256_file "$TMP/$ZIP")"
 if [ "$actual" != "$expected" ]; then
-  echo "fetch-electron: $ZIP does not match the mirror's SHASUMS256.txt" >&2
+  echo "fetch-electron: $ZIP does not match upstreams.lock.json" >&2
   echo "  expected: $expected" >&2
   echo "  actual:   $actual" >&2
   exit 1

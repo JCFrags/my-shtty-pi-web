@@ -15,6 +15,66 @@ A real browser that runs inside your terminal
 curl -fsSL https://terminal-browser.sh/install | bash
 ```
 
+### Build a local runtime artifact (Fedora x64)
+
+Use the existing distribution build, after preparing the locked workspace dependencies:
+
+```bash
+TERMINAL_BROWSER_RELEASE_OUT=/var/tmp/terminal-browser-candidate pnpm build:dist
+pnpm test:dist
+```
+
+Choose a fresh output directory for each candidate. The build does not replace
+source `dist` directories, install packages into Pi or Herdr, run setup, or stop
+running browsers. It stages the browser, CLI, N-API module, patched Electron,
+AgentCursor code, legacy `agent-browser` CLI, assets, skills, license notices,
+complete Pi extension package, and prebuilt Herdr plugin in
+`<output>/<artifact-id>/terminal-browser/`. Host Pi, Herdr, Node (for Pi and the
+Herdr action parser), and Fedora system libraries remain prerequisites; this is
+not a bundled Pi or Herdr application. The optional Pi Web research provider is
+not part of the browser artifact.
+
+Electron stays at **43.3.0** and AgentCursor at commit
+`b23c633c66fd240f836f5edd1034f6fcf678e237`. `upstreams.lock.json` pins the patched
+Electron archive checksums and the legacy `agent-browser` v0.33.0 commit.
+The release build downloads Electron into its own output and verifies its pinned
+archive checksum. Native builds use locked Cargo inputs and separate target
+outputs. To reuse build caches, set `TERMINAL_BROWSER_NATIVE_TARGET`,
+`TERMINAL_BROWSER_AGENT_SOURCE` (a clean pinned checkout), and
+`TERMINAL_BROWSER_AGENT_TARGET`; these must not be live runtime directories.
+
+Each artifact has `build-manifest.json`: full source commit, dirty flag, exact
+source-input digest, lockfile hashes, runtime and tool versions, integration
+metadata, and all runtime file hashes/modes. A dirty candidate has a dirty-tree
+suffix and is never presented as a clean commit build. The outer
+`manifest-linux-x64.json` hashes both the archive and internal manifest. Verify
+an extracted candidate before use:
+
+```bash
+node scripts/dist-manifest.mjs verify /path/to/extracted/terminal-browser /path/to/manifest-linux-x64.json
+TERMINAL_BROWSER_PI_ROOT=/usr/local/lib/node_modules/@earendil-works/pi-coding-agent \
+  pnpm test:dist:smoke /path/to/extracted/terminal-browser
+```
+
+The Fedora smoke test uses Bubblewrap with no checkout, real home, development
+`node_modules`, display socket, or network. It checks the packaged launchers,
+Electron/native SQLite imports, assets, slow-natural AgentCursor click/type,
+isolated daemon startup, and (when a Pi root is supplied) all five extension
+registrations. It does not test a visible Herdr pane or production activation.
+The Pi package is tested with workspace Pi 0.84.2 and installed Pi 0.85.1.
+
+Packaged Pi and Herdr entrypoints call their own artifact's `bin/terminal-browser`,
+which establishes `TERMINAL_BROWSER_DIST_ROOT` and uses bundled Electron as the
+CLI runtime. Pi's source build uses an explicit source launch mode; the release
+build generates bundle mode. The packaged Herdr descriptor has no source build
+step. No development symlink or runtime dependency installation is required.
+The browser uses its own AgentCursor driver, not the optional OS-cursor driver.
+
+This is artifact preparation only. The existing `install:dist`, setup, and upstream
+upgrade paths are not the versioned activation/rollback workflow. Do not use them
+to activate this candidate over a running local installation. Runtime startup
+identity and strict stale-daemon rejection are separate from artifact checksums.
+
 ### Usage
 ```
 terminal-browser # launches the browser

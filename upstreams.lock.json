@@ -18,5 +18,20 @@
     "defaultBranch": "master",
     "inspectedSha": "94f6d9c0d9bb9cf9ffae99d8bbfb09e9bf2fc9e0"
   },
+  "electron": {
+    "version": "43.3.0",
+    "repository": "https://github.com/zenbu-labs/electron-releases",
+    "archives": {
+      "darwin-arm64": "92373642b9c425e004ee99cbd95f555da4885ca9e619a7013194fead56e4a987",
+      "darwin-x64": "b173c29938e79358eb9057ae99d79941b737f2ae6bd5cbcaf1eff13c22f6f8a3",
+      "linux-arm64": "567f33e8d49dd367f7ab7b2a1294b0b1b5d293178aa91d58c00e3e0448305492",
+      "linux-x64": "81480d46732312e4014011b6b9326678d12088ceb108123bd8117295675c41d1"
+    }
+  },
+  "agentBrowser": {
+    "repository": "https://github.com/vercel-labs/agent-browser",
+    "tag": "v0.33.0",
+    "commit": "1ed371f3af472cc0d6cd8fdaea75d1a085ff7534"
+  },
   "captureDate": "2026-09-02T23:19:00-07:00"
 }

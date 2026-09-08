@@ -1,10 +1,8 @@
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "../../cli/dist/main.js");
+import { join } from "node:path";
+import { cliCommand } from "./launch.js";
 const OUTPUT_LIMIT = 256 * 1024;
 
 export interface ToolContext {
@@ -39,7 +37,8 @@ function ownerEnvironment(context: ToolContext): NodeJS.ProcessEnv {
 
 export const defaultCommandRunner: CommandRunner = ({ args, context, stdin, timeoutMs = 30_000 }) =>
   new Promise((resolveResult, reject) => {
-    const child = spawn(process.execPath, [CLI_PATH, ...args], {
+    const [command, commandArgs] = cliCommand(args);
+    const child = spawn(command, commandArgs, {
       cwd: context.cwd,
       env: ownerEnvironment(context),
       stdio: ["pipe", "pipe", "pipe"],
