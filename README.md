@@ -244,6 +244,9 @@ The pinned native frame fixture uses different local sites and asserts real
 out-of-process sessions, nested same-origin/cross-origin frames, duplicate labels,
 zoomed root/popup capture pixels, scrolling, upload, child prompts, drag delivery,
 process swaps, detach, geometry rejection, and takeover without repeated effects.
+It also delays owner lookup and session initialization to verify cancelled scrolling,
+unrelated detach recovery, and exact-session key release. Element capture tests
+include filtered noninteractive elements and refs excluded by the snapshot limit.
 Electron offscreen out-of-process frames need exact-session CDP input, rather than
 root `sendInputEvent`. HTML5 drag interception is on the root session; drag events
 use the selected frame session. These routes stay inside the normal PageInput and

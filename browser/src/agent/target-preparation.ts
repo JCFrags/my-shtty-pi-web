@@ -12,6 +12,7 @@ export interface PreparedTarget {
 }
 
 export class TargetPreparation {
+  private waitFailure: Error | null = null;
   constructor(
     private readonly observer: AgentPageObserver,
     readonly documentId: string,
@@ -73,7 +74,7 @@ export class TargetPreparation {
   }
 
   async assertFocused(target: PreparedTarget): Promise<void> {
-    if ("locator" in target.target && await this.uniqueRef(target.target.locator) !== target.state.ref) {
+    if ("locator" in target.target && await this.uniqueRef(target.target.locator, true) !== target.state.ref) {
       throw new Error("editable locator changed after input; action was not retried");
     }
     const state = await this.state(target.state.ref, false);
@@ -82,35 +83,58 @@ export class TargetPreparation {
     }
   }
 
-  private async uniqueRef(spec: LocatorSpec): Promise<string | null> {
+  private async uniqueRef(spec: LocatorSpec, afterInput = false): Promise<string | null> {
     const query = await this.query(spec);
     if (query.count > 1) {
       const candidates = query.matches.map(({ ref, tag, role, name }) => ({ ref, tag, role, name: name.slice(0, 120) }));
-      throw new Error(`ambiguous locator (${query.count} matches); narrow the scope or use nth: ${JSON.stringify(candidates)}`);
+      throw new Error(`ambiguous locator (${query.count} matches); narrow the scope or use nth: ${JSON.stringify(candidates)}${afterInput ? "; input may have been delivered; action was not retried" : ""}`);
     }
     return query.matches[0]?.ref ?? null;
   }
 
   private async query(spec: LocatorSpec) {
-    this.guard();
-    const query = await this.observer.queryLocator(spec);
-    this.guard();
+    this.assertActive();
+    const query = await this.wait(this.observer.queryLocator(spec));
+    this.assertActive();
     if (query.documentId !== this.documentId) throw new Error("page changed since observation");
     return query;
   }
 
   private async state(ref: string, scroll: boolean, point?: Point) {
-    this.guard();
-    const result = await this.observer.elementState(ref, { documentId: this.documentId, scroll, point });
-    this.guard();
+    this.assertActive();
+    const result = await this.wait(this.observer.elementState(ref, { documentId: this.documentId, scroll, point, guard: () => this.assertActive() }));
+    this.assertActive();
     if (result.documentId !== this.documentId) throw new Error("page changed since observation");
     return result.state;
   }
 
+  private assertActive(): void {
+    this.guard();
+    if (this.waitFailure) throw this.waitFailure;
+  }
+
+  private async wait<T>(task: Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setInterval>;
+    const started = this.now();
+    try {
+      return await Promise.race([task, new Promise<never>((_, reject) => {
+        timer = setInterval(() => {
+          try {
+            this.assertActive();
+            if (this.now() - started >= 10_000) {
+              this.waitFailure = new Error("target preparation timed out");
+              throw this.waitFailure;
+            }
+          } catch (error) { reject(error); }
+        }, 25);
+      })]);
+    } finally { clearInterval(timer!); }
+  }
+
   private async pause(deadline: number) {
-    this.guard();
+    this.assertActive();
     await this.sleep(Math.min(80, Math.max(0, deadline - this.now())));
-    this.guard();
+    this.assertActive();
   }
 }
 

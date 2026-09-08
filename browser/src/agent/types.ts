@@ -54,7 +54,7 @@ export interface AgentLocatorQuery {
 
 export interface AgentPageObserver {
   queryLocator(spec: LocatorSpec): Promise<AgentLocatorQuery>;
-  elementState(ref: string, options?: { point?: Point; scroll?: boolean; documentId?: string }): Promise<{ documentId: string; state: AgentElementState | null }>;
+  elementState(ref: string, options?: { point?: Point; scroll?: boolean; guard?: () => void; documentId?: string }): Promise<{ documentId: string; state: AgentElementState | null }>;
 
   observe(maxElements: number, includeText: boolean, filter?: LocatorSpec): Promise<ObservedPage>;
   currentDocumentId(): Promise<string>;

@@ -64,15 +64,20 @@ export class FrameObserver implements AgentPageObserver {
   async elementState(ref: string, options: {
     point?: Point;
     scroll?: boolean;
+    guard?: () => void;
     documentId?: string;
   } = {}) {
+    options.guard?.();
     const documentId = await this.currentDocumentId();
+    options.guard?.();
     if (options.documentId && options.documentId !== documentId)
       throw new Error('frame changed since observation');
     const localRef = this.decode(ref);
     if (options.scroll) {
-      await this.frames.geometry(true);
-      await this.local.elementState(localRef, { scroll: true });
+      await this.frames.geometry(true, options.guard);
+      options.guard?.();
+      await this.local.elementState(localRef, { scroll: true, guard: options.guard });
+      options.guard?.();
     }
     const geometry = await this.frames.geometry();
     const point = options.point ? { x: options.point.x / geometry.zoom - geometry.x, y: options.point.y / geometry.zoom - geometry.y } : undefined;

@@ -35,7 +35,7 @@ let controller;
 (async () => {
   assert.equal(process.versions.electron, '43.3.0');
   await app.whenReady();
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await new Promise(resolve => server.listen(0, '0.0.0.0', resolve));
   const surface = () => ({ clear() {}, close() {}, present(frame) { frame.released?.(); } });
   controller = new BrowserController(surface(), surface(), surface(), { x: 0, y: 0, width: 800, height: 600, scale: 1 }, `http://127.0.0.1:${server.address().port}/root`, {
     cwd: directory, background: '#222222', visible: true, partition: null, tabsAsPopups: false,
@@ -64,6 +64,97 @@ let controller;
   const js = source => controller.frames.evaluate(source);
   const request = async(extra={}) => {const observation=await runtime.observe();return {observationId:observation.observationId,expectedControlEpoch:control.controlEpoch,...extra};};
   const locator = id => [{kind:'css',value:'#'+id}];
+  console.log('STAGE audit-regressions');
+  await assert.rejects(runtime.click(await request({locator:[{kind:'css',value:'['}]})), error => {
+    assert.match(error.message, /not a valid selector/);
+    assert(!error.message.includes('\n'));
+    assert(error.message.length < 350);
+    return true;
+  });
+  await js("document.body.insertAdjacentHTML('beforeend','<div id=filtered style=width:80px;height:30px>Filtered content</div>')");
+  const filtered = await runtime.observe({filter:locator('filtered')});
+  const generic = filtered.snapshot.elements.find(element=>element.name==='Filtered content' || element.text==='Filtered content');
+  assert(generic);
+  assert.equal(generic.role,'generic');
+  const genericCapture = await runtime.observe({view:'visual',scope:'element',ref:generic.ref});
+  assert(genericCapture.visual.bytes>0);
+  assert(!genericCapture.snapshot.elements.some(element=>element.ref===generic.ref));
+  const excluded = (await runtime.observe()).snapshot.elements.find(element=>element.name==='Name');
+  assert(excluded);
+  const excludedCapture = await runtime.observe({view:'visual',scope:'element',ref:excluded.ref,maxElements:1});
+  assert(excludedCapture.visual.bytes>0);
+  assert(!excludedCapture.snapshot.elements.some(element=>element.ref===excluded.ref));
+  await js("document.getElementById('filtered').remove()");
+  await assert.rejects(runtime.observe({view:'visual',scope:'element',ref:generic.ref}), /stale or unknown/);
+
+  const regressionCdp = controller.cdp.bind(controller);
+  for (const change of ['cancel','takeover','navigation']) {
+    await controller.runJs("document.body.style.height='2200px';document.getElementById('cross').style.top='1400px';window.scrollTo(0,0)");
+    const observed = await runtime.observe();
+    const save = observed.snapshot.elements.find(element=>element.name==='Save');
+    const abort = new AbortController();
+    let interrupted = false;
+    controller.cdp = async (method, params, session) => {
+      if (method==='DOM.getFrameOwner' && !interrupted) {
+        interrupted=true;
+        if(change==='cancel') abort.abort(new Error('cancelled geometry'));
+        if(change==='takeover') control.pause(control.controlEpoch);
+        if(change==='navigation') await js("history.pushState({},'',location.pathname+'#geometry')");
+        await wait(100);
+      }
+      return regressionCdp(method,params,session);
+    };
+    await assert.rejects(runtime.click({observationId:observed.observationId,expectedControlEpoch:control.controlEpoch,ref:save.ref,signal:abort.signal}), /cancelled|control|changed|observation/);
+    await wait(150);
+    controller.cdp=regressionCdp;
+    assert(interrupted);
+    assert.equal(await controller.runJs('scrollY'),0,change+' must not scroll after interruption');
+    assert.equal(controller.input.programmaticPressed.size,0);
+    if(change==='takeover') control.resume(control.controlEpoch);
+  }
+  await controller.runJs("document.body.style.height='';document.getElementById('cross').style.top='100px';window.scrollTo(0,0)");
+  await runtime.observe();
+  await js("document.getElementById('name').focus();window.keyEvents=[];document.addEventListener('keydown',event=>keyEvents.push('down:'+event.key));document.addEventListener('keyup',event=>keyEvents.push('up:'+event.key))");
+  let keyNavigated = false;
+  const keyRoutes = [];
+  controller.cdp = async (method,params,session) => {
+    if(method==='Input.dispatchKeyEvent') keyRoutes.push({type:params.type,session});
+    const value = await regressionCdp(method,params,session);
+    if(method==='Input.dispatchKeyEvent' && params.type==='rawKeyDown' && !keyNavigated) {
+      keyNavigated=true;
+      await js("history.pushState({},'',location.pathname+'#key')");
+      await wait(100);
+    }
+    return value;
+  };
+  await assert.rejects(runtime.pressKey(await request({key:'a'})), /changed/);
+  await wait(100);
+  controller.cdp=regressionCdp;
+  assert.deepEqual(await js('keyEvents'),['down:a','up:a']);
+  assert.deepEqual(keyRoutes.map(route=>route.type),['rawKeyDown','keyUp']);
+  assert(keyRoutes[0].session);
+  assert.equal(keyRoutes[0].session,keyRoutes[1].session);
+  await js("document.getElementById('name').addEventListener('input',()=>document.body.append(document.getElementById('name').cloneNode()),{once:true})");
+  await assert.rejects(runtime.type(await request({locator:locator('name'),text:'abc',replace:false})), /ambiguous locator.*input may have been delivered.*not retried/);
+  assert.deepEqual(await js("Array.from(document.querySelectorAll('#name')).map(node=>node.value)"),['a','a']);
+  await js("document.querySelectorAll('#name')[1].remove();document.getElementById('name').value=''");
+
+  await runtime.observe({frame:'main'});
+  let detachedDuringInit=false;
+  controller.cdp=async(method,params,session)=>{
+    if(method==='Runtime.enable' && session && !detachedDuringInit) {
+      detachedDuringInit=true;
+      await controller.runJs("document.getElementById('transient').remove()");
+      await wait(100);
+    }
+    return regressionCdp(method,params,session);
+  };
+  await controller.runJs(`(()=>{const frame=document.createElement('iframe');frame.id='transient';frame.src='http://127.0.0.2:${server.address().port}/leaf';document.body.append(frame)})()`);
+  await wait(1000);
+  controller.cdp=regressionCdp;
+  assert(detachedDuringInit);
+  for(let attempt=0;attempt<3;attempt++) await runtime.observe({frame:'main'});
+  await runtime.observe({frame:cross.ref});
   console.log('STAGE click');
   const firstClick=await runtime.click(await request({locator:locator('save')}));
   assert.deepEqual(rootTargets.at(-1),firstClick.point);
@@ -132,7 +223,10 @@ let controller;
   await controller.runJs("document.getElementById('cross').style.left='130px'");
   await assert.rejects(runtime.hover({observationId:visual.observationId,expectedControlEpoch:control.controlEpoch,target:{x:visualSave.rect.x+20,y:visualSave.rect.y+15}}),/geometry changed/);
   await controller.runJs("document.getElementById('cross').style.transform='rotate(2deg)'");
-  await assert.rejects(runtime.observe(),/unsupported frame owner transform/);
+  await assert.rejects(runtime.observe(),error=>{
+    assert.equal(error.message,'Error: unsupported frame owner transform');
+    return true;
+  });
   await controller.runJs("document.getElementById('cross').style.transform='none'");
   const beforeTakeover=await js('counts.save');
   const originalPointer=controller.agentPointer.bind(controller);

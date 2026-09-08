@@ -170,9 +170,11 @@ export class BrowserAgentRuntime {
         let rect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
         if (scope === "element") {
           if (!options.ref) throw new Error("element visual observation needs a ref");
-          const element = page.snapshot.elements.find((candidate) => candidate.ref === options.ref);
+          const result = await this.observer.elementState(options.ref, { documentId: page.documentId });
+          if (result.documentId !== page.documentId) throw new Error("page changed during observation");
+          const element = result.state;
           if (!element) throw new Error("stale or unknown ref");
-          if (!element.visible || !element.inViewport) throw new Error("element is outside the current viewport");
+          if (!element.visible || element.rect.width <= 0 || element.rect.height <= 0) throw new Error("element is outside the current viewport");
           rect = clipRect(element.rect, viewport);
         }
         const data = await this.target.capturePage(scope === "element" ? rect : undefined);

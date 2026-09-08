@@ -201,7 +201,8 @@ return { documentId: registry.documentId, count: nodes.length, matches: nodes.sl
     return query;
   }
 
-  async elementState(ref: string, options: { point?: Point; scroll?: boolean; documentId?: string } = {}): Promise<{ documentId: string; state: AgentElementState | null }> {
+  async elementState(ref: string, options: { point?: Point; scroll?: boolean; guard?: () => void; documentId?: string } = {}): Promise<{ documentId: string; state: AgentElementState | null }> {
+    options.guard?.();
     const result = await this.target.runJs(`(() => {
 ${REGISTRY_SETUP}
 ${DOM_HELPERS}

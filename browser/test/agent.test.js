@@ -997,3 +997,17 @@ test('socket disconnect cancels only its own active runtime input and queued req
     registry.dispose();
   }
 });
+
+test('element capture resolves current identity outside the fresh snapshot', async () => {
+  const { runtime, observer, capturedRect } = runtimeFixture();
+  await runtime.observe();
+  const observe = observer.observe;
+  observer.observe = async () => {
+    const page = await observe();
+    page.snapshot.elements = [];
+    return page;
+  };
+  await runtime.observe({ view: 'visual', scope: 'element', ref: 'e1', maxElements: 1 });
+  assert.deepEqual(capturedRect(), { x: 1, y: 2, width: 20, height: 10 });
+  await assert.rejects(runtime.observe({ view: 'visual', scope: 'element', ref: 'missing' }), /stale or unknown/);
+});

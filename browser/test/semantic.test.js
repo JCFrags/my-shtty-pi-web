@@ -117,3 +117,46 @@ test('obstruction at the actual point and lost insertion focus prevent side effe
   await assert.rejects(driver.type({ text: 'secret', replace: true, perKeyMinMs: 1, perKeyMaxMs: 2, mode: 'content' }), /focus changed/);
   assert.deepEqual(events, []);
 });
+
+test('preparation interrupts a pending renderer wait and blocks its late mutation', async () => {
+  const fixture = preparationFixture();
+  let resume;
+  let mutated = false;
+  fixture.observer.elementState = async (_ref, options) => {
+    await new Promise(resolve => { resume = resolve; });
+    options.guard();
+    mutated = true;
+    return { documentId: 'doc', state: state() };
+  };
+  const pending = fixture.preparation.prepare({ ref: 'e1' });
+  fixture.abort.abort(new Error('cancelled pending geometry'));
+  await assert.rejects(pending, /cancelled pending geometry/);
+  resume();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(mutated, false);
+});
+
+test('ambiguous editable locator after input reports possible delivery and no retry', async () => {
+  const fixture = preparationFixture();
+  const prepared = await fixture.preparation.prepare({ locator }, 'editable');
+  prepared.committed = true;
+  fixture.setCount(2);
+  await assert.rejects(fixture.preparation.assertFocused(prepared), /ambiguous locator.*input may have been delivered.*not retried/);
+});
+
+test('preparation timeout also blocks a late mutation when the operation guard remains healthy', async () => {
+  let now = 0, resume, mutated = false;
+  const observer = { elementState: async (_ref, options) => {
+    await new Promise(resolve => { resume = resolve; });
+    options.guard();
+    mutated = true;
+    return { documentId: 'doc', state: state() };
+  } };
+  const preparation = new TargetPreparation(observer, 'doc', () => {}, async () => {}, () => now);
+  const pending = preparation.prepare({ ref: 'e1' });
+  now = 10_000;
+  await assert.rejects(pending, /preparation timed out/);
+  resume();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(mutated, false);
+});

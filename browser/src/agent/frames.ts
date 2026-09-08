@@ -70,7 +70,8 @@ export class BrowserFrames {
   private root = "";
   private selected = "";
   private ready: Promise<void> | null = null;
-  private failure: Error | null = null;
+  private readonly failures = new Map<string, Error>();
+  private readonly keySessions = new Map<string, string>();
   private disposed = false;
   private geometryValue: FrameGeometry | null = null;
   private observationGeometry: string | null = null;
@@ -114,12 +115,20 @@ export class BrowserFrames {
   }
   private async settle(): Promise<void> {
     while (this.pending.size)
-      await Promise.all([...this.pending]); if (this.failure)
-      throw this.failure;
+      await Promise.all([...this.pending]);
   }
-  private track(task: Promise<unknown>): void {
-    this.pending.add(task);
-    void task.catch(error => { this.failure = error instanceof Error ? error : new Error(String(error)); this.changed(); }).finally(() => this.pending.delete(task));
+  private liveSession(session: string): boolean {
+    const id = this.sessions.get(session);
+    return !!id && this.frames.get(id)?.session === session;
+  }
+  private track(task: Promise<unknown>, session: string): void {
+    const settled = task.catch(() => {
+      if (this.liveSession(session)) {
+        this.failures.set(session, new Error("frame initialization failed; observe main and select a healthy frame"));
+        if (this.affects(this.sessions.get(session)!)) this.changed();
+      }
+    }).finally(() => this.pending.delete(settled));
+    this.pending.add(settled);
   }
   private record(id: string, session: string): FrameDocument {
     let frame = this.frames.get(id);
@@ -159,16 +168,21 @@ export class BrowserFrames {
       this.track((async () => {
         try {
           await this.send("Runtime.enable", {}, child);
+          if (!this.liveSession(child)) return;
           await this.send("Page.enable", {}, child);
-          this.tree((await this.send("Page.getFrameTree", {}, child)).frameTree, child, frame.parent);
+          if (!this.liveSession(child)) return;
+          const tree = await this.send("Page.getFrameTree", {}, child);
+          if (!this.liveSession(child)) return;
+          this.tree(tree.frameTree, child, frame.parent);
           await this.initializeSession(child);
+          if (!this.liveSession(child)) return;
           await this.send("Target.setAutoAttach", AUTO_ATTACH, child);
         }
         finally {
           if (params.waitingForDebugger)
             await this.send("Runtime.runIfWaitingForDebugger", {}, child).catch(() => { });
         }
-      })());
+      })(), child);
     }
     if (method === "Target.detachedFromTarget") {
       const id = this.sessions.get(params.sessionId);
@@ -178,6 +192,7 @@ export class BrowserFrames {
           this.frames.delete(id);
         }
         this.sessions.delete(params.sessionId);
+        this.failures.delete(params.sessionId);
       }
     }
     if (method === "Page.navigatedWithinDocument") {
@@ -250,7 +265,9 @@ export class BrowserFrames {
     }
   }
   selectedFrame(): FrameDocument {
-    const frame = this.frames.get(this.selected); if (!frame?.context)
+    const frame = this.frames.get(this.selected);
+    if (frame && this.failures.has(frame.session)) throw this.failures.get(frame.session)!;
+    if (!frame?.context)
       throw new Error("selected frame changed or detached; observe main to select again"); return { ...frame };
   }
   chain(): FrameDocument[] {
@@ -265,6 +282,7 @@ export class BrowserFrames {
       const parent = frame.parent ? this.frames.get(frame.parent) : undefined;
       if (!parent?.context)
         throw new Error("frame ancestor changed or detached");
+      if (this.failures.has(parent.session)) throw this.failures.get(parent.session)!;
       frame = parent;
     }
     return result;
@@ -294,7 +312,7 @@ export class BrowserFrames {
     if (key !== this.documentKey())
       throw new Error("frame changed during evaluation");
     if (result.exceptionDetails)
-      throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text ?? "frame evaluation failed");
+      throw new Error(rendererError(result.exceptionDetails, "frame evaluation failed"));
     return result.result?.value;
   }
   rememberGeometry(): void { this.observationGeometry = this.geometryValue?.signature ?? null; }
@@ -306,26 +324,33 @@ export class BrowserFrames {
     if (!await this.hit(geometry, point))
       throw new Error("coordinate target is outside or obstructed in selected frame");
   }
-  async geometry(scroll = false): Promise<FrameGeometry> {
+  async geometry(scroll = false, guard: () => void = () => {}): Promise<FrameGeometry> {
+    guard();
     const chain = this.chain(), key = this.documentKey(), zoom = this.contents.getZoomFactor();
+    const check = () => {
+      guard();
+      if (key !== this.documentKey() || zoom !== this.contents.getZoomFactor()) throw new Error("frame changed during geometry measurement");
+    };
+    const send: Send = async (...args) => { check(); const result = await this.send(...args); check(); return result; };
     let x = 0, y = 0;
     const root = await this.evaluate("({width:innerWidth,height:innerHeight,scrollX,scrollY})", chain[0]) as {
       width: number;
       height: number;
     };
+    check();
     let clip: Rect = { x: 0, y: 0, width: root.width, height: root.height };
     const owners: Owner[] = [];
     try {
       for (const session of new Set(chain.slice(0, -1).map(frame => frame.session)))
-        await this.send("Runtime.releaseObjectGroup", { objectGroup: "terminal-browser-frame-owners" }, session);
+        await send("Runtime.releaseObjectGroup", { objectGroup: "terminal-browser-frame-owners" }, session);
       for (let index = 1; index < chain.length; index++) {
         const parent = chain[index - 1], child = chain[index];
-        const node = await this.send("DOM.getFrameOwner", { frameId: child.id }, parent.session);
-        const resolved = await this.send("DOM.resolveNode", { backendNodeId: node.backendNodeId, executionContextId: parent.contextId, objectGroup: "terminal-browser-frame-owners" }, parent.session);
+        const node = await send("DOM.getFrameOwner", { frameId: child.id }, parent.session);
+        const resolved = await send("DOM.resolveNode", { backendNodeId: node.backendNodeId, executionContextId: parent.contextId, objectGroup: "terminal-browser-frame-owners" }, parent.session);
         const objectId = resolved.object.objectId;
-        const result = await this.send("Runtime.callFunctionOn", { objectId, functionDeclaration: OWNER_MEASURE, arguments: [{ value: scroll }], returnByValue: true }, parent.session);
+        const result = await send("Runtime.callFunctionOn", { objectId, functionDeclaration: OWNER_MEASURE, arguments: [{ value: scroll }], returnByValue: true }, parent.session);
         if (result.exceptionDetails)
-          throw new Error(result.exceptionDetails.exception?.description ?? "frame owner measurement failed");
+          throw new Error(rendererError(result.exceptionDetails, "frame owner measurement failed"));
         const owner: Owner = { ...result.result.value, frame: parent, objectId };
         owners.push(owner);
         clip = intersect(clip, { ...owner.clip, x: owner.clip.x + x, y: owner.clip.y + y });
@@ -337,6 +362,7 @@ export class BrowserFrames {
       if (key !== this.documentKey() || zoom !== this.contents.getZoomFactor())
         throw new Error("frame changed during geometry measurement");
       const local = await this.evaluate("({width:innerWidth,height:innerHeight,scrollX,scrollY})");
+      check();
       const geometry = { x, y, zoom, clip, owners, signature: JSON.stringify({ x, y, zoom, clip, root, local, owners: owners.map(({ x, y, width, height, clip, visible }) => ({ x, y, width, height, clip, visible })) }) };
       this.geometryValue = geometry;
       return geometry;
@@ -433,7 +459,10 @@ export class BrowserFrames {
     key: AgentKey;
     character?: string;
   }): Promise<unknown> | null {
-    const session = event.type === "keyUp" && !this.geometryValue ? this.lastRoute?.session : this.selectedFrame().session;
+    const identity = event.key.identity;
+    const session = event.type === "rawKeyDown" ? this.selectedFrame().session : this.keySessions.get(identity);
+    if (event.type === "rawKeyDown") this.keySessions.set(identity, session!);
+    if (event.type === "keyUp") this.keySessions.delete(identity);
     if (!session)
       return null;
     const named: Record<string, [
@@ -495,3 +524,8 @@ export class BrowserFrames {
 export function intersect(a: Rect, b: Rect): Rect { const x = Math.max(a.x, b.x), y = Math.max(a.y, b.y); return { x, y, width: Math.max(0, Math.min(a.x + a.width, b.x + b.width) - x), height: Math.max(0, Math.min(a.y + a.height, b.y + b.height) - y) }; }
 export function contains(rect: Rect, point: Point): boolean { return point.x >= rect.x && point.y >= rect.y && point.x < rect.x + rect.width && point.y < rect.y + rect.height; }
 export function toSurface(rect: Rect, geometry: FrameGeometry): Rect { return { x: (rect.x + geometry.x) * geometry.zoom, y: (rect.y + geometry.y) * geometry.zoom, width: rect.width * geometry.zoom, height: rect.height * geometry.zoom }; }
+
+function rendererError(details: any, fallback: string): string {
+  const text = String(details.exception?.description ?? details.text ?? fallback).split(/\r?\n/)[0].trim().slice(0, 350);
+  return text || fallback;
+}
