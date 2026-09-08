@@ -142,7 +142,9 @@ passage selection, SDK, audit and research schemas. Its provenance records the
 original source hashes and the exact retained declarations. It contains no
 browser routes, browser tools, backend selection or workspace launcher.
 
-Build and test it independently on Linux x64 with Node 24 and pnpm 10.13.1:
+Build and test it independently on Linux x64 with Node 24 and pnpm 10.13.1.
+The retained Fedora CLI launcher requires Node 24 at `/usr/bin/node`; CI declares
+that host path explicitly in its disposable runner:
 
 ```bash
 pnpm --dir scripts/retire-legacy install --frozen-lockfile --ignore-workspace

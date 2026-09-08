@@ -63,6 +63,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - name: Provide the retained Fedora launcher Node path
+        run: |
+          if [ ! -e /usr/bin/node ]; then sudo ln -s "$(command -v node)" /usr/bin/node; fi
+          /usr/bin/node -e 'if (process.versions.node.split(".")[0] !== "24") process.exit(1)'
       - name: Install the independent frozen research toolchain without lifecycle scripts
         run: pnpm --dir scripts/retire-legacy install --frozen-lockfile --ignore-workspace
       - name: Reproduce the research-only runtime and verify retained behavior
