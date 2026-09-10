@@ -7,6 +7,14 @@ export interface Pane {
   tab: string;
 }
 
+export class PaneLaunchError extends Error {
+  constructor(readonly pane: Pane, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "PaneLaunchError";
+    this.cause = cause;
+  }
+}
+
 export interface PaneDetails extends Pane {
   tty: string | null;
   command: string | null;
@@ -23,6 +31,7 @@ export interface SplitRequest {
   command: string[];
   size: number | null;
   tty: string | null;
+  onPaneCreated?(pane: Pane): void;
 }
 
 
@@ -59,7 +68,8 @@ export interface Terminal {
    * script the current terminal they are running in
    * 
    */
-  split?(request: SplitRequest): Promise<void>;
+  split?(request: SplitRequest): Promise<Pane | void>;
+  paneStatus?(pane: string): Promise<"present" | "absent" | "unknown">;
   listPanes?(): Promise<PaneDetails[]>;
   sendText?(pane: string, text: string): Promise<void>;
   focusPane?(pane: string): Promise<void>;

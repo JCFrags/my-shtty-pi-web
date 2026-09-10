@@ -491,6 +491,9 @@ class Session {
       key: this.ctx.key,
       tty: this.ctx.tty ?? null,
       owner: this.owner,
+      startupAttempt: /^[a-f0-9-]{36}$/.test(this.ctx.env.TERMINAL_BROWSER_STARTUP_ATTEMPT ?? "")
+        ? this.ctx.env.TERMINAL_BROWSER_STARTUP_ATTEMPT!
+        : null,
       where: async () => {
         const pane = await this.findOwnPane();
         return {

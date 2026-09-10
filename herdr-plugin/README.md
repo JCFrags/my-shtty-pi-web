@@ -25,6 +25,18 @@ terminal-browser action # an agent-browser compatible cli for interacting with o
 ```
 
 
+### Packaged startup verification
+
+Run the local acceptance test with an extracted package and the absolute path to a prepared Herdr 0.8.2 or newer binary:
+
+```bash
+node scripts/test/startup-dist.mjs /path/to/extracted/terminal-browser /absolute/path/to/herdr
+```
+
+The test uses a private Bubblewrap sandbox. It checks direct terminal, split, new-tab, companion, and loaded Pi extension failures. It also verifies that the isolated ownership lock and an unrelated pane do not change. The test needs prepared Pi host dependencies and does not run in CI when Herdr is unavailable.
+
+Startup failures return bounded JSON with the original message, an attempt ID, the exact pane when known, process exit details, cleanup status, and `terminal-browser doctor --json` as the recovery command. Failed `exec` panes report `exited` after Herdr confirms their removal. A timed-out or uncertain pane is retained instead of being closed automatically.
+
 ### Use cases:
 - You can have a coding agent and website scoped to the same terminal tab
 - Your agent has full access to interact with open terminal-browsers, which gives your agent the capability to use the web

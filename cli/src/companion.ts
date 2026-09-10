@@ -15,6 +15,17 @@ import type { BrowserOwner, InstanceRow } from "pixel-store";
 import { control } from "./control";
 import { ownerMatches, recordKey } from "./instances";
 import { instances } from "./registry";
+import {
+  bindStartupPane,
+  createStartupAttempt,
+  StartupFailure,
+  writeStartupFailure,
+  removeStartupAttempt,
+  startupEnvironment,
+  startupFailureError,
+  waitForStartup,
+} from "./startup";
+import type { StartupAttempt } from "./startup";
 
 const execFileAsync = promisify(execFile);
 const PLUGIN_ID = "zenbu-labs.terminal-browser";
@@ -113,8 +124,22 @@ async function runHerdr(args: string[], environment: NodeJS.ProcessEnv): Promise
       maxBuffer: OUTPUT_LIMIT,
     });
     return typeof stdout === "string" ? stdout : "";
-  } catch {
-    throw new Error("Herdr could not open or focus the browser companion");
+  } catch (error) {
+    const failure = error as Error & { stderr?: string };
+    const detail = (typeof failure.stderr === "string" && failure.stderr.trim() ? failure.stderr : failure.message).trim();
+    const bounded = Buffer.from(detail).subarray(0, 8192).toString("utf8").replace(/\uFFFD+$/u, "");
+    let message = bounded || "Herdr could not open or focus the browser companion";
+    let code = (error as NodeJS.ErrnoException).code;
+    try {
+      const response = JSON.parse(bounded) as { error?: { code?: unknown; message?: unknown } };
+      if (typeof response.error?.message === "string") message = response.error.message;
+      if (typeof response.error?.code === "string") code = response.error.code.toUpperCase();
+    } catch {}
+    throw Object.assign(new Error(message), {
+      code: typeof code === "string" ? code : "HERDR_LAUNCH_FAILED",
+      exitCode: typeof (error as { code?: unknown }).code === "number" ? (error as unknown as { code: number }).code : null,
+      signal: (error as { signal?: unknown }).signal ?? null,
+    });
   }
 }
 
@@ -159,7 +184,34 @@ function isReady(browser: { where: BrowserWhere; tabs: NonNullable<BrowserTarget
     browser.tabs.some((tab) => tab.active && tab.targetId);
 }
 
-async function waitForReadyBrowser(owner: BrowserOwner, pane?: string) {
+async function companionPaneStatus(pane: string, environment: NodeJS.ProcessEnv): Promise<"present" | "absent" | "unknown"> {
+  try {
+    const output = await runHerdr(["pane", "list"], environment);
+    const value = JSON.parse(output) as { result?: { panes?: Array<{ pane_id?: string }> } };
+    return Array.isArray(value.result?.panes)
+      ? value.result!.panes!.some((candidate) => candidate.pane_id === pane) ? "present" : "absent"
+      : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+async function waitForReadyBrowser(owner: BrowserOwner, pane?: string, startup?: StartupAttempt, environment: NodeJS.ProcessEnv = process.env) {
+  if (startup) {
+    return waitForStartup({
+      startup,
+      pane: pane ?? null,
+      timeoutMs: READY_TIMEOUT_MS,
+      timeoutMessage: "browser companion did not become ready within 20 seconds",
+      pollIntervalMs: 150,
+      findReady: async (attempt) => {
+        const found = await liveOwned(owner);
+        if (found.length > 1) throw new Error("multiple browsers claim this Pi pane");
+        return found[0]?.record.startupAttempt === attempt && isReady(found[0], pane) ? found[0] : null;
+      },
+      paneStatus: (candidate) => companionPaneStatus(candidate, environment),
+    });
+  }
   const deadline = Date.now() + READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const found = await liveOwned(owner);
@@ -206,7 +258,7 @@ async function reuseBrowser(
   return { action: "reused", key: recordKey(found.record), pane: found.where.pane!, tabs };
 }
 
-export function paneOpenArgs(owner: BrowserOwner, options: CompanionOpenOptions): string[] {
+export function paneOpenArgs(owner: BrowserOwner, options: CompanionOpenOptions, startup?: StartupAttempt): string[] {
   const args = [
     "plugin", "pane", "open",
     "--plugin", PLUGIN_ID,
@@ -215,7 +267,10 @@ export function paneOpenArgs(owner: BrowserOwner, options: CompanionOpenOptions)
     "--target-pane", owner.paneId,
     "--direction", "right",
   ];
-  const childEnvironment = browserOwnerEnvironment(owner);
+  const childEnvironment = {
+    ...browserOwnerEnvironment(owner),
+    ...(startup ? startupEnvironment(startup) : {}),
+  };
   if (options.url) childEnvironment.TERMINAL_BROWSER_COMPANION_URL = options.url;
   for (const [name, value] of Object.entries(childEnvironment)) {
     if (value !== undefined) args.push("--env", `${name}=${value}`);
@@ -224,8 +279,8 @@ export function paneOpenArgs(owner: BrowserOwner, options: CompanionOpenOptions)
   return args;
 }
 
-async function waitForOpenedBrowser(owner: BrowserOwner, pane: string): Promise<CompanionOpenResult> {
-  const browser = await waitForReadyBrowser(owner, pane);
+async function waitForOpenedBrowser(owner: BrowserOwner, pane: string, startup: StartupAttempt, environment: NodeJS.ProcessEnv): Promise<CompanionOpenResult> {
+  const browser = await waitForReadyBrowser(owner, pane, startup, environment);
   return {
     action: "opened",
     key: recordKey(browser.record),
@@ -246,12 +301,20 @@ export async function openCompanion(
       const ready = isReady(existing[0]) ? existing[0] : await waitForReadyBrowser(owner);
       return reuseBrowser(ready, options, environment);
     }
-    const pane = parseOpenedPane(await runHerdr(paneOpenArgs(owner, options), environment));
+    const startup = createStartupAttempt(owner);
+    let pane: string | null = null;
     try {
-      return await waitForOpenedBrowser(owner, pane);
+      pane = parseOpenedPane(await runHerdr(paneOpenArgs(owner, options, startup), environment));
+      bindStartupPane(startup, pane);
+      return await waitForOpenedBrowser(owner, pane, startup, environment);
     } catch (error) {
-      await runHerdr(["plugin", "pane", "close", pane], environment).catch(() => {});
-      throw error;
+      if (error instanceof StartupFailure) throw error;
+      const report = writeStartupFailure(error, { pane }, { ...environment, ...browserOwnerEnvironment(owner), ...startupEnvironment(startup) });
+      if (!report) throw error;
+      report.cleanup = { status: pane ? "retained" : "not-attempted", nextStep: `Run terminal-browser doctor --json${pane ? ` and inspect pane ${pane}` : ""} before explicit recovery.` };
+      throw startupFailureError(report);
+    } finally {
+      removeStartupAttempt(startup);
     }
   });
 }

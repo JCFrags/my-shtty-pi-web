@@ -71,6 +71,7 @@ export interface ControlHost {
   key: string;
   tty: string | null;
   owner: BrowserOwner | null;
+  startupAttempt: string | null;
   where(): Promise<Where>;
   splitDir: InstanceRow["splitDir"];
   parentTty: string | null;
@@ -194,6 +195,7 @@ export class Registry {
       splitDir: this.host.splitDir,
       parentTty: this.host.parentTty,
       ...browserOwnerColumns(this.host.owner),
+      startupAttempt: this.host.startupAttempt,
       socket: this.socketPath,
       cdpPort: this.cdpPort,
       startedAt: this.startedAt,

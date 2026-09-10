@@ -6,7 +6,7 @@
   "exec": {
     "herdr pane split --pane w1:p1 --direction right --focus --right-click pane": "{\"result\":{\"pane\":{\"pane_id\":\"w1:p2\"}}}",
     "herdr pane swap --pane w1:p2 --direction left": "{}",
-    "herdr pane run w1:p2 terminal-browser open": ""
+    "herdr pane run w1:p2 exec terminal-browser open": ""
   },
   "expect": {
     "name": "herdr",
@@ -25,7 +25,7 @@
       "commands": [
         "herdr pane split --pane w1:p1 --direction right --focus --right-click pane",
         "herdr pane swap --pane w1:p2 --direction left",
-        "herdr pane run w1:p2 terminal-browser open"
+        "herdr pane run w1:p2 exec terminal-browser open"
       ]
     }
   }

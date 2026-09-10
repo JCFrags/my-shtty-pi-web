@@ -199,9 +199,11 @@ function actionTarget(
   return ref !== undefined ? { ref } : { x: x!, y: y! };
 }
 
-export default async function terminalBrowserExtension(pi: ExtensionAPI): Promise<void> {
+export default async function terminalBrowserExtension(
+  pi: ExtensionAPI,
+  client: PiBrowserClient = new PiBrowserClient(),
+): Promise<void> {
   await loadWebResearch(pi);
-  const client = new PiBrowserClient();
   let cleanup = () => {};
   pi.on("session_start", () => {
     cleanup();

@@ -66,7 +66,7 @@ export const defaultCommandRunner: CommandRunner = ({ args, context, stdin, time
       context.signal?.removeEventListener("abort", abort);
       if (context.signal?.aborted) return reject(new Error("Browser operation cancelled."));
       if (exceeded) return reject(new Error("Browser response exceeded its safe limit."));
-      if (code !== 0) return reject(new Error(actionableError(stderr)));
+      if (code !== 0) return reject(actionableError(stderr));
       try {
         resolveResult(JSON.parse(stdout));
       } catch {
@@ -76,16 +76,57 @@ export const defaultCommandRunner: CommandRunner = ({ args, context, stdin, time
     child.stdin.end(stdin);
   });
 
-function actionableError(stderr: string): string {
+export interface BrowserStartupReport {
+  version: 1;
+  attempt: string;
+  state: "failed";
+  code: string;
+  message: string;
+  pane: string | null;
+  exitCode: number | null;
+  signal: string | null;
+  doctorCommand: "terminal-browser doctor --json";
+  cleanup: { status: string; nextStep: string; error?: string };
+}
+
+export class BrowserStartupError extends Error {
+  constructor(readonly report: BrowserStartupReport) {
+    super(JSON.stringify(report));
+    this.name = "BrowserStartupError";
+  }
+}
+
+function parseStartupReport(message: string): BrowserStartupReport | null {
+  if (Buffer.byteLength(message) > 16 * 1024) return null;
+  try {
+    const value = JSON.parse(message) as BrowserStartupReport;
+    return value?.version === 1 && value.state === "failed" &&
+      /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value.attempt) &&
+      /^[A-Z0-9_]{1,64}$/.test(value.code) && typeof value.message === "string" && Buffer.byteLength(value.message) <= 8192 &&
+      (value.pane === null || (typeof value.pane === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(value.pane))) &&
+      (value.exitCode === null || (Number.isInteger(value.exitCode) && value.exitCode >= 0 && value.exitCode <= 255)) &&
+      (value.signal === null || (typeof value.signal === "string" && /^SIG[A-Z0-9]{1,16}$/.test(value.signal))) &&
+      value.doctorCommand === "terminal-browser doctor --json" &&
+      ["not-attempted", "exited", "retained", "failed"].includes(value.cleanup?.status) &&
+      typeof value.cleanup.nextStep === "string" && Buffer.byteLength(value.cleanup.nextStep) <= 4096 &&
+      (value.cleanup.error === undefined || (typeof value.cleanup.error === "string" && Buffer.byteLength(value.cleanup.error) <= 4096)) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function actionableError(stderr: string): Error {
   const message = stderr.replace(/^terminal-browser:\s*/u, "").trim();
+  const startup = parseStartupReport(message);
+  if (startup) return new BrowserStartupError(startup);
   if (/agent control is human|agent control is paused|browser control is with the user/iu.test(message)) {
-    return "Browser control is with the user. Wait until the user returns control, then call browser_control with status or resume.";
+    return new Error("Browser control is with the user. Wait until the user returns control, then call browser_control with status or resume.");
   }
   if (/stale control epoch|page changed|stale or unknown observation/iu.test(message)) {
-    return "Browser state changed. Call browser_observe and inspect the outcome before deciding on another action.";
+    return new Error("Browser state changed. Call browser_observe and inspect the outcome before deciding on another action.");
   }
-  if (/no browser companion/iu.test(message)) return "No companion browser is open. Call browser_open first.";
-  return message || "Browser operation failed.";
+  if (/no browser companion/iu.test(message)) return new Error("No companion browser is open. Call browser_open first.");
+  return new Error(message || "Browser operation failed.");
 }
 
 export interface BrowserStateCache {

@@ -35,10 +35,26 @@ for (const file of fs.readdirSync(FIXTURES)) {
   test(`${expect.name}: opens a split`, async () => {
     const { run, commands } = recorder(exec);
     const terminal = detect(env, run);
-    await terminal.split(expect.split.request);
+    const opened = await terminal.split(expect.split.request);
     assert.deepEqual(commands, expect.split.commands);
+    if (expect.name === "herdr") assert.deepEqual(opened, { id: "w1:p2", tab: "w1:t1" });
   });
 }
+
+test("herdr split errors retain the exact pane created before run failed", async () => {
+  const terminal = detect({ HERDR_PANE_ID: "w1:p1", HERDR_TAB_ID: "w1:t1" }, async (_bin, args) => {
+    if (args[1] === "split") return JSON.stringify({ result: { pane: { pane_id: "w1:p7" } } });
+    throw new Error("pane run refused");
+  });
+  await assert.rejects(terminal.split({
+    from: { id: "w1:p1", tab: "w1:t1" }, direction: "right",
+    command: ["terminal-browser", "open"], size: null, tty: null,
+  }), (error) => {
+    assert.equal(error.message, "pane run refused");
+    assert.deepEqual(error.pane, { id: "w1:p7", tab: "w1:t1" });
+    return true;
+  });
+});
 
 test("an unknown terminal is nobody", () => {
   assert.equal(detect({ TERM: "xterm-256color" }, async () => ""), null);

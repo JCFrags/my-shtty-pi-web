@@ -48,8 +48,57 @@ import type { InstanceRecord } from "./registry";
 import { installedVersion, upgradeCommand } from "./upgrade";
 import { daemonRequest } from "./daemon-status";
 import { doctor, safeDaemonStatus } from "./doctor";
+import {
+  bindStartupPane,
+  createStartupAttempt,
+  StartupFailure,
+  removeStartupAttempt,
+  startupAttempt,
+  startupEnvironment,
+  startupFailureError,
+  waitForSpawnedDaemon,
+  waitForStartup,
+  writeStartupFailure,
+} from "./startup";
 
 const DIST_ROOT = process.env.TERMINAL_BROWSER_DIST_ROOT ?? null;
+const launchCommand = process.argv[2];
+const reportsStartup = !launchCommand || launchCommand === "open" || launchCommand === "new-tab" || launchCommand === "companion";
+const ownsStartupAttempt = !startupAttempt() && reportsStartup;
+const rootStartup = ownsStartupAttempt ? createStartupAttempt() : null;
+if (rootStartup) Object.assign(process.env, startupEnvironment(rootStartup));
+if (rootStartup) process.once("exit", () => removeStartupAttempt(rootStartup));
+const startupSignalHandlers = new Map<NodeJS.Signals, () => void>();
+for (const [signal, exitCode] of reportsStartup ? [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]] as const : []) {
+  const handler = () => {
+    const report = writeStartupFailure(new Error(`browser startup interrupted by ${signal}`), {
+      exitCode: null,
+      signal,
+    });
+    if (report && rootStartup) process.stderr.write(`terminal-browser: ${JSON.stringify(report)}\n`);
+    process.exit(exitCode);
+  };
+  startupSignalHandlers.set(signal, handler);
+  process.once(signal, handler);
+}
+function finishStartupReporting(): void {
+  for (const [signal, handler] of startupSignalHandlers) process.removeListener(signal, handler);
+  startupSignalHandlers.clear();
+  if (rootStartup) removeStartupAttempt(rootStartup);
+}
+
+async function finishReportingWhenRegistered(): Promise<void> {
+  const attempt = startupAttempt();
+  if (!attempt) { finishStartupReporting(); return; }
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    if ((await instances()).some((record) => record.startupAttempt === attempt)) {
+      finishStartupReporting();
+      return;
+    }
+    await sleep(100);
+  }
+}
 delete process.env.ELECTRON_RUN_AS_NODE;
 
 function fail(message: string): never {
@@ -126,15 +175,63 @@ function browserLaunchCommand(argv: string[]): { command: string[]; cwd: string 
   const quoted = [electron, main, ...argv]
     .map((arg) => `'${arg.replaceAll("'", `'\\''`)}'`)
     .join(" ");
-  const line = `exec ${quoted} 2>>'${logDir.replaceAll("'", `'\\''`)}/stderr.log'`;
+  const line = `exec ${quoted}`;
   return { command: ["/bin/sh", "-c", line], cwd: browserDir };
 }
 
-function clientLaunchCommand(argv: string[]): string[] {
-  const runner = DIST_ROOT
+function cliRunner(): string[] {
+  return DIST_ROOT
     ? [path.join(DIST_ROOT, "bin", "terminal-browser")]
     : [process.execPath, path.resolve(__dirname, "main.js")];
-  return [...runner, "open", ...argv];
+}
+
+function clientLaunchCommand(argv: string[], environment: NodeJS.ProcessEnv = {}): string[] {
+  const runner = cliRunner();
+  const assigned = Object.entries(environment)
+    .filter((entry): entry is [string, string] => entry[1] !== undefined)
+    .map(([name, value]) => `${name}=${value}`);
+  return assigned.length > 0
+    ? ["env", ...assigned, ...runner, "supervise-startup", "--", "open", ...argv]
+    : [...runner, "open", ...argv];
+}
+
+async function superviseStartup(args: string[]): Promise<number> {
+  if (args.shift() !== "--" || args.length === 0) throw new Error("invalid startup supervisor command");
+  finishStartupReporting();
+  const runner = cliRunner();
+  const child = spawn(runner[0], [...runner.slice(1), ...args], {
+    env: { ...process.env, TERMINAL_BROWSER_STARTUP_SUPERVISED: "1" },
+    stdio: ["inherit", "inherit", "pipe"],
+  });
+  let stderr = "";
+  let ready = false;
+  let stopped = false;
+  const attempt = startupAttempt();
+  const watch = async () => {
+    while (!stopped && !ready && attempt) {
+      ready = (await instances()).some((record) => record.startupAttempt === attempt);
+      if (!ready) await sleep(100);
+    }
+  };
+  void watch().catch(() => {});
+  child.stderr.on("data", (chunk: Buffer) => {
+    process.stderr.write(chunk);
+    const remaining = 8192 - Buffer.byteLength(stderr);
+    if (remaining > 0) stderr += chunk.subarray(0, remaining).toString("utf8");
+  });
+  return new Promise<number>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      stopped = true;
+      if (!ready) {
+        const error = new Error(stderr.trim() || `browser process exited before startup readiness${signal ? ` with signal ${signal}` : ` with code ${code ?? "unknown"}`}`);
+        if (typeof code === "number") Object.assign(error, { code: `BROWSER_EXIT_${code}`, exitCode: code });
+        if (signal) Object.assign(error, { code: "BROWSER_EXIT_SIGNAL", signal, exitCode: null });
+        writeStartupFailure(error);
+      }
+      resolve(signal ? 128 : code ?? 1);
+    });
+  });
 }
 
 function ownTtyPath(): string | null {
@@ -163,10 +260,30 @@ function connectDaemon(): Promise<net.Socket> {
   });
 }
 
-function spawnDaemon() {
+function spawnDaemon(): { failure: () => Error | null } {
   const { command, cwd } = browserLaunchCommand(["--daemon"]);
-  const child = spawn(command[0], command.slice(1), { cwd, detached: true, stdio: "ignore" });
+  const child = spawn(command[0], command.slice(1), { cwd, detached: true, stdio: ["ignore", "ignore", "pipe"] });
+  let failed: Error | null = null;
+  let stderr = "";
+  child.stderr.on("data", (chunk: Buffer) => {
+    const text = chunk.toString("utf8");
+    try { fs.appendFileSync(path.join(LOGS_DIR, "stderr.log"), text); } catch {}
+    const remaining = 8192 - Buffer.byteLength(stderr);
+    if (remaining > 0) stderr += Buffer.from(text).subarray(0, remaining).toString("utf8");
+  });
+  child.once("error", (error) => { failed = error; });
+  child.once("close", (code, signal) => {
+    const detail = stderr.trim();
+    failed = new Error(detail || `daemon process exited before socket acquisition with ${signal ? `signal ${signal}` : `code ${code ?? "unknown"}`}`);
+    if (typeof code === "number") {
+      (failed as NodeJS.ErrnoException).code = `DAEMON_EXIT_${code}`;
+      Object.assign(failed, { exitCode: code });
+    }
+    if (signal) Object.assign(failed, { signal, exitCode: null });
+  });
+  (child.stderr as typeof child.stderr & { unref?: () => void }).unref?.();
   child.unref();
+  return { failure: () => failed };
 }
 
 async function daemonSocket(): Promise<net.Socket> {
@@ -177,16 +294,12 @@ async function daemonSocket(): Promise<net.Socket> {
   }
   const appData = INSTALLATION?.paths.appData ?? process.env.TERMINAL_BROWSER_APPDATA ?? (process.platform === "darwin" ? path.join(os.homedir(), "Library/Application Support") : process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"));
   if (fs.existsSync(path.join(appData, APP_DIR_NAME, "terminal-browser.lock"))) throw new Error("profile ownership is occupied or uncertain; no daemon was started. Inspect doctor before explicit recovery.");
-  spawnDaemon();
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    try {
-      return await connectDaemon();
-    } catch {
-      await sleep(200);
-    }
-  }
-  throw new Error("daemon did not start");
+  const launch = spawnDaemon();
+  return waitForSpawnedDaemon({
+    connect: connectDaemon,
+    failure: launch.failure,
+    timeoutMs: 15_000,
+  });
 }
 
 interface DaemonReply {
@@ -260,6 +373,7 @@ async function attachHere(argv: string[]): Promise<never> {
     socket.destroy();
     throw new Error(reply.error ?? "daemon refused the session");
   }
+  void finishReportingWhenRegistered().catch(() => {});
   nextReply(socket, (message) => {
     if (message.event === "closed") process.exit(message.code ?? 0);
   });
@@ -285,10 +399,8 @@ async function attachHere(argv: string[]): Promise<never> {
 }
 
 async function openHere(argv: string[]): Promise<never> {
-  await sshSetup(argv).catch((error) =>
-    fail(error instanceof Error ? error.message : String(error)),
-  );
-  return attachHere(argv).catch((error) => fail(`could not start the browser: ${String(error)}`));
+  await sshSetup(argv);
+  return attachHere(argv);
 }
 
 function flagEq(argv: string[], flag: string): string | undefined {
@@ -355,25 +467,45 @@ async function launchInSplit(
 ): Promise<InstanceRecord> {
   const from = await terminal.getCurrentPane?.({ tty: ownTtyPath() ?? callerTty().path, cwd: process.cwd() });
   if (!from) fail(`could not work out which ${terminal.name} pane you are in`);
-  const before = new Set((await instances()).map(recordKey));
-  await terminal.split!({
-    from,
-    direction,
-    command: clientLaunchCommand(argv),
-    size: size ?? null,
-    tty: ownTtyPath() ?? callerTty().path,
-  });
-  // ssh auth prompts and bundle installs run inside the new pane first
-  const patience = argv.some((arg) => arg.startsWith("--ssh=")) ? 600_000 : 20_000;
-  const deadline = Date.now() + patience;
-  while (Date.now() < deadline) {
-    const fresh = (await instances()).find((record) => !before.has(recordKey(record)));
-    if (fresh) {
-      return fresh;
+  const startup = createStartupAttempt();
+  let pane: string | null = null;
+  try {
+    try {
+      const opened = await terminal.split!({
+        from,
+        direction,
+        command: clientLaunchCommand(argv, startupEnvironment(startup)),
+        size: size ?? null,
+        tty: ownTtyPath() ?? callerTty().path,
+        onPaneCreated: (created) => {
+          pane = created.id;
+          bindStartupPane(startup, created.id);
+        },
+      });
+      pane = opened?.id ?? null;
+    } catch (error) {
+      const created = (error as { pane?: { id?: unknown } })?.pane;
+      pane = typeof created?.id === "string" ? created.id : null;
+      const report = writeStartupFailure(error, { pane }, startupEnvironment(startup));
+      if (!report) throw error;
+      report.cleanup = {
+        status: "retained",
+        nextStep: `Inspect${pane ? ` pane ${pane}` : " the launch target"} and run terminal-browser doctor --json before explicit recovery.`,
+      };
+      throw startupFailureError(report);
     }
-    await sleep(250);
+    const patience = argv.some((arg) => arg.startsWith("--ssh=")) ? 600_000 : 20_000;
+    return await waitForStartup({
+      startup,
+      pane,
+      timeoutMs: patience,
+      timeoutMessage: `browser did not register within ${Math.round(patience / 1000)}s`,
+      findReady: async (attempt) => (await instances()).find((record) => record.startupAttempt === attempt) ?? null,
+      paneStatus: terminal.paneStatus,
+    });
+  } finally {
+    removeStartupAttempt(startup);
   }
-  fail(`browser did not register within ${Math.round(patience / 1000)}s (is the split open?)`);
 }
 
 let asked: Promise<TerminalCheck> | null = null;
@@ -690,6 +822,7 @@ async function main(): Promise<number> {
     process.stdout.write(commandHelp(command) ?? rootHelp());
     return 0;
   }
+  if (command === "supervise-startup") return superviseStartup(args);
   if (command === "doctor") { print(await doctor()); return 0; }
   if (command === "daemon-status") { print(safeDaemonStatus(await daemonRequest({ cmd: "status" }))); return 0; }
   if (command === "shutdown") return shutdownDaemon(args);
@@ -762,5 +895,7 @@ void main()
     if (code) process.exit(code);
   })
   .catch((error: unknown) => {
-    fail(error instanceof Error ? error.message : String(error));
+    const report = error instanceof StartupFailure ? error.report : writeStartupFailure(error);
+    if (rootStartup) removeStartupAttempt(rootStartup);
+    fail(report ? JSON.stringify(report) : error instanceof Error ? error.message : String(error));
   });

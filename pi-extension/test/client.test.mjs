@@ -2,9 +2,28 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import test from "node:test";
 
-import { PiBrowserClient } from "../dist/client.js";
+import { BrowserStartupError, PiBrowserClient, actionableError } from "../dist/client.js";
 
 const context = { cwd: "/tmp/project", sessionId: "session-a" };
+
+test("structured startup failures retain their machine-readable report", () => {
+  const report = {
+    version: 1,
+    attempt: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    state: "failed",
+    code: "PROFILE_OWNERSHIP_UNCERTAIN",
+    message: "original ownership refusal",
+    pane: "w1:p8",
+    exitCode: 1,
+    signal: null,
+    doctorCommand: "terminal-browser doctor --json",
+    cleanup: { status: "retained", nextStep: "Inspect pane w1:p8." },
+  };
+  const error = actionableError(`terminal-browser: ${JSON.stringify(report)}\n`);
+  assert(error instanceof BrowserStartupError);
+  assert.deepEqual(error.report, report);
+  assert.deepEqual(JSON.parse(error.message), report);
+});
 
 function fixtureObservation(epoch = 4) {
   return {

@@ -2,16 +2,33 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import extension, { observationResult } from "../dist/extension.js";
+import { BrowserStartupError } from "../dist/client.js";
 
 process.env.PI_WEB_SEARCH_READ_EXTENSION = "/nonexistent/pi-web-research-extension.mjs";
 
-async function registeredTools() {
+async function registeredTools(client = undefined) {
   const tools = [];
   const events = [];
-  await extension({ registerTool(tool) { tools.push(tool); }, on(event, handler) { assert.equal(typeof handler, "function"); events.push(event); } });
+  await extension({ registerTool(tool) { tools.push(tool); }, on(event, handler) { assert.equal(typeof handler, "function"); events.push(event); } }, client);
   assert.deepEqual(events, ["session_start", "session_shutdown"]);
   return tools;
 }
+
+test("registered browser_open exposes complete structured startup diagnostics in the normal error message", async () => {
+  const report = {
+    version: 1, attempt: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", state: "failed",
+    code: "PROFILE_OWNERSHIP_UNCERTAIN", message: "original ownership refusal", pane: "w1:p8",
+    exitCode: 1, signal: null, doctorCommand: "terminal-browser doctor --json",
+    cleanup: { status: "exited", nextStep: "Run terminal-browser doctor --json before explicit recovery." },
+  };
+  const tools = await registeredTools({ open: async () => { throw new BrowserStartupError(report); } });
+  const open = tools.find((tool) => tool.name === "browser_open");
+  const ctx = { cwd: "/tmp/project", sessionManager: { getSessionId: () => "session-a" } };
+  await assert.rejects(open.execute("call", {}, undefined, undefined, ctx), (error) => {
+    assert.deepEqual(JSON.parse(error.message), report);
+    return true;
+  });
+});
 
 test("visual tool results emit native image content without image data in text or details", () => {
   const imageData = Buffer.from("image bytes").toString("base64");

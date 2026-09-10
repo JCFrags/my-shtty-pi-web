@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { bracketedPaste, shellQuote } from "../shared";
+import { PaneLaunchError } from "../terminal";
 import type { Detect, Direction, PaneDetails } from "../terminal";
 
 interface HerdrPaneSplitResult {
@@ -139,11 +140,19 @@ export const herdr: Detect = (env, run) => {
     prepare,
     getCurrentPane: async () => ({ id: env.HERDR_PANE_ID!, tab: env.HERDR_TAB_ID! }),
     listPanes,
+    async paneStatus(pane) {
+      try {
+        const { result } = JSON.parse(await herdr(["pane", "list"])) as { result: { panes: HerdrPane[] } };
+        return result.panes.some((candidate) => candidate.pane_id === pane) ? "present" : "absent";
+      } catch {
+        return "unknown";
+      }
+    },
     async sendText(pane, text) {
       await herdr(["pane", "send-text", pane, bracketedPaste(text)]);
     },
     focusPane,
-    async split({ from, direction, command, size }) {
+    async split({ from, direction, command, size, onPaneCreated }) {
       const native = NATIVE_DIRECTION[direction];
       const ratio = size ? ["--ratio", String(size)] : [];
       const { result } = await splitPane(["--pane", from.id, "--direction", native, "--focus", ...ratio]);
@@ -151,7 +160,14 @@ export const herdr: Detect = (env, run) => {
       if (direction === "left" || direction === "up") {
         await herdr(["pane", "swap", "--pane", newPaneId, "--direction", OPPOSITE[native]]);
       }
-      await herdr(["pane", "run", newPaneId, shellQuote(command)]);
+      const opened = { id: newPaneId, tab: from.tab };
+      onPaneCreated?.(opened);
+      try {
+        await herdr(["pane", "run", newPaneId, `exec ${shellQuote(command)}`]);
+      } catch (error) {
+        throw new PaneLaunchError(opened, error);
+      }
+      return opened;
     },
   };
 };

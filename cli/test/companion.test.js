@@ -45,8 +45,9 @@ test("exact owner selection prevents cross-agent routing", () => {
   assert.deepEqual(ownerMatches([row("a", ownerA), row("b", ownerB)], ownerB).map((value) => value.key), ["b"]);
 });
 
-test("pane launch passes complete owner metadata and exact placement", () => {
-  const args = paneOpenArgs(ownerA, { url: "file:///tmp/a.html", focus: false });
+test("pane launch passes complete owner metadata, startup correlation and exact placement", () => {
+  const startup = { attempt: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", file: "/tmp/not-used" };
+  const args = paneOpenArgs(ownerA, { url: "file:///tmp/a.html", focus: false }, startup);
   assert.deepEqual(args.slice(0, 12), [
     "plugin", "pane", "open", "--plugin", "zenbu-labs.terminal-browser",
     "--entrypoint", "companion", "--placement", "split",
@@ -57,6 +58,7 @@ test("pane launch passes complete owner metadata and exact placement", () => {
   assert.equal(args.includes("TERMINAL_BROWSER_OWNER_PANE_ID=w1:p1"), true);
   assert.equal(args.includes("TERMINAL_BROWSER_OWNER_PROJECT_DIR=/tmp/a"), true);
   assert.equal(args.includes("TERMINAL_BROWSER_COMPANION_URL=file:///tmp/a.html"), true);
+  assert.equal(args.includes(`TERMINAL_BROWSER_STARTUP_ATTEMPT=${startup.attempt}`), true);
   assert.equal(args.at(-1), "--no-focus");
 });
 

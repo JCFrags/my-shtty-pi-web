@@ -23,6 +23,7 @@ test("Herdr entrypoints resolve a directory alias before finding the artifact an
   const env = { PATH: process.env.PATH, NODE: process.execPath, PROBE: probe, HERDR_BIN_PATH: herdr, HERDR_ENV: "1", HERDR_WORKSPACE_ID: "workspace", HERDR_TAB_ID: "tab", HERDR_PANE_ID: "pane" };
   const run = (script, extra = {}) => JSON.parse(execFileSync("bash", [path.join(alias, script)], { env: { ...env, ...extra }, encoding: "utf8" }));
   assert.deepEqual(run("open-companion.sh").args, ["open", "--no-merge"]);
+  assert.deepEqual(run("open-companion.sh", { TERMINAL_BROWSER_STARTUP_ATTEMPT: "fixture-attempt" }).args, ["supervise-startup", "--", "open", "--no-merge"]);
   assert.deepEqual(run("open-companion.sh", { TERMINAL_BROWSER_COMPANION_URL: "https://example.test/?q=a b" }).args, ["open", "https://example.test/?q=a b", "--no-merge"]);
   assert.deepEqual(run("open-split.sh").args, ["open", "--split", "right"]);
   assert.deepEqual(run("focus-companion.sh"), { args: ["companion", "open"], owner: "/tmp/project with spaces", pane: "pane" });

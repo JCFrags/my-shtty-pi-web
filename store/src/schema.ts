@@ -29,6 +29,7 @@ export const instances = sqliteTable("instances", {
   ownerPaneId: text("owner_pane_id"),
   ownerSessionId: text("owner_session_id"),
   ownerProjectDir: text("owner_project_dir"),
+  startupAttempt: text("startup_attempt"),
   startedAt: integer("started_at").notNull(),
 });
 
