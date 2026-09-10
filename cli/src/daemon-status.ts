@@ -5,12 +5,14 @@ export function daemonRequest(request: Record<string, unknown>): Promise<unknown
   return new Promise((resolve, reject) => {
     const connection = net.connect(DAEMON_SOCKET);
     let buffer = "";
-    const timer = setTimeout(() => finish(new Error("daemon status unavailable")), 2000);
+    const timer = setTimeout(() => finish(Object.assign(new Error("daemon status unavailable"), { code: "ETIMEDOUT" })), 2000);
     const finish = (error: Error | null, value?: unknown) => {
       clearTimeout(timer); connection.destroy();
       if (error) reject(error); else resolve(value);
     };
-    connection.on("error", () => finish(new Error("daemon status unavailable")));
+    connection.on("error", (error: NodeJS.ErrnoException) => {
+      finish(Object.assign(new Error("daemon status unavailable"), { code: error.code }));
+    });
     connection.on("end", () => { if (!buffer.includes("\n")) finish(new Error("daemon status incomplete")); });
     connection.on("data", (chunk) => {
       buffer += chunk.toString("utf8");

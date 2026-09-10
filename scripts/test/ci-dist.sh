@@ -25,6 +25,7 @@ for release in a b; do
   TERMINAL_BROWSER_RELEASE_OUT="$WORK/$release" scripts/release.sh "ci-$release-$(git rev-parse --short HEAD)"
 done
 ARTIFACT="$(node -p 'require(process.argv[1]).artifactId' "$WORK/a/manifest-linux-x64.json")"
+TERMINAL_BROWSER_TEST_ELECTRON="$WORK/a/$ARTIFACT/terminal-browser/electron/electron" node --test scripts/test/profile-startup-cleanup.test.mjs
 pnpm test:dist:smoke "$WORK/a/$ARTIFACT/terminal-browser"
 pnpm test:dist:recovery "$WORK/a" "$WORK/b"
 printf 'packaged evidence: %s\n' "$WORK"

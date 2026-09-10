@@ -12,10 +12,10 @@ const MAX_REQUEST_BYTES = 256 * 1024;
 
 export function buildStamp(): string { return RUNTIME_IDENTITY.build ?? "unknown"; }
 
-export async function runDaemon(cdpPort: number | null): Promise<void> {
+export async function runDaemon(cdpPort: number | null, exit: (code: number) => void = (code) => app.exit(code)): Promise<void> {
   if (fs.existsSync(DAEMON_SOCKET)) {
     process.stderr.write("daemon socket is occupied or stale; inspect it before explicit recovery\n");
-    app.exit(3);
+    exit(3);
     return;
   }
   fs.mkdirSync(path.dirname(DAEMON_SOCKET), { recursive: true, mode: 0o700 });
@@ -101,14 +101,40 @@ export async function runDaemon(cdpPort: number | null): Promise<void> {
       }
     });
   });
-  let ownedSocket: number | undefined;
-  server.on("error", () => { process.stderr.write("daemon socket could not be acquired\n"); app.exit(1); });
-  server.listen(DAEMON_SOCKET, () => {
-    ownedSocket = fs.lstatSync(DAEMON_SOCKET).ino;
-    fs.chmodSync(DAEMON_SOCKET, 0o600);
-  });
-  app.on("will-quit", () => {
+  let ownedSocket: { dev: number; ino: number; ctimeMs: number } | undefined;
+  const releaseSocket = () => {
+    let ownsPath = false;
+    try {
+      const current = fs.lstatSync(DAEMON_SOCKET);
+      ownsPath = ownedSocket !== undefined && current.isSocket() && current.dev === ownedSocket.dev && current.ino === ownedSocket.ino && current.ctimeMs === ownedSocket.ctimeMs;
+    } catch {}
+    if (!ownsPath) {
+      server.unref();
+      return;
+    }
     server.close();
-    try { if (ownedSocket !== undefined && fs.lstatSync(DAEMON_SOCKET).ino === ownedSocket) fs.unlinkSync(DAEMON_SOCKET); } catch {}
+    try {
+      const current = fs.lstatSync(DAEMON_SOCKET);
+      if (current.isSocket() && current.dev === ownedSocket!.dev && current.ino === ownedSocket!.ino && current.ctimeMs === ownedSocket!.ctimeMs) fs.unlinkSync(DAEMON_SOCKET);
+    } catch {}
+  };
+  const exitAfterFailure = (code: number) => {
+    releaseSocket();
+    exit(code);
+  };
+  server.on("error", () => {
+    process.stderr.write("daemon socket could not be acquired\n");
+    exitAfterFailure(1);
   });
+  server.listen(DAEMON_SOCKET, () => {
+    try {
+      fs.chmodSync(DAEMON_SOCKET, 0o600);
+      const current = fs.lstatSync(DAEMON_SOCKET);
+      ownedSocket = { dev: current.dev, ino: current.ino, ctimeMs: current.ctimeMs };
+    } catch {
+      process.stderr.write("daemon socket could not be initialized\n");
+      exitAfterFailure(1);
+    }
+  });
+  app.on("will-quit", releaseSocket);
 }

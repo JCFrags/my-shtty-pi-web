@@ -118,6 +118,18 @@ It does not scan page content, open/migrate the database, prepare graphics,
 repair sockets, or run setup. Graphics stays unknown without visible terminal
 evidence; an internal Chromium frame is not such evidence.
 
+Doctor reports the receipt-defined profile lock's bounded file identity and PID,
+plus separate socket metadata and status-request errors. A PID-only lock does not
+record its owner's boot or process-start identity. A missing PID or socket alone
+never authorizes recovery. Check process visibility, current profile users, and
+unchanged lock identity before proposing a separately approved operation.
+
+Handled initialization and daemon-socket failures explicitly release the profile
+claim before `app.exit()`, which does not emit `will-quit`. Cleanup compares the
+lock path with its held file descriptor, so a replacement lock is preserved even
+if it contains the same PID. Abrupt process death can still leave a lock. Startup
+refuses that lock and never deletes it automatically.
+
 Replacing a daemon loses its open tabs and transient browser state. First get
 its complete metadata-only session inventory, then obtain approval for that
 exact process/build/session set:

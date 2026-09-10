@@ -22,7 +22,7 @@ try {
 app.commandLine.appendSwitch("enable-logging", "file");
 app.commandLine.appendSwitch("log-file", path.join(LOGS_DIR, "chromium.log"));
 app.setName("terminal-browser");
-claimProfile();
+const profile = claimProfile();
 
 
 function freePort(): Promise<number> {
@@ -52,8 +52,12 @@ void (async () => {
       .map((d) => `${d.size.width}x${d.size.height}@${d.scaleFactor}x`)
       .join(", ")}`,
   );
-  await runDaemon(cdpPort);
+  await runDaemon(cdpPort, (code) => {
+    profile.release();
+    app.exit(code);
+  });
 })().catch((error) => {
   process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
+  profile.release();
   app.exit(1);
 });

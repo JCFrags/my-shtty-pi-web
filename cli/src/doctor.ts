@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { APP_DIR_NAME, DAEMON_SOCKET, INSTALLATION, RUNTIME_IDENTITY, processStart, runtimeMatches } from "pixel-store";
 import { daemonRequest } from "./daemon-status";
+import { profileOwnership, socketEvidence } from "./profile-ownership";
 
 const hex = (value: unknown, length: number) => typeof value === "string" && new RegExp(`^[a-f0-9]{${length}}$`).test(value) ? value : null;
 const identifier = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(value) ? value : null;
@@ -59,12 +60,17 @@ export async function doctor() {
       candidates = fs.readdirSync(releases).filter((entry) => Boolean(hex(entry, 64))).slice(0, 128);
     } catch {}
   }
-  let daemon: any = { state: fs.existsSync(DAEMON_SOCKET) ? "unknown-or-stale-socket" : "unknown", remedy: "Use daemon-status. Unknown or legacy processes require explicit inspection; do not delete sockets or kill a guessed PID." };
+  const socket = socketEvidence(DAEMON_SOCKET);
+  let daemon: any = { state: "unknown", socket, remedy: "Use daemon-status. Unknown or legacy processes require explicit inspection; do not delete sockets or kill a guessed PID." };
   try {
     const status = safeDaemonStatus(await daemonRequest({ cmd: "status" }));
     const start = processStart(status.identity.pid);
     daemon = { state: start && start === status.identity.processStart ? "running" : "unverified", matchesCandidate: runtimeMatches(status.identity), ...status };
-  } catch {}
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    daemon.reason = "No verified daemon status reply was received; socket state alone does not establish profile ownership.";
+    daemon.probeCode = typeof code === "string" && /^[A-Z0-9_]{1,40}$/.test(code) ? code : "INVALID_OR_INCOMPLETE_STATUS";
+  }
   const loadedPi: any[] = [];
   const stateHome = INSTALLATION?.paths.stateHome ?? process.env.XDG_STATE_HOME ?? path.join(os.homedir(), ".local/state");
   const receipts = path.join(stateHome, APP_DIR_NAME, "pi-loaded");
@@ -86,6 +92,9 @@ export async function doctor() {
     candidate: { artifactId: RUNTIME_IDENTITY.artifactId, installed: INSTALLATION ? true : null, candidates },
     selectedNextLaunch: selected,
     daemon,
+    profileOwnership: INSTALLATION
+      ? profileOwnership(path.join(INSTALLATION.paths.appData, APP_DIR_NAME))
+      : { state: "unverifiable", reason: "No active installation receipt; profile path was not inferred from shell defaults." },
     pi: { loaded: loadedPi, state: loadedPi.length ? "receipts-found" : "unknown", remedy: "Use an exact versioned package source at the same settings index. Only reload an idle Pi session with an empty draft after approval." },
     herdrOwnership: "unknown; persisted plugin registration does not prove the running Herdr registration",
     graphics: { state: "unknown", reason: process.stdout.isTTY ? "visible terminal rendering has not been verified" : "non-TTY invocation; internal Chromium frames are not visible rendering evidence" },
