@@ -171,7 +171,11 @@ function changeHerdr(file, from, to) {
   assert.equal(indices.length, from === null ? 0 : 1, "Herdr registration changed");
   const index = from === null ? entries.length : indices[0];
   const entry = from === null ? null : entries[index];
-  if (from) for (const field of HERDR_FIELDS) assert.deepEqual(entry[field], from[field], "Herdr plugin selection changed");
+  if (from) for (const field of HERDR_FIELDS) {
+    const actual = field === "build" && entry[field] === undefined ? [] : entry[field];
+    const expected = field === "build" && from[field] === undefined ? [] : from[field];
+    assert.deepEqual(actual, expected, "Herdr plugin selection changed");
+  }
   if (to === null) entries.splice(index, 1);
   else {
     const replacement = entry ? { ...entry } : { enabled: true };

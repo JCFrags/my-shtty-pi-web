@@ -79,7 +79,11 @@ symlink as evidence of a loaded Pi update. Do not auto-reload, clear a draft, or
 resume browser control. The matching Herdr registry entry gets the exact retained `plugin_root` and
 `manifest_path`, plus the prebuilt descriptor without its checkout build step.
 Other plugins, their order, and the current enabled flag stay unchanged.
-No running Herdr API or reload is called. Doctor distinguishes this persisted
+Herdr can omit an empty `build` list when saving its registry. The manager treats
+that omission and `build: []` equally; changed nonempty build plans still refuse.
+Refresh a running Herdr registration only after activation succeeds, using its
+supported same-ID plugin link command. Do not continue after an installer refusal.
+No running Herdr API or reload is called by the installer. Doctor distinguishes this persisted
 next-launch selection from unknown running Herdr registration.
 
 After installation, the retained bundle contains the same manager; no checkout

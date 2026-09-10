@@ -106,6 +106,40 @@ test("A/B activation preserves exact Pi slot, filters, unrelated subsequent edit
   assert.equal(JSON.parse(fs.readFileSync(box.selection.herdrRegistry))[1].plugin_root,box.selection.herdrSource);
 });
 
+test("Herdr empty build omission allows repeat, update and rollback but rejects changed plans", (t) => {
+  const box = sandbox(t), a = archive(t), b = archive(t, (dir, manifest) => {
+    fs.appendFileSync(path.join(dir, "browser/dist/main.js"), " B");
+    manifest.identity.source.commit = "b".repeat(40);
+  });
+  for (const candidate of [a, b]) stage(candidate.tarball, candidate.outerFile, box.root);
+  activate(box.root, a.manifest.artifactId);
+  const omitBuild = () => {
+    const plugins = JSON.parse(fs.readFileSync(box.selection.herdrRegistry));
+    delete plugins[1].build;
+    plugins[0].retained = true;
+    plugins[1].enabled = false;
+    writeJson(box.selection.herdrRegistry, plugins);
+  };
+  omitBuild();
+  assert(activate(box.root, a.manifest.artifactId).repeated);
+  activate(box.root, b.manifest.artifactId);
+  omitBuild();
+  rollback(box.root);
+  assert.equal(status(box.root).selected, a.manifest.artifactId);
+  const plugins = JSON.parse(fs.readFileSync(box.selection.herdrRegistry));
+  assert.equal(plugins[0].retained, true);
+  assert.equal(plugins[1].enabled, false);
+  for (const build of [[{ command: ["unexpected-build"] }], null, {}]) {
+    plugins[1].build = build;
+    writeJson(box.selection.herdrRegistry, plugins);
+    const before = fs.readFileSync(box.selection.herdrRegistry, "utf8");
+    assert.throws(() => activate(box.root, b.manifest.artifactId), /Herdr plugin selection changed/);
+    assert.throws(() => rollback(box.root), /Herdr plugin selection changed/);
+    assert.equal(fs.readFileSync(box.selection.herdrRegistry, "utf8"), before);
+    assert.equal(status(box.root).selected, a.manifest.artifactId);
+  }
+});
+
 test("activation failure restores scoped selections and refuses unrelated changed links", (t) => {
   const box = sandbox(t);
   const a = archive(t);
