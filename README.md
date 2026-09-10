@@ -229,6 +229,9 @@ shared `node_modules`, Python environments or system libraries wholesale.
 
 ### Build a local runtime artifact (Fedora x64)
 
+Pushes to `main` run verification, not external publication or worker deployment.
+The separate release workflow runs only for `v*` tags or an explicit manual dispatch.
+
 Use the existing distribution build, after preparing the locked workspace dependencies:
 
 ```bash
