@@ -1,3 +1,0 @@
-Plain Text Operations Note
-
-The current raw text path preserves this required sentence without HTML conversion. The fixture is local, small, and deterministic.

@@ -1,0 +1,70 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+const [outA,outB]=['/archives/a','/archives/b'];
+const home=fs.mkdtempSync('/tmp/installed-');
+const install=path.join(home,'install');
+const json=(file,value)=>fs.writeFileSync(file,JSON.stringify(value,null,2)+'\n',{mode:0o600});
+const env={PATH:process.env.PATH,HOME:home,XDG_CONFIG_HOME:path.join(home,'config'),XDG_DATA_HOME:path.join(home,'data'),XDG_STATE_HOME:path.join(home,'state'),XDG_CACHE_HOME:path.join(home,'cache'),XDG_RUNTIME_DIR:path.join(home,'runtime'),TERMINAL_BROWSER_APPDATA:path.join(home,'appdata'),TERMINAL_BROWSER_INTEROP_DIR:path.join(home,'interop'),PI_CODING_AGENT_DIR:path.join(home,'pi'),PI_OFFLINE:'1'};
+for(const directory of Object.values(env).filter(value=>value.startsWith(home)))fs.mkdirSync(directory,{recursive:true,mode:0o700});
+const settings=path.join(env.PI_CODING_AGENT_DIR,'settings.json'),registry=path.join(env.XDG_CONFIG_HOME,'plugins.json');
+const oldHerdr=path.join(home,'old-herdr');
+json(settings,{packages:['before',{source:'packages/pi-terminal-browser',extensions:['+dist/extension.js'],skills:[]},'after'],privateCanary:'MUST_NOT_APPEAR'});
+json(registry,[{plugin_id:'unrelated',enabled:true},{plugin_id:'zenbu-labs.terminal-browser',name:'Terminal Browser',version:'0.2.0',min_herdr_version:'0.8.2',manifest_path:path.join(oldHerdr,'herdr-plugin.toml'),plugin_root:oldHerdr,enabled:true,source:{kind:'local'},build:[{command:['pnpm','build']}]}]);
+const paths={dataHome:env.XDG_DATA_HOME,stateHome:env.XDG_STATE_HOME,cacheHome:env.XDG_CACHE_HOME,runtimeHome:env.XDG_RUNTIME_DIR,appData:env.TERMINAL_BROWSER_APPDATA,interopState:env.TERMINAL_BROWSER_INTEROP_DIR,interopShare:env.TERMINAL_BROWSER_INTEROP_DIR};
+const cli=path.join(home,'terminal-browser'),alias=path.join(home,'herdr-plugin');
+const receipt=path.join(home,'receipt.json');json(receipt,{schemaVersion:1,namespace:'terminal-browser-dev-61753e09',paths,selection:{cli,herdr:alias,piSettings:settings,piSource:'packages/pi-terminal-browser',herdrRegistry:registry,herdrSource:oldHerdr}});
+const data=path.join(paths.dataHome,'terminal-browser-dev-61753e09');fs.mkdirSync(data);fs.writeFileSync(path.join(data,'terminal-browser.db'),'DO_NOT_OPEN_OR_MIGRATE');fs.writeFileSync(path.join(data,'terminal-browser.db-wal'),'PRESERVE_WAL');
+const other=path.join(paths.appData,'terminal-browser-dev-baadb0eb');fs.mkdirSync(other);fs.writeFileSync(path.join(other,'unchanged'),'OTHER_NAMESPACE');
+const profile=path.join(paths.appData,'terminal-browser-dev-61753e09','Default');fs.mkdirSync(profile,{recursive:true});fs.writeFileSync(path.join(profile,'Preferences'),'PROFILE');
+const downloads=path.join(home,'project','.terminal-browser-downloads');fs.mkdirSync(downloads,{recursive:true});for(const owner of ['one','two'])fs.writeFileSync(path.join(downloads,'history-'+owner+'.json'),JSON.stringify({owner,retained:true}),{mode:0o600});
+function state(){return [fs.readFileSync(path.join(profile,'Preferences'),'utf8'),...['one','two'].map(owner=>fs.readFileSync(path.join(downloads,'history-'+owner+'.json'),'utf8')),fs.readFileSync(path.join(data,'terminal-browser.db'),'utf8'),fs.readFileSync(path.join(data,'terminal-browser.db-wal'),'utf8'),fs.readFileSync(path.join(other,'unchanged'),'utf8')];}
+const beforeState=state();
+function manage(script,...args){return JSON.parse(execFileSync(process.execPath,[script,...args],{env,encoding:'utf8',timeout:120000}));}
+const bootstrap='/bootstrap/scripts/install-manager.mjs';
+const read=out=>({out,...JSON.parse(fs.readFileSync(path.join(out,'manifest-linux-x64.json'),'utf8'))});const a=read(outA),b=read(outB);
+const beforeSettings=fs.readFileSync(settings,'utf8'),beforeHerdr=fs.readFileSync(registry,'utf8');
+manage(bootstrap,'stage',path.join(a.out,a.file),path.join(a.out,'manifest-linux-x64.json'),install);
+assert(manage(bootstrap,'stage',path.join(a.out,a.file),path.join(a.out,'manifest-linux-x64.json'),install).repeated);
+assert.equal(fs.readFileSync(settings,'utf8'),beforeSettings);assert.equal(fs.readFileSync(registry,'utf8'),beforeHerdr);assert(!fs.existsSync(cli));
+manage(bootstrap,'configure',install,receipt);
+const bundleA=path.join(install,'releases',a.artifactId,'terminal-browser'),bundleB=path.join(install,'releases',b.artifactId,'terminal-browser');
+const managerA=path.join(bundleA,'scripts/install-manager.mjs'),managerB=path.join(bundleB,'scripts/install-manager.mjs');
+manage(managerA,'activate',install,a.artifactId);
+function doctor(expected){const output=execFileSync(cli,['doctor','--json'],{env,encoding:'utf8',timeout:15000});assert(!output.includes('MUST_NOT_APPEAR'));const result=JSON.parse(output);assert.equal(result.candidate.artifactId,expected);assert.equal(result.candidate.installed,true);assert.equal(result.graphics.state,'unknown');assert.equal(result.automaticRepair,false);for(const key of ['cli','pi','herdr'])assert.equal(result.selectedNextLaunch[key].artifactId,expected);assert.deepEqual(state(),beforeState);return result;}
+doctor(a.artifactId);
+const activeSettings=fs.readFileSync(settings,'utf8'),activeHerdr=fs.readFileSync(registry,'utf8'),activeCli=fs.readlinkSync(cli);
+manage(managerA,'stage',path.join(b.out,b.file),path.join(b.out,'manifest-linux-x64.json'),install);
+assert.equal(fs.readFileSync(settings,'utf8'),activeSettings);assert.equal(fs.readFileSync(registry,'utf8'),activeHerdr);assert.equal(fs.readlinkSync(cli),activeCli);
+const crashHook=path.join(home,'crash.cjs');
+fs.writeFileSync(crashHook,`const fs=require('node:fs');const rename=fs.renameSync;let writes=0;fs.renameSync=function(...args){const result=rename.apply(this,args);if(++writes===3)process.kill(process.pid,'SIGKILL');return result;};`);
+assert.throws(()=>execFileSync(process.execPath,['--require',crashHook,managerA,'activate',install,b.artifactId],{env,stdio:'pipe'}),error=>error.signal==='SIGKILL');
+assert.equal(manage(managerA,'status',install).recoveryRequired,true);
+assert.equal(manage(managerA,'recover',install).selected,a.artifactId);
+assert.equal(manage(managerA,'recover',install).recovered,false);
+doctor(a.artifactId);
+manage(managerA,'activate',install,b.artifactId);doctor(b.artifactId);
+const edited=JSON.parse(fs.readFileSync(settings));edited.unrelated='retained';edited.packages[1].skills=['later-edit'];json(settings,edited);const editedHerdr=JSON.parse(fs.readFileSync(registry));editedHerdr[0].laterEdit=true;editedHerdr[1].enabled=false;json(registry,editedHerdr);
+manage(managerB,'rollback',install);assert.equal(doctor(a.artifactId).selectedNextLaunch.herdr.enabled,false);assert.equal(JSON.parse(fs.readFileSync(settings)).unrelated,'retained');assert.deepEqual(JSON.parse(fs.readFileSync(settings)).packages[1].skills,['later-edit']);assert.equal(JSON.parse(fs.readFileSync(registry))[0].laterEdit,true);assert.equal(JSON.parse(fs.readFileSync(registry))[1].enabled,false);
+manage(managerA,'rollback',install);assert.equal(JSON.parse(fs.readFileSync(settings)).packages[1].source,'packages/pi-terminal-browser');assert.equal(JSON.parse(fs.readFileSync(registry))[1].plugin_root,oldHerdr);assert.deepEqual(state(),beforeState);
+for(const bundle of [bundleA,bundleB])execFileSync(process.execPath,[path.join(bundle,'scripts/dist-manifest.mjs'),'verify',bundle],{env,stdio:'pipe',timeout:120000});
+console.log(JSON.stringify({passed:true,sandbox:home,artifacts:[a.artifactId,b.artifactId],stageActiveUnchanged:true,packagedManagerWithoutCheckout:true,nativeDoctor:true,scopedPiHerdrRollback:true,stateInPlace:true,artifactBytesUnchanged:true}));
+
+const nativeHome='/tmp/native-home',nativeInstall='/tmp/native-install';
+const nativeEnv={PATH:process.env.PATH,HOME:nativeHome,PI_OFFLINE:'1',TERMINAL_BROWSER_SHM:'0'};
+for(const key of ['XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','XDG_RUNTIME_DIR','TERMINAL_BROWSER_APPDATA','TERMINAL_BROWSER_INTEROP_DIR','PI_CODING_AGENT_DIR'])nativeEnv[key]=path.join(nativeHome,key);
+for(const directory of Object.values(nativeEnv).filter(value=>value.startsWith(nativeHome)))fs.mkdirSync(directory,{recursive:true,mode:0o700});
+const nativeReceipt=path.join(nativeHome,'receipt.json');
+json(nativeReceipt,{schemaVersion:1,namespace:'terminal-browser-dev-61753e09',paths:{dataHome:nativeEnv.XDG_DATA_HOME,stateHome:nativeEnv.XDG_STATE_HOME,cacheHome:nativeEnv.XDG_CACHE_HOME,runtimeHome:nativeEnv.XDG_RUNTIME_DIR,appData:nativeEnv.TERMINAL_BROWSER_APPDATA,interopState:nativeEnv.TERMINAL_BROWSER_INTEROP_DIR,interopShare:nativeEnv.TERMINAL_BROWSER_INTEROP_DIR},selection:{cli:path.join(nativeHome,'terminal-browser'),herdr:path.join(nativeHome,'herdr'),piSettings:path.join(nativeEnv.PI_CODING_AGENT_DIR,'settings.json'),piSource:null,herdrRegistry:path.join(nativeHome,'plugins.json'),herdrSource:null}});
+for(const candidate of [a,b])manage(managerA,'stage',path.join(candidate.out,candidate.file),path.join(candidate.out,'manifest-linux-x64.json'),nativeInstall);
+manage(managerA,'configure',nativeInstall,nativeReceipt);
+manage(managerA,'activate',nativeInstall,a.artifactId);
+Object.assign(process.env,nativeEnv,{TERMINAL_BROWSER_INSTALLATION:path.join(nativeInstall,'installation.json'),RUNTIME_A_ROOT:path.join(nativeInstall,'releases',a.artifactId,'terminal-browser'),RUNTIME_B_ROOT:path.join(nativeInstall,'releases',b.artifactId,'terminal-browser'),INSTALL_ROOT:nativeInstall});
+process.env.TERMINAL_BROWSER_DIST_ROOT=process.env.RUNTIME_A_ROOT;
+await import('/test/packaged-runtime.mjs');
+for(const candidate of [a,b]){
+  const bundle=path.join(nativeInstall,'releases',candidate.artifactId,'terminal-browser');
+  execFileSync(process.execPath,[path.join(bundle,'scripts/dist-manifest.mjs'),'verify',bundle],{env:nativeEnv,stdio:'pipe',timeout:120000});
+}
+console.log(JSON.stringify({nativeArtifactsUnchanged:true}));

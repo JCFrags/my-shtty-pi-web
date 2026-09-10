@@ -1,0 +1,640 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+
+import type { Terminal } from "pixel-terminals";
+
+import { currentBrowserOwner } from "./companion";
+import { control } from "./control";
+import { browsers, ownedBy, recordKey, targets } from "./instances";
+import type { Browser } from "./instances";
+
+const DEFAULT_MAX_ELEMENTS = 200;
+const MAX_ELEMENTS = 500;
+const MAX_AGENT_STRING = 256;
+const MAX_KEY = 128;
+const MAX_NATURAL_TEXT = 4_096;
+const MAX_REPLACE_TEXT = 32_768;
+const MAX_SCROLL_DELTA = 20_000;
+const ACTION_TIMEOUT_MS = 30_000;
+const MAX_ACTION_TIMEOUT_MS = 300_000;
+
+export async function agentCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const subcommand = args.shift();
+  if (subcommand === "dialog") return dialogCommand(terminal, args);
+  if (subcommand === "observe") return observeCommand(terminal, args);
+  if (subcommand === "upload") return uploadCommand(terminal, args);
+  if (subcommand === "click") return clickCommand(terminal, args);
+  if (subcommand === "hover") return hoverCommand(terminal, args);
+  if (subcommand === "drag") return dragCommand(terminal, args);
+  if (subcommand === "type") return typeCommand(terminal, args);
+  if (subcommand === "press-key") return pressKeyCommand(terminal, args);
+  if (subcommand === "scroll") return scrollCommand(terminal, args);
+  if (subcommand === "navigate") return navigateCommand(terminal, args);
+  if (subcommand === "get-url") return getUrlCommand(terminal, args);
+  if (subcommand === "wait-for") return waitForCommand(terminal, args);
+  if (subcommand === "status") return statusCommand(terminal, args);
+  if (subcommand === "pause") return transitionCommand(terminal, args, "agent.pause");
+  if (subcommand === "resume") return transitionCommand(terminal, args, "agent.resume");
+  throw new Error("agent needs observe, upload, click, hover, drag, type, press-key, scroll, navigate, get-url, wait-for, status, pause, or resume (terminal-browser agent --help)");
+}
+
+async function dialogCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tab = parseTab(takeValue(args, "--tab"));
+  const dialogId = takeValue(args, "--dialog-id");
+  const epoch = parseEpoch(takeValue(args, "--control-epoch"), "agent.dialog");
+  const accept = takeBoolean(args, "--accept");
+  const dismiss = takeBoolean(args, "--dismiss");
+  const stdin = takeBoolean(args, "--stdin");
+  const textFlag = takeValue(args, "--text");
+  if (!tab || !dialogId || dialogId.length > 128 || accept === dismiss) throw new Error("dialog requires --tab, --dialog-id, and exactly one of --accept or --dismiss");
+  if (stdin && textFlag !== undefined) throw new Error("choose --stdin or --text");
+  if (args.length) throw new Error(`unexpected ${args[0]}`);
+  const text = stdin ? await readStdin(32768) : textFlag;
+  if (text !== undefined && text.length > 32768) throw new Error("prompt text too long");
+  const browser = await selectBrowser(terminal, browserKey);
+  print(await control(browser.socket, { cmd: "agent.dialog", tab, dialogId, expectedControlEpoch: epoch, accept, ...(text === undefined ? {} : { text }) }));
+  return 0;
+}
+
+async function statusCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  rejectTabOption(args);
+  const browserKey = takeValue(args, "--browser");
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  print(await control(browser.socket, { cmd: "agent.status" }));
+  return 0;
+}
+
+async function transitionCommand(
+  terminal: Terminal | null,
+  args: string[],
+  cmd: "agent.pause" | "agent.resume",
+): Promise<number> {
+  rejectTabOption(args);
+  const browserKey = takeValue(args, "--browser");
+  const epochValue = takeValue(args, "--control-epoch");
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  print(await control(browser.socket, {
+    cmd,
+    expectedControlEpoch: parseEpoch(epochValue, cmd),
+  }));
+  return 0;
+}
+
+async function observeCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const frame = takeValue(args, "--frame");
+  if (frame !== undefined && !/^(main|f[1-9][0-9]{0,8})$/.test(frame)) throw new Error("invalid frame selection");
+  const maxValue = takeValue(args, "--max-elements");
+  const view = parseObservationView(takeValue(args, "--view"));
+  const scope = parseObservationScope(takeValue(args, "--scope"));
+  const ref = takeValue(args, "--ref");
+  const imageOutput = takeValue(args, "--image-output");
+  const noText = takeBoolean(args, "--no-text");
+  const filter = takeLocator(args, "--filter-json");
+  if (scope === "element" && !ref) throw new Error("agent observe element scope needs --ref");
+  if (scope === "viewport" && ref) throw new Error("agent observe --ref needs element scope");
+  if (scope === "element" && view === "semantic") throw new Error("agent observe element scope needs a visual view");
+  if (view !== "semantic" && !imageOutput) throw new Error("agent observe visual views need --image-output");
+  if (view === "semantic" && imageOutput) throw new Error("agent observe --image-output needs a visual view");
+  if (ref) validateAgentString(ref, "agent observe ref");
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent observe --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  const maxElements = parseMaxElements(maxValue);
+  const value = await control(browser.socket, {
+    cmd: "agent.observe",
+    ...(frame ? { frame } : {}),
+    tab,
+    maxElements,
+    includeText: !noText,
+    ...(filter === undefined ? {} : { filter }),
+    view,
+    scope,
+    ...(ref ? { ref } : {}),
+  }) as Record<string, unknown>;
+  if (value.dialog) { print(value); return 0; }
+  const visual = value.visual as Record<string, unknown> | undefined;
+  if (view !== "semantic") {
+    if (!visual || !Buffer.isBuffer(visual.data)) throw new Error("browser returned no visual image");
+    await fs.writeFile(path.resolve(imageOutput!), visual.data, { flag: "wx", mode: 0o600 });
+    const { data: _data, ...metadata } = visual;
+    value.visual = metadata;
+  }
+  print(value);
+  return 0;
+}
+
+async function clickCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const observationId = takeValue(args, "--observation");
+  const epochValue = takeValue(args, "--control-epoch");
+  const locator = takeLocator(args, "--locator-json");
+  const ref = args.shift();
+  if ((ref !== undefined) === (locator !== undefined)) throw new Error("agent target needs a ref or --locator-json, but not both");
+  if (ref !== undefined) validateAgentString(ref, "agent target ref");
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent click --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  const observation = parseObservation(observationId, "agent.click");
+  const expectedControlEpoch = parseEpoch(epochValue, "agent.click");
+  print(
+    await control(browser.socket, {
+      cmd: "agent.click",
+      tab,
+      ...(ref === undefined ? { locator } : { ref }),
+      observationId: observation,
+      expectedControlEpoch,
+    }),
+  );
+  return 0;
+}
+
+async function uploadCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const observationId = takeValue(args, "--observation");
+  const epochValue = takeValue(args, "--control-epoch");
+  const filesValue = takeValue(args, "--files-json");
+  let files: unknown;
+  try { files = JSON.parse(filesValue ?? "null"); } catch { throw new Error("invalid files JSON"); }
+  if (!Array.isArray(files) || !files.length || files.length > 16 || files.some(file => typeof file !== "string" || !file || file.length > 4096)) throw new Error("upload requires 1 to 16 file paths");
+  const locator = takeLocator(args, "--locator-json");
+  const ref = args.shift();
+  if ((ref !== undefined) === (locator !== undefined)) throw new Error("agent target needs a ref or --locator-json, but not both");
+  if (ref !== undefined) validateAgentString(ref, "agent target ref");
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent upload --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  const observation = parseObservation(observationId, "agent.upload");
+  const expectedControlEpoch = parseEpoch(epochValue, "agent.upload");
+  print(
+    await control(browser.socket, {
+      cmd: "agent.upload",
+      tab,
+      ...(ref === undefined ? { locator } : { ref }),
+      files: (files as string[]).map(file => path.resolve(process.cwd(), file)),
+      observationId: observation,
+      expectedControlEpoch,
+    }, MAX_ACTION_TIMEOUT_MS),
+  );
+  return 0;
+}
+
+async function hoverCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const observationId = takeValue(args, "--observation");
+  const epochValue = takeValue(args, "--control-epoch");
+  const xValue = takeValue(args, "--x");
+  const yValue = takeValue(args, "--y");
+  const locator = takeLocator(args, "--locator-json");
+  const ref = args.shift();
+  const target = parseCliTarget(ref, xValue, yValue, "agent hover", locator);
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent hover --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  print(await control(browser.socket, {
+    cmd: "agent.hover",
+    tab,
+    ...target,
+    observationId: parseObservation(observationId, "agent.hover"),
+    expectedControlEpoch: parseEpoch(epochValue, "agent.hover"),
+  }, ACTION_TIMEOUT_MS));
+  return 0;
+}
+
+async function dragCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const observationId = takeValue(args, "--observation");
+  const epochValue = takeValue(args, "--control-epoch");
+  const from = parseCliTarget(
+    takeValue(args, "--from-ref"),
+    takeValue(args, "--from-x"),
+    takeValue(args, "--from-y"),
+    "agent drag from",
+    takeLocator(args, "--from-locator-json"),
+  );
+  const to = parseCliTarget(
+    takeValue(args, "--to-ref"),
+    takeValue(args, "--to-x"),
+    takeValue(args, "--to-y"),
+    "agent drag to",
+    takeLocator(args, "--to-locator-json"),
+  );
+  const button = takeValue(args, "--button") ?? "left";
+  if (button !== "left" && button !== "middle" && button !== "right") {
+    throw new Error("agent drag --button must be left, middle, or right");
+  }
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent drag --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  print(await control(browser.socket, {
+    cmd: "agent.drag",
+    tab,
+    ...prefixTarget("from", from),
+    ...prefixTarget("to", to),
+    button,
+    observationId: parseObservation(observationId, "agent.drag"),
+    expectedControlEpoch: parseEpoch(epochValue, "agent.drag"),
+  }, MAX_ACTION_TIMEOUT_MS));
+  return 0;
+}
+
+async function typeCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const observationId = takeValue(args, "--observation");
+  const epochValue = takeValue(args, "--control-epoch");
+  const textFlag = takeValue(args, "--text");
+  const stdin = takeBoolean(args, "--stdin");
+  const replace = takeBoolean(args, "--replace");
+  const locator = takeLocator(args, "--locator-json");
+  const ref = args.shift();
+  if ((ref !== undefined) === (locator !== undefined)) throw new Error("agent target needs a ref or --locator-json, but not both");
+  if (ref !== undefined) validateAgentString(ref, "agent target ref");
+  if ((textFlag === undefined && !stdin) || (textFlag !== undefined && stdin)) {
+    throw new Error("agent type needs exactly one of --text or --stdin");
+  }
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent type --help)`);
+  const text = stdin
+    ? await readStdin(replace ? MAX_REPLACE_TEXT : MAX_NATURAL_TEXT)
+    : textFlag!;
+  validateTypeText(text, replace);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  const observation = parseObservation(observationId, "agent.type");
+  const expectedControlEpoch = parseEpoch(epochValue, "agent.type");
+  const timeout = replace
+    ? ACTION_TIMEOUT_MS
+    : Math.min(MAX_ACTION_TIMEOUT_MS, ACTION_TIMEOUT_MS + text.length * 250);
+  print(
+    await control(browser.socket, {
+      cmd: "agent.type",
+      tab,
+      ...(ref === undefined ? { locator } : { ref }),
+      text,
+      replace,
+      observationId: observation,
+      expectedControlEpoch,
+    }, timeout),
+  );
+  return 0;
+}
+
+async function pressKeyCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const observationId = takeValue(args, "--observation");
+  const epochValue = takeValue(args, "--control-epoch");
+  const key = args.shift();
+  if (!key) {
+    throw new Error("agent press-key needs a key (terminal-browser agent press-key --help)");
+  }
+  if (key.length > MAX_KEY) throw new Error("agent press-key key is too long");
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent press-key --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  const observation = parseObservation(observationId, "agent.press-key");
+  const expectedControlEpoch = parseEpoch(epochValue, "agent.press-key");
+  print(await control(browser.socket, {
+    cmd: "agent.press-key",
+    tab,
+    key,
+    observationId: observation,
+    expectedControlEpoch,
+  }, ACTION_TIMEOUT_MS));
+  return 0;
+}
+
+async function scrollCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const observationId = takeValue(args, "--observation");
+  const epochValue = takeValue(args, "--control-epoch");
+  const dyValue = takeValue(args, "--dy");
+  const dxValue = takeValue(args, "--dx");
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent scroll --help)`);
+  const dy = parseScrollNumber(dyValue, "--dy");
+  const dx = dxValue === undefined ? 0 : parseScrollNumber(dxValue, "--dx");
+  validateScroll(dx, dy);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  const observation = parseObservation(observationId, "agent.scroll");
+  const expectedControlEpoch = parseEpoch(epochValue, "agent.scroll");
+  print(await control(browser.socket, {
+    cmd: "agent.scroll",
+    tab,
+    dx,
+    dy,
+    observationId: observation,
+    expectedControlEpoch,
+  }, ACTION_TIMEOUT_MS));
+  return 0;
+}
+
+async function navigateCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const epochValue = takeValue(args, "--control-epoch");
+  const url = args.shift();
+  if (!url || url.startsWith("-")) {
+    throw new Error("agent navigate needs a URL (terminal-browser agent navigate --help)");
+  }
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent navigate --help)`);
+  validateNavigation(url);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  const expectedControlEpoch = parseEpoch(epochValue, "agent.navigate");
+  print(await control(browser.socket, {
+    cmd: "agent.navigate",
+    tab,
+    url,
+    expectedControlEpoch,
+  }, ACTION_TIMEOUT_MS));
+  return 0;
+}
+
+async function getUrlCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const epochValue = takeValue(args, "--control-epoch");
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent get-url --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  const expectedControlEpoch = parseEpoch(epochValue, "agent.get-url");
+  print(await control(browser.socket, {
+    cmd: "agent.get-url",
+    tab,
+    expectedControlEpoch,
+  }, ACTION_TIMEOUT_MS));
+  return 0;
+}
+
+async function waitForCommand(terminal: Terminal | null, args: string[]): Promise<number> {
+  const browserKey = takeValue(args, "--browser");
+  const tabValue = takeValue(args, "--tab");
+  const observationId = takeValue(args, "--observation");
+  const epochValue = takeValue(args, "--control-epoch");
+  const ref = takeValue(args, "--ref");
+  const locator = takeLocator(args, "--locator-json");
+  if (ref !== undefined && locator !== undefined) throw new Error("wait requires exactly one ref or locator");
+  const text = takeValue(args, "--text");
+  const condition = takeValue(args, "--condition");
+  const timeoutValue = takeValue(args, "--timeout-ms");
+  if (ref === undefined && locator === undefined && text === undefined) throw new Error("agent wait-for needs --ref or --text");
+  if (ref !== undefined) validateAgentString(ref, "agent wait-for ref");
+  if (condition !== undefined && condition !== "exists" && condition !== "visible" && condition !== "text" && condition !== "actionable") {
+    throw new Error("agent wait-for --condition must be exists, visible, actionable, or text");
+  }
+  if (condition === "exists" && ref === undefined && locator === undefined) throw new Error("agent wait-for exists needs --ref");
+  if ((condition === "visible" || condition === "actionable") && ref === undefined && locator === undefined) throw new Error("agent wait-for visible needs --ref");
+  if (condition === "text" && text === undefined) throw new Error("agent wait-for text needs --text");
+  if (text !== undefined) validateWaitText(text);
+  const timeoutMs = parseWaitTimeout(timeoutValue);
+  if (args.length > 0) throw new Error(`unexpected ${args[0]} (terminal-browser agent wait-for --help)`);
+  const browser = await selectBrowser(terminal, browserKey);
+  const tab = await selectTab(browser, parseTab(tabValue));
+  const observation = parseObservation(observationId, "agent.wait-for");
+  const expectedControlEpoch = parseEpoch(epochValue, "agent.wait-for");
+  print(await control(browser.socket, {
+    cmd: "agent.wait-for",
+    tab,
+    ...(ref === undefined ? {} : { ref }),
+    ...(locator === undefined ? {} : { locator }),
+    ...(text === undefined ? {} : { text }),
+    ...(condition === undefined ? {} : { condition }),
+    timeoutMs,
+    observationId: observation,
+    expectedControlEpoch,
+  }, Math.min(MAX_ACTION_TIMEOUT_MS, timeoutMs + 5_000)));
+  return 0;
+}
+
+async function selectBrowser(terminal: Terminal | null, key: string | undefined): Promise<Browser> {
+  const found = await browsers(terminal);
+  if (key) {
+    const matches = found.filter((browser) => recordKey(browser) === key);
+    if (matches.length === 0) throw new Error(`no browser ${key}`);
+    if (matches.length > 1) throw new Error(`browser key ${key} is ambiguous`);
+    return matches[0]!;
+  }
+  if (process.env.HERDR_ENV === "1" || process.env.TERMINAL_BROWSER_OWNER_PANE_ID) {
+    const owner = currentBrowserOwner(process.env, process.cwd());
+    const owned = found.filter((browser) => ownedBy(browser, owner));
+    if (owned.length === 1) return owned[0]!;
+    if (owned.length === 0) {
+      throw new Error("no browser companion for this Pi pane; call browser_open first");
+    }
+    throw new Error("multiple browsers claim this Pi pane");
+  }
+  const here = found.filter((browser) => browser.inCurrentTab);
+  if (here.length === 1) return here[0]!;
+  if (here.length === 0) throw new Error("no browser in the current terminal tab; use --browser <key>");
+  throw new Error(`${here.length} browsers in the current terminal tab; use --browser <key>`);
+}
+
+async function selectTab(browser: Browser, requested: number | undefined): Promise<number> {
+  const available = await targets(browser);
+  const selected = requested === undefined
+    ? available.find((tab) => tab.active)
+    : available.find((tab) => tab.id === requested);
+  if (selected) return selected.id;
+  if (requested === undefined) throw new Error(`browser ${recordKey(browser)} has no active tab`);
+  throw new Error(`browser ${recordKey(browser)} has no tab ${requested}`);
+}
+
+function rejectTabOption(args: string[]) {
+  if (args.some((arg) => arg === "--tab" || arg.startsWith("--tab="))) {
+    throw new Error("agent status, pause, and resume do not accept --tab");
+  }
+}
+
+function takeValue(args: string[], name: string): string | undefined {
+  const at = args.indexOf(name);
+  if (at >= 0) {
+    const value = args[at + 1];
+    if (value === undefined) throw new Error(`${name} requires a value`);
+    args.splice(at, 2);
+    return value;
+  }
+  const prefix = `${name}=`;
+  const inline = args.findIndex((arg) => arg.startsWith(prefix));
+  if (inline >= 0) return args.splice(inline, 1)[0]!.slice(prefix.length);
+  return undefined;
+}
+
+function takeBoolean(args: string[], name: string): boolean {
+  const at = args.indexOf(name);
+  if (at < 0) return false;
+  args.splice(at, 1);
+  return true;
+}
+
+function parseTab(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.startsWith("t") ? value.slice(1) : value;
+  if (!/^\d+$/.test(normalized)) throw new Error(`invalid --tab ${value}`);
+  const tab = Number(normalized);
+  if (!Number.isSafeInteger(tab) || tab < 1) throw new Error(`invalid --tab ${value}`);
+  return tab;
+}
+
+function parseObservationView(value: string | undefined): "semantic" | "visual" | "both" {
+  if (value === undefined) return "semantic";
+  if (value !== "semantic" && value !== "visual" && value !== "both") {
+    throw new Error("--view must be semantic, visual, or both");
+  }
+  return value;
+}
+
+function parseObservationScope(value: string | undefined): "viewport" | "element" {
+  if (value === undefined) return "viewport";
+  if (value !== "viewport" && value !== "element") {
+    throw new Error("--scope must be viewport or element");
+  }
+  return value;
+}
+
+function parseMaxElements(value: string | undefined): number {
+  if (value === undefined) return DEFAULT_MAX_ELEMENTS;
+  const maxElements = Number(value);
+  if (!Number.isSafeInteger(maxElements) || maxElements < 1 || maxElements > MAX_ELEMENTS) {
+    throw new Error("--max-elements must be an integer from 1 to 500");
+  }
+  return maxElements;
+}
+
+function parseEpoch(value: string | undefined, command: string): number {
+  if (value === undefined) throw new Error(`${command} needs --control-epoch <n>`);
+  const epoch = Number(value);
+  if (!Number.isSafeInteger(epoch) || epoch < 1) {
+    throw new Error(`${command} --control-epoch must be a positive integer`);
+  }
+  return epoch;
+}
+
+function parseObservation(value: string | undefined, command: string): string {
+  if (value === undefined) throw new Error(`${command} needs --observation <id>`);
+  validateAgentString(value, `${command} observationId`);
+  return value;
+}
+
+function validateAgentString(value: string, name: string): void {
+  if (value.trim().length === 0 || value.length > MAX_AGENT_STRING) {
+    throw new Error(`${name} must be a non-empty string of at most ${MAX_AGENT_STRING} characters`);
+  }
+}
+
+type CliTarget = { ref: string } | { locator: unknown[] } | { x: number; y: number };
+
+function parseCliTarget(
+  ref: string | undefined,
+  xValue: string | undefined,
+  yValue: string | undefined,
+  command: string,
+  locator?: unknown[],
+): CliTarget {
+  if (locator !== undefined) {
+    if (ref !== undefined || xValue !== undefined || yValue !== undefined) throw new Error("locator cannot be combined with ref or coordinates");
+    return { locator };
+  }
+  const hasCoordinates = xValue !== undefined || yValue !== undefined;
+  if ((ref !== undefined) === hasCoordinates) throw new Error(`${command} needs exactly one ref or x/y pair`);
+  if (ref !== undefined) {
+    validateAgentString(ref, `${command} ref`);
+    return { ref };
+  }
+  const x = Number(xValue);
+  const y = Number(yValue);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || Math.abs(x) > 20_000 || Math.abs(y) > 20_000) {
+    throw new Error(`${command} x and y must be finite coordinates within 20000`);
+  }
+  return { x, y };
+}
+
+function prefixTarget(prefix: "from" | "to", target: CliTarget) {
+  if ("locator" in target) return { [`${prefix}Locator`]: target.locator };
+  return "ref" in target
+    ? { [`${prefix}Ref`]: target.ref }
+    : { [`${prefix}X`]: target.x, [`${prefix}Y`]: target.y };
+}
+
+function parseScrollNumber(value: string | undefined, name: string): number {
+  if (value === undefined) throw new Error(`agent scroll needs ${name} <n>`);
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new Error(`agent scroll ${name} must be finite`);
+  return parsed;
+}
+
+function validateScroll(dx: number, dy: number) {
+  if (Math.abs(dx) > MAX_SCROLL_DELTA || Math.abs(dy) > MAX_SCROLL_DELTA) {
+    throw new Error("agent scroll delta is too large");
+  }
+  if (dx === 0 && dy === 0) throw new Error("agent scroll needs a nonzero delta");
+}
+
+function validateTypeText(text: string, replace: boolean) {
+  const max = replace ? MAX_REPLACE_TEXT : MAX_NATURAL_TEXT;
+  if (text.length > max) throw new Error(`agent type text must be at most ${max} characters`);
+  if (text.includes("\0")) throw new Error("agent type text contains NUL");
+  if (!replace && text.length === 0) throw new Error("agent type text must not be empty unless --replace is used");
+}
+
+function validateWaitText(text: string) {
+  if (text.length === 0 || text.length > 1_024) throw new Error("agent wait-for text must be non-empty and at most 1024 characters");
+  if (text.includes("\0")) throw new Error("agent wait-for text contains NUL");
+}
+
+function validateNavigation(url: string) {
+  if (url.trim().length === 0 || url.length > 8_192) throw new Error("agent navigate URL must be non-empty and at most 8192 characters");
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(url)) throw new Error("agent navigate URL contains control characters");
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(url.trim())?.[1]?.toLowerCase();
+  if (scheme && scheme !== "http" && scheme !== "https" && scheme !== "file" && scheme !== "about") {
+    throw new Error("agent navigate URL scheme is not allowed");
+  }
+  if (scheme === "about" && url.trim().toLowerCase() !== "about:blank") {
+    throw new Error("agent navigate only allows about:blank");
+  }
+}
+
+function parseWaitTimeout(value: string | undefined): number {
+  if (value === undefined) return 10_000;
+  const timeout = Number(value);
+  if (!Number.isSafeInteger(timeout) || timeout < 0 || timeout > 60_000) {
+    throw new Error("agent wait-for --timeout-ms must be an integer from 0 to 60000");
+  }
+  return timeout;
+}
+
+async function readStdin(maxLength: number): Promise<string> {
+  process.stdin.setEncoding("utf8");
+  const chunks: string[] = [];
+  let length = 0;
+  for await (const chunk of process.stdin) {
+    const value = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    length += value.length;
+    if (length > maxLength) throw new Error(`agent type stdin must be at most ${maxLength} characters`);
+    chunks.push(value);
+  }
+  return chunks.join("");
+}
+
+function print(value: unknown) {
+  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+function takeLocator(args: string[], flag: string): unknown[] | undefined {
+  const value = takeValue(args, flag);
+  if (value === undefined) return undefined;
+  if (value.length > 32_768) throw new Error("locator JSON is too long");
+  let spec: unknown;
+  try { spec = JSON.parse(value); } catch { throw new Error("invalid locator JSON"); }
+  if (!Array.isArray(spec) || !spec.length || spec.length > 16) throw new Error("locator must contain 1 to 16 native steps");
+  return spec;
+}

@@ -1,102 +1,115 @@
 name: ci
 
 on:
-  push:
   pull_request:
+  push:
+    branches:
+      - main
+      - rebuild/terminal-browser-agent
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  web:
-    runs-on: ubuntu-latest
+  integration:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
-      - run: corepack enable
-      - run: corepack prepare pnpm@10.13.1 --activate
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
       - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
-      - run: pnpm typecheck
-      - run: pnpm test
+      - name: Build workspace
+        run: pnpm -r build
+      - name: Browser typecheck
+        run: pnpm --filter terminal-browser typecheck
+      - name: CLI typecheck
+        run: pnpm --filter terminal-browser-cli typecheck
+      - name: Pi extension typecheck
+        run: pnpm --filter pi-terminal-browser typecheck
+      - name: AgentCursor import check
+        run: pnpm --filter terminal-browser exec node --input-type=module -e "import { ActionService, createPersona, generateMove } from 'agentcursor'; import assert from 'node:assert/strict'; for (const value of [ActionService, createPersona, generateMove]) assert.equal(typeof value, 'function');"
+      - name: Browser integration tests
+        run: pnpm --filter terminal-browser test
+      - name: Install native fixture display dependencies
+        run: sudo apt-get update && sudo apt-get install -y xvfb xauth
+      - name: Native pinned Electron workflow fixtures
+        run: xvfb-run -a pnpm --filter terminal-browser test:electron
+      - name: CLI integration tests
+        run: pnpm --filter terminal-browser-cli test
+      - name: Store tests
+        run: pnpm --filter pixel-store test
+      - name: Pi extension tests
+        run: pnpm --filter pi-terminal-browser test
 
-  browser-python:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: components/browser
+  research-retention:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: pnpm/action-setup@v4
         with:
-          version: '0.10.0'
-          enable-cache: true
-          cache-dependency-glob: components/browser/uv.lock
-      - run: uv python install 3.13
-      - run: uv sync --all-packages --locked
-      - run: uv run pytest tests/reader tests/docling
-
-  extraction-contract:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+          version: 10.13.1
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
-      - uses: astral-sh/setup-uv@v6
-        with:
-          version: '0.10.0'
-          enable-cache: true
-          cache-dependency-glob: components/browser/uv.lock
-      - run: corepack enable
-      - run: corepack prepare pnpm@10.13.1 --activate
-      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
-      - run: pnpm install --frozen-lockfile
-      - run: uv python install 3.13
-        working-directory: components/browser
-      - run: uv sync --all-packages --locked
-        working-directory: components/browser
-      - run: pnpm test:extraction
-
-  browser-rust:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: components/browser
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: '1.88.0'
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: components/browser
-      - run: cargo check --workspace --all-targets --exclude pi-browser-workspace
-      - run: cargo test --workspace --exclude pi-browser-workspace
-
-  browser-fedora-workspace:
-    runs-on: ubuntu-latest
-    container: fedora:43
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Fedora build prerequisites
-        run: >-
-          dnf install -y
-          gcc gcc-c++ make pkgconf-pkg-config curl git openssl-devel
-          webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel
-          libxdo-devel gtk3-devel glib2-devel cairo-devel pango-devel
-          gdk-pixbuf2-devel
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - name: Build the browser workspace shell
+          node-version: 24
+      - name: Provide the retained Fedora launcher Node path
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.88.0
-          export PATH="$HOME/.cargo/bin:$PATH"
-          npm install --global pnpm@10.13.1
-          pnpm install --frozen-lockfile
-          pnpm --filter @pi-web/workspace build
-          cd components/browser
-          cargo check -p pi-browser-workspace
+          if [ ! -e /usr/bin/node ]; then sudo ln -s "$(command -v node)" /usr/bin/node; fi
+          /usr/bin/node -e 'if (process.versions.node.split(".")[0] !== "24") process.exit(1)'
+      - name: Install the independent frozen research toolchain without lifecycle scripts
+        run: pnpm --dir scripts/retire-legacy install --frozen-lockfile --ignore-workspace
+      - name: Reproduce the research-only runtime and verify retained behavior
+        run: pnpm --dir scripts/retire-legacy run test:run
+      - name: Verify exact legacy cleanup and preservation
+        run: node --test scripts/test/legacy-browser-cleanup.test.mjs
+
+  packaged-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@1.93.1
+      - name: Install Ubuntu 24.04 native and isolation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libssl-dev libclang-dev nasm python3 bubblewrap unzip curl libgtk-3-0t64 libnss3 libgbm1 libasound2t64 libxss1 libxshmfence1
+          python3 -c 'import sys; assert sys.version_info[:2] == (3, 12)'
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: pnpm install --frozen-lockfile
+      - name: Build two complete pinned releases and run offline packaged runtime and recovery
+        run: pnpm test:dist:ci
+
+  pixel-terminals-baseline:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run upstream terminal-adapter baseline
+        run: pnpm --filter pixel-terminals test

@@ -1,0 +1,23 @@
+id = "zenbu-labs.terminal-browser"
+name = "Terminal Browser"
+version = "0.2.0"
+min_herdr_version = "0.8.2"
+description = "Open an owner-bound browser beside a Pi agent"
+platforms = ["linux", "macos"]
+
+[[build]]
+command = ["bash", "-c", "cd .. && pnpm build"]
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "companion"
+title = "Terminal Browser"
+placement = "split"
+command = ["bash", "open-companion.sh"]
+
+[[actions]]
+id = "open-companion"
+title = "Open or focus Pi browser companion"
+description = "Open or focus the terminal-browser owned by the selected Pi pane"
+contexts = ["global"]
+command = ["bash", "focus-companion.sh"]

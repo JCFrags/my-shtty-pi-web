@@ -1,35 +1,23 @@
 {
-  "name": "pi-web-tools",
-  "version": "0.1.0",
+  "name": "terminal-graphics-engine",
   "private": true,
-  "type": "module",
-  "packageManager": "pnpm@10.13.1",
-  "engines": {
-    "node": ">=24"
-  },
   "scripts": {
-    "lint": "eslint .",
-    "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm -r --if-present test && node --test scripts/*.test.mjs",
-    "test:python": "cd components/browser && uv run --offline pytest tests/reader tests/docling benchmarks/extraction/tests",
-    "benchmark:extraction": "cd components/browser && uv run --offline python benchmarks/extraction/run.py",
-    "test:extraction": "cd components/browser && uv run --offline python benchmarks/extraction/generate_fixtures.py --check && uv run --offline pytest benchmarks/extraction/tests && uv run --offline python benchmarks/extraction/run.py",
-    "test:live": "pnpm --filter @webx/pi-webx exec tsx ../../scripts/live-web-acceptance.ts",
-    "check:rust": "cd components/browser && cargo check --workspace",
-    "test:rust": "cd components/browser && cargo test --workspace"
+    "build": "pnpm -r build",
+    "browser": "pnpm --filter terminal-browser start",
+    "build:dist": "scripts/release.sh \"local-$(git rev-parse --short HEAD)\"",
+    "install:dist": "scripts/install-local.sh",
+    "test:dist": "node --test scripts/test/*.test.mjs",
+    "test:dist:smoke": "node scripts/test/smoke-dist.mjs",
+    "test:dist:recovery": "node scripts/test/recovery-dist.mjs",
+    "test:dist:ci": "bash scripts/test/ci-dist.sh",
+    "dist": "pnpm build:dist && pnpm install:dist",
+    "release:patch": "scripts/tag-release.sh patch",
+    "release:minor": "scripts/tag-release.sh minor",
+    "release:major": "scripts/tag-release.sh major"
   },
+  "packageManager": "pnpm@10.13.1",
   "devDependencies": {
-    "@eslint/js": "10.0.1",
-    "@mozilla/readability": "0.6.0",
-    "@types/node": "24.12.4",
-    "@types/turndown": "5.0.5",
-    "@vitest/coverage-v8": "4.1.10",
-    "defuddle": "0.19.3",
-    "eslint": "10.8.1",
-    "linkedom": "0.18.13",
-    "turndown": "7.2.4",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.67.0",
-    "vitest": "4.1.10"
+    "@electron/osx-sign": "^1.3.3",
+    "esbuild": "^0.25.0"
   }
 }

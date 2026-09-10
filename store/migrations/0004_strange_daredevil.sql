@@ -1,0 +1,1 @@
+ALTER TABLE `instances` ADD `startup_attempt` text;

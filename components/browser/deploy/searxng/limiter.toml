@@ -1,4 +1,0 @@
-# Loopback-only deployment. Limiting is intentionally disabled in settings.yml;
-# this file is retained so operators can opt in without changing the image.
-[botdetection.ip_limit]
-link_token = false
