@@ -188,6 +188,7 @@ export class TerminalBrowserDriver implements BrowserDriver {
     const totalY = Math.round(args.dy);
     const steps = boundedSteps(args.steps, totalX, totalY);
     const position = await this.cursorState();
+    await this.target.frames?.assertCoordinates(position);
     this.lastPosition = { ...position };
     let previousX = 0;
     let previousY = 0;

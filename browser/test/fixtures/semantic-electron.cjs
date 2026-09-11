@@ -21,7 +21,7 @@ body { margin: 10px; } button,input { margin: 8px; width: 150px; height: 32px; }
 #inner { height: 240px; width: 260px; overflow: auto; } #deep { margin-top: 500px; }
 </style><div id="scope"><label>Email<input id="first"></label><label>Email<input id="second"></label></div>
 <button id="target" data-testid="target">Save</button><button id="delayed" disabled>Later</button>
-<input id="decoy" aria-label="Decoy"><div id="shadow"></div>
+<input id="decoy" aria-label="Decoy"><div id="shadow"></div><div id="closedShadow"></div>
 <div id="nested"><div id="inner"><button id="deep">Deep action</button></div></div>
 <script>
 window.counts = {}; document.addEventListener('click', event => {
@@ -29,6 +29,9 @@ window.counts = {}; document.addEventListener('click', event => {
   if (node) counts[node.id] = (counts[node.id] || 0) + 1;
 });
 shadow.attachShadow({mode:'open'}).innerHTML = '<label>Shadow name<input id="shadowInput"></label><button id="shadowButton">Shadow action</button>';
+const closedRoot = closedShadow.attachShadow({mode:'closed'});
+closedRoot.innerHTML = '<button id="closedButton">Closed action</button>';
+window.closedButton = closedRoot.querySelector('button');
 window.ready = true;
 </script>`);
 });
@@ -67,6 +70,8 @@ window.ready = true;
   assert.match(native.handle, /^e\d+$/);
   assert(native.rect.width > 0);
   assert.equal((await resolver.resolveLocator(role('Missing'), { timeoutMs: 0 })).count, 0);
+  assert.equal((await resolver.resolveLocator(role('Closed action'), { timeoutMs: 0 })).count, 0);
+  assert.equal((await runtime.observe()).snapshot.elements.some(element => element.name === 'Closed action'), false);
   await assert.rejects(runtime.type(await request({ locator: [{ kind: 'label', value: 'Email' }], text: 'wrong', replace: true })), /ambiguous locator/);
   assert.deepEqual(await js('[first.value,second.value]'), ['', '']);
   await runtime.type(await request({ locator: [{ kind: 'css', value: '#scope' }, { kind: 'label', value: 'Email' }, { kind: 'nth', index: 1 }], text: 'selected', replace: true }));

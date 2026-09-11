@@ -273,6 +273,17 @@ test('phase4a runtime removal leaves research state and the independent runtime 
   assert.throws(() => createPlan({ ...f.inventory(WORKSPACE), kind: 'phase4a-runtime' }, f.sandbox), /Not a phase4a runtime path/);
 });
 
+test('custom PinchTab bridge removal preserves upstream browser commands', t => {
+  const f = fixture(t);
+  const bridge = `${HOME}/.local/bin/pinchtab-bridge`;
+  f.write(bridge, 'custom retired provider');
+  const upstream = f.write(`${HOME}/.local/bin/agent-browser`, 'upstream');
+  const plan = createPlan({ ...f.inventory(bridge), kind: 'phase4a-runtime' }, f.sandbox);
+  applyPlan(plan, planSha256(plan), f.journal, f.sandbox);
+  assert.equal(fs.existsSync(f.local(bridge)), false);
+  assert.equal(fs.readFileSync(upstream, 'utf8'), 'upstream');
+});
+
 test('pinned dependency removal prepares only owned read-only directories and keeps shared packages', t => {
   const f = fixture(t);
   const root = `${HOME}/Projects/my-shtty-pi-web/node_modules/.pnpm/@tauri-apps+api@2.8.0`;
