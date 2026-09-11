@@ -29,6 +29,14 @@ function capturedIdentity() {
 }
 
 export const LOADED_IDENTITY = capturedIdentity();
+const receiptSequenceKey = Symbol.for("terminal-browser.pi-receipt-sequence");
+
+function nextReceiptSequence() {
+  const shared = globalThis as any;
+  const sequence = Number.isSafeInteger(shared[receiptSequenceKey]) ? shared[receiptSequenceKey] + 1 : 1;
+  shared[receiptSequenceKey] = sequence;
+  return sequence;
+}
 
 export function startupReceipt(): () => void {
   const file = process.env.TERMINAL_BROWSER_INSTALLATION ?? path.resolve(runtimeRoot, "../../../installation.json");
@@ -40,8 +48,9 @@ export function startupReceipt(): () => void {
   const directory = path.join(receipt.paths.stateHome, receipt.namespace, "pi-loaded");
   if (directory.startsWith(`${runtimeRoot}/`)) throw new Error("runtime receipts must be outside artifacts");
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const destination = path.join(directory, `${randomUUID()}.json`);
-  const bytes = `${JSON.stringify({ identity: LOADED_IDENTITY })}\n`;
+  const receiptId = randomUUID();
+  const destination = path.join(directory, `${receiptId}.json`);
+  const bytes = `${JSON.stringify({ identity: LOADED_IDENTITY, receipt: { id: receiptId, createdAt: new Date().toISOString(), sequence: nextReceiptSequence() } })}\n`;
   fs.writeFileSync(destination, bytes, { mode: 0o600, flag: "wx" });
   return () => { try { if (fs.readFileSync(destination, "utf8") === bytes) fs.unlinkSync(destination); } catch {} };
 }

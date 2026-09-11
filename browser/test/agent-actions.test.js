@@ -183,6 +183,15 @@ test("scroll stops before a later wheel after the guard refuses", async () => {
   assert.equal(events.at(-1).kind, "release");
 });
 
+test("scroll refuses stale frame coordinates before the first wheel", async () => {
+  const { driver, target, events } = driverFixture();
+  Object.assign(target, {
+    frames: { assertCoordinates: async () => { throw new Error("frame geometry changed since visual observation"); } },
+  });
+  await assert.rejects(driver.scroll({ dx: 0, dy: 20, steps: 3, mode: "content" }), /frame geometry changed/);
+  assert.equal(events.filter((event) => event.kind === "wheel").length, 0);
+});
+
 function runtimeFixture(options = {}) {
   const control = options.control || new BrowserControl();
   const calls = [];

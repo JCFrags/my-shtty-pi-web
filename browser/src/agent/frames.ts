@@ -48,7 +48,7 @@ const OWNER_MEASURE = `function(scroll) {
   const intersect = (a,b) => { const x=Math.max(a.x,b.x),y=Math.max(a.y,b.y); return {x,y,width:Math.max(0,Math.min(a.x+a.width,b.x+b.width)-x),height:Math.max(0,Math.min(a.y+a.height,b.y+b.height)-y)}; };
   for(let node=this;node;node=node.parentElement || node.getRootNode()?.host) {
     const style=getComputedStyle(node);
-    if(style.transform !== 'none' || style.perspective !== 'none' || style.rotate !== 'none' || style.scale !== 'none' || style.translate !== 'none' || Number(style.zoom || 1) !== 1) throw new Error('unsupported frame owner transform');
+    if(style.transform !== 'none' || style.perspective !== 'none' || style.rotate !== 'none' || style.scale !== 'none' || style.translate !== 'none' || Number(style.zoom || 1) !== 1) throw new Error('unsupported frame owner transform or CSS zoom');
     if(style.display==='none'||style.visibility!=='visible'||Number(style.opacity)===0) visible=false;
     if(node!==this && /(hidden|clip|auto|scroll)/.test(style.overflowX+' '+style.overflowY)) {
       const r=node.getBoundingClientRect();

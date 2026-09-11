@@ -114,6 +114,13 @@ Upstream `upgrade` is disabled for this integration.
 A running daemon and Pi extension retain their startup artifact, protocol and
 process-start identity. Doctor is read-only and reports candidates, next-launch
 selections and observed loaded identities separately. Unknown is not absent.
+Pi receipt diagnostics enumerate the entire retained directory with bounded
+per-record reads. `pi.receipts.complete` distinguishes a complete inspection from
+unreadable records, uncertain process identity, or ambiguous reload order. Counts
+and evidence separate live, historical, invalid, unreadable and incomplete records.
+Only exact boot/start-matched processes with an unambiguous latest receipt are
+live. A selected path or partial scan never proves all-session convergence.
+
 It does not scan page content, open/migrate the database, prepare graphics,
 repair sockets, or run setup. Graphics stays unknown without visible terminal
 evidence; an internal Chromium frame is not such evidence.
@@ -202,7 +209,8 @@ accepts a classified version-1 inventory with `candidateDeletions` records
 (`path`, `inode`, `device`, `uid`, `type`, plus file `sha256` or `symlinkTarget`).
 Default mode retires the fixed historical source/install roots. Inventory kind
 `phase4a-runtime` removes only the fixed obsolete runtime selections after
-research migration. Kind `tauri-dependencies` removes only the pinned dedicated
+research migration, including the custom `pinchtab-bridge` executable. It does
+not remove upstream `agent-browser` or other independent browser commands. Kind `tauri-dependencies` removes only the pinned dedicated
 Tauri packages and hoisted links; first verify that retained package manifests
 and reverse links have no dependency outside that deletion set.
 
@@ -324,7 +332,20 @@ Herdr/owner/production routes. Use a short private runtime path (for example,
 `mktemp -d /tmp/XXXXXX`): Unix socket paths have a small fixed length limit. XDG
 alone does not isolate global interop state.
 
-### Usage
+### Pi workflow
+
+Use the five native tools: `browser_open`, `browser_observe`, `browser_act`,
+`browser_tabs`, and `browser_control`. Discover hidden tools through Pi's tool
+search rather than falling back to shell commands. Pi keeps companion ownership,
+observations, and control epochs internal. Pointer actions use slow-natural
+AgentCursor input. Observe before acting and never automatically repeat a
+possibly delivered action or resume human control.
+
+### Upstream CLI usage outside Pi
+
+The supported upstream CLI and agent-browser compatibility remain available.
+These commands are not the Pi browser workflow.
+
 ```
 terminal-browser # launches the browser
 terminal-browser open <url> # opens the browser at a url
@@ -573,6 +594,17 @@ contexts before stopping the shared daemon, obtain permission for unsaved work,
 and verify the old daemon exited before reopening companions. Record hashes of
 the built browser files at startup and verify the new frame behavior in a fresh
 Pi process; source HEAD or a new CLI PID alone is not deployment evidence.
+
+### Tested support and recovery
+
+| Behavior | Support and tested limit | Practical recovery |
+| --- | --- | --- |
+| Root, popup, same-origin and cross-origin frames | Native observations/captures, slow-natural click/hover/drag/type/scroll, dialogs, project uploads and tracked downloads pass pinned Electron fixtures. Drag stays within one selected frame. | Observe again after navigation, context/frame changes or an interrupted action. Check the resulting state before any new action. |
+| Shadow roots | Open-root locators work. Closed-root controls are excluded from snapshots and locators; no universal shadow support is claimed. | Use an exposed control or let the human operate the closed-root UI. |
+| Frame-owner transforms and CSS `zoom` | Tested refusal before input. Ordinary axis-aligned owners and browser page zoom work. | Remove the owner's transform/CSS zoom or use a supported page layout, then observe again. |
+| Changed frame geometry or viewport | Old visual coordinates and selected-frame scroll refuse without dispatch. A fresh observation permits supported input. | Re-observe. Do not automatically repeat a click, edit or download whose side effect may already exist. |
+| Terminal/display scale | Supplied scale and resized-layout tests pass. Cross-monitor mixed-DPI hardware was not tested; display scale is selected at startup. | Pause first. If alignment changes after a monitor move, preserve transient work and restart the companion at the correct scale, then observe again. |
+| Ownership and human takeover | Two-owner isolation and immediate cancellation with held-key/button release pass native fixtures. Delivered side effects are not undone. | Resume only when explicitly requested, inspect the new state, and continue with a fresh observation. |
 
 ### Agent cursor alignment
 

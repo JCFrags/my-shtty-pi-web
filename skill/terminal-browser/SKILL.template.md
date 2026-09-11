@@ -1,7 +1,25 @@
 ---
 name: terminal-browser
-description: A real browser running inside the terminal. It splits the human's terminal pane automatically, so you can show a website side by side with the conversation, render HTML to visualize something, and drive whatever tab is open — snapshot, click, fill, eval — with the `terminal-browser action` subcommand.
+description: Use for interactive websites or local HTML in a terminal companion. In Pi, use the five native browser tools for owner-scoped observation and AgentCursor input. Outside Pi, the supported terminal-browser CLI remains available.
 ---
+
+## Pi workflow
+
+Use `browser_open`, `browser_observe`, `browser_act`, `browser_tabs`, and
+`browser_control`. If these tools are hidden, discover them through the installed
+tool search. Do not substitute shell commands because a native tool is hidden.
+
+Open or reuse this Pi pane's companion with `browser_open`. Observe before acting.
+Use `browser_act` for slow-natural AgentCursor input, `browser_tabs` for contexts
+and downloads, and `browser_control` for pause or explicit resume. Use one action
+per call. Keep observations bounded. Pi manages owner routing, observation IDs,
+and control epochs internally. Never resume human control automatically or repeat
+an action whose side effect may already have been delivered.
+
+## CLI workflow outside Pi
+
+The upstream CLI and agent-browser compatibility remain supported. They are not
+the replacement for Pi's native browser tools.
 
 `terminal-browser open <url>` puts a browser in a terminal pane. On its own it
 takes over the current pane. `--split right` (or `down`, `left`, `up`) opens a
