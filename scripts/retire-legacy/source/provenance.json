@@ -306,9 +306,9 @@
     {
       "path": "apps/pi-webx/src/index.ts",
       "originalSha256": "53e69e6231d8503f10140b0e9673eacfbf64532c113f1969ebbbc159d8c6fd03",
-      "retainedSha256": "f83370fe56841001ff1aaab98eaec0b41aff44ca09907db87670b732938bfdbc",
+      "retainedSha256": "287081b27904ee509cef140f558fb2862ed984d5ac0e73595c64ea4bd88d459a",
       "originalBytes": 26067,
-      "retainedBytes": 18005,
+      "retainedBytes": 17520,
       "changed": true,
       "preservedDeclarations": {
         "STATUS_KEY": "260298528d99f65368c3fc4dd1b6bf5cde26770a8a87c6260a75950cd37fce46",
@@ -346,6 +346,15 @@
         "renderData": "de6e6b6adf933971f7a8a9ae4eebdc31ddd40ccd983c4b86fbfdb49cf0d59d8e",
         "presentResult": "3de1e1a6bcf4dc2ce105e2a40dbb73638bd7217d3b6eee2536ea6d87fcff291a"
       }
+    },
+    {
+      "path": "apps/pi-webx/src/rendering.ts",
+      "originalSha256": null,
+      "retainedSha256": "f8f8471008f67680105743381e160c8e673e145029cd50ede27076d8db6c1b8b",
+      "originalBytes": 0,
+      "retainedBytes": 10744,
+      "changed": true,
+      "preservedDeclarations": {}
     },
     {
       "path": "apps/pi-webx/src/schemas.ts",
