@@ -176,9 +176,25 @@ node scripts/retire-legacy/build.mjs /absolute/new/research-output scripts/retir
 ```
 
 The independent lock disables dependency lifecycle scripts. The test runner
-checks the reviewed runtime manifest hash, all 70 research tests and strict
-TypeScript checks. It never uses the historical checkout's dependency tree.
-The `research-retention` CI job runs this same gate.
+checks the reviewed runtime manifest hash, all 71 research tests and strict
+TypeScript checks against Pi 0.87.1. It never uses the historical checkout's
+dependency tree. The `research-retention` CI job runs this same gate.
+
+The research adapter requires Pi's structured prompt-options API, checked with
+Pi 0.87.1. It writes only `systemPromptOptions.sections.webx_guidance` when at
+least one research tool is active. It removes that section when all research
+tools are inactive. It preserves other sections and does not return a
+whole-prompt override. Another extension's forced override can still hide or
+flatten these sections. Structured guidance does not guarantee cache reuse.
+
+For an existing installation, compare the complete built output with the
+selected release before planning deployment. A prompt-only adapter change needs
+only a new retained `extension.mjs` selection and its host-Pi `node_modules`
+link. Preserve the daemon, CLI, reader, service environment, cache/content stores
+and browser selections when their bytes are unchanged. Do not restart services
+for an adapter-only change. If only build-toolchain metadata differs and the
+adapter and all other runtime files are identical, no runtime deployment or Pi
+reload is needed. Keep versioned releases unchanged.
 
 For deployment, verify every `manifest.json` file hash, then copy the complete
 output to `~/.local/share/pi-web-research/releases/<manifest-sha256>/`. Do not

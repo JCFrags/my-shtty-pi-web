@@ -195,8 +195,11 @@ export function createPiWebxExtension(sdkFactory: WebxSdkFactory = createSdkClie
     pi.registerTool({ name: "web_content", label: "Retrieve stored web content", description: "Retrieve normalized content already stored by WebX under an opaque content ID. Exact offset mode returns a bounded passage with exact continuation metadata. Focused findText or query mode returns a bounded relevant passage. It never refetches the source.", promptSnippet: "Continue or focus normalized stored content without a network request", promptGuidelines: ["Use web_content only with a content ID returned by web_read or web_content. Use the exact reported nextOffset for continuation. Do not combine offset with findText or query."], parameters: WebContentSchema, execute: invoke("web.content") });
 
     pi.on("before_agent_start", (event) => {
-      if (!pi.getActiveTools().some((name) => TOOL_NAMES.includes(name as (typeof TOOL_NAMES)[number]))) return;
-      return { systemPrompt: `${event.systemPrompt}\n\n${WEBX_AGENT_GUIDANCE}` };
+      if (pi.getActiveTools().some((name) => TOOL_NAMES.includes(name as (typeof TOOL_NAMES)[number]))) {
+        event.systemPromptOptions.sections.webx_guidance = WEBX_AGENT_GUIDANCE;
+      } else {
+        delete event.systemPromptOptions.sections.webx_guidance;
+      }
     });
 
     const showStatus = (ctx: ExtensionContext) => {

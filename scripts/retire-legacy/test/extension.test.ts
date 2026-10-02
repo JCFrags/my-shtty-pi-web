@@ -93,6 +93,41 @@ function harness(sdk: MockSdk, trusted = true, audit: { record(input: unknown): 
   };
 }
 
+test("agent guidance changes only its section and follows the active research tools", async () => {
+  const sdk = new MockSdk();
+  const fx = harness(sdk);
+  const beforeAgentStart = fx.events.get("before_agent_start");
+  assert.ok(beforeAgentStart);
+  const event = {
+    systemPrompt: "base prompt",
+    systemPromptOptions: {
+      sections: { other_guidance: "other guidance", webx_guidance: "stale guidance" } as Record<string, string>,
+      selectedTools: ["web_search"],
+      forceSystemPrompt: "explicit override",
+    },
+  };
+  assert.equal(await beforeAgentStart(event), undefined);
+  assert.deepEqual({ ...event.systemPromptOptions.sections }, { other_guidance: "other guidance" });
+  event.systemPromptOptions.selectedTools = [];
+  let guidance: string | undefined;
+  for (const name of ["web_search", "web_read", "web_read_batch", "web_content"]) {
+    fx.active.splice(0, fx.active.length, "read", name);
+    assert.equal(await beforeAgentStart(event), undefined);
+    guidance ??= event.systemPromptOptions.sections.webx_guidance;
+    assert.match(guidance!, /WebX is Pi's primary internet interface/u);
+    assert.deepEqual({ ...event.systemPromptOptions.sections }, { other_guidance: "other guidance", webx_guidance: guidance });
+  }
+  fx.active.splice(0, fx.active.length, "read", "browser_open");
+  assert.equal(await beforeAgentStart(event), undefined);
+  assert.deepEqual(event.systemPromptOptions, {
+    sections: { other_guidance: "other guidance" },
+    selectedTools: [],
+    forceSystemPrompt: "explicit override",
+  });
+  assert.equal(event.systemPrompt, "base prompt");
+  assert.equal(sdk.starts, 0);
+});
+
 test("default read tool hides linked crawl fields and explicit compatibility opt-in restores them", () => {
   const normal = harness(new MockSdk());
   const normalRead = normal.tools.find((tool) => tool.name === "web_read");
