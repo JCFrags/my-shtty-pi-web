@@ -2,9 +2,10 @@
   "originalGitSha": "70ca901e35473a53bf2a37284235fb7714972ee8",
   "originalLockSha256": "aa083313e9ca178e57f466294e739294dadcdca2c857d34415df2637be4bf5d1",
   "pnpmVersion": "10.13.1",
-  "packageCount": 315,
-  "resolution": "Historical lock seeded the build/test dependency closure. Exact installed Pi 0.85.1 dependency edges were pinned during resolution. Every resulting package version exists in the historical lock or the tested installed Pi graph. Temporary resolution overrides were removed after the exact integrity lock was generated. No dependency versions were upgraded.",
-  "packagesFromInstalledPiOutsideHistoricalLock": [
+  "packageCount": 263,
+  "resolution": "The historical lock seeded the initial build/test dependencies using the installed Pi 0.85.1 graph. The list below records that initial selection. The structured-prompt update pins the three direct Pi development dependencies to 0.87.1 and resolves their required transitive dependencies. Other direct toolchain versions remain unchanged. Pi modules remain external to the runtime bundles.",
+  "previousLockSha256": "f75301543352d614f3db917cf750291c6baead0b6b01c7ed70ae63f0931bd62b",
+  "initialPackagesFromInstalledPiOutsideHistoricalLock": [
     "@anthropic-ai/sdk@0.123.0",
     "@aws-crypto/crc32@5.2.0",
     "@aws-sdk/core@3.974.11",
@@ -82,5 +83,5 @@
     "ws@8.21.0",
     "xml-naming@0.1.0"
   ],
-  "lockSha256": "f75301543352d614f3db917cf750291c6baead0b6b01c7ed70ae63f0931bd62b"
+  "lockSha256": "c836e86c52189ba4cc54617b4a994c1302daf83e619f634251bb2dd27e79f7e0"
 }
